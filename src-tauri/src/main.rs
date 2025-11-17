@@ -13,6 +13,7 @@ pub struct PlayerState {
     pub sink: Arc<Mutex<Sink>>,
     pub current_source: Arc<Mutex<Option<SymphoniaSource>>>,
     pub current_path: Arc<Mutex<Option<String>>>,
+    pub target_volume: Arc<Mutex<f32>>,
 }
 
 pub struct AppState {
@@ -43,6 +44,7 @@ fn main() {
             sink: Arc::new(Mutex::new(sink)),
             current_source: Arc::new(Mutex::new(None)),
             current_path: Arc::new(Mutex::new(None)),
+            target_volume: Arc::new(Mutex::new(1.0)),
         },
         config_manager,
     };
@@ -93,6 +95,8 @@ fn main() {
             commands::remove_music_directory,
             commands::set_music_directories,
             commands::get_music_directories,
+            // Font management commands
+            commands::get_system_fonts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -703,7 +703,7 @@ const playFile = (file) => {
 }
 
 .filled-button:hover {
-  background-color: var(--theme-primary-container);
+  background-color: var(--md-sys-color-on-surface-variant);
 }
 
 .text-button {

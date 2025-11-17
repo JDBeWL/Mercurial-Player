@@ -3,6 +3,7 @@ use crate::config::AppConfig;
 use crate::audio_decoder::{SymphoniaDecoder, SymphoniaSource};
 use lofty::{Accessor, AudioFile, Probe, TaggedFileExt};
 use rodio::Source;
+use std::sync::Arc;
 use std::fs::{self, File};
 use serde::Serialize;
 use std::io::BufReader;
@@ -52,72 +53,57 @@ pub struct PlaybackStatus {
 #[command]
 pub fn play_track(state: State<AppState>, path: String) -> Result<(), String> {
     let player_state = &state.player;
-    // 停止当前播放
+
+    // Stop the current track and clear the sink
     {
         let sink = player_state.sink.lock().unwrap();
         sink.stop();
+        // Restore volume before playing the new track
+        let target_volume = *player_state.target_volume.lock().unwrap();
+        sink.set_volume(target_volume);
     }
     
-    // 清空当前状态
+    // Update current track info
     *player_state.current_path.lock().unwrap() = Some(path.clone());
     *player_state.current_source.lock().unwrap() = None;
 
     let file_path = Path::new(&path);
     let extension = file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
 
-    // 如果是mp3，直接使用rodio
-    if extension.eq_ignore_ascii_case("mp3") {
+    let source: Box<dyn rodio::Source<Item = f32> + Send> = if extension.eq_ignore_ascii_case("mp3") {
         println!("使用rodio解码器播放MP3: {}", path);
         let file = File::open(&path).map_err(|e| e.to_string())?;
         let reader = BufReader::new(file);
-        let source = rodio::Decoder::new(reader).map_err(|e| e.to_string())?.convert_samples::<f32>();
-        
-        let sink = player_state.sink.lock().unwrap();
-        sink.append(source);
-        sink.play();
-        return Ok(());
-    }
+        Box::new(rodio::Decoder::new(reader).map_err(|e| e.to_string())?.convert_samples::<f32>())
+    } else {
+        match SymphoniaDecoder::new(&path) {
+            Ok(symphonia_decoder) => {
+                println!("使用Symphonia解码器: {}", path);
+                Box::new(SymphoniaSource::new(symphonia_decoder))
+            }
+            Err(e) => {
+                println!("Symphonia解码失败，回退到rodio解码器: {}", e);
+                let file = File::open(&path).map_err(|e| e.to_string())?;
+                let reader = BufReader::new(file);
+                let rodio_source = rodio::Decoder::new(reader).map_err(|e| e.to_string())?;
+                Box::new(rodio_source.convert_samples::<f32>())
+            }
+        }
+    };
+
+    let sink = player_state.sink.lock().unwrap();
+    sink.append(source);
+    sink.play();
     
-    // 对于其他格式，尝试使用Symphonia解码器（支持seek）
-    match SymphoniaDecoder::new(&path) {
-        Ok(symphonia_decoder) => {
-            println!("使用Symphonia解码器: {}", path);
-            
-            // 包装Symphonia解码器为rodio::Source
-            let source: Box<dyn rodio::Source<Item = f32> + Send> = Box::new(SymphoniaSource::new(symphonia_decoder));
-            
-            let sink = player_state.sink.lock().unwrap();
-            sink.append(source);
-            sink.play();
-            
-            Ok(())
-        }
-        Err(e) => {
-            // 如果Symphonia解码失败，回退到rodio解码器
-            println!("Symphonia解码失败，回退到rodio解码器: {}", e);
-            
-            let file = File::open(&path).map_err(|e| e.to_string())?;
-            let reader = BufReader::new(file);
-            
-            let rodio_source = rodio::Decoder::new(reader).map_err(|e| e.to_string())?;
-            
-            // 使用rodio解码器，并手动转换为f32样本
-            let source: Box<dyn rodio::Source<Item = f32> + Send> = Box::new(rodio_source.convert_samples::<f32>());
-            
-            let sink = player_state.sink.lock().unwrap();
-            sink.append(source);
-            sink.play();
-            
-            Ok(())
-        }
-    }
+    Ok(())
 }
 
 
 #[command]
 pub fn pause_track(state: State<AppState>) {
-    let sink = state.player.sink.lock().unwrap();
-    sink.pause();
+    let player_state = &state.player;
+    let sink = Arc::clone(&player_state.sink);
+    sink.lock().unwrap().pause();
 }
 
 #[command]
@@ -128,7 +114,9 @@ pub fn resume_track(state: State<AppState>) {
 
 #[command]
 pub fn set_volume(state: State<AppState>, volume: f32) {
-    let sink = state.player.sink.lock().unwrap();
+    let player_state = &state.player;
+    *player_state.target_volume.lock().unwrap() = volume;
+    let sink = player_state.sink.lock().unwrap();
     sink.set_volume(volume);
 }
 
@@ -545,6 +533,31 @@ pub fn import_config(state: State<AppState>, file_path: String) -> Result<AppCon
 #[command]
 pub fn reset_config(state: State<AppState>) -> Result<AppConfig, String> {
     state.config_manager.reset_config()
+}
+
+// --- Font Management Commands ---
+
+#[command]
+pub fn get_system_fonts() -> Result<Vec<String>, String> {
+    let mut fonts = Vec::new();
+    
+    // 添加最常用的系统字体和MD3推荐字体
+    fonts.push("system-ui".to_string());         // 系统默认UI字体
+    fonts.push("Roboto".to_string());            // MD3字体
+    fonts.push("Arial".to_string());             // Windows常用
+    fonts.push("Helvetica".to_string());          // macOS常用
+    fonts.push("Times New Roman".to_string());    // 衬线字体
+    fonts.push("Noto Sans".to_string());         // Google字体，支持多语言
+    fonts.push("Segoe UI".to_string());          // Windows 10/11默认
+    fonts.push("PingFang SC".to_string());       // macOS中文默认
+    fonts.push("Microsoft YaHei".to_string());   // Windows中文默认
+    fonts.push("Consolas".to_string());          // 常用等宽字体
+    
+    // 去重并排序
+    fonts.sort();
+    fonts.dedup();
+    
+    Ok(fonts)
 }
 
 // --- Music Directory Management Commands ---

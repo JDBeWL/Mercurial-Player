@@ -70,7 +70,7 @@
                     <div class="track-artist">&nbsp;</div>
                   </div>
 
-                  <div class="audio-info" v-if="currentTrack && formattedAudioInfo">
+                  <div class="audio-info" v-if="currentTrack && formattedAudioInfo && configStore.general.showAudioInfo">
                     <span class="text-caption">{{ formattedAudioInfo }}</span>
                   </div>
                   <div class="audio-info-placeholder" v-else>
@@ -501,7 +501,7 @@ onUnmounted(() => {
   flex: 1;
   display: flex;
   overflow: hidden;
-  padding: 0.5% 4%;
+  padding: 0.5% 6%;
   background-color: var(--md-sys-color-surface-container-low);
 }
 
@@ -627,7 +627,7 @@ onUnmounted(() => {
 }
 
 .track-title {
-  font-size: 24px;
+  font-size: 32px;
   font-weight: 500;
   color: var(--md-sys-color-on-surface);
   margin: 0 0 8px 0;

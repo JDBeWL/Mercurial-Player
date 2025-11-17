@@ -88,7 +88,13 @@
     "generalSettings": "General Settings",
     "language": "Language",
     "startupLoadLastConfig": "Load last configuration on startup",
-    "autoSaveConfig": "Auto save configuration"
+    "autoSaveConfig": "Auto save configuration",
+    "showAudioInfo": "Show Audio Info",
+    "lyricsAlignment": "Lyrics Alignment",
+    "alignLeft": "Left",
+    "alignCenter": "Center",
+    "alignRight": "Right",
+    "lyricsFontFamily": "Lyrics Font"
   },
   "themeSelector": {
     "chooseThemeColor": "Choose Theme Color",

@@ -4,7 +4,18 @@
             <div v-if="loading" class="loading">{{ $t('lyrics.loading') }}</div>
             <div v-else-if="!lyrics.length" class="no-lyrics">{{ $t('lyrics.notFound') }}</div>
             <div v-else>
-                <div class="lyrics" v-for="(line, index) in lyrics" :key="index" :class="{ active: isActive(index) }">
+                <div class="lyrics-spacer-up"></div>
+                <div 
+                    class="lyrics" 
+                    v-for="(line, index) in lyrics" 
+                    :key="index" 
+                    :class="{ active: isActive(index) }"
+                    :style="{ 
+                        textAlign: configStore.general.lyricsAlignment,
+                        fontFamily: configStore.general.lyricsFontFamily
+                    }"
+                    @click="handleLyricClick(line.time, index)"
+                >
                     <template v-if="line.karaoke && isActive(index)">
                         <!-- 卡拉OK -->
                         <p class="first-line">
@@ -23,6 +34,7 @@
                         <p class="last-line" v-if="line.texts[1]">{{ line.texts[1] }}</p>
                     </template>
                 </div>
+                <div class="lyrics-spacer-down"></div>
             </div>
         </div>
     </div>
@@ -30,18 +42,22 @@
 
 <script>
 import { usePlayerStore } from '@/stores/player'
+import { useConfigStore } from '@/stores/config' // Import useConfigStore
 import { nextTick, ref, watchEffect, onMounted, onUnmounted } from 'vue'
 import { FileUtils } from '@/utils/fileUtils';
+import { invoke } from '@tauri-apps/api/core';
 import "@/assets/css/lyrics-display.css"
 
 export default {
     name: "LyricsDisplay",
     setup() {
         const playerStore = usePlayerStore();
+        const configStore = useConfigStore(); // Initialize configStore
         const lyrics = ref([]);
         const loading = ref(false);
         const containerRef = ref(null);
         const activeIndex = ref(-1);
+        const isUserScroll = ref(false); // 标记是否是用户点击导致的滚动
 
         const parseLRC = (lrcText) => {
             const lines = lrcText.split("\n");
@@ -182,38 +198,80 @@ export default {
             return result.sort((a, b) => a.time - b.time);
         };
 
-        const scrollToActiveLyric = (immediate = false) => {
-            if (!containerRef.value || activeIndex.value === -1) return;
-
-            const container = containerRef.value;
-            const activeElement = container.querySelector(".lyrics.active");
-
-            nextTick(() => {
-                if (!activeElement) return;
-                const containerRect = container.getBoundingClientRect();
-                const elementRect = activeElement.getBoundingClientRect();
-
-                // 计算相对滚动位置
-                const relativePosition = elementRect.top - containerRect.top;
-                const targetScroll = 
-                    container.scrollTop +
-                    relativePosition -
-                    containerRect.height / 3 +
-                    elementRect.height / 3;
-
-                const maxScroll = container.scrollHeight - containerRect.height;
-                const finalScroll = Math.max(0, Math.min(targetScroll, maxScroll));
-
-                if (Math.abs(container.scrollTop - finalScroll) > 1) {
-                    container.scrollTo({
-                        top: finalScroll,
-                        behavior: immediate ? "auto" : "smooth",
+                const smoothScrollTo = (element, to, duration) => {
+                    const start = element.scrollTop;
+                    const change = to - start;
+                    const increment = 20;
+                    let currentTime = 0;
+        
+                    const easeInOutQuad = (t, b, c, d) => {
+                        t /= d / 2;
+                        if (t < 1) return c / 2 * t * t + b;
+                        t--;
+                        return -c / 2 * (t * (t - 2) - 1) + b;
+                    };
+        
+                    const animateScroll = () => {
+                        currentTime += increment;
+                        const val = easeInOutQuad(currentTime, start, change, duration);
+                        element.scrollTop = val;
+                        if (currentTime < duration) {
+                            requestAnimationFrame(animateScroll);
+                        } else {
+                            element.scrollTop = to;
+                        }
+                    };
+                    animateScroll();
+                };
+        
+                const scrollToActiveLyric = (immediate = false, isUserClick = false) => {
+                    if (!containerRef.value || activeIndex.value === -1) return;
+        
+                    const container = containerRef.value;
+                    const activeElement = container.querySelector(".lyrics.active");
+        
+                    nextTick(() => {
+                        if (!activeElement) return;
+                        const containerRect = container.getBoundingClientRect();
+                        const elementRect = activeElement.getBoundingClientRect();
+        
+                        // 根据是否是用户点击使用不同的定位策略
+                        let targetScroll;
+                        if (isUserClick) {
+                            // 用户点击时，精确将目标歌词定位在容器中心位置
+                            const relativePosition = elementRect.top - containerRect.top;
+                            targetScroll = 
+                                container.scrollTop + 
+                                relativePosition - 
+                                containerRect.height / 2.1 + 
+                                elementRect.height / 2;
+                        } else {
+                            // 自动滚动时，提前预判并滚动到偏上位置
+                            const relativePosition = elementRect.top - containerRect.top;
+                            targetScroll = 
+                                container.scrollTop + 
+                                relativePosition - 
+                                containerRect.height / 4 + 
+                                elementRect.height / 3.6;
+                        }
+        
+                        const maxScroll = container.scrollHeight - containerRect.height;
+                        const finalScroll = Math.max(0, Math.min(targetScroll, maxScroll));
+        
+                        if (Math.abs(container.scrollTop - finalScroll) > 1) {
+                            if (immediate || isUserClick) {
+                                container.scrollTop = finalScroll;
+                                // 如果是用户点击，已经在外部设置了定时器重置标志，这里不再重复设置
+                            } else {
+                                smoothScrollTo(container, finalScroll, 300); // 300ms duration for smooth scroll
+                            }
+                        }
                     });
-                }
-            });
-        };
-
+                };
         const stopWatcher = watchEffect(() => {
+            // 如果是用户点击导致的滚动，暂时不处理自动滚动
+            if (isUserScroll.value) return;
+            
             const ADVANCE_TIME = 0.2;
             const currentTime = playerStore.currentTime + ADVANCE_TIME;
             let newIndex = -1;
@@ -309,6 +367,35 @@ export default {
             return { '--progress': '0%' };
         };
 
+        // 处理歌词点击事件
+        const handleLyricClick = async (time, index) => {
+            if (time >= 0 && playerStore.currentTrack) {
+                try {
+                    // 标记这是用户点击，防止自动滚动干扰
+                    isUserScroll.value = true;
+                    
+                    // 更新当前激活的歌词索引
+                    activeIndex.value = index;
+                    
+                    // 使用playerStore的seek方法，它会同时更新前端和后端的状态
+                    await playerStore.seek(time);
+                    
+                    // 确保DOM更新后立即滚动到选中的歌词
+                    await nextTick();
+                    scrollToActiveLyric(true, true);
+                    
+                    // 确保在点击后有限定时间内重置标志，防止自动滚动被永久阻止
+                    setTimeout(() => {
+                        isUserScroll.value = false;
+                    }, 100); // 100ms后重置，给足够时间让动画完成
+                } catch (error) {
+                    console.error('Failed to seek to lyric time:', error);
+                    // 出错时也要重置标志
+                    isUserScroll.value = false;
+                }
+            }
+        };
+
         return {
             lyrics,
             currentTime: playerStore.currentTime,
@@ -317,6 +404,8 @@ export default {
             containerRef,
             isWordActive,
             getASSKaraokeStyle,
+            handleLyricClick,
+            configStore, // Expose configStore to the template
         };
     },
 };

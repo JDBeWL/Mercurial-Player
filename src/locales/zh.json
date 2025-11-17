@@ -88,7 +88,13 @@
     "generalSettings": "通用设置",
     "language": "语言",
     "startupLoadLastConfig": "启动时加载上次配置",
-    "autoSaveConfig": "自动保存配置"
+    "autoSaveConfig": "自动保存配置",
+    "showAudioInfo": "显示音频信息",
+    "lyricsAlignment": "歌词对齐",
+    "alignLeft": "左对齐",
+    "alignCenter": "居中",
+    "alignRight": "右对齐",
+    "lyricsFontFamily": "歌词字体"
   },
   "themeSelector": {
     "chooseThemeColor": "选择主题颜色",

@@ -15,28 +15,35 @@
 .lyrics {
     margin: 6px 0;
     padding: 12px 20px 12px 12px;
-    font-size: 18px;
+    font-size: 22px;
     transition: all 0.18s ease;
     transform-origin: left center;
     word-break: break-word;
-    max-width: calc((100% - 5%) / 1.1);
-    min-height: 1.2em;
+    /* max-width: calc(100% - 5%); */
+    min-height: 1.1em;
+    /* 字体将在组件内通过style属性动态设置 */
+    cursor: pointer;
+    border-radius: 8px;
+}
+
+.lyrics:hover {
+    background-color: var(--md-sys-color-surface-variant);
 }
 .lyrics.active {
-    transform: translateX(-10px) scale(1.1);
+    margin: 0;
     border-radius: 12px;
-    font-size: 18px;
+    font-size: 32px;
     font-weight: bold;
     color: var(--md-sys-color-primary);
-    background-color: color-mix(in srgb, var(--md-sys-color-primary) 10%, transparent);
+    /* background-color: color-mix(in srgb, var(--md-sys-color-primary) 10%, transparent); */
     position: relative;
     z-index: 1;
 }
 
 .lyrics p {
     margin: 0;
-    line-height: 1.6;
-    padding: 4px 0;
+    line-height: 1.5;
+    /* padding: 1px 0; */
 }
 .lyrics.active p {
     color: var(--md-sys-color-primary);
@@ -47,14 +54,14 @@
     /* margin-bottom: 4px; */
 }
 .lyrics .chinese {
-    font-size: 0.9em;
+    font-size: 1em;
     /* color: #888; */
     /* margin-top: 4px; */
 }
 
 .lyrics.active .english {
     color: var(--md-sys-color-primary);
-    font-size: 1.1em;
+    font-size: 1.2em;
 }
 .lyrics.active .chinese {
     color: var(--md-sys-color-primary);
@@ -63,14 +70,13 @@
 
 .lyrics-display {
     height: 100%;
-    padding: 8px;
+    padding: 12px;
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: none;
     -ms-overflow-style: none;
     position: relative;
-    scroll-behavior: smooth;
 }
 
 .lyrics-display::-webkit-scrollbar {
@@ -87,3 +93,10 @@
     color: var(--md-sys-color-primary);
 }
 
+.lyrics-spacer-up {
+    height: 30vh;
+}
+
+.lyrics-spacer-down {
+    height: 40vh;
+}

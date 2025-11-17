@@ -59,6 +59,14 @@ pub struct GeneralConfig {
     pub theme: String,
     pub startup_load_last_config: bool,
     pub auto_save_config: bool,
+    pub show_audio_info: bool,
+    pub lyrics_alignment: String,
+    #[serde(default = "default_lyrics_font_family")]
+    pub lyrics_font_family: String,
+}
+
+fn default_lyrics_font_family() -> String {
+    "Roboto".to_string()  // MD3推荐字体
 }
 
 impl Default for AppConfig {
@@ -123,6 +131,9 @@ impl Default for GeneralConfig {
             theme: "auto".to_string(),
             startup_load_last_config: true,
             auto_save_config: true,
+            show_audio_info: true,
+            lyrics_alignment: "center".to_string(),
+            lyrics_font_family: "system-ui".to_string(),
         }
     }
 }

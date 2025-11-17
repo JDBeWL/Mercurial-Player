@@ -68,11 +68,29 @@
                 <input type="checkbox" v-model="configStore.general.autoSaveConfig" @change="saveConfig">
                 {{ $t('config.autoSaveConfig') }}
               </label>
+              <label>
+                <input type="checkbox" v-model="configStore.general.showAudioInfo" @change="saveConfig">
+                {{ $t('config.showAudioInfo') }}
+              </label>
               <div class="select-field">
                 <label for="language">{{ $t('config.language') }}:</label>
                 <select id="language" v-model="configStore.general.language" @change="handleLanguageChange">
                   <option value="zh">中文</option>
                   <option value="en">English</option>
+                </select>
+              </div>
+              <div class="select-field">
+                <label for="lyricsAlignment">{{ $t('config.lyricsAlignment') }}:</label>
+                <select id="lyricsAlignment" v-model="configStore.general.lyricsAlignment" @change="saveConfig">
+                  <option value="left">{{ $t('config.alignLeft') }}</option>
+                  <option value="center">{{ $t('config.alignCenter') }}</option>
+                  <option value="right">{{ $t('config.alignRight') }}</option>
+                </select>
+              </div>
+              <div class="select-field">
+                <label for="lyricsFontFamily">{{ $t('config.lyricsFontFamily') }}:</label>
+                <select id="lyricsFontFamily" v-model="configStore.general.lyricsFontFamily" @change="saveConfig">
+                  <option v-for="font in systemFonts" :key="font" :value="font">{{ font }}</option>
                 </select>
               </div>
             </div>
@@ -141,7 +159,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useConfigStore } from '../stores/config';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
@@ -151,6 +169,18 @@ import { useI18n } from 'vue-i18n';
 const configStore = useConfigStore();
 const activeTab = ref('folders');
 const { locale } = useI18n();
+const systemFonts = ref(['system-ui', 'sans-serif', 'serif', 'monospace']);
+
+// 获取系统字体列表
+const loadSystemFonts = async () => {
+  try {
+    const fonts = await invoke('get_system_fonts');
+    // 不再额外添加system-ui，因为后端已经包含了
+    systemFonts.value = ['sans-serif', 'serif', 'monospace', ...fonts];
+  } catch (error) {
+    console.error('Failed to load system fonts:', error);
+  }
+};
 
 // 音乐文件夹相关
 const musicDirectories = computed(() => configStore.musicDirectories);
@@ -168,6 +198,14 @@ const addFolder = async () => {
       const { useMusicLibraryStore } = await import('../stores/musicLibrary');
       const musicLibraryStore = useMusicLibraryStore();
       musicLibraryStore.musicFolders = result;
+      
+      // 如果是首次添加音乐库，则刷新音乐库界面
+      if (musicDirectories.value.length === 0) {
+        // 延迟刷新确保DOM更新完成
+        setTimeout(async () => {
+          await musicLibraryStore.refreshMusicFolders();
+        }, 100);
+      }
     }
   } catch (error) {
     console.error('Failed to add folder:', error);
@@ -209,6 +247,11 @@ const handleLanguageChange = async () => {
     console.error('Failed to change language:', error);
   }
 };
+
+// 初始化组件时加载系统字体
+onMounted(() => {
+  loadSystemFonts();
+});
 </script>
 
 <style scoped>

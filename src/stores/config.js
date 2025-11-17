@@ -51,7 +51,10 @@ export const useConfigStore = defineStore('config', {
       language: 'zh',                   // 语言
       theme: 'auto',                    // 主题
       startupLoadLastConfig: true,      // 启动时加载上次配置
-      autoSaveConfig: true               // 自动保存配置
+      autoSaveConfig: true,               // 自动保存配置
+      showAudioInfo: true,              // 是否显示音频信息
+      lyricsAlignment: 'center',        // 歌词对齐方式
+      lyricsFontFamily: 'Roboto',       // 歌词字体(MD3)
     },
     
     // UI设置（原ui.js的功能）
