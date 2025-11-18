@@ -249,7 +249,7 @@ ThemeSelector {
   height: 100%;
   background-color: var(--md-sys-color-primary);
   border-radius: 2px;
-  transition: width 0.1s linear;
+  transition: width 0.707s linear;
 }
 
 .progress-bar-buffer {

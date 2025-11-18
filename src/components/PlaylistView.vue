@@ -82,102 +82,37 @@ const handleClose = () => {
   }, 300) // 与CSS动画时间一致
 }
 
-// 存储处理后的音轨信息
-const processedTracks = ref({})
-
-// 智能获取音轨标题
+// 智能获取音轨标题 - 使用store中的预处理数据
 const getTrackTitle = (track) => {
-  const trackPath = track.path
-  
-  // 如果已经处理过该音轨，直接返回结果
-  if (processedTracks.value[trackPath]) {
-    return processedTracks.value[trackPath].title
+  // 优先使用displayTitle字段（如果已预处理）
+  if (track.displayTitle) {
+    return track.displayTitle
   }
   
-  // 异步处理音轨信息（这里实际是同步处理，但保持函数结构）
-  processTrackInfo(trackPath)
+  // 其次使用title字段
+  if (track.title) {
+    return track.title
+  }
   
-  // 如果还没处理完，暂时返回文件名
-  return FileUtils.getFileName(trackPath)
+  // 最后使用文件名
+  return FileUtils.getFileName(track.path)
 }
 
-// 智能获取音轨艺术家
+// 智能获取音轨艺术家 - 使用store中的预处理数据
 const getTrackArtist = (track) => {
-  const trackPath = track.path
-  
-  // 如果已经处理过该音轨，直接返回结果
-  if (processedTracks.value[trackPath]) {
-    return processedTracks.value[trackPath].artist
+  // 优先使用displayArtist字段（如果已预处理）
+  if (track.displayArtist) {
+    return track.displayArtist
   }
   
-  // 如果还没处理完，暂时返回空或track中已有的artist信息
-  return track.artist || ''
+  // 其次使用artist字段
+  if (track.artist) {
+    return track.artist
+  }
+  
+  // 返回空字符串
+  return ''
 }
-
-
-
-// 异步处理音轨信息
-const processTrackInfo = async (trackPath) => {
-  try {
-    // 如果已经在处理中，跳过
-    if (processedTracks.value[trackPath]?.processing) return
-    
-    // 标记为处理中
-    processedTracks.value[trackPath] = { processing: true }
-    
-    // 获取配置
-    const config = {
-      preferMetadata: configStore.titleExtraction?.preferMetadata ?? true,
-      hideFileExtension: configStore.titleExtraction?.hideFileExtension ?? true,
-      parseArtistTitle: configStore.titleExtraction?.parseArtistTitle ?? true,
-      separator: configStore.titleExtraction?.separator ?? '-',
-      customSeparators: configStore.titleExtraction?.customSeparators ?? ['-', '_', '.', ' ']
-    }
-    
-    // 使用 TitleExtractor 智能提取标题信息
-    const titleInfo = await TitleExtractor.extractTitle(trackPath, config)
-    
-    // 更新处理结果
-    processedTracks.value[trackPath] = {
-      processing: false,
-      ...titleInfo
-    }
-    
-  } catch (error) {
-    console.error('处理音轨信息失败:', trackPath, error)
-    // 出错时使用文件名作为标题
-    processedTracks.value[trackPath] = {
-      processing: false,
-      title: FileUtils.getFileName(trackPath),
-      artist: '',
-      fileName: FileUtils.getFileName(trackPath),
-      isFromMetadata: false
-    }
-  }
-}
-
-// 监听播放列表变化，预加载音轨信息
-watch(playlist, (newPlaylist) => {
-  if (newPlaylist && newPlaylist.length > 0) {
-    // 预加载所有音轨信息
-    newPlaylist.forEach(track => {
-      if (track.path) {
-        processTrackInfo(track.path)
-      }
-    })
-  }
-}, { immediate: true, deep: true })
-
-// 组件挂载时也预加载
-onMounted(() => {
-  if (playlist.value && playlist.value.length > 0) {
-    playlist.value.forEach(track => {
-      if (track.path) {
-        processTrackInfo(track.path)
-      }
-    })
-  }
-})
 
 const isCurrentTrack = (track) => {
   return currentTrack.value && currentTrack.value.path === track.path

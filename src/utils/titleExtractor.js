@@ -12,48 +12,38 @@ export class TitleExtractor {
    */
   static async extractTitle(filePath, config = {}) {
     try {
-      const { preferMetadata = true, hideFileExtension = true, parseArtistTitle = true } = config
+      const { preferMetadata = true } = config
       
-      let titleInfo = {
-        fileName: '',
-        title: '',
-        artist: '',
-        album: '',
-        isFromMetadata: false
-      }
-      
-      // 优先尝试从元数据获取信息
+      // 优先从元数据获取信息
       if (preferMetadata) {
         try {
           const metadata = await invoke('get_track_metadata', { path: filePath })
           if (metadata && metadata.title) {
-            titleInfo = {
-              fileName: this.getFileName(filePath, hideFileExtension),
-              title: metadata.title || '',
-              artist: metadata.artist || '',
-              album: metadata.album || '',
+            // 获取到元数据，清理后返回
+            return {
+              fileName: this.getFileName(filePath, config.hideFileExtension),
+              title: this.cleanTitle(metadata.title),
+              artist: this.cleanTitle(metadata.artist || ''),
+              album: this.cleanTitle(metadata.album || ''),
               isFromMetadata: true
-            }
-            
-            // 如果从元数据成功获取信息，直接返回
-            if (titleInfo.title) {
-              return titleInfo
             }
           }
         } catch (error) {
           console.warn('Failed to get metadata for:', filePath, error)
+          // 获取元数据失败，继续执行，尝试从文件名解析
         }
       }
       
-      // 从文件名解析
+      // 回退到从文件名解析
       return this.parseFromFileName(filePath, config)
       
     } catch (error) {
       console.error('Error extracting title:', error)
-      // 出错时返回基础文件名信息
+      // 出现意外错误时的最终回退方案
+      const fileName = this.getFileName(filePath, config.hideFileExtension)
       return {
-        fileName: this.getFileName(filePath, config.hideFileExtension),
-        title: this.getFileName(filePath, config.hideFileExtension),
+        fileName: fileName,
+        title: this.cleanTitle(fileName), // 清理回退的标题
         artist: '',
         album: '',
         isFromMetadata: false
@@ -81,37 +71,35 @@ export class TitleExtractor {
     let artist = ''
     
     if (parseArtistTitle) {
-      // 使用所有可用的分隔符尝试解析艺术家和标题
-      const separators = [...new Set([separator, ...customSeparators])]
-      
-      for (const sep of separators) {
-        if (sep && fileName.includes(sep)) {
-          const parts = fileName.split(sep)
-          
-          // 尝试不同的解析模式
-          if (parts.length === 2) {
-            // 模式: 艺术家 - 标题
-            artist = parts[0].trim()
-            title = parts[1].trim()
-            break
-          } else if (parts.length > 2) {
-            // 尝试第一个分隔符分割
-            const firstSepIndex = fileName.indexOf(sep)
-            const lastSepIndex = fileName.lastIndexOf(sep)
-            
-            if (firstSepIndex !== lastSepIndex) {
-              // 多分隔符情况，尝试多种解析策略
-              artist = parts[0].trim()
-              title = parts.slice(1).join(' ').trim()
-            }
+      // 定义一个带优先级的分隔符列表
+      const prioritizedSeparators = [
+        ' - ', // ' - ' 是最高优先级的
+        ...new Set([separator, ...customSeparators])
+      ].filter(s => s && s.length > 0);
+
+      for (const sep of prioritizedSeparators) {
+        // 使用 lastIndexOf 来处理 "艺术家 - 歌曲 - 专辑" 这类情况
+        const lastIndex = fileName.lastIndexOf(sep);
+        
+        // 确保分隔符不在字符串的开头或结尾
+        if (lastIndex > 0 && lastIndex < fileName.length - sep.length) {
+          const potentialArtist = fileName.substring(0, lastIndex);
+          const potentialTitle = fileName.substring(lastIndex + sep.length);
+
+          // 如果分割后两部分都不为空，则认为解析成功
+          if (potentialArtist && potentialTitle) {
+            artist = this.cleanTitle(potentialArtist);
+            title = this.cleanTitle(potentialTitle);
+            // 解析成功，跳出循环
+            break;
           }
         }
       }
     }
     
-    // 如果解析出的标题为空，使用完整文件名
-    if (!title.trim()) {
-      title = fileName
+    // 如果一轮循环后没有解析出艺术家，确保标题是干净的
+    if (artist === '' && title === fileName) {
+      title = this.cleanTitle(fileName);
     }
     
     return {

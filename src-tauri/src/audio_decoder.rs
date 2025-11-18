@@ -194,7 +194,9 @@ impl SymphoniaDecoder {
         
         // 探测格式
         let meta_opts: MetadataOptions = Default::default();
-        let fmt_opts: FormatOptions = Default::default();
+        let mut fmt_opts: FormatOptions = Default::default();
+        // 启用无缝播放
+        fmt_opts.enable_gapless = true;
         
         let probed = symphonia::default::get_probe()
             .format(&hint, mss, &fmt_opts, &meta_opts)
@@ -348,7 +350,9 @@ impl SymphoniaDecoder {
         
         // 探测格式
         let meta_opts: MetadataOptions = Default::default();
-        let fmt_opts: FormatOptions = Default::default();
+        let mut fmt_opts: FormatOptions = Default::default();
+        // 启用无缝播放
+        fmt_opts.enable_gapless = true;
         
         let probed = symphonia::default::get_probe()
             .format(&hint, mss, &fmt_opts, &meta_opts)

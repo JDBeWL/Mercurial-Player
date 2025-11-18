@@ -130,17 +130,43 @@ export const usePlayerStore = defineStore('player', {
         console.error("Failed to pause before play:", error);
       }
 
+      // 获取预处理的元数据
+      let metadata = {};
+      if (this._metadataCache && this._metadataCache[track.path]) {
+        metadata = this._metadataCache[track.path];
+        console.log('使用缓存的元数据:', track.path);
+      } else {
+        console.log('元数据缓存未命中:', track.path);
+        
+        // 如果没有缓存，尝试快速获取基本信息
+        metadata = {
+          title: track.title || FileUtils.getFileName(track.path),
+          artist: track.artist || '',
+          album: track.album || '',
+          duration: track.duration || 0,
+          bitrate: track.bitrate || null,
+          sampleRate: track.sampleRate || null,
+          channels: track.channels || null
+        };
+      }
+
       // Reset state for the new track
       this.lastTrackIndex = this.currentTrackIndex; // Store current index before updating
-      this.currentTrack = track;
-      this.duration = track.duration || 0;
+      this.currentTrack = {
+        ...track,
+        title: metadata.title,
+        artist: metadata.artist,
+        album: metadata.album,
+        duration: metadata.duration
+      };
+      this.duration = metadata.duration || 0;
       this.currentTime = 0;
       this.lyrics = null;
       this.currentLyricIndex = -1;
       this.audioInfo = {
-        bitrate: track.bitrate || 'N/A',
-        sampleRate: track.sampleRate || 'N/A',
-        channels: track.channels || 'N/A',
+        bitrate: metadata.bitrate || 'N/A',
+        sampleRate: metadata.sampleRate || 'N/A',
+        channels: metadata.channels || 'N/A',
       };
 
       try {
@@ -375,6 +401,11 @@ export const usePlayerStore = defineStore('player', {
       this.lyrics = null;
       this.currentLyricIndex = -1;
       
+      // 清除元数据缓存
+      if (this._metadataCache) {
+        this._metadataCache = {};
+      }
+      
       // 停止后端播放
       try {
         await invoke('pause_track');
@@ -505,6 +536,124 @@ export const usePlayerStore = defineStore('player', {
         this.duration = 0;
         this.stopStatusPolling();
       }
+      
+      // 预处理播放列表中所有文件的元数据
+      this.preprocessPlaylistMetadata(playlist);
+    },
+
+    /**
+     * 预处理播放列表中所有文件的元数据
+     * @param {Array} playlist - 播放列表
+     */
+    async preprocessPlaylistMetadata(playlist) {
+      if (!playlist || playlist.length === 0) return;
+      
+      console.log(`开始预处理播放列表元数据，共 ${playlist.length} 个文件`);
+      
+      // 初始化元数据缓存（如果还没有）
+      if (!this._metadataCache) {
+        this._metadataCache = {};
+      }
+      
+      // 批量获取元数据
+      const { useConfigStore } = await import('./config.js');
+      const configStore = useConfigStore();
+      
+      // 并行处理所有文件，但限制并发数以避免性能问题
+      const BATCH_SIZE = 5; // 每批处理5个文件
+      for (let i = 0; i < playlist.length; i += BATCH_SIZE) {
+        const batch = playlist.slice(i, i + BATCH_SIZE);
+        
+        await Promise.all(batch.map(async (track) => {
+          const trackPath = track.path;
+          
+          // 如果已经处理过，跳过
+          if (this._metadataCache[trackPath]) {
+            return;
+          }
+          
+          try {
+            // 获取配置
+            const config = {
+              preferMetadata: configStore.titleExtraction?.preferMetadata ?? true,
+              hideFileExtension: configStore.titleExtraction?.hideFileExtension ?? true,
+              parseArtistTitle: configStore.titleExtraction?.parseArtistTitle ?? true,
+              separator: configStore.titleExtraction?.separator ?? '-',
+              customSeparators: configStore.titleExtraction?.customSeparators ?? ['-', '_', '.', ' ']
+            };
+            
+            // 使用 TitleExtractor 提取标题信息
+            const { TitleExtractor } = await import('../utils/titleExtractor.js');
+            const titleInfo = await TitleExtractor.extractTitle(trackPath, config);
+            
+            // 获取音频元数据
+            let audioMetadata = {
+              duration: 0,
+              bitrate: null,
+              sampleRate: null,
+              channels: null
+            };
+            
+            try {
+              const metadata = await invoke('get_track_metadata', { path: trackPath });
+              if (metadata) {
+                audioMetadata = {
+                  duration: metadata.duration || 0,
+                  bitrate: metadata.bitrate || null,
+                  sampleRate: metadata.sampleRate || null,
+                  channels: metadata.channels || null
+                };
+              }
+            } catch (error) {
+              console.warn(`获取音频元数据失败: ${trackPath}`, error);
+            }
+            
+            // 存储处理结果
+            this._metadataCache[trackPath] = {
+              ...titleInfo,
+              ...audioMetadata,
+              lastUpdated: new Date().toISOString()
+            };
+            
+            // 更新播放列表中的轨道信息
+            const trackIndex = this.playlist.findIndex(t => t.path === trackPath);
+            if (trackIndex !== -1) {
+              this.playlist[trackIndex] = {
+                ...this.playlist[trackIndex],
+                title: titleInfo.title,
+                artist: titleInfo.artist,
+                album: titleInfo.album,
+                displayTitle: titleInfo.title,
+                displayArtist: titleInfo.artist,
+                duration: audioMetadata.duration,
+                bitrate: audioMetadata.bitrate,
+                sampleRate: audioMetadata.sampleRate,
+                channels: audioMetadata.channels
+              };
+            }
+            
+          } catch (error) {
+            console.error(`处理音轨信息失败: ${trackPath}`, error);
+            
+            // 即使出错也要缓存，避免重复处理
+            this._metadataCache[trackPath] = {
+              title: FileUtils.getFileName(trackPath),
+              artist: '',
+              album: '',
+              displayTitle: FileUtils.getFileName(trackPath),
+              displayArtist: '',
+              duration: 0,
+              bitrate: null,
+              sampleRate: null,
+              channels: null,
+              lastUpdated: new Date().toISOString(),
+              error: true
+            };
+          }
+        }));
+      }
+      
+      console.log(`播放列表元数据预处理完成`);
     },
 
     async loadLyrics(trackPath) {

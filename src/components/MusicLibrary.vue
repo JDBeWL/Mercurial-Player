@@ -419,24 +419,24 @@ const openFolderDialog = async () => {
 const selectedPlaylist = ref(null)
 
 // 播放全部（当前显示的全部歌曲播放列表）
-const playAll = () => {
+const playAll = async () => {
   // 找到全部歌曲播放列表
   const allSongsPlaylist = enhancedPlaylists.value.find(p => p.isAllSongsPlaylist)
   if (allSongsPlaylist && allSongsPlaylist.files.length > 0) {
-    playerStore.loadPlaylist(allSongsPlaylist.files)
+    await playerStore.loadPlaylist(allSongsPlaylist.files)
     playerStore.play()
     handleClose()
   } else if (enhancedPlaylists.value.length > 0) {
     // 如果没有全部歌曲播放列表，则播放第一个播放列表
     const firstPlaylist = enhancedPlaylists.value[0]
-    playerStore.loadPlaylist(firstPlaylist.files)
+    await playerStore.loadPlaylist(firstPlaylist.files)
     playerStore.play()
     handleClose()
   }
 }
 
-const playPlaylist = (playlist) => {
-  playerStore.loadPlaylist(playlist.files)
+const playPlaylist = async (playlist) => {
+  await playerStore.loadPlaylist(playlist.files)
   playerStore.play()
   handleClose()
 }

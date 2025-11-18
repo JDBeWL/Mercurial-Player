@@ -1,5 +1,5 @@
 <template>
-  <div class="app-container">
+  <div class="app-container" :data-fullscreen="isFullscreen" :data-maximized="isMaximized">
     <header class="nav-bar" data-tauri-drag-region>
       <!-- 左侧控制区 -->
       <div class="nav-left">
@@ -216,11 +216,12 @@ const { currentTrack, playlist, audioInfo, currentTrackIndex, lastTrackIndex } =
 const showLibrary = ref(false)
 const showPlaylist = ref(false)
 const isFullscreen = ref(false)
+const isMaximized = ref(false)
 
 // 存储处理后的音轨信息
 const processedTracks = ref({})
 
-// 智能获取音轨标题
+// 智能获取音轨标题 - 优化显示流程
 const getTrackTitle = (track) => {
   if (!track || !track.path) {
     return ''
@@ -229,18 +230,21 @@ const getTrackTitle = (track) => {
   const trackPath = track.path
 
   // 如果已经处理过该音轨，直接返回结果
-  if (processedTracks.value[trackPath]) {
+  if (processedTracks.value[trackPath] && !processedTracks.value[trackPath].processing) {
     return processedTracks.value[trackPath].title
   }
+  
+  // 异步处理音轨信息，但不阻塞当前渲染
+  if (!processedTracks.value[trackPath] || !processedTracks.value[trackPath].processing) {
+    processTrackInfo(trackPath)
+  }
 
-  // 异步处理音轨信息（这里实际是同步处理，但保持函数结构）
-  processTrackInfo(trackPath)
-
-  // 如果还没处理完，暂时返回文件名或已有的name
+  // 如果还没处理完，暂时返回track中已有的name或文件名
+  // 这样可以避免闪烁，因为track中的name可能已经是处理过的
   return track.name || FileUtils.getFileName(trackPath)
 }
 
-// 智能获取音轨艺术家
+// 智能获取音轨艺术家 - 优化显示流程
 const getTrackArtist = (track) => {
   if (!track || !track.path) {
     return ''
@@ -249,12 +253,14 @@ const getTrackArtist = (track) => {
   const trackPath = track.path
 
   // 如果已经处理过该音轨，直接返回结果
-  if (processedTracks.value[trackPath]) {
+  if (processedTracks.value[trackPath] && !processedTracks.value[trackPath].processing) {
     return processedTracks.value[trackPath].artist
   }
 
-  // 异步处理音轨信息（这里实际是同步处理，但保持函数结构）
-  processTrackInfo(trackPath)
+  // 异步处理音轨信息，但不阻塞当前渲染
+  if (!processedTracks.value[trackPath] || !processedTracks.value[trackPath].processing) {
+    processTrackInfo(trackPath)
+  }
 
   // 如果还没处理完，暂时返回track中已有的artist信息
   return track.artist || ''
@@ -493,8 +499,9 @@ onMounted(async () => {
   // 检查当前窗口是否处于全屏状态
   try {
     isFullscreen.value = await appWindow.isFullscreen()
+    isMaximized.value = await appWindow.isMaximized()
   } catch (error) {
-    console.error('Failed to check fullscreen state:', error)
+    console.error('Failed to check window state:', error)
   }
 
   // 添加全局键盘事件监听器
@@ -513,6 +520,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-radius: 12px;
+  transition: border-radius 0.3s ease;
 }
 
 .main-content {
@@ -773,5 +782,11 @@ onUnmounted(() => {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* 全屏和最大化状态下移除圆角 */
+.app-container[data-fullscreen="true"],
+.app-container[data-maximized="true"] {
+  border-radius: 0;
 }
 </style>

@@ -5,6 +5,7 @@
 use super::metadata::Playlist;
 use std::fs;
 use std::path::Path;
+use rayon::prelude::*;
 use tauri::{command, State};
 use walkdir::{DirEntry, WalkDir};
 use crate::AppState;
@@ -34,29 +35,31 @@ pub fn get_audio_files(path: String) -> Result<Playlist, String> {
         return Err("Provided path is not a directory".to_string());
     }
 
-    let mut files = Vec::new();
-    for entry in WalkDir::new(dir)
+    let audio_files: Vec<_> = WalkDir::new(dir)
         .into_iter()
         .filter_map(Result::ok)
         .filter(|e| is_audio_file(e))
-    {
-        // 使用to_string_lossy处理非ASCII字符路径
-        let file_path = entry.path().to_string_lossy().to_string();
-        match crate::metadata::get_track_metadata(file_path) {
-            Ok(metadata) => {
-                files.push(metadata);
+        .collect();
+
+    let tracks: Vec<_> = audio_files
+        .par_iter()
+        .filter_map(|entry| {
+            let file_path = entry.path().to_string_lossy().to_string();
+            match crate::metadata::get_track_metadata(file_path) {
+                Ok(metadata) => Some(metadata),
+                Err(e) => {
+                    eprintln!("Failed to get metadata for file: {}", e);
+                    None
+                }
             }
-            Err(e) => {
-                eprintln!("Failed to get metadata for file: {}", e);
-            }
-        }
-    }
+        })
+        .collect();
 
     let playlist_name = dir.file_name().map_or_else(|| "Unknown".to_string(), |s| s.to_string_lossy().to_string());
 
     Ok(Playlist {
         name: playlist_name,
-        files,
+        files: tracks,
     })
 }
 
@@ -73,67 +76,72 @@ pub fn get_all_audio_files(state: State<AppState>, paths: Vec<String>) -> Result
             continue;
         }
 
-        // 如果启用递归扫描并且需要基于文件夹创建播放列表
         if config.directory_scan.enable_subdirectory_scan && config.playlist.folder_based_playlists {
-            // 创建基于文件夹的播放列表
-            let mut folder_playlists = std::collections::HashMap::new();
-            
             let max_depth = config.directory_scan.max_depth as usize;
-            for entry in WalkDir::new(dir)
+            
+            let audio_files: Vec<_> = WalkDir::new(dir)
                 .max_depth(max_depth)
                 .into_iter()
                 .filter_map(Result::ok)
-                .filter(|e| is_audio_file(e) || e.path().is_dir())
-            {
-                if entry.path().is_dir() {
-                    // 这是一个目录，准备基于文件夹的播放列表
-                    continue;
-                }
-                
-                let parent_dir = entry.path().parent().unwrap_or(dir);
-                let folder_name = parent_dir.file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("Unknown");
-                
-                let file_path = entry.path().to_string_lossy().to_string();
-                match crate::metadata::get_track_metadata(file_path) {
-                    Ok(metadata) => {
-                        let playlist = folder_playlists.entry(folder_name.to_string())
-                            .or_insert_with(|| Playlist::new(folder_name.to_string()));
-                        playlist.add_track(metadata);
+                .filter(|e| is_audio_file(e))
+                .collect();
+
+            let tracks_with_folders: Vec<_> = audio_files
+                .par_iter()
+                .filter_map(|entry| {
+                    let parent_dir = entry.path().parent().unwrap_or(dir);
+                    let folder_name = parent_dir.file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("Unknown");
+                    
+                    let file_path = entry.path().to_string_lossy().to_string();
+                    match crate::metadata::get_track_metadata(file_path) {
+                        Ok(metadata) => Some((folder_name.to_string(), metadata)),
+                        Err(e) => {
+                            eprintln!("Failed to get metadata for file: {}", e);
+                            None
+                        }
                     }
-                    Err(e) => {
-                        eprintln!("Failed to get metadata for file: {}", e);
-                    }
-                }
+                })
+                .collect();
+
+            let mut folder_playlists = std::collections::HashMap::new();
+            for (folder_name, metadata) in tracks_with_folders {
+                let playlist = folder_playlists.entry(folder_name.clone())
+                    .or_insert_with(|| Playlist::new(folder_name));
+                playlist.add_track(metadata);
             }
             
-            // 将所有文件夹播放列表添加到结果中
             for (_, playlist) in folder_playlists {
                 if !playlist.is_empty() {
                     all_playlists.push(playlist);
                 }
             }
         } else {
-            // 简单地将所有音频文件添加到一个播放列表
             let playlist_name = dir.file_name().map_or_else(|| "Unknown".to_string(), |s| s.to_string_lossy().to_string());
             let mut playlist = Playlist::new(playlist_name);
             
-            for entry in WalkDir::new(dir)
+            let audio_files: Vec<_> = WalkDir::new(dir)
                 .into_iter()
                 .filter_map(Result::ok)
                 .filter(|e| is_audio_file(e))
-            {
-                let file_path = entry.path().to_string_lossy().to_string();
-                match crate::metadata::get_track_metadata(file_path) {
-                    Ok(metadata) => {
-                        playlist.add_track(metadata);
+                .collect();
+
+            let tracks: Vec<_> = audio_files
+                .par_iter()
+                .filter_map(|entry| {
+                    let file_path = entry.path().to_string_lossy().to_string();
+                    match crate::metadata::get_track_metadata(file_path) {
+                        Ok(metadata) => Some(metadata),
+                        Err(e) => {
+                            eprintln!("Failed to get metadata for file: {}", e);
+                            None
+                        }
                     }
-                    Err(e) => {
-                        eprintln!("Failed to get metadata for file: {}", e);
-                    }
-                }
-            }
+                })
+                .collect();
+            
+            playlist.files.extend(tracks);
             
             if !playlist.is_empty() {
                 all_playlists.push(playlist);
