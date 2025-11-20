@@ -32,6 +32,13 @@ export const usePlayerStore = defineStore('player', {
     _isLoading: false,
     _statusPollId: null, // 状态轮询ID
     lastTrackIndex: -1, // 上一次播放的歌曲索引
+    
+    // 文件检查缓存和配置
+    _fileExistsCache: new Map(), // 文件存在性缓存
+    _lastFileCheckTime: 0, // 上次文件检查时间
+    _fileCheckInterval: 5000, // 文件检查间隔：5秒
+    _lastPlaylistCheckTime: 0, // 上次播放列表检查时间
+    _playlistCheckInterval: 10000, // 播放列表检查间隔：10秒
   }),
 
   getters: {
@@ -89,14 +96,21 @@ export const usePlayerStore = defineStore('player', {
     async playTrack(track) {
       if (!track || this._isLoading) return;
 
-      // 检查文件是否存在，如果不存在则尝试修复路径
+      // 检查文件是否存在，如果不存在则尝试修复路径（使用缓存优化）
       let trackExists = await this.checkCurrentTrackExists();
       if (!trackExists && track.path) {
         // 尝试修复路径格式
         const altPath = track.path.includes('/') ? track.path.replace(/\//g, '\\') : track.path.replace(/\\/g, '/');
         if (altPath !== track.path) {
           track.path = altPath;
-          trackExists = await this.checkCurrentTrackExists();
+          // 强制重新检查（绕过缓存）
+          const directExists = await FileUtils.fileExists(altPath);
+          if (directExists) {
+            this.setCachedFileExists(altPath, true);
+            trackExists = true;
+          } else {
+            this.setCachedFileExists(altPath, false);
+          }
         }
       }
       
@@ -232,15 +246,19 @@ export const usePlayerStore = defineStore('player', {
         }
 
         try {
-          // 检查后端是否还有音频在播放
-          const isFinished = await invoke('is_track_finished');
+          // 只有在接近歌曲结尾时才检查is_track_finished，减少不必要的后端调用
+          const isNearEnd = this.duration > 0 && (this.duration - this.currentTime) < 1.0;
           
-          if (isFinished) {
-            // 如果后端音频播放完成，触发_onEnded处理
-            this._onEnded();
-            return;
+          if (isNearEnd) {
+            // 检查后端是否还有音频在播放
+            const isFinished = await invoke('is_track_finished');
+            
+            if (isFinished) {
+              // 如果后端音频播放完成，触发_onEnded处理
+              this._onEnded();
+              return;
+            }
           }
-          
           // Increment current time
           const newTime = this.currentTime + (interval / 1000);
 
@@ -283,11 +301,17 @@ export const usePlayerStore = defineStore('player', {
         console.error("Failed to pause track:", error);
       }
       
-      // 检查播放列表文件是否仍然存在
-      const playlistExists = await this.checkPlaylistFilesExist();
-      if (!playlistExists) {
-        await this.resetPlayerState();
-        return;
+      // 优化：减少播放列表文件检查频率，只在必要时检查
+      const now = Date.now();
+      const shouldCheckPlaylist = (now - this._lastPlaylistCheckTime > this._playlistCheckInterval) || 
+                                 (this._lastPlaylistCheckTime === 0);
+      
+      if (shouldCheckPlaylist) {
+        const playlistExists = await this.checkPlaylistFilesExist();
+        if (!playlistExists) {
+          await this.resetPlayerState();
+          return;
+        }
       }
       
       if (this.repeatMode === 'track') {
@@ -320,47 +344,77 @@ export const usePlayerStore = defineStore('player', {
     // --- 文件检查 ---
 
     /**
-     * 检查当前播放列表的歌曲文件是否仍然存在
+     * 检查当前播放列表的歌曲文件是否仍然存在（带缓存优化）
      */
     async checkPlaylistFilesExist() {
       if (!this.playlist || this.playlist.length === 0) return true;
       
+      const now = Date.now();
+      // 如果距离上次检查时间太短，返回缓存结果或默认true
+      if (now - this._lastPlaylistCheckTime < this._playlistCheckInterval) {
+        return true; // 短时间内假设文件仍然存在
+      }
+      
       try {
-        // 检查播放列表中的每个文件是否存在
+        let allFilesExist = true;
+        // 只检查缓存中不存在的文件或者缓存过期的文件
         for (const track of this.playlist) {
-          let exists = await FileUtils.fileExists(track.path);
+          let exists = this.getCachedFileExists(track.path);
           
-          // 如果原始路径不存在，尝试另一种路径分隔符格式
-          if (!exists && track.path) {
-            const altPath = track.path.includes('/') ? track.path.replace(/\//g, '\\') : track.path.replace(/\\/g, '/');
-            if (altPath !== track.path) {
-              track.path = altPath;
-              exists = await FileUtils.fileExists(altPath);
+          if (exists === null) { // 缓存中没有，需要实际检查
+            // 先检查原始路径
+            exists = await FileUtils.fileExists(track.path);
+            
+            // 如果原始路径不存在，尝试另一种路径分隔符格式
+            if (!exists && track.path) {
+              const altPath = track.path.includes('/') ? track.path.replace(/\//g, '\\') : track.path.replace(/\\/g, '/');
+              if (altPath !== track.path) {
+                const altExists = await FileUtils.fileExists(altPath);
+                if (altExists) {
+                  track.path = altPath;
+                  exists = true;
+                }
+              }
             }
+            
+            // 更新缓存
+            this.setCachedFileExists(exists ? track.path : track.path, exists);
           }
           
           if (!exists) {
             console.error(`File not found in playlist: ${track.path}`);
-            return false; // 如果任何一个文件不存在，返回false
+            allFilesExist = false;
+            break;
           }
         }
-        return true; // 所有文件都存在
+        
+        this._lastPlaylistCheckTime = now;
+        return allFilesExist;
       } catch (error) {
         console.error('Error checking playlist files:', error);
-        return false; // 出错时认为文件不存在
+        return false;
       }
     },
 
     /**
-     * 检查当前播放的歌曲是否仍然存在
+     * 检查当前播放的歌曲是否仍然存在（带缓存优化）
      */
     async checkCurrentTrackExists() {
       if (!this.currentTrack) return false;
       
+      // 先检查缓存
+      const cachedResult = this.getCachedFileExists(this.currentTrack.path);
+      if (cachedResult !== null) {
+        return cachedResult;
+      }
+      
       try {
         // 先检查原始路径
         let exists = await FileUtils.fileExists(this.currentTrack.path);
-        if (exists) return true;
+        if (exists) {
+          this.setCachedFileExists(this.currentTrack.path, true);
+          return true;
+        }
         
         // 如果原始路径不存在，尝试另一种路径分隔符格式
         const altPath = this.currentTrack.path.includes('/') 
@@ -372,14 +426,81 @@ export const usePlayerStore = defineStore('player', {
           if (exists) {
             // 更新路径为有效的格式
             this.currentTrack.path = altPath;
+            this.setCachedFileExists(altPath, true);
             return true;
           }
         }
         
+        this.setCachedFileExists(this.currentTrack.path, false);
         return false;
       } catch (error) {
         console.error('Error checking current track:', error);
+        this.setCachedFileExists(this.currentTrack.path, false);
         return false;
+      }
+    },
+
+    /**
+     * 获取缓存的文件存在性
+     * @param {string} filePath 文件路径
+     * @returns {boolean|null} 缓存结果，null表示没有缓存
+     */
+    getCachedFileExists(filePath) {
+      if (!filePath || !this._fileExistsCache) return null;
+      
+      const cached = this._fileExistsCache.get(filePath);
+      if (!cached) return null;
+      
+      // 如果缓存超过30秒，认为过期
+      const now = Date.now();
+      if (now - cached.timestamp > 30000) {
+        this._fileExistsCache.delete(filePath);
+        return null;
+      }
+      
+      return cached.exists;
+    },
+
+    /**
+     * 设置文件存在性缓存
+     * @param {string} filePath 文件路径
+     * @param {boolean} exists 是否存在
+     */
+    setCachedFileExists(filePath, exists) {
+      if (!filePath || !this._fileExistsCache) return;
+      
+      this._fileExistsCache.set(filePath, {
+        exists: exists,
+        timestamp: Date.now()
+      });
+      
+      // 清理过期的缓存条目（保持缓存大小合理）
+      this.cleanExpiredFileCache();
+    },
+
+    /**
+     * 清理过期的文件缓存
+     */
+    cleanExpiredFileCache() {
+      if (!this._fileExistsCache) return;
+      
+      const now = Date.now();
+      const maxSize = 200; // 最大缓存条目数
+      
+      // 删除过期条目
+      for (const [path, cached] of this._fileExistsCache.entries()) {
+        if (now - cached.timestamp > 60000) { // 1分钟过期
+          this._fileExistsCache.delete(path);
+        }
+      }
+      
+      // 如果还是太大，删除最旧的条目
+      if (this._fileExistsCache.size > maxSize) {
+        const entries = Array.from(this._fileExistsCache.entries())
+          .sort((a, b) => a[1].timestamp - b[1].timestamp);
+        
+        const toDelete = entries.slice(0, this._fileExistsCache.size - maxSize);
+        toDelete.forEach(([path]) => this._fileExistsCache.delete(path));
       }
     },
 
@@ -401,10 +522,17 @@ export const usePlayerStore = defineStore('player', {
       this.lyrics = null;
       this.currentLyricIndex = -1;
       
-      // 清除元数据缓存
+      // 清除所有缓存
       if (this._metadataCache) {
         this._metadataCache = {};
       }
+      if (this._fileExistsCache) {
+        this._fileExistsCache.clear();
+      }
+      
+      // 重置检查时间
+      this._lastFileCheckTime = 0;
+      this._lastPlaylistCheckTime = 0;
       
       // 停止后端播放
       try {
@@ -417,11 +545,17 @@ export const usePlayerStore = defineStore('player', {
     async nextTrack() {
       if (!this.currentTrack) return;
 
-      // 检查播放列表文件是否仍然存在
-      const playlistExists = await this.checkPlaylistFilesExist();
-      if (!playlistExists) {
-        await this.resetPlayerState();
-        return;
+      // 优化：减少播放列表文件检查频率，只在必要时检查
+      const now = Date.now();
+      const shouldCheckPlaylist = (now - this._lastPlaylistCheckTime > this._playlistCheckInterval) || 
+                                 (this._lastPlaylistCheckTime === 0);
+      
+      if (shouldCheckPlaylist) {
+        const playlistExists = await this.checkPlaylistFilesExist();
+        if (!playlistExists) {
+          await this.resetPlayerState();
+          return;
+        }
       }
 
       let nextIndex;
@@ -443,11 +577,17 @@ export const usePlayerStore = defineStore('player', {
     async previousTrack() {
       if (!this.currentTrack) return;
 
-      // 检查播放列表文件是否仍然存在
-      const playlistExists = await this.checkPlaylistFilesExist();
-      if (!playlistExists) {
-        await this.resetPlayerState();
-        return;
+      // 优化：减少播放列表文件检查频率，只在必要时检查
+      const now = Date.now();
+      const shouldCheckPlaylist = (now - this._lastPlaylistCheckTime > this._playlistCheckInterval) || 
+                                 (this._lastPlaylistCheckTime === 0);
+      
+      if (shouldCheckPlaylist) {
+        const playlistExists = await this.checkPlaylistFilesExist();
+        if (!playlistExists) {
+          await this.resetPlayerState();
+          return;
+        }
       }
 
       let prevIndex;
@@ -677,6 +817,14 @@ export const usePlayerStore = defineStore('player', {
         this.stopStatusPolling();
         // 停止后端播放
         invoke('pause_track');
+        
+        // 清理所有缓存
+        if (this._fileExistsCache) {
+          this._fileExistsCache.clear();
+        }
+        if (this._metadataCache) {
+          this._metadataCache = {};
+        }
     }
   }
 });
