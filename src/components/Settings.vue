@@ -34,11 +34,23 @@
             >
               {{ $t('config.playlistSettings') }}
             </button>
+            <button 
+              @click="activeTab = 'audioDevice'" 
+              :class="{ active: activeTab === 'audioDevice' }"
+            >
+              {{ $t('config.audioDeviceSettings') }}
+            </button>
           </div>
           
           <!-- 音乐文件夹设置 -->
           <div v-if="activeTab === 'folders'" class="tab-content">
-            <h3>{{ $t('config.musicFolders') }}</h3>
+            <div class="tab-header">
+              <h3>{{ $t('config.musicFolders') }}</h3>
+              <button class="add-folder-btn" @click="addFolder">
+                <span class="material-symbols-rounded">add</span>
+                {{ $t('config.addFolder') }}
+              </button>
+            </div>
             <div v-if="musicDirectories.length === 0" class="empty-state">
               <p>{{ $t('config.noMusicFolders') }}</p>
             </div>
@@ -50,10 +62,6 @@
                 </button>
               </li>
             </ul>
-            <button class="add-folder-btn" @click="addFolder">
-              <span class="material-symbols-rounded">add</span>
-              {{ $t('config.addFolder') }}
-            </button>
           </div>
           
           <!-- 通用设置 -->
@@ -159,6 +167,11 @@
               </div>
             </div>
           </div>
+          
+          <!-- 音频设备设置 -->
+          <div v-if="activeTab === 'audioDevice'" class="tab-content">
+            <AudioDeviceSettings />
+          </div>
         </div>
       </div>
     </div>
@@ -172,6 +185,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { setLocale } from '../i18n';
 import { useI18n } from 'vue-i18n';
+import AudioDeviceSettings from './AudioDeviceSettings.vue';
 
 const configStore = useConfigStore();
 const activeTab = ref('folders');
@@ -341,8 +355,15 @@ onMounted(() => {
   padding-right: 8px;
 }
 
+.tab-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
 .tab-content h3 {
-  margin: 0 0 16px 0;
+  margin: 0;
   font-size: 20px;
   font-weight: 500;
   color: var(--md-sys-color-on-surface);
@@ -383,7 +404,6 @@ ul {
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
-  margin-top: 16px;
   background-color: var(--md-sys-color-primary);
   color: var(--md-sys-color-on-primary);
   border: none;
@@ -395,7 +415,7 @@ ul {
 }
 
 .add-folder-btn:hover {
-  background-color: var(--md-sys-color-primary-container);
+  background-color: var(--md-sys-color-outline);
   color: var(--md-sys-color-on-primary-container);
 }
 

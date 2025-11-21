@@ -61,6 +61,11 @@ export const useConfigStore = defineStore('config', {
     ui: {
       showSettings: false,              // 是否显示设置面板
       showConfigPanel: false            // 是否显示配置面板
+    },
+    
+    // 音频设置
+    audio: {
+      exclusiveMode: false              // 独占模式
     }
   }),
 
@@ -88,9 +93,13 @@ export const useConfigStore = defineStore('config', {
         const config = await invoke('load_config')
         if (config) {
           this.$patch(config)
-          // 更新主题
+          
+          // 只在主题不同时才更新主题，避免不必要的重置
           const themeStore = useThemeStore()
-          themeStore.setThemePreference(this.general.theme)
+          if (config.general && config.general.theme !== themeStore.themePreference) {
+            themeStore.setThemePreference(config.general.theme)
+          }
+          
           console.log('Configuration loaded successfully')
         }
         
@@ -239,6 +248,17 @@ export const useConfigStore = defineStore('config', {
      */
     setGeneralConfig(config) {
       this.general = { ...this.general, ...config }
+      // 只在自动保存配置启用且不是程序启动时才保存
+      if (this.general.autoSaveConfig && !this._isInitializing) {
+        this.saveConfig()
+      }
+    },
+
+    /**
+     * 设置音频配置
+     */
+    setAudioConfig(config) {
+      this.audio = { ...this.audio, ...config }
       // 只在自动保存配置启用且不是程序启动时才保存
       if (this.general.autoSaveConfig && !this._isInitializing) {
         this.saveConfig()

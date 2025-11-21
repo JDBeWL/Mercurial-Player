@@ -8,6 +8,7 @@ mod metadata;
 mod config_commands;
 mod system;
 mod error;
+mod audio_device;
 
 // 重新导出所有命令
 pub use playback::*;
@@ -15,17 +16,21 @@ pub use filesystem::*;
 pub use metadata::*;
 pub use config_commands::*;
 pub use system::*;
+pub use audio_device::*;
 
 use std::sync::{Arc, Mutex};
 use rodio::{OutputStream, Sink};
 use crate::config::ConfigManager;
 use crate::audio_decoder::SymphoniaSource;
+use cpal::traits::{DeviceTrait, HostTrait};
 
 pub struct PlayerState {
     pub sink: Arc<Mutex<Sink>>,
     pub current_source: Arc<Mutex<Option<SymphoniaSource>>>,
     pub current_path: Arc<Mutex<Option<String>>>,
     pub target_volume: Arc<Mutex<f32>>,
+    pub current_device_name: Arc<Mutex<String>>,
+    pub exclusive_mode: Arc<Mutex<bool>>,
 }
 
 pub struct AppState {
@@ -34,10 +39,16 @@ pub struct AppState {
 }
 
 fn main() {
-    // 创建音频输出流
-    let (_stream, stream_handle) = OutputStream::try_default().expect("Failed to create output stream");
-    // We need to keep the stream alive, but it's not Send or Sync.
-    // Leaking it is a simple way to keep it alive for the lifetime of the app.
+    // 初始化cpal host
+    let host = cpal::default_host();
+    let device = host.default_output_device().expect("No default output device available");
+    let device_name = device.name().unwrap_or_else(|_| "Unknown Device".to_string());
+
+    // 从选定的设备创建音频输出流
+    let (_stream, stream_handle) = OutputStream::try_from_device(&device).expect("Failed to create output stream from device");
+    
+    // 我们需要保持流的存活，但它不是Send或Sync。
+    // 泄露它是一种简单的方法，让它在应用程序的生命周期内保持存活。
     Box::leak(Box::new(_stream));
 
     let sink = Sink::try_new(&stream_handle).expect("Failed to create sink");
@@ -57,17 +68,19 @@ fn main() {
             current_source: Arc::new(Mutex::new(None)),
             current_path: Arc::new(Mutex::new(None)),
             target_volume: Arc::new(Mutex::new(1.0)),
+            current_device_name: Arc::new(Mutex::new(device_name)),
+            exclusive_mode: Arc::new(Mutex::new(false)),
         },
         config_manager,
     };
 
     tauri::Builder::default()
         .manage(app_state)
-        .setup(|app| {
+        .setup(|_app| {
             #[cfg(debug_assertions)]
             {
                 use tauri::Manager;
-                let window = app.get_webview_window("main").unwrap();
+                let window = _app.get_webview_window("main").unwrap();
                 window.open_devtools();
             }
             Ok(())
@@ -112,6 +125,13 @@ fn main() {
             // 系统命令
             get_system_info,
             get_system_fonts,
+            
+            // 音频设备命令
+            get_audio_devices,
+            set_audio_device,
+            get_current_audio_device,
+            toggle_exclusive_mode,
+            get_exclusive_mode,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

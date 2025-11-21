@@ -38,7 +38,7 @@ impl PlaybackStatus {
 
 /// 播放指定的音轨
 #[command]
-pub fn play_track(state: State<AppState>, path: String) -> Result<(), String> {
+pub fn play_track(state: State<AppState>, path: String, position: Option<f32>) -> Result<(), String> {
     let player_state = &state.player;
 
     // 停止当前音轨并清除sink
@@ -64,7 +64,12 @@ pub fn play_track(state: State<AppState>, path: String) -> Result<(), String> {
         Box::new(rodio::Decoder::new(reader).map_err(|e| e.to_string())?.convert_samples::<f32>())
     } else {
         match SymphoniaDecoder::new(&path) {
-            Ok(symphonia_decoder) => {
+            Ok(mut symphonia_decoder) => {
+                if let Some(time) = position {
+                    if let Err(e) = symphonia_decoder.seek(Duration::from_secs_f32(time)) {
+                        eprintln!("Symphonia seek failed: {}", e);
+                    }
+                }
                 println!("使用Symphonia解码器: {}", path);
                 Box::new(crate::audio_decoder::SymphoniaSource::new(symphonia_decoder))
             }
@@ -80,6 +85,15 @@ pub fn play_track(state: State<AppState>, path: String) -> Result<(), String> {
 
     let sink = player_state.sink.lock().unwrap();
     sink.append(source);
+
+    if let Some(time) = position {
+        if extension.eq_ignore_ascii_case("mp3") {
+            if let Err(e) = sink.try_seek(Duration::from_secs_f32(time)) {
+                eprintln!("Rodio seek failed: {}", e);
+            }
+        }
+    }
+
     sink.play();
     
     Ok(())

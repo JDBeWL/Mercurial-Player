@@ -97,7 +97,17 @@
     "lyricsFontFamily": "Lyrics Font",
     "lyricsStyle": "Lyrics Style",
     "lyricsStyleModern": "Modern",
-    "lyricsStyleClassic": "Classic"
+    "lyricsStyleClassic": "Classic",
+    "audioDeviceSettings": "Audio Device",
+    "defaultDevice": "Default",
+    "exclusiveMode": "Exclusive Mode",
+    "exclusiveModeDesc": "Bypass system mixer for lower latency",
+    "loadingDevices": "Loading audio devices...",
+    "deviceLoadError": "Failed to load audio devices",
+    "noAudioDevices": "No audio devices found",
+    "retry": "Retry",
+    "refresh": "Refresh",
+    "refreshDevices": "Refresh Device List"
   },
   "themeSelector": {
     "chooseThemeColor": "Choose Theme Color",

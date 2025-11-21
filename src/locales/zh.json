@@ -97,7 +97,17 @@
     "lyricsFontFamily": "歌词字体",
     "lyricsStyle": "歌词样式",
     "lyricsStyleModern": "现代",
-    "lyricsStyleClassic": "经典"
+    "lyricsStyleClassic": "经典",
+    "audioDeviceSettings": "音频设备",
+    "defaultDevice": "默认",
+    "exclusiveMode": "独占模式",
+    "exclusiveModeDesc": "绕过系统混音以获得更低延迟",
+    "loadingDevices": "加载音频设备中...",
+    "deviceLoadError": "加载音频设备失败",
+    "noAudioDevices": "未找到音频设备",
+    "retry": "重试",
+    "refresh": "刷新",
+    "refreshDevices": "刷新设备列表"
   },
   "themeSelector": {
     "chooseThemeColor": "选择主题颜色",

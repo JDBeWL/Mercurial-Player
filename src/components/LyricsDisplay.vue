@@ -135,8 +135,8 @@ export default {
                     targetScroll = elTop - (containerH / 2) + (elH / 2);
                 } else {
                     if (currentStyle === 'classic') {
-                        // 这里应该是计算出来的但是我试出来了...
-                        targetScroll = elTop - (containerH / 3.27) + (elH / 2);
+                        // 这里应该是计算出来的这里不是很稳定
+                        targetScroll = elTop - (containerH / 3.25) + (elH / 2);
                     } else {
                         targetScroll = elTop - (containerH * 0.25) + (elH / 2);
                     }
@@ -274,7 +274,7 @@ export default {
         // 播放进度监听 (使用二分查找优化性能)
         watchEffect(() => {
             if (isUserScroll.value) return;
-            const currentTime = playerStore.currentTime + 0.25; // 0.25s 提前量，优化观感
+            const currentTime = playerStore.currentTime + 0.2; // 0.2s 提前量，优化观感
 
             let l = 0, r = lyrics.value.length - 1, idx = -1;
             while (l <= r) {
@@ -352,7 +352,7 @@ export default {
     align-items: center;
     justify-content: center;
     color: #888;
-    font-size: 18px;
+    font-size: 24px;
 }
 
 .lyrics-spacer-up {

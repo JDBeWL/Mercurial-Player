@@ -19,6 +19,9 @@ pub struct AppConfig {
     
     // 通用设置
     pub general: GeneralConfig,
+    
+    // 音频设置
+    pub audio: AudioConfig,
 }
 
 /// 子目录扫描配置
@@ -65,6 +68,13 @@ pub struct GeneralConfig {
     pub lyrics_font_family: String,
 }
 
+/// 音频设置
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioConfig {
+    pub exclusive_mode: bool,
+}
+
 fn default_lyrics_font_family() -> String {
     "Roboto".to_string()
 }
@@ -77,6 +87,7 @@ impl Default for AppConfig {
             title_extraction: TitleExtractionConfig::default(),
             playlist: PlaylistConfig::default(),
             general: GeneralConfig::default(),
+            audio: AudioConfig::default(),
         }
     }
 }
@@ -134,6 +145,14 @@ impl Default for GeneralConfig {
             show_audio_info: true,
             lyrics_alignment: "center".to_string(),
             lyrics_font_family: "system-ui".to_string(),
+        }
+    }
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            exclusive_mode: false,
         }
     }
 }
