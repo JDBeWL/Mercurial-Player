@@ -9,6 +9,7 @@ mod filesystem;
 mod metadata;
 mod playback;
 mod system;
+mod window_commands;
 
 // 重新导出所有命令
 pub use audio_device::*;
@@ -17,6 +18,7 @@ pub use filesystem::*;
 pub use metadata::*;
 pub use playback::*;
 pub use system::*;
+pub use window_commands::*;
 
 use crate::audio_decoder::SymphoniaSource;
 use crate::config::ConfigManager;
@@ -142,6 +144,8 @@ fn main() {
             get_current_audio_device,
             toggle_exclusive_mode,
             get_exclusive_mode,
+            // 窗口命令
+            set_mini_mode,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,6 @@
 <template>
-  <div class="app-container" :data-fullscreen="isFullscreen" :data-maximized="isMaximized">
+  <MiniPlayer v-if="configStore.ui.miniMode" />
+  <div v-else class="app-container" :data-fullscreen="isFullscreen" :data-maximized="isMaximized">
     <header class="nav-bar" data-tauri-drag-region>
       <!-- 左侧控制区 -->
       <div class="nav-left">
@@ -16,6 +17,9 @@
       </div>
       <!-- 右侧控制区 -->
       <div class="nav-right">
+        <button class="icon-button" data-tauri-drag-region="false" @click="configStore.toggleMiniMode" title="Mini模式">
+          <span class="material-symbols-rounded">picture_in_picture_alt</span>
+        </button>
         <button class="icon-button" data-tauri-drag-region="false" @click="minimizeWindow" title="最小化">
           <span class="material-symbols-rounded">minimize</span>
         </button>
@@ -201,6 +205,7 @@ import MusicLibrary from './components/MusicLibrary.vue'
 import PlaylistView from './components/PlaylistView.vue'
 import ThemeSelector from './components/ThemeSelector.vue'
 import Settings from './components/Settings.vue'
+import MiniPlayer from './components/MiniPlayer.vue'
 import FileUtils from './utils/fileUtils'
 import { TitleExtractor } from './utils/titleExtractor'
 
@@ -270,7 +275,7 @@ const processTrackInfo = async (trackPath) => {
   try {
     // 如果已经在处理中，跳过
     if (processedTracks.value[trackPath]?.processing) return
-
+  
     // 标记为处理中
     processedTracks.value[trackPath] = { processing: true }
 
@@ -604,6 +609,7 @@ onUnmounted(() => {
     font-size: 24px;
     /* 允许最多3行 */
     -webkit-line-clamp: 3;
+    line-clamp: 3;
     max-height: 3.9em;
   }
 
@@ -611,6 +617,7 @@ onUnmounted(() => {
     font-size: 16px;
     /* 允许最多2行 */
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     max-height: 2.8em;
   }
 }
@@ -680,6 +687,7 @@ onUnmounted(() => {
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2; /* 最多显示两行 */
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   /* 确保短标题不会有多余空间 */
   max-height: 2.6em; /* 约2行的高度 */
@@ -696,6 +704,7 @@ onUnmounted(() => {
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 1; /* 最多显示一行 */
+  line-clamp: 1;
   -webkit-box-orient: vertical;
   white-space: normal;
   /* 确保短艺术家名不会有多余空间 */

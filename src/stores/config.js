@@ -5,7 +5,7 @@ import { useThemeStore } from './theme'
 // 防抖函数
 function debounce(func, wait) {
   let timeout
-  return function(...args) {
+  return function (...args) {
     const context = this
     clearTimeout(timeout)
     timeout = setTimeout(() => func.apply(context, args), wait)
@@ -19,7 +19,7 @@ export const useConfigStore = defineStore('config', {
   state: () => ({
     // 音乐文件夹列表
     musicDirectories: [],
-    
+
     // 子目录扫描配置
     directoryScan: {
       enableSubdirectoryScan: true,     // 是否启用子目录扫描
@@ -27,7 +27,7 @@ export const useConfigStore = defineStore('config', {
       ignoreHiddenFolders: true,       // 忽略隐藏文件夹
       folderBlacklist: ['.git', 'node_modules', 'temp', 'tmp'] // 忽略的文件夹
     },
-    
+
     // 标题提取配置
     titleExtraction: {
       preferMetadata: true,            // 优先使用元数据
@@ -36,7 +36,7 @@ export const useConfigStore = defineStore('config', {
       hideFileExtension: true,         // 隐藏文件扩展名
       parseArtistTitle: true           // 从文件名解析艺术家和标题
     },
-    
+
     // 播放列表配置
     playlist: {
       generateAllSongsPlaylist: true,   // 生成"全部歌曲"播放列表
@@ -44,7 +44,7 @@ export const useConfigStore = defineStore('config', {
       playlistNameFormat: '{folderName}', // 播放列表名称格式
       sortOrder: 'asc'                // 排序顺序: 'asc' (A-Z) 或 'desc' (Z-A)
     },
-    
+
     // 通用设置
     general: {
       language: 'zh',                   // 语言
@@ -56,13 +56,14 @@ export const useConfigStore = defineStore('config', {
       lyricsFontFamily: 'Roboto',       // 歌词字体
       lyricsStyle: 'modern',           // 歌词样式
     },
-    
+
     // UI设置（原ui.js的功能）
     ui: {
       showSettings: false,              // 是否显示设置面板
-      showConfigPanel: false            // 是否显示配置面板
+      showConfigPanel: false,           // 是否显示配置面板
+      miniMode: false                   // 是否处于Mini模式
     },
-    
+
     // 音频设置
     audio: {
       exclusiveMode: false              // 独占模式
@@ -74,7 +75,7 @@ export const useConfigStore = defineStore('config', {
     availableSeparators: (state) => {
       return [...new Set([state.titleExtraction.separator, ...state.titleExtraction.customSeparators])]
     },
-    
+
     // 获取有效的分隔符（过滤掉空字符串）
     validSeparators: (state) => {
       return state.availableSeparators.filter(sep => sep && sep.trim() !== '')
@@ -88,21 +89,21 @@ export const useConfigStore = defineStore('config', {
     async loadConfig() {
       // 标记为初始化状态，防止自动保存
       this._isInitializing = true
-      
+
       try {
         const config = await invoke('load_config')
         if (config) {
           this.$patch(config)
-          
+
           // 只在主题不同时才更新主题，避免不必要的重置
           const themeStore = useThemeStore()
           if (config.general && config.general.theme !== themeStore.themePreference) {
             themeStore.setThemePreference(config.general.theme)
           }
-          
+
           console.log('Configuration loaded successfully')
         }
-        
+
         // 单独加载音乐文件夹列表
         try {
           const musicDirectories = await invoke('get_music_directories')
@@ -118,7 +119,7 @@ export const useConfigStore = defineStore('config', {
           console.warn('Failed to load music directories:', error)
           this.musicDirectories = []
         }
-        
+
         // 延迟标记初始化完成，确保所有配置都已应用
         setTimeout(() => {
           this.markInitializationComplete()
@@ -126,7 +127,7 @@ export const useConfigStore = defineStore('config', {
       } catch (error) {
         console.warn('Failed to load config, using defaults:', error)
         // 加载失败时使用默认配置
-        
+
         // 即使加载失败也要标记初始化完成
         setTimeout(() => {
           this.markInitializationComplete()
@@ -155,7 +156,7 @@ export const useConfigStore = defineStore('config', {
     /**
      * 保存配置到后端（使用防抖）
      */
-    saveConfig: debounce(function() {
+    saveConfig: debounce(function () {
       return this.saveConfigNow()
     }, 1000),
 
@@ -165,9 +166,9 @@ export const useConfigStore = defineStore('config', {
     async exportConfig(filePath) {
       try {
         const configToExport = JSON.parse(JSON.stringify(this.$state))
-        await invoke('export_config', { 
-          config: configToExport, 
-          filePath 
+        await invoke('export_config', {
+          config: configToExport,
+          filePath
         })
         console.log('Configuration exported successfully')
       } catch (error) {
@@ -341,6 +342,22 @@ export const useConfigStore = defineStore('config', {
      */
     toggleConfigPanel() {
       this.ui.showConfigPanel = !this.ui.showConfigPanel
+    },
+
+    /**
+     * 切换Mini模式
+     */
+    async toggleMiniMode() {
+      try {
+        const newMode = !this.ui.miniMode
+        // 调用后端命令调整窗口
+        await invoke('set_mini_mode', { enable: newMode })
+        this.ui.miniMode = newMode
+      } catch (error) {
+        console.error('Failed to toggle mini mode:', error)
+        // 如果后端失败，回滚状态
+        this.ui.miniMode = !this.ui.miniMode
+      }
     }
   }
 })

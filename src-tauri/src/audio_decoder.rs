@@ -3,7 +3,6 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-// 修复1: 移除了未使用的 Signal
 use symphonia::core::audio::AudioBufferRef;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error;
@@ -11,6 +10,12 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+
+// --- 配置常量 ---
+// 将默认缓冲时间增加到 3000ms (3秒)，提供更大的安全余量
+const DEFAULT_BUFFER_DURATION_MS: u32 = 3000;
+// 恢复较小的批处理大小，确保能更频繁地释放锁，避免阻塞音频线程太久
+const SOURCE_BATCH_SIZE: usize = 4096;
 
 /// 音频解码器状态
 #[derive(Debug, PartialEq)]
@@ -29,7 +34,6 @@ const fn calculate_buffer_size(sample_rate: u32, channels: u16, duration_ms: u32
 }
 
 /// 音频缓冲区管理器
-/// 作为一个简单的 FIFO 队列使用
 struct AudioBuffer {
     samples: Vec<f32>,
     position: usize,
@@ -41,21 +45,25 @@ struct AudioBuffer {
 
 impl AudioBuffer {
     fn new(capacity: usize, sample_rate: u32, channels: u16) -> Self {
+        // 设置填充阈值：当缓冲区剩余时间少于总容量的 40% 时请求填充
+        let refill_threshold_ms =
+            (capacity as u64 * 1000 / (sample_rate as u64 * channels as u64) * 40 / 100) as u32;
+
         Self {
             samples: Vec::with_capacity(capacity),
             position: 0,
             capacity,
             sample_rate,
             channels,
-            refill_threshold_ms: 50, 
+            refill_threshold_ms: refill_threshold_ms.max(100), // 至少保证100ms余量
         }
     }
-    
+
     #[inline(always)]
     fn is_empty(&self) -> bool {
         self.position >= self.samples.len()
     }
-    
+
     #[inline(always)]
     fn next(&mut self) -> Option<f32> {
         if self.position < self.samples.len() {
@@ -66,49 +74,45 @@ impl AudioBuffer {
             None
         }
     }
-    
+
     fn clear(&mut self) {
         self.samples.clear();
         self.position = 0;
     }
-    
+
     fn append(&mut self, samples: &[f32]) {
         self.samples.extend_from_slice(samples);
     }
-    
+
     #[inline]
     fn remaining(&self) -> usize {
         self.samples.len() - self.position
     }
-    
+
     /// 基于时间的填充需求检测
     fn needs_refill(&self) -> bool {
         let remaining_samples = self.remaining();
-        // 避免除法，转换为乘法比较: remaining * 1000 < rate * channels * threshold
-        (remaining_samples as u64 * 1000) < (self.sample_rate as u64 * self.channels as u64 * self.refill_threshold_ms as u64)
+        (remaining_samples as u64 * 1000)
+            < (self.sample_rate as u64 * self.channels as u64 * self.refill_threshold_ms as u64)
     }
-    
+
     fn set_refill_threshold(&mut self, threshold_ms: u32) {
         self.refill_threshold_ms = threshold_ms;
     }
 }
 
-/// Symphonia解码器的包装器，实现了 rodio::Source
-/// 
-/// 优化说明：引入了本地缓存 (chunk_buffer) 以减少锁争用。
 pub struct SymphoniaSource {
     decoder: Arc<Mutex<SymphoniaDecoder>>,
-    // 本地缓存，用于批量获取数据，避免每次 next() 都加锁
     chunk_buffer: Vec<f32>,
     chunk_pos: usize,
 }
 
 impl SymphoniaSource {
     pub fn new(decoder: SymphoniaDecoder) -> Self {
-        SymphoniaSource { 
+        SymphoniaSource {
             decoder: Arc::new(Mutex::new(decoder)),
-            // 预分配 1024 个采样点的缓存 (约 23ms @ 44.1kHz stereo)
-            chunk_buffer: Vec::with_capacity(1024),
+            // 增大本地缓存到 4096
+            chunk_buffer: Vec::with_capacity(SOURCE_BATCH_SIZE),
             chunk_pos: 0,
         }
     }
@@ -119,38 +123,33 @@ impl Iterator for SymphoniaSource {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        // 1. 快速路径：如果本地缓存有数据，直接返回
         if self.chunk_pos < self.chunk_buffer.len() {
             let sample = self.chunk_buffer[self.chunk_pos];
             self.chunk_pos += 1;
             return Some(sample);
         }
 
-        // 2. 慢速路径：本地缓存耗尽，获取锁并批量拉取
         if let Ok(mut decoder) = self.decoder.lock() {
             self.chunk_buffer.clear();
             self.chunk_pos = 0;
-            
-            // 尝试从解码器填充本地缓存
-            // 这里的 1024 是批量大小，平衡了锁开销和内存局部性
-            let batch_size = 1024;
-            for _ in 0..batch_size {
+
+            // 使用定义的常量 SOURCE_BATCH_SIZE (4096)
+            // 这样每次获取锁可以拿到更多数据，减少锁争抢
+            for _ in 0..SOURCE_BATCH_SIZE {
                 if let Some(sample) = decoder.next() {
                     self.chunk_buffer.push(sample);
                 } else {
-                    // 解码器耗尽（文件结束或暂时无数据）
                     break;
                 }
             }
         }
 
-        // 3. 再次检查缓存（如果刚才拉取到了数据）
         if self.chunk_pos < self.chunk_buffer.len() {
             let sample = self.chunk_buffer[self.chunk_pos];
             self.chunk_pos += 1;
             return Some(sample);
         }
-        
+
         None
     }
 }
@@ -168,7 +167,7 @@ impl Source for SymphoniaSource {
         if let Ok(decoder) = self.decoder.lock() {
             decoder.target_channels()
         } else {
-            2 // 默认立体声
+            2
         }
     }
 
@@ -176,7 +175,7 @@ impl Source for SymphoniaSource {
         if let Ok(decoder) = self.decoder.lock() {
             decoder.sample_rate()
         } else {
-            44100 // 默认采样率
+            44100
         }
     }
 
@@ -189,23 +188,17 @@ impl Source for SymphoniaSource {
     }
 }
 
-/// Symphonia解码器实现
 pub struct SymphoniaDecoder {
     path: String,
     sample_rate: u32,
     total_duration: Option<Duration>,
     state: DecoderState,
-    
-    // 内部主缓冲区
     buffer: AudioBuffer,
-    // 暂存缓冲区，用于避免在解码循环中反复分配内存
     scratch_buffer: Vec<f32>,
-    
     decoder: Option<Box<dyn symphonia::core::codecs::Decoder>>,
     format: Option<Box<dyn symphonia::core::formats::FormatReader>>,
     track_id: Option<u32>,
     current_sample: u64,
-    
     target_channels: u16,
     source_channels: u16,
     channel_map: Option<Vec<usize>>,
@@ -215,54 +208,53 @@ impl SymphoniaDecoder {
     pub fn new(path: &str) -> Result<Self, String> {
         Self::new_with_buffer_duration(path, None)
     }
-    
-    pub fn new_with_buffer_duration(path: &str, buffer_duration_ms: Option<u32>) -> Result<Self, String> {
+
+    pub fn new_with_buffer_duration(
+        path: &str,
+        buffer_duration_ms: Option<u32>,
+    ) -> Result<Self, String> {
         let file = File::open(path).map_err(|e| e.to_string())?;
-        let mss = MediaSourceStream::new(Box::new(file.try_clone().map_err(|e| e.to_string())?), Default::default());
-        
+        let mss = MediaSourceStream::new(
+            Box::new(file.try_clone().map_err(|e| e.to_string())?),
+            Default::default(),
+        );
         let mut hint = Hint::new();
         if let Some(extension) = Path::new(path).extension().and_then(|s| s.to_str()) {
             hint.with_extension(extension);
         }
-        
         let meta_opts: MetadataOptions = Default::default();
         let mut fmt_opts: FormatOptions = Default::default();
         fmt_opts.enable_gapless = true;
-        
         let probed = symphonia::default::get_probe()
             .format(&hint, mss, &fmt_opts, &meta_opts)
             .map_err(|e| format!("Failed to probe format: {}", e))?;
-        
         let format = probed.format;
-        
-        let track = format.tracks()
+        let track = format
+            .tracks()
             .iter()
             .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
             .ok_or("No audio track found")?;
-        
+
         let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
         let source_channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(2) as u16;
-        
-        let total_duration = if let (Some(n_frames), Some(sample_rate)) = (
-            track.codec_params.n_frames,
-            track.codec_params.sample_rate
-        ) {
-            Some(Duration::from_secs_f64(n_frames as f64 / sample_rate as f64))
+
+        let total_duration = if let (Some(n_frames), Some(sample_rate)) =
+            (track.codec_params.n_frames, track.codec_params.sample_rate)
+        {
+            Some(Duration::from_secs_f64(
+                n_frames as f64 / sample_rate as f64,
+            ))
         } else {
             None
         };
-        
-        let buffer_duration_ms = buffer_duration_ms.unwrap_or_else(|| {
-            match sample_rate {
-                0..=48000 => 100, 
-                _ => 50,
-            }
-        });
-        
+
+        // --- 核心修复：使用更大的默认缓冲区 ---
+        let buffer_duration_ms = buffer_duration_ms.unwrap_or(DEFAULT_BUFFER_DURATION_MS);
+
         let target_channels = 2u16;
         let buffer_size = calculate_buffer_size(sample_rate, target_channels, buffer_duration_ms);
         let channel_map = Self::create_channel_mapping(source_channels);
-        
+
         Ok(SymphoniaDecoder {
             path: path.to_string(),
             sample_rate,
@@ -270,7 +262,7 @@ impl SymphoniaDecoder {
             total_duration,
             state: DecoderState::Uninitialized,
             buffer: AudioBuffer::new(buffer_size, sample_rate, target_channels),
-            scratch_buffer: Vec::with_capacity(4096), // 预分配暂存区
+            scratch_buffer: Vec::with_capacity(SOURCE_BATCH_SIZE * 2), // 稍微预分配大一点
             decoder: None,
             format: None,
             track_id: None,
@@ -279,7 +271,7 @@ impl SymphoniaDecoder {
             channel_map,
         })
     }
-    
+
     fn create_channel_mapping(channels: u16) -> Option<Vec<usize>> {
         match channels {
             6 => Some(vec![0, 1]), // 5.1 -> Stereo
@@ -288,41 +280,42 @@ impl SymphoniaDecoder {
             _ => None,
         }
     }
-    
+
     pub fn adjust_buffer_settings(&mut self, buffer_duration_ms: u32, refill_threshold_ms: u32) {
-        let new_buffer_size = calculate_buffer_size(self.sample_rate, self.target_channels, buffer_duration_ms);
-        // 保存旧数据（可选，这里简化为清空重建）
+        let new_buffer_size =
+            calculate_buffer_size(self.sample_rate, self.target_channels, buffer_duration_ms);
         self.buffer = AudioBuffer::new(new_buffer_size, self.sample_rate, self.target_channels);
         self.buffer.set_refill_threshold(refill_threshold_ms);
     }
-    
+
     pub fn get_buffer_info(&self) -> (u32, u32, usize) {
-        let buffer_duration_ms = ((self.buffer.capacity as u64 * 1000) / 
-                               (self.sample_rate as u64 * self.target_channels as u64)) as u32;
-        (buffer_duration_ms, self.buffer.refill_threshold_ms, self.buffer.capacity)
+        let buffer_duration_ms = ((self.buffer.capacity as u64 * 1000)
+            / (self.sample_rate as u64 * self.target_channels as u64))
+            as u32;
+        (
+            buffer_duration_ms,
+            self.buffer.refill_threshold_ms,
+            self.buffer.capacity,
+        )
     }
-    
+
     pub fn target_channels(&self) -> u16 {
         self.target_channels
     }
-    
     pub fn source_channels(&self) -> u16 {
         self.source_channels
     }
-    
+
     pub fn seek(&mut self, time: Duration) -> Result<(), String> {
         let target_seconds = time.as_secs_f64();
         let target_ts = (target_seconds * self.sample_rate as f64) as u64;
-        
         self.current_sample = target_ts;
         self.buffer.clear();
-        
         if let (Some(format), Some(decoder)) = (&mut self.format, &mut self.decoder) {
             let seek_to = symphonia::core::formats::SeekTo::TimeStamp {
                 ts: target_ts,
                 track_id: self.track_id.unwrap(),
             };
-            
             match format.seek(symphonia::core::formats::SeekMode::Accurate, seek_to) {
                 Ok(_) => {
                     decoder.reset();
@@ -330,7 +323,6 @@ impl SymphoniaDecoder {
                     Ok(())
                 }
                 Err(e) => {
-                    // Seek 失败尝试软重置
                     self.current_sample = 0;
                     self.state = DecoderState::Uninitialized;
                     Err(format!("Seek failed: {:?}", e))
@@ -341,58 +333,55 @@ impl SymphoniaDecoder {
             Ok(())
         }
     }
-    
+
     fn initialize_decoder(&mut self) -> Result<(), String> {
         let file = File::open(&self.path).map_err(|e| e.to_string())?;
-        let mss = MediaSourceStream::new(Box::new(file.try_clone().map_err(|e| e.to_string())?), Default::default());
-        
+        let mss = MediaSourceStream::new(
+            Box::new(file.try_clone().map_err(|e| e.to_string())?),
+            Default::default(),
+        );
         let mut hint = Hint::new();
         if let Some(extension) = Path::new(&self.path).extension().and_then(|s| s.to_str()) {
             hint.with_extension(extension);
         }
-        
         let meta_opts: MetadataOptions = Default::default();
         let mut fmt_opts: FormatOptions = Default::default();
         fmt_opts.enable_gapless = true;
-        
         let probed = symphonia::default::get_probe()
             .format(&hint, mss, &fmt_opts, &meta_opts)
             .map_err(|e| format!("Failed to probe format: {}", e))?;
-        
         let mut format = probed.format;
-        
-        let track = format.tracks()
+        let track = format
+            .tracks()
             .iter()
             .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
             .ok_or("No audio track found")?;
-        
         let track_id = track.id;
-        
         let dec_opts: DecoderOptions = Default::default();
         let mut decoder = symphonia::default::get_codecs()
             .make(&track.codec_params, &dec_opts)
             .map_err(|e| format!("Failed to create decoder: {}", e))?;
-        
         if self.current_sample > 0 {
             let seek_to = symphonia::core::formats::SeekTo::TimeStamp {
                 ts: self.current_sample,
                 track_id,
             };
-            if format.seek(symphonia::core::formats::SeekMode::Accurate, seek_to).is_ok() {
+            if format
+                .seek(symphonia::core::formats::SeekMode::Accurate, seek_to)
+                .is_ok()
+            {
                 decoder.reset();
             } else {
                 self.current_sample = 0;
             }
         }
-        
         self.format = Some(format);
         self.decoder = Some(decoder);
         self.track_id = Some(track_id);
         self.state = DecoderState::Ready;
-        
         Ok(())
     }
-    
+
     fn fill_buffer(&mut self) -> Result<(), String> {
         if self.state == DecoderState::Uninitialized {
             if let Err(e) = self.initialize_decoder() {
@@ -400,21 +389,27 @@ impl SymphoniaDecoder {
                 return Err(e);
             }
         }
-        
+
         match &self.state {
             DecoderState::Error(_) | DecoderState::EndOfStream => return Ok(()),
             _ => {}
         }
-        
+
         // 避免借用检查器问题，先获取必要的可变引用
         let format = self.format.as_mut().unwrap();
         let decoder = self.decoder.as_mut().unwrap();
         let track_id = self.track_id.unwrap();
-        
+
         let mut decoded_packets = 0;
-        let max_packets = 10; // 每次最多解码 10 个包，避免单次阻塞太久
-        
+        let max_packets = 4; // 减少单次解码包数，避免阻塞
+
+        // 只要缓冲区未满 (remaining < capacity)，就尝试解码
         while self.buffer.remaining() < self.buffer.capacity && decoded_packets < max_packets {
+            // 如果已经达到了填充阈值，提前退出以释放锁
+            if !self.buffer.needs_refill() && decoded_packets > 0 {
+                break;
+            }
+
             let packet = match format.next_packet() {
                 Ok(p) => p,
                 Err(Error::ResetRequired) => {
@@ -426,25 +421,23 @@ impl SymphoniaDecoder {
                     break;
                 }
                 Err(e) => {
-                    // 非致命错误可能需要继续，但这里简化为错误状态
                     self.state = DecoderState::Error(format!("Read packet error: {}", e));
                     return Err(format!("Read packet error: {}", e));
                 }
             };
-            
+
             if packet.track_id() != track_id {
                 continue;
             }
-            
+
             match decoder.decode(&packet) {
                 Ok(decoded) => {
-                    // 优化：使用暂存缓冲区，避免分配
                     self.scratch_buffer.clear();
-                    
-                    // 转换并写入 scratch_buffer
-                    Self::convert_audio_buffer(decoded, &mut self.scratch_buffer, &self.channel_map);
-                    
-                    // 将 scratch_buffer 的内容追加到主 buffer
+                    Self::convert_audio_buffer(
+                        decoded,
+                        &mut self.scratch_buffer,
+                        &self.channel_map,
+                    );
                     self.buffer.append(&self.scratch_buffer);
                     decoded_packets += 1;
                 }
@@ -459,22 +452,25 @@ impl SymphoniaDecoder {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
-    /// 优化后的转换函数：直接展开循环，避免闭包，利于 SIMD
-    fn convert_audio_buffer(audio_buf: AudioBufferRef, samples: &mut Vec<f32>, channel_map: &Option<Vec<usize>>) {
+
+    fn convert_audio_buffer(
+        audio_buf: AudioBufferRef,
+        samples: &mut Vec<f32>,
+        channel_map: &Option<Vec<usize>>,
+    ) {
         let frames = audio_buf.frames();
         let channels = audio_buf.spec().channels.count();
-        
-        // 预分配空间
-        let target_channels = if let Some(map) = channel_map { map.len() } else { channels };
+        let target_channels = if let Some(map) = channel_map {
+            map.len()
+        } else {
+            channels
+        };
         samples.reserve(frames * target_channels);
-
         match audio_buf {
             AudioBufferRef::F32(buf) => {
-                // 修复：将 planes() 调用拆分为两步，避免临时值被丢弃
                 let planes = buf.planes();
                 let src = planes.planes();
                 Self::copy_planes(src, samples, frames, channels, channel_map, |s| *s);
@@ -482,25 +478,28 @@ impl SymphoniaDecoder {
             AudioBufferRef::S16(buf) => {
                 let planes = buf.planes();
                 let src = planes.planes();
-                Self::copy_planes(src, samples, frames, channels, channel_map, |s| (*s as f32) / 32768.0);
+                Self::copy_planes(src, samples, frames, channels, channel_map, |s| {
+                    (*s as f32) / 32768.0
+                });
             }
             AudioBufferRef::U8(buf) => {
                 let planes = buf.planes();
                 let src = planes.planes();
-                Self::copy_planes(src, samples, frames, channels, channel_map, |s| (*s as f32 - 128.0) / 128.0);
+                Self::copy_planes(src, samples, frames, channels, channel_map, |s| {
+                    (*s as f32 - 128.0) / 128.0
+                });
             }
             AudioBufferRef::S32(buf) => {
                 let planes = buf.planes();
                 let src = planes.planes();
-                Self::copy_planes(src, samples, frames, channels, channel_map, |s| (*s as f32) / 2147483648.0);
+                Self::copy_planes(src, samples, frames, channels, channel_map, |s| {
+                    (*s as f32) / 2147483648.0
+                });
             }
-            _ => {
-                // 对于未优化的格式，静默处理或添加更多 match arm
-            }
+            _ => {}
         }
     }
 
-    /// 核心拷贝逻辑：按帧交错 (Interleave)
     #[inline(always)]
     fn copy_planes<T, F>(
         planes: &[&[T]],
@@ -508,10 +507,12 @@ impl SymphoniaDecoder {
         frames: usize,
         src_channels: usize,
         map: &Option<Vec<usize>>,
-        converter: F
-    ) where T: Copy, F: Fn(&T) -> f32 {
+        converter: F,
+    ) where
+        T: Copy,
+        F: Fn(&T) -> f32,
+    {
         if let Some(map) = map {
-            // 映射模式
             for i in 0..frames {
                 for &ch_idx in map {
                     if ch_idx < src_channels {
@@ -521,7 +522,6 @@ impl SymphoniaDecoder {
                 }
             }
         } else {
-            // 直通模式 (Interleave)
             for i in 0..frames {
                 for ch in 0..src_channels {
                     let sample = converter(&planes[ch][i]);
@@ -534,13 +534,10 @@ impl SymphoniaDecoder {
 
 impl Iterator for SymphoniaDecoder {
     type Item = f32;
-
     fn next(&mut self) -> Option<f32> {
         if self.buffer.is_empty() || self.buffer.needs_refill() {
-            // 忽略错误，如果填充失败且缓冲区为空，下面会返回 None
             let _ = self.fill_buffer();
         }
-        
         let sample = self.buffer.next();
         if sample.is_some() {
             self.current_sample += 1;
@@ -548,16 +545,20 @@ impl Iterator for SymphoniaDecoder {
         sample
     }
 }
-
 impl Source for SymphoniaDecoder {
-    fn current_frame_len(&self) -> Option<usize> { None }
-    fn channels(&self) -> u16 { self.target_channels }
-    fn sample_rate(&self) -> u32 { self.sample_rate }
-    fn total_duration(&self) -> Option<Duration> { self.total_duration }
-}
-
-impl Drop for SymphoniaDecoder {
-    fn drop(&mut self) {
-        // 自动清理
+    fn current_frame_len(&self) -> Option<usize> {
+        None
     }
+    fn channels(&self) -> u16 {
+        self.target_channels
+    }
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        self.total_duration
+    }
+}
+impl Drop for SymphoniaDecoder {
+    fn drop(&mut self) {}
 }
