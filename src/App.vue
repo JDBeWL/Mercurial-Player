@@ -93,9 +93,18 @@
               </Transition>
             </div>
 
-            <!-- 右侧：歌词 -->
+            <!-- 右侧：歌词/可视化 -->
             <div class="player-right">
-              <LyricsDisplay class="lyrics-container" />
+               <div class="view-toggle-container">
+                 <button class="icon-button view-toggle-btn" @click="toggleViewMode" :title="viewMode === 'lyrics' ? '切换到波形模式' : '切换到歌词模式'">
+                    <span class="material-symbols-rounded">{{ viewMode === 'lyrics' ? 'equalizer' : 'lyrics' }}</span>
+                 </button>
+              </div>
+              
+              <Transition name="fade" mode="out-in">
+                <LyricsDisplay v-if="viewMode === 'lyrics'" class="lyrics-container" />
+                <VisualizerPanel v-else class="lyrics-container" />
+              </Transition>
             </div>
           </div>
 
@@ -201,6 +210,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import PlayerControls from './components/PlayerControls.vue'
 import ProgressBar from './components/ProgressBar.vue'
 import LyricsDisplay from './components/LyricsDisplay.vue'
+import VisualizerPanel from './components/VisualizerPanel.vue'
 import MusicLibrary from './components/MusicLibrary.vue'
 import PlaylistView from './components/PlaylistView.vue'
 import ThemeSelector from './components/ThemeSelector.vue'
@@ -222,6 +232,11 @@ const showLibrary = ref(false)
 const showPlaylist = ref(false)
 const isFullscreen = ref(false)
 const isMaximized = ref(false)
+const viewMode = ref('lyrics') // 'lyrics' or 'visualizer'
+
+const toggleViewMode = () => {
+  viewMode.value = viewMode.value === 'lyrics' ? 'visualizer' : 'lyrics'
+}
 
 // 存储处理后的音轨信息
 const processedTracks = ref({})
@@ -581,6 +596,14 @@ onUnmounted(() => {
 .player-right {
   flex: 1;
   min-width: 0;
+  position: relative;
+}
+
+.view-toggle-container {
+  position: absolute;
+  top: 0;
+  right: 16px;
+  z-index: 10;
 }
 
 /* 响应式设计 */

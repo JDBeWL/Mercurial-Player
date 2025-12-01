@@ -33,6 +33,8 @@ pub struct PlayerState {
     pub target_volume: Arc<Mutex<f32>>,
     pub current_device_name: Arc<Mutex<String>>,
     pub exclusive_mode: Arc<Mutex<bool>>,
+    pub waveform_data: Arc<Mutex<Vec<f32>>>,
+    pub spectrum_data: Arc<Mutex<Vec<f32>>>,
 }
 
 pub struct AppState {
@@ -88,6 +90,8 @@ fn main() {
             target_volume: Arc::new(Mutex::new(1.0)),
             current_device_name: Arc::new(Mutex::new(device_name)),
             exclusive_mode: Arc::new(Mutex::new(exclusive_mode_enabled)),
+            waveform_data: Arc::new(Mutex::new(Vec::with_capacity(1024))),
+            spectrum_data: Arc::new(Mutex::new(vec![0.0; 128])),
         },
         config_manager,
     };
@@ -122,7 +126,10 @@ fn main() {
             set_volume,
             get_playback_status,
             seek_track,
+            seek_track,
             is_track_finished,
+            get_waveform_data,
+            get_spectrum_data,
             // 配置命令
             initialize_config_files,
             load_config,

@@ -2,7 +2,7 @@
     margin: 6px 0;
     padding: 12px 20px 12px 12px;
     font-size: 24px;
-    transition: all 0.18s ease-in-out;
+    transition: all 0.25s ease-in-out;
     word-break: break-word;
     min-height: 1em;
     cursor: pointer;
@@ -17,12 +17,18 @@
 .lyrics-style-classic .lyrics.active {
     font-size: 32px;
     font-weight: bold;
-    transform: scale3d(1.01); /* 尝试把硬件加速打开（ */
+    transform: scale3d(1.05);
+    /* 尝试把硬件加速打开（ */
     color: var(--md-sys-color-primary);
 }
 
-.lyrics-style-classic .lyrics .english { font-size: 1em; }
-.lyrics-style-classic .lyrics .chinese { font-size: 1em; }
+.lyrics-style-classic .lyrics .english {
+    font-size: 1em;
+}
+
+.lyrics-style-classic .lyrics .chinese {
+    font-size: 1em;
+}
 
 .lyrics-style-classic .lyrics-display {
     mask-image: none;

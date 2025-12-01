@@ -22,9 +22,9 @@
     will-change: transform, opacity, filter;
 
     transition:
-        opacity 0.18s cubic-bezier(0.33, 1, 0.68, 1),
-        transform 0.18s cubic-bezier(0.33, 1, 0.68, 1),
-        filter 0.18s linear;
+        opacity 0.25s cubic-bezier(0.33, 1, 0.68, 1),
+        transform 0.25s cubic-bezier(0.33, 1, 0.68, 1),
+        filter 0.25s linear;
 }
 
 .lyrics-style-modern .lyrics:hover {

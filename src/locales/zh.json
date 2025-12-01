@@ -10,6 +10,7 @@
   "player": {
     "noTrack": "未选择曲目",
     "fileNotFound": "文件不存在或已被删除",
+    "musicName": "等待歌词...",
     "bitrate": "{value}kbps",
     "sampleRate": "{value}kHz",
     "channels": "{value} 声道"

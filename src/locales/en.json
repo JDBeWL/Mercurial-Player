@@ -10,6 +10,7 @@
   "player": {
     "noTrack": "No track selected",
     "fileNotFound": "File not found or has been deleted",
+    "musicName": "Waiting for lyrics...",
     "bitrate": "{value}kbps",
     "sampleRate": "{value}kHz",
     "channels": "{value} channel | {value} channels"

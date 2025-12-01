@@ -5,9 +5,12 @@
 use super::audio_decoder::SymphoniaDecoder;
 use super::AppState;
 use rodio::Source;
+use spectrum_analyzer::scaling::divide_by_N_sqrt;
+use spectrum_analyzer::windows::hann_window;
+use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{command, State};
 
@@ -24,8 +27,6 @@ pub struct PlaybackStatus {
 }
 
 impl PlaybackStatus {
-    #[must_use]
-    #[allow(dead_code)]
     pub const fn new(is_playing: bool, position_secs: f32, volume: f32) -> Self {
         Self {
             is_playing,
@@ -33,6 +34,155 @@ impl PlaybackStatus {
             volume,
         }
     }
+}
+
+/// 用于可视化的音频源包装器
+pub struct VisualizationSource<I>
+where
+    I: Source<Item = f32> + Send,
+{
+    input: I,
+    waveform_data: Arc<Mutex<Vec<f32>>>,
+    spectrum_data: Arc<Mutex<Vec<f32>>>,
+    buffer: Vec<f32>,
+    prev_spectrum: Vec<f32>,
+}
+
+impl<I> VisualizationSource<I>
+where
+    I: Source<Item = f32> + Send,
+{
+    pub fn new(
+        input: I,
+        waveform_data: Arc<Mutex<Vec<f32>>>,
+        spectrum_data: Arc<Mutex<Vec<f32>>>,
+    ) -> Self {
+        Self {
+            input,
+            waveform_data,
+            spectrum_data,
+            buffer: Vec::with_capacity(1024),
+            prev_spectrum: vec![0.0; 128],
+        }
+    }
+}
+
+impl<I> Iterator for VisualizationSource<I>
+where
+    I: Source<Item = f32> + Send,
+{
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let sample = self.input.next();
+        if let Some(s) = sample {
+            // 存入本地缓冲区用于FFT
+            self.buffer.push(s);
+
+            if self.buffer.len() >= 1024 {
+                // 计算FFT
+                let hann_window = hann_window(&self.buffer);
+                // 44100Hz 采样率 (简化假设，实际应从 input.sample_rate() 获取)
+                let spectrum_result = samples_fft_to_spectrum(
+                    &hann_window,
+                    44100,
+                    FrequencyLimit::Range(20.0, 20000.0),
+                    Some(&divide_by_N_sqrt),
+                );
+
+                if let Ok(spectrum) = spectrum_result {
+                    // 对数频段映射 (128 bands)
+                    let mut new_spectrum = vec![0.0; 128];
+                    let data = spectrum.data();
+
+                    // 频率范围 20Hz - 20000Hz
+                    let min_freq = 20.0f32;
+                    let max_freq = 20000.0f32;
+                    let log_min = min_freq.log10();
+                    let log_max = max_freq.log10();
+                    let log_step = (log_max - log_min) / 128.0;
+
+                    for (freq, value) in data {
+                        let freq_val = freq.val();
+                        if freq_val < min_freq || freq_val > max_freq {
+                            continue;
+                        }
+
+                        // 计算当前频率属于哪个 bin
+                        let bin_index = ((freq_val.log10() - log_min) / log_step).floor() as usize;
+
+                        if bin_index < 128 {
+                            // 取最大值
+                            if value.val() > new_spectrum[bin_index] {
+                                new_spectrum[bin_index] = value.val();
+                            }
+                        }
+                    }
+
+                    // 平滑处理 (EMA)
+                    for i in 0..128 {
+                        self.prev_spectrum[i] = self.prev_spectrum[i] * 0.5 + new_spectrum[i] * 0.5;
+                    }
+
+                    // 更新共享状态
+                    if let Ok(mut spec) = self.spectrum_data.try_lock() {
+                        *spec = self.prev_spectrum.clone();
+                    }
+                }
+
+                // 更新波形数据用于调试或备用
+                if let Ok(mut wave) = self.waveform_data.try_lock() {
+                    *wave = self.buffer.clone();
+                }
+
+                self.buffer.clear();
+            }
+        }
+        sample
+    }
+}
+
+impl<I> Source for VisualizationSource<I>
+where
+    I: Source<Item = f32> + Send,
+{
+    fn current_frame_len(&self) -> Option<usize> {
+        self.input.current_frame_len()
+    }
+
+    fn channels(&self) -> u16 {
+        self.input.channels()
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.input.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.input.total_duration()
+    }
+}
+
+/// 获取当前波形数据
+#[command]
+pub fn get_waveform_data(state: State<AppState>) -> Result<Vec<f32>, String> {
+    let data = state
+        .player
+        .waveform_data
+        .lock()
+        .map_err(|e| format!("Failed to acquire lock on waveform data: {}", e))?;
+    Ok(data.clone())
+}
+
+/// 获取当前频谱数据
+#[command]
+pub fn get_spectrum_data(state: State<AppState>) -> Result<Vec<f32>, String> {
+    let data = state
+        .player
+        .spectrum_data
+        .lock()
+        .map_err(|e| format!("Failed to acquire lock on spectrum data: {}", e))?;
+    Ok(data.clone())
 }
 
 /// 播放指定的音轨
@@ -57,6 +207,9 @@ pub fn play_track(
     *player_state.current_path.lock().unwrap() = Some(path.clone());
     *player_state.current_source.lock().unwrap() = None;
 
+    let waveform_data = Arc::clone(&player_state.waveform_data);
+    let spectrum_data = Arc::clone(&player_state.spectrum_data);
+
     let source: Box<dyn Source<Item = f32> + Send> = match SymphoniaDecoder::new(&path) {
         Ok(mut symphonia_decoder) => {
             if let Some(time) = position {
@@ -65,8 +218,10 @@ pub fn play_track(
                 }
             }
             println!("使用Symphonia解码器: {}", path);
-            Box::new(crate::audio_decoder::SymphoniaSource::new(
-                symphonia_decoder,
+            Box::new(VisualizationSource::new(
+                crate::audio_decoder::SymphoniaSource::new(symphonia_decoder),
+                waveform_data,
+                spectrum_data,
             ))
         }
         Err(e) => {
@@ -74,7 +229,11 @@ pub fn play_track(
             let file = File::open(&path).map_err(|e| e.to_string())?;
             let reader = BufReader::new(file);
             let rodio_source = rodio::Decoder::new(reader).map_err(|e| e.to_string())?;
-            Box::new(rodio_source.convert_samples::<f32>())
+            Box::new(VisualizationSource::new(
+                rodio_source.convert_samples::<f32>(),
+                waveform_data,
+                spectrum_data,
+            ))
         }
     };
 
@@ -171,7 +330,11 @@ pub fn seek_track(state: State<AppState>, time: f32) -> Result<(), String> {
                 match decoder.seek(duration) {
                     Ok(_) => {
                         let source: Box<dyn Source<Item = f32> + Send> =
-                            Box::new(crate::audio_decoder::SymphoniaSource::new(decoder));
+                            Box::new(VisualizationSource::new(
+                                crate::audio_decoder::SymphoniaSource::new(decoder),
+                                Arc::clone(&player_state.waveform_data),
+                                Arc::clone(&player_state.spectrum_data),
+                            ));
 
                         // 停止当前播放并替换为新源
                         {

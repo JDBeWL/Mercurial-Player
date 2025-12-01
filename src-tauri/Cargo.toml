@@ -26,6 +26,7 @@ lofty = "0.18"
 base64 = "0.21"
 symphonia = { version = "0.5", features = ["flac", "vorbis", "aac", "alac", "aiff", "wav"] }
 rayon = "1.8"
+spectrum-analyzer = "1.4"
 tauri-plugin-dialog = { version = "2.3.3", features = [] }
 tauri-plugin-fs = { version = "2.4.4", features = [] }
 tauri-plugin-shell = { version = "2.3.3", features = [] }
