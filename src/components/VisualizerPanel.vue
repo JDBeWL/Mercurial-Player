@@ -229,7 +229,8 @@ export default {
 }
 
 .visualizer-container {
-  flex: 0 0 65%; /* 固定高度比例，比如 35% */
+  flex: 0 0 35%;
+  margin-top: 4%;
   width: 100%;
   min-height: 100px;
   background-color: var(--md-sys-color-surface-container-high);
@@ -245,13 +246,13 @@ canvas {
 }
 
 .single-line-lyrics {
-  flex: 1; /* 占据剩余空间 */
-  min-height: 120px;
+  flex: 0;
+  min-height: 100px;
   display: flex;
   align-items: center;
   justify-content: center;
-  text-align: center;
-  padding: 16px;
+  text-align: right;
+  /* padding: 8px; */
 }
 
 .lyric-content {
@@ -262,7 +263,7 @@ canvas {
 }
 
 .lyric-original {
-  font-size: 32px; /* 更大的字体 */
+  font-size: 36px;
   font-weight: 700;
   color: var(--md-sys-color-on-surface);
   line-height: 1.3;
@@ -270,7 +271,7 @@ canvas {
 }
 
 .lyric-translation {
-  font-size: 26px; /* 更大的翻译字体 */
+  font-size: 32px;
   color: var(--md-sys-color-primary);
   font-weight: 400;
   margin-top: 8px;
