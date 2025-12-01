@@ -67,6 +67,7 @@ where
     }
 }
 
+// 别管这个纯娱乐的可视化功能，maybe it could be useful one day
 impl<I> Iterator for VisualizationSource<I>
 where
     I: Source<Item = f32> + Send,
@@ -95,8 +96,8 @@ where
                     let mut new_spectrum = vec![0.0; 128];
                     let data = spectrum.data();
 
-                    // 频率范围 20Hz - 20000Hz
-                    let min_freq = 20.0f32;
+                    // 频率范围 180Hz - 20000Hz
+                    let min_freq = 180.0f32;
                     let max_freq = 20000.0f32;
                     let log_min = min_freq.log10();
                     let log_max = max_freq.log10();

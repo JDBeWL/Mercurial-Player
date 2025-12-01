@@ -142,16 +142,18 @@ export default {
       ctx.shadowBlur = 0;
 
       for (let i = 0; i < bufferLength; i++) {
-        const value = audioData[i];
-        // 调整缩放系数，避免频繁顶格
-        // 之前是 2.0，稍微降低一点，或者使用非线性缩放
-        let barHeight = value * height * 1.5; 
+        // 极小的底噪，确保最低限度的动画，同时避免过多抖动
+        const baseNoise = 0.02;
+        const value = audioData[i] + baseNoise;
+        // 适度的缩放系数，既保持动感又避免频繁触顶
+        // 使用对数缩放以增强微小变化的可视性
+        let barHeight = Math.pow(value, 0.9) * height * 0.9; 
         
         // 限制最大高度，但尽量让它自然过渡
         if (barHeight > height) barHeight = height;
         
-        // 最小高度
-        if (barHeight < 4) barHeight = 4; // 稍微高一点以便显示圆角
+        // 降低最小高度，让微小的频率变化也能显示
+        if (barHeight < 2) barHeight = 2;
 
         // 单侧绘制 (从底部向上)
         // 使用 roundRect 绘制圆角柱子 (如果浏览器支持)
