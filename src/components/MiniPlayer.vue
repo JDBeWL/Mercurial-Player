@@ -23,8 +23,8 @@
       <div class="info-controls" data-tauri-drag-region>
         <!-- 歌曲信息 -->
         <div class="track-info" data-tauri-drag-region>
-          <div class="track-title" :title="getTrackTitle(currentTrack)">{{ getTrackTitle(currentTrack) }}</div>
-          <div class="track-artist" :title="getTrackArtist(currentTrack)">{{ getTrackArtist(currentTrack) }}</div>
+          <div class="track-title" :title="getTrackTitle(currentTrack, '未播放')">{{ getTrackTitle(currentTrack, '未播放') }}</div>
+          <div class="track-artist" :title="getTrackArtist(currentTrack, '未知艺术家')">{{ getTrackArtist(currentTrack, '未知艺术家') }}</div>
         </div>
 
         <!-- 控制按钮 -->
@@ -61,19 +61,21 @@ import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
 import { useConfigStore } from '../stores/config'
-import FileUtils from '../utils/fileUtils'
-import { TitleExtractor } from '../utils/titleExtractor'
+import { useTrackInfo } from '../composables/useTrackInfo'
 
 const playerStore = usePlayerStore()
 const configStore = useConfigStore()
 const { currentTrack, currentTime, duration, isPlaying } = storeToRefs(playerStore)
 
+// 使用 composable 处理音轨信息
+const { getTrackTitle, getTrackArtist, watchTrack } = useTrackInfo()
+
+// 监听当前音轨变化
+watchTrack(() => currentTrack.value)
+
 // 拖拽进度条相关状态
 const isDragging = ref(false)
 const dragPercentage = ref(0)
-
-// 存储处理后的音轨信息
-const processedTracks = ref({})
 
 // 计算属性
 const currentTrackCover = computed(() => {
@@ -83,96 +85,7 @@ const currentTrackCover = computed(() => {
   return 'none'
 })
 
-// 获取音轨标题
-const getTrackTitle = (track) => {
-  if (!track || !track.path) {
-    return '未播放'
-  }
 
-  const trackPath = track.path
-
-  // 如果已经处理过该音轨，直接返回结果
-  if (processedTracks.value[trackPath] && !processedTracks.value[trackPath].processing) {
-    return processedTracks.value[trackPath].title
-  }
-  
-  // 异步处理音轨信息，但不阻塞当前渲染
-  if (!processedTracks.value[trackPath] || !processedTracks.value[trackPath].processing) {
-    processTrackInfo(trackPath)
-  }
-
-  // 如果还没处理完，暂时返回track中已有的name或文件名
-  return track.name || FileUtils.getFileName(trackPath)
-}
-
-// 获取音轨艺术家
-const getTrackArtist = (track) => {
-  if (!track || !track.path) {
-    return ''
-  }
-
-  const trackPath = track.path
-
-  // 如果已经处理过该音轨，直接返回结果
-  if (processedTracks.value[trackPath] && !processedTracks.value[trackPath].processing) {
-    return processedTracks.value[trackPath].artist
-  }
-
-  // 异步处理音轨信息，但不阻塞当前渲染
-  if (!processedTracks.value[trackPath] || !processedTracks.value[trackPath].processing) {
-    processTrackInfo(trackPath)
-  }
-
-  // 如果还没处理完，暂时返回track中已有的artist信息
-  return track.artist || '未知艺术家'
-}
-
-// 异步处理音轨信息
-const processTrackInfo = async (trackPath) => {
-  try {
-    // 如果已经在处理中，跳过
-    if (processedTracks.value[trackPath]?.processing) return
-
-    // 标记为处理中
-    processedTracks.value[trackPath] = { processing: true }
-
-    // 获取配置
-    const config = {
-      preferMetadata: configStore.titleExtraction?.preferMetadata ?? true,
-      hideFileExtension: configStore.titleExtraction?.hideFileExtension ?? true,
-      parseArtistTitle: configStore.titleExtraction?.parseArtistTitle ?? true,
-      separator: configStore.titleExtraction?.separator ?? '-',
-      customSeparators: configStore.titleExtraction?.customSeparators ?? ['-', '_', '.', ' ']
-    }
-
-    // 使用 TitleExtractor 智能提取标题信息
-    const titleInfo = await TitleExtractor.extractTitle(trackPath, config)
-
-    // 更新处理结果
-    processedTracks.value[trackPath] = {
-      processing: false,
-      ...titleInfo
-    }
-
-  } catch (error) {
-    console.error('处理音轨信息失败:', trackPath, error)
-    // 出错时使用文件名作为标题
-    processedTracks.value[trackPath] = {
-      processing: false,
-      title: FileUtils.getFileName(trackPath),
-      artist: '',
-      fileName: FileUtils.getFileName(trackPath),
-      isFromMetadata: false
-    }
-  }
-}
-
-// 监听当前音轨变化，自动处理标题信息
-watch(currentTrack, (newTrack) => {
-  if (newTrack && newTrack.path) {
-    processTrackInfo(newTrack.path)
-  }
-}, { immediate: true })
 
 const progressPercentage = computed(() => {
   if (isDragging.value) return dragPercentage.value

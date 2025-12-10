@@ -231,37 +231,8 @@ export class FileUtils {
       return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
     }
   }
-  static getFileName(filePath) {
-    const parts = filePath.split(/[/\\]/);
-    return parts[parts.length - 1] || filePath;
-  }
-
-  static getFileExtension(filePath) {
-    const fileName = this.getFileName(filePath);
-    const lastDotIndex = fileName.lastIndexOf('.');
-    return lastDotIndex > 0 ? fileName.substring(lastDotIndex + 1).toLowerCase() : '';
-  }
-
-  static isAudioFile(filePath) {
-    const extension = this.getFileExtension(filePath);
-    const audioExtensions = ['mp3', 'flac', 'wav', 'ogg', 'm4a', 'aac', 'wma'];
-    return audioExtensions.includes(extension);
-  }
-
-  static isLyricsFile(filePath) {
-    const extension = this.getFileExtension(filePath);
-    const lyricsExtensions = ['lrc', 'ass', 'ssa', 'srt'];
-    return lyricsExtensions.includes(extension);
-  }
-
-  static formatTime(seconds) {
-    if (isNaN(seconds) || !isFinite(seconds)) return '0:00';
-    
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = Math.floor(seconds % 60);
-    
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-  }
+  // 这些方法已经在文件前面定义过，不需要重复定义
+  // 移除重复定义以提高性能
 }
 
 export default FileUtils;

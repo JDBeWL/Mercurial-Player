@@ -130,75 +130,7 @@
   </div>
 </template>
 
-<style scoped>
-/* 过渡动画 */
-.slide-left-enter-active,
-.slide-left-leave-active {
-  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
 
-.slide-left-enter-from {
-  transform: translateX(-100%);
-}
-
-.slide-left-leave-to {
-  transform: translateX(-100%);
-}
-
-.slide-right-enter-active,
-.slide-right-leave-active {
-  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
-
-.slide-right-enter-from {
-  transform: translateX(100%);
-}
-
-.slide-right-leave-to {
-  transform: translateX(100%);
-}
-
-/* 专辑封面过渡动画 */
-.album-art-slide-next-enter-active,
-.album-art-slide-next-leave-active,
-.album-art-slide-prev-enter-active,
-.album-art-slide-prev-leave-active {
-  transition: all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  width: 100%;
-  height: 100%;
-}
-
-/* 下一首过渡 */
-.album-art-slide-next-enter-from {
-  transform: translateX(20%) scale(0.9);
-  opacity: 0;
-}
-
-.album-art-slide-next-leave-to {
-  transform: translateX(-20%) scale(0.9);
-  opacity: 0;
-}
-
-/* 上一首过渡 */
-.album-art-slide-prev-enter-from {
-  transform: translateX(-20%) scale(0.9);
-  opacity: 0;
-}
-
-.album-art-slide-prev-leave-to {
-  transform: translateX(20%) scale(0.9);
-  opacity: 0;
-}
-
-/* 过渡结束 */
-.album-art-slide-next-enter-to,
-.album-art-slide-next-leave-from,
-.album-art-slide-prev-enter-to,
-.album-art-slide-prev-leave-from {
-  transform: translateX(0) scale(1);
-  opacity: 1;
-}
-</style>
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
@@ -216,8 +148,7 @@ import PlaylistView from './components/PlaylistView.vue'
 import ThemeSelector from './components/ThemeSelector.vue'
 import Settings from './components/Settings.vue'
 import MiniPlayer from './components/MiniPlayer.vue'
-import FileUtils from './utils/fileUtils'
-import { TitleExtractor } from './utils/titleExtractor'
+import { useTrackInfo } from './composables/useTrackInfo'
 
 const playerStore = usePlayerStore()
 const themeStore = useThemeStore()
@@ -227,6 +158,9 @@ const configStore = useConfigStore()
 const appWindow = getCurrentWindow()
 
 const { currentTrack, playlist, audioInfo, currentTrackIndex, lastTrackIndex } = storeToRefs(playerStore)
+
+// 使用 composable 处理音轨信息
+const { getTrackTitle, getTrackArtist, watchTrack } = useTrackInfo()
 
 const showLibrary = ref(false)
 const showPlaylist = ref(false)
@@ -238,92 +172,7 @@ const toggleViewMode = () => {
   viewMode.value = viewMode.value === 'lyrics' ? 'visualizer' : 'lyrics'
 }
 
-// 存储处理后的音轨信息
-const processedTracks = ref({})
 
-// 获取音轨标题
-const getTrackTitle = (track) => {
-  if (!track || !track.path) {
-    return ''
-  }
-
-  const trackPath = track.path
-
-  // 如果已经处理过该音轨，直接返回结果
-  if (processedTracks.value[trackPath] && !processedTracks.value[trackPath].processing) {
-    return processedTracks.value[trackPath].title
-  }
-  
-  // 异步处理音轨信息，但不阻塞当前渲染
-  if (!processedTracks.value[trackPath] || !processedTracks.value[trackPath].processing) {
-    processTrackInfo(trackPath)
-  }
-
-  // 如果还没处理完，暂时返回track中已有的name或文件名
-  return track.name || FileUtils.getFileName(trackPath)
-}
-
-// 获取音轨艺术家
-const getTrackArtist = (track) => {
-  if (!track || !track.path) {
-    return ''
-  }
-
-  const trackPath = track.path
-
-  // 如果已经处理过该音轨，直接返回结果
-  if (processedTracks.value[trackPath] && !processedTracks.value[trackPath].processing) {
-    return processedTracks.value[trackPath].artist
-  }
-
-  // 异步处理音轨信息，但不阻塞当前渲染
-  if (!processedTracks.value[trackPath] || !processedTracks.value[trackPath].processing) {
-    processTrackInfo(trackPath)
-  }
-
-  // 如果还没处理完，暂时返回track中已有的artist信息
-  return track.artist || ''
-}
-
-// 异步处理音轨信息
-const processTrackInfo = async (trackPath) => {
-  try {
-    // 如果已经在处理中，跳过
-    if (processedTracks.value[trackPath]?.processing) return
-  
-    // 标记为处理中
-    processedTracks.value[trackPath] = { processing: true }
-
-    // 获取配置
-    const config = {
-      preferMetadata: configStore.titleExtraction?.preferMetadata ?? true,
-      hideFileExtension: configStore.titleExtraction?.hideFileExtension ?? true,
-      parseArtistTitle: configStore.titleExtraction?.parseArtistTitle ?? true,
-      separator: configStore.titleExtraction?.separator ?? '-',
-      customSeparators: configStore.titleExtraction?.customSeparators ?? ['-', '_', '.', ' ']
-    }
-
-    // 使用 TitleExtractor 智能提取标题信息
-    const titleInfo = await TitleExtractor.extractTitle(trackPath, config)
-
-    // 更新处理结果
-    processedTracks.value[trackPath] = {
-      processing: false,
-      ...titleInfo
-    }
-
-  } catch (error) {
-    console.error('处理音轨信息失败:', trackPath, error)
-    // 出错时使用文件名作为标题
-    processedTracks.value[trackPath] = {
-      processing: false,
-      title: FileUtils.getFileName(trackPath),
-      artist: '',
-      fileName: FileUtils.getFileName(trackPath),
-      isFromMetadata: false
-    }
-  }
-}
 
 const currentTrackCover = computed(() => {
   if (currentTrack.value && currentTrack.value.cover) {
@@ -459,11 +308,7 @@ const closeWindow = async () => {
 
 
 // 监听当前音轨变化，自动处理标题信息
-watch(currentTrack, (newTrack) => {
-  if (newTrack && newTrack.path) {
-    processTrackInfo(newTrack.path)
-  }
-}, { immediate: true })
+watchTrack(() => currentTrack.value)
 
 const transitionDirection = ref(null)
 
@@ -531,6 +376,74 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 过渡动画 */
+.slide-left-enter-active,
+.slide-left-leave-active {
+  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.slide-left-enter-from {
+  transform: translateX(-100%);
+}
+
+.slide-left-leave-to {
+  transform: translateX(-100%);
+}
+
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.slide-right-enter-from {
+  transform: translateX(100%);
+}
+
+.slide-right-leave-to {
+  transform: translateX(100%);
+}
+
+/* 专辑封面过渡动画 */
+.album-art-slide-next-enter-active,
+.album-art-slide-next-leave-active,
+.album-art-slide-prev-enter-active,
+.album-art-slide-prev-leave-active {
+  transition: all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  width: 100%;
+  height: 100%;
+}
+
+/* 下一首过渡 */
+.album-art-slide-next-enter-from {
+  transform: translateX(20%) scale(0.9);
+  opacity: 0;
+}
+
+.album-art-slide-next-leave-to {
+  transform: translateX(-20%) scale(0.9);
+  opacity: 0;
+}
+
+/* 上一首过渡 */
+.album-art-slide-prev-enter-from {
+  transform: translateX(-20%) scale(0.9);
+  opacity: 0;
+}
+
+.album-art-slide-prev-leave-to {
+  transform: translateX(20%) scale(0.9);
+  opacity: 0;
+}
+
+/* 过渡结束 */
+.album-art-slide-next-enter-to,
+.album-art-slide-next-leave-from,
+.album-art-slide-prev-enter-to,
+.album-art-slide-prev-leave-from {
+  transform: translateX(0) scale(1);
+  opacity: 1;
+}
+
 .app-container {
   height: 100vh;
   display: flex;

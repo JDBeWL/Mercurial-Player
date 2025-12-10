@@ -19,7 +19,7 @@
       <div v-else class="playlist-songs">
         <div class="list">
           <div 
-            v-for="(track, index) in playlist" 
+            v-for="(track, index) in processedPlaylist" 
             :key="index"
             class="list-item"
             :class="{ selected: isCurrentTrack(track) }"
@@ -42,8 +42,8 @@
               </span>
             </div>
             <div class="list-item-content">
-              <div class="list-item-headline" :title="getTrackTitle(track)">{{ getTrackTitle(track) }}</div>
-              <div class="list-item-supporting" :title="getTrackArtist(track)">{{ getTrackArtist(track) }}</div>
+              <div class="list-item-headline" :title="track.cachedTitle">{{ track.cachedTitle }}</div>
+              <div class="list-item-supporting" :title="track.cachedArtist">{{ track.cachedArtist }}</div>
             </div>
             <div class="list-item-trailing">
               <button class="icon-button" @click.stop="removeTrack(index)">
@@ -58,7 +58,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
 import { useConfigStore } from '../stores/config'
@@ -82,37 +82,7 @@ const handleClose = () => {
   }, 300) // 与CSS动画时间一致
 }
 
-// 智能获取音轨标题 - 使用store中的预处理数据
-const getTrackTitle = (track) => {
-  // 优先使用displayTitle字段（如果已预处理）
-  if (track.displayTitle) {
-    return track.displayTitle
-  }
-  
-  // 其次使用title字段
-  if (track.title) {
-    return track.title
-  }
-  
-  // 最后使用文件名
-  return FileUtils.getFileName(track.path)
-}
 
-// 智能获取音轨艺术家 - 使用store中的预处理数据
-const getTrackArtist = (track) => {
-  // 优先使用displayArtist字段（如果已预处理）
-  if (track.displayArtist) {
-    return track.displayArtist
-  }
-  
-  // 其次使用artist字段
-  if (track.artist) {
-    return track.artist
-  }
-  
-  // 返回空字符串
-  return ''
-}
 
 const isCurrentTrack = (track) => {
   return currentTrack.value && currentTrack.value.path === track.path
@@ -121,6 +91,71 @@ const isCurrentTrack = (track) => {
 const playTrack = (track) => {
   playerStore.playTrack(track)
 }
+
+// 创建标题缓存
+const titleCache = new Map()
+const artistCache = new Map()
+
+// 智能获取音轨标题 - 使用缓存提高性能
+const getTrackTitle = (track) => {
+  // 使用音轨路径作为缓存键
+  if (titleCache.has(track.path)) {
+    return titleCache.get(track.path)
+  }
+  
+  let title
+  // 优先使用displayTitle字段（如果已预处理）
+  if (track.displayTitle) {
+    title = track.displayTitle
+  }
+  // 其次使用title字段
+  else if (track.title) {
+    title = track.title
+  }
+  // 最后使用文件名
+  else {
+    title = FileUtils.getFileName(track.path)
+  }
+  
+  // 缓存结果
+  titleCache.set(track.path, title)
+  return title
+}
+
+// 智能获取音轨艺术家 - 使用缓存提高性能
+const getTrackArtist = (track) => {
+  // 使用音轨路径作为缓存键
+  if (artistCache.has(track.path)) {
+    return artistCache.get(track.path)
+  }
+  
+  let artist
+  // 优先使用displayArtist字段（如果已预处理）
+  if (track.displayArtist) {
+    artist = track.displayArtist
+  }
+  // 其次使用artist字段
+  else if (track.artist) {
+    artist = track.artist
+  }
+  // 返回空字符串
+  else {
+    artist = ''
+  }
+  
+  // 缓存结果
+  artistCache.set(track.path, artist)
+  return artist
+}
+
+// 创建计算属性以提高性能
+const processedPlaylist = computed(() => {
+  return playlist.value.map(track => ({
+    ...track,
+    cachedTitle: getTrackTitle(track),
+    cachedArtist: getTrackArtist(track)
+  }))
+})
 
 const removeTrack = (index) => {
   // 创建一个新的播放列表，并移除指定索引的音轨
@@ -170,6 +205,10 @@ const removeTrack = (index) => {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
+  /* 启用硬件加速和优化滚动性能 */
+  transform: translateZ(0);
+  -webkit-overflow-scrolling: touch;
+  will-change: scroll-position;
 }
 
 .playlist-empty {
@@ -215,6 +254,8 @@ const removeTrack = (index) => {
   border-radius: var(--md-sys-shape-corner-medium);
   overflow: visible;
   padding: 2px;
+  /* 优化列表渲染性能 */
+  contain: layout style paint;
 }
 
 .list-item {
@@ -223,16 +264,14 @@ const removeTrack = (index) => {
   padding: 12px 16px;
   margin: 2px 0;
   cursor: pointer;
-  transition: all 0.2s ease;
   position: relative;
   overflow: hidden;
   border-radius: 8px;
+  will-change: background-color; /* 优化性能 */
 }
 
 .list-item:hover {
   background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
-  border-radius: 8px;
-  transform: translateX(2px);
 }
 
 .list-item.selected {
@@ -263,7 +302,6 @@ const removeTrack = (index) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: all 0.2s ease;
 }
 
 .list-item.selected .list-item-headline {
@@ -276,7 +314,6 @@ const removeTrack = (index) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: all 0.2s ease;
 }
 
 .list-item.selected .list-item-supporting {
