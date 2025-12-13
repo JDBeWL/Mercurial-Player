@@ -76,9 +76,9 @@ export default {
                     visualTime.value = playerStore.currentTime;
                 }
 
-                // 漂移校正：如果视觉时间与真实时间误差过大(>0.25s)，进行硬同步
+                // 漂移校正：如果视觉时间与真实时间误差过大，进行硬同步
                 const diff = Math.abs(visualTime.value - playerStore.currentTime);
-                if (diff > 0.25) {
+                if (diff > 0.75) {
                     visualTime.value = playerStore.currentTime;
                 }
 
