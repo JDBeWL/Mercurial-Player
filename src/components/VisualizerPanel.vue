@@ -8,7 +8,11 @@
     <!-- 下方：单行歌词显示 -->
     <div class="single-line-lyrics">
       <div v-if="currentLyric" class="lyric-content">
-        <div class="lyric-original" :class="{ 'has-translation': !!currentLyric.texts[1] }">
+        <div :class="[
+          'lyric-original',
+          { 'has-translation': !!currentLyric.texts[1] },
+          isLyricTypeASS ? 'lyric-original-ass' : 'lyric-original-lrc'
+        ]">
           <template v-if="currentLyric.karaoke">
              <!-- 复用卡拉OK逻辑 -->
              <span v-for="(word, idx) in currentLyric.words" :key="idx" 
@@ -68,6 +72,11 @@ export default {
         return lyrics.value[activeIndex.value];
       }
       return null;
+    });
+
+    // 判断歌词类型（ASS/LRC）
+    const isLyricTypeASS = computed(() => {
+      return currentLyric.value && currentLyric.value.words && currentLyric.value.words.length > 0;
     });
 
     // --- 视觉时间 (用于卡拉OK) ---
@@ -297,9 +306,18 @@ canvas {
 .lyric-original {
   font-size: 36px;
   font-weight: 700;
-  color: var(--md-sys-color-on-surface);
   line-height: 1.3;
   transition: all 0.3s ease;
+}
+
+/* LRC字幕颜色 */
+.lyric-original-lrc {
+  color: var(--md-sys-color-primary);
+}
+
+/* ASS字幕颜色 */
+.lyric-original-ass {
+  color: var(--md-sys-color-primary);
 }
 
 .lyric-translation {
