@@ -55,7 +55,10 @@
     "empty": "播放列表为空",
     "clear": "清空播放列表",
     "songs": "{count} 首歌曲",
-    "addSongs": "添加歌曲到播放列表以开始播放"
+    "addSongs": "添加歌曲到播放列表以开始播放",
+    "play": "播放",
+    "pause": "暂停",
+    "remove": "移除"
   },
   "lyrics": {
     "title": "歌词",

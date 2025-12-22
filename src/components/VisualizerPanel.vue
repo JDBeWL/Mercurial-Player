@@ -117,11 +117,11 @@ export default {
       // 绘制频谱条
       const drawData = smoothedAudioData.length > 0 ? smoothedAudioData : audioData;
 
-      // 如果没有数据或暂停，显示直线
+      // 如果没有数据或暂停，显示直线在底部
       if (!playerStore.isPlaying || drawData.length === 0) {
           ctx.beginPath();
-          ctx.moveTo(0, height / 2);
-          ctx.lineTo(width, height / 2);
+          ctx.moveTo(0, height - 2);
+          ctx.lineTo(width, height - 2);
           ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--md-sys-color-primary').trim() || '#6750a4';
           ctx.stroke();
           

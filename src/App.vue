@@ -515,7 +515,7 @@ onUnmounted(() => {
 .view-toggle-container {
   position: absolute;
   top: 0;
-  right: 16px;
+  right: 0;
   z-index: 10;
 }
 

@@ -531,8 +531,17 @@ impl SymphoniaDecoder {
                     (*s as f32) / 2147483648.0
                 });
             }
+            AudioBufferRef::S24(buf) => {
+                let planes = buf.planes();
+                let src = planes.planes();
+                // i24 类型的内部表示是一个 i32，范围是 -8388608 到 8388607
+                Self::copy_planes(src, samples, frames, channels, channel_map, |s| {
+                    (s.inner() as f32) / 8388608.0
+                });
+            }
             _ => {
                 // 对于未优化的格式，静默处理或添加更多 match arm
+                eprintln!("Unsupported audio buffer format encountered");
             }
         }
     }

@@ -25,28 +25,35 @@
             :class="{ selected: isCurrentTrack(track) }"
             @click="playTrack(track)"
           >
-            <div class="list-item-leading">
-              <span 
-                class="material-sounds-playing-icon" 
-                v-if="isCurrentTrack(track) && playerStore.isPlaying"
-              >
-                <span class="bar bar-1"></span>
-                <span class="bar bar-2"></span>
-                <span class="bar bar-3"></span>
-              </span>
-              <span class="material-symbols-rounded playing-icon" v-else-if="isCurrentTrack(track)">
-                equalizer
-              </span>
-              <span class="material-symbols-rounded" v-else>
-                music_note
-              </span>
+
+            <div class="track-cover" v-if="track.cover">
+              <img :src="track.cover" :alt="track.cachedTitle" />
+            </div>
+            <div class="track-cover-placeholder" v-else>
+              <span class="material-symbols-rounded">album</span>
             </div>
             <div class="list-item-content">
               <div class="list-item-headline" :title="track.cachedTitle">{{ track.cachedTitle }}</div>
               <div class="list-item-supporting" :title="track.cachedArtist">{{ track.cachedArtist }}</div>
             </div>
             <div class="list-item-trailing">
-              <button class="icon-button" @click.stop="removeTrack(index)">
+              <button 
+                v-if="!isCurrentTrack(track) || !playerStore.isPlaying"
+                class="icon-button play-button" 
+                @click.stop="playTrack(track)"
+                :title="$t('playlist.play')"
+              >
+                <span class="material-symbols-rounded">play_arrow</span>
+              </button>
+              <button 
+                v-if="isCurrentTrack(track) && playerStore.isPlaying"
+                class="icon-button pause-button" 
+                @click.stop="pauseTrack"
+                :title="$t('playlist.pause')"
+              >
+                <span class="material-symbols-rounded">pause</span>
+              </button>
+              <button class="icon-button remove-button" @click.stop="removeTrack(index)" :title="$t('playlist.remove')">
                 <span class="material-symbols-rounded">close</span>
               </button>
             </div>
@@ -58,17 +65,14 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
-import { useConfigStore } from '../stores/config'
 import FileUtils from '../utils/fileUtils'
-import { TitleExtractor } from '../utils/titleExtractor'
 
 const emit = defineEmits(['close'])
 
 const playerStore = usePlayerStore()
-const configStore = useConfigStore()
 const { playlist, currentTrack, isPlaying } = storeToRefs(playerStore)
 
 // 控制动画状态
@@ -82,14 +86,16 @@ const handleClose = () => {
   }, 300) // 与CSS动画时间一致
 }
 
-
-
 const isCurrentTrack = (track) => {
   return currentTrack.value && currentTrack.value.path === track.path
 }
 
 const playTrack = (track) => {
   playerStore.playTrack(track)
+}
+
+const pauseTrack = () => {
+  playerStore.pause()
 }
 
 // 创建标题缓存
@@ -158,7 +164,6 @@ const processedPlaylist = computed(() => {
 })
 
 const removeTrack = (index) => {
-  // 创建一个新的播放列表，并移除指定索引的音轨
   const newPlaylist = [...playlist.value]
   newPlaylist.splice(index, 1)
   playerStore.loadPlaylist(newPlaylist)
@@ -205,7 +210,6 @@ const removeTrack = (index) => {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
-  /* 启用硬件加速和优化滚动性能 */
   transform: translateZ(0);
   -webkit-overflow-scrolling: touch;
   will-change: scroll-position;
@@ -254,7 +258,6 @@ const removeTrack = (index) => {
   border-radius: var(--md-sys-shape-corner-medium);
   overflow: visible;
   padding: 2px;
-  /* 优化列表渲染性能 */
   contain: layout style paint;
 }
 
@@ -267,7 +270,7 @@ const removeTrack = (index) => {
   position: relative;
   overflow: hidden;
   border-radius: 8px;
-  will-change: background-color; /* 优化性能 */
+  will-change: background-color;
 }
 
 .list-item:hover {
@@ -280,13 +283,34 @@ const removeTrack = (index) => {
   z-index: 1;
 }
 
-.list-item-leading {
-  margin-right: 16px;
-  color: var(--md-sys-color-on-surface-variant);
+
+
+.track-cover,
+.track-cover-placeholder {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  margin-right: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
 
-.list-item.selected .list-item-leading {
-  color: var(--theme-on-primary-container);
+.track-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.track-cover-placeholder {
+  background-color: var(--md-sys-color-surface-variant);
+}
+
+.track-cover-placeholder .material-symbols-rounded {
+  font-size: 24px;
+  color: var(--md-sys-color-on-surface-variant);
 }
 
 .list-item-content {
@@ -320,19 +344,50 @@ const removeTrack = (index) => {
   color: var(--theme-on-primary-container);
 }
 
-
 .list-item-trailing {
   display: flex;
-  gap: 8px;
+  gap: 4px;
+  align-items: center;
 }
 
-/* 声音播放动画图标 */
-.material-sounds-playing-icon {
-  display: inline-flex;
-  align-items: flex-end;
-  height: 24px;
-  width: 24px;
-  color: inherit;
+.play-button,
+.pause-button,
+.remove-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.play-button:hover,
+.pause-button:hover {
+  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
+}
+
+.remove-button:hover {
+  background-color: color-mix(in srgb, var(--md-sys-color-error) 12%, transparent);
+}
+
+.play-button .material-symbols-rounded,
+.pause-button .material-symbols-rounded {
+  font-size: 20px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.remove-button .material-symbols-rounded {
+  font-size: 18px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.list-item.selected .play-button .material-symbols-rounded,
+.list-item.selected .pause-button .material-symbols-rounded {
+  color: var(--theme-on-primary-container);
 }
 
 @media (max-width: 480px) {
@@ -343,45 +398,5 @@ const removeTrack = (index) => {
   .list-item-supporting {
     font-size: 12px;
   }
-}
-
-.bar {
-  display: inline-block;
-  width: 3px;
-  margin: 0 1px;
-  background-color: currentColor;
-  border-radius: 3px;
-  animation: sound-wave 0.6s infinite ease-in-out;
-}
-
-.bar-1 {
-  height: 6px;
-  animation-delay: 0s;
-}
-
-.bar-2 {
-  height: 12px;
-  animation-delay: 0.2s;
-}
-
-.bar-3 {
-  height: 8px;
-  animation-delay: 0.4s;
-}
-
-@keyframes sound-wave {
-  0%, 100% {
-    transform: scaleY(0.5);
-    opacity: 0.7;
-  }
-  50% {
-    transform: scaleY(1);
-    opacity: 1;
-  }
-}
-
-.list-item.selected .material-sounds-playing-icon,
-.list-item.selected .playing-icon {
-  color: var(--theme-on-primary-container);
 }
 </style>

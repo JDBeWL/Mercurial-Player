@@ -55,7 +55,10 @@
     "empty": "Playlist is empty",
     "clear": "Clear Playlist",
     "songs": "{count} song | {count} songs",
-    "addSongs": "Add songs to your playlist to start listening"
+    "addSongs": "Add songs to your playlist to start listening",
+    "play": "Play",
+    "pause": "Pause",
+    "remove": "Remove"
   },
   "lyrics": {
     "title": "Lyrics",
