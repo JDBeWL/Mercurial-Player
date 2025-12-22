@@ -106,66 +106,80 @@ where
             // 存入本地缓冲区用于FFT
             self.buffer.push(s);
 
+            // 使用 try_lock 避免阻塞音频流，仅在锁可用时才更新可视化数据
+            // 这样可以确保 FFT 计算不会阻塞音频播放
             if self.buffer.len() >= 1024 {
-                // 计算FFT
-                let hann_window = hann_window(&self.buffer);
-                // 44100Hz 采样率 (简化假设，实际应从 input.sample_rate() 获取)
-                let spectrum_result = samples_fft_to_spectrum(
-                    &hann_window,
-                    44100,
-                    FrequencyLimit::Range(20.0, 20000.0),
-                    Some(&divide_by_N_sqrt),
-                );
+                // 快速路径：仅在锁可用时执行 FFT 计算
+                // 如果锁被占用，跳过本次更新，下次再尝试
+                if let Ok(mut spec) = self.spectrum_data.try_lock() {
+                    // 计算FFT（仅当锁可用时）
+                    let hann_window = hann_window(&self.buffer);
+                    // 使用实际的采样率（如果可用）
+                    let sample_rate = self.input.sample_rate();
+                    let spectrum_result = samples_fft_to_spectrum(
+                        &hann_window,
+                        sample_rate,
+                        FrequencyLimit::Range(20.0, 20000.0),
+                        Some(&divide_by_N_sqrt),
+                    );
 
-                if let Ok(spectrum) = spectrum_result {
-                    // 对数频段映射 (128 bands)
-                    let mut new_spectrum = vec![0.0; 128];
-                    let data = spectrum.data();
+                    if let Ok(spectrum) = spectrum_result {
+                        // 对数频段映射 (128 bands)
+                        let mut new_spectrum = vec![0.0; 128];
+                        let data = spectrum.data();
 
-                    // 频率范围 180Hz - 20000Hz
-                    let min_freq = 180.0f32;
-                    let max_freq = 20000.0f32;
-                    let log_min = min_freq.log10();
-                    let log_max = max_freq.log10();
-                    let log_step = (log_max - log_min) / 128.0;
+                        // 频率范围 180Hz - 20000Hz
+                        let min_freq = 180.0f32;
+                        let max_freq = 20000.0f32;
+                        let log_min = min_freq.log10();
+                        let log_max = max_freq.log10();
+                        let log_step = (log_max - log_min) / 128.0;
 
-                    for (freq, value) in data {
-                        let freq_val = freq.val();
-                        if freq_val < min_freq || freq_val > max_freq {
-                            continue;
-                        }
+                        for (freq, value) in data {
+                            let freq_val = freq.val();
+                            if freq_val < min_freq || freq_val > max_freq {
+                                continue;
+                            }
 
-                        // 计算当前频率属于哪个 bin
-                        let bin_index = ((freq_val.log10() - log_min) / log_step).floor() as usize;
+                            // 计算当前频率属于哪个 bin
+                            let bin_index = ((freq_val.log10() - log_min) / log_step).floor() as usize;
 
-                        if bin_index < 128 {
-                            // 取最大值
-                            if value.val() > new_spectrum[bin_index] {
-                                new_spectrum[bin_index] = value.val();
+                            if bin_index < 128 {
+                                // 取最大值
+                                if value.val() > new_spectrum[bin_index] {
+                                    new_spectrum[bin_index] = value.val();
+                                }
                             }
                         }
-                    }
 
-                    // 平滑处理 (EMA)
-                    for i in 0..128 {
-                        self.prev_spectrum[i] = self.prev_spectrum[i] * 0.5 + new_spectrum[i] * 0.5;
-                    }
+                        // 平滑处理 (EMA)
+                        for i in 0..128 {
+                            self.prev_spectrum[i] = self.prev_spectrum[i] * 0.5 + new_spectrum[i] * 0.5;
+                        }
 
-                    // 更新共享状态
-                    if let Ok(mut spec) = self.spectrum_data.try_lock() {
+                        // 更新共享状态（锁已经持有）
                         *spec = self.prev_spectrum.clone();
                     }
+                }
 
-                    // 发送频谱更新事件（限制推送频率为60fps，约16ms间隔）
-                    if let Some(ref app) = self.app_handle {
-                        let current_time = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
-                        
-                        let last_time = self.last_emit_time.load(std::sync::atomic::Ordering::Relaxed);
-                        
-                        if current_time - last_time >= 16 { // 限制推送频率约60fps
+                // 更新波形数据（也使用 try_lock）
+                if let Ok(mut wave) = self.waveform_data.try_lock() {
+                    *wave = self.buffer.clone();
+                }
+
+                // 发送频谱更新事件（限制推送频率为60fps，约16ms间隔）
+                // 使用 try_lock 的结果来决定是否发送，避免阻塞
+                if let Some(ref app) = self.app_handle {
+                    let current_time = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    
+                    let last_time = self.last_emit_time.load(std::sync::atomic::Ordering::Relaxed);
+                    
+                    if current_time - last_time >= 16 { // 限制推送频率约60fps
+                        // 仅在锁可用时发送事件，避免阻塞
+                        if self.spectrum_data.try_lock().is_ok() {
                             if let Err(e) = emit_spectrum_update(app, &self.prev_spectrum) {
                                 eprintln!("Failed to emit spectrum update: {}", e);
                             } else {
@@ -173,11 +187,6 @@ where
                             }
                         }
                     }
-                }
-
-                // 更新波形数据用于调试或备用
-                if let Ok(mut wave) = self.waveform_data.try_lock() {
-                    *wave = self.buffer.clone();
                 }
 
                 self.buffer.clear();
@@ -263,9 +272,18 @@ pub fn play_track(
                     eprintln!("Symphonia seek failed: {}", e);
                 }
             }
-            println!("使用Symphonia解码器: {}", path);
+            
+            // 预填充缓冲区，确保在播放开始前有足够的数据
+            // 这可以减少播放开始时的中断概率
+            if let Err(e) = symphonia_decoder.prefill_buffer() {
+                eprintln!("警告: 缓冲区预填充失败，可能会影响播放流畅度: {}", e);
+                // 不阻止播放，继续执行
+            }
+            
+            println!("使用Symphonia解码器（无锁版本）: {}", path);
+            // 使用无锁版本的解码器，完全消除锁竞争
             Box::new(VisualizationSource::new(
-                crate::audio_decoder::SymphoniaSource::new(symphonia_decoder),
+                crate::audio_decoder::LockFreeSymphoniaSource::new(symphonia_decoder),
                 waveform_data,
                 spectrum_data,
                 Some(app.clone()),
@@ -377,9 +395,15 @@ pub fn seek_track(app: AppHandle, state: State<AppState>, time: f32) -> Result<(
                 println!("使用Symphonia seek for: {}", path);
                 match decoder.seek(duration) {
                     Ok(_) => {
+                        // 预填充缓冲区，确保跳转后的播放流畅
+                        if let Err(e) = decoder.prefill_buffer() {
+                            eprintln!("警告: 跳转后缓冲区预填充失败: {}", e);
+                            // 不阻止播放，继续执行
+                        }
+                        
                         let source: Box<dyn Source<Item = f32> + Send> =
                             Box::new(VisualizationSource::new(
-                                crate::audio_decoder::SymphoniaSource::new(decoder),
+                                crate::audio_decoder::LockFreeSymphoniaSource::new(decoder),
                                 Arc::clone(&player_state.waveform_data),
                                 Arc::clone(&player_state.spectrum_data),
                                 Some(app.clone()),

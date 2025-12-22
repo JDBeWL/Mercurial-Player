@@ -74,6 +74,11 @@ const volumeSlider = ref(null)
 const isDragging = ref(false)
 const showVolume = ref(false)
 
+// 保存事件处理函数引用，以便正确清理
+let volumeSliderClickHandler = null
+let thumbMousedownHandler = null
+let sliderMousedownHandler = null
+
 const handleVolumeChange = (event) => {
   if (!volumeSlider.value) return
   
@@ -111,16 +116,21 @@ const stopDrag = () => {
 
 onMounted(() => {
   if (volumeSlider.value) {
-    volumeSlider.value.addEventListener('click', handleVolumeChange)
+    // 保存处理函数引用
+    volumeSliderClickHandler = handleVolumeChange
+    sliderMousedownHandler = startDrag
+    
+    volumeSlider.value.addEventListener('click', volumeSliderClickHandler)
     
     // 为滑块添加拖拽事件
     const thumb = volumeSlider.value.querySelector('.slider-thumb')
     if (thumb) {
-      thumb.addEventListener('mousedown', startDrag)
+      thumbMousedownHandler = startDrag
+      thumb.addEventListener('mousedown', thumbMousedownHandler)
     }
     
     // 为整个滑块区域也添加拖拽事件
-    volumeSlider.value.addEventListener('mousedown', startDrag)
+    volumeSlider.value.addEventListener('mousedown', sliderMousedownHandler)
   }
 })
 
@@ -156,9 +166,24 @@ const getVolumeIcon = () => {
 }
 
 onUnmounted(() => {
-  // 清理事件监听器
+  // 清理全局事件监听器
   document.removeEventListener('mousemove', handleDrag)
   document.removeEventListener('mouseup', stopDrag)
+  
+  // 清理音量滑块的事件监听器
+  if (volumeSlider.value) {
+    if (volumeSliderClickHandler) {
+      volumeSlider.value.removeEventListener('click', volumeSliderClickHandler)
+    }
+    if (sliderMousedownHandler) {
+      volumeSlider.value.removeEventListener('mousedown', sliderMousedownHandler)
+    }
+    
+    const thumb = volumeSlider.value.querySelector('.slider-thumb')
+    if (thumb && thumbMousedownHandler) {
+      thumb.removeEventListener('mousedown', thumbMousedownHandler)
+    }
+  }
 })
 </script>
 

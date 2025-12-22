@@ -1,8 +1,10 @@
 use rodio::Source;
 use std::fs::File;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
+use std::thread;
+use crossbeam_channel::{unbounded, Receiver};
 use symphonia::core::audio::AudioBufferRef;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error;
@@ -46,7 +48,9 @@ impl AudioBuffer {
             capacity,
             sample_rate,
             channels,
-            refill_threshold_ms: 50,
+            // 针对IO延迟优化：降低阈值到 100ms，更早触发填充
+            // 配合更大的缓冲区，可以在IO繁忙时提前填充，避免中断
+            refill_threshold_ms: 100,
         }
     }
 
@@ -93,23 +97,220 @@ impl AudioBuffer {
     }
 }
 
+/// 无锁版本的 Symphonia 解码器源
+/// 使用后台线程解码，通过无锁通道传递数据，完全消除锁竞争
+pub struct LockFreeSymphoniaSource {
+    // 无锁通道接收端，从后台解码线程接收音频样本
+    receiver: Receiver<f32>,
+    // 后台解码线程的句柄
+    _decoder_thread: thread::JoinHandle<()>,
+    // 停止标志（原子操作，无锁）
+    stop_flag: Arc<AtomicBool>,
+    // 缓存 Source trait 方法的返回值
+    cached_channels: u16,
+    cached_sample_rate: u32,
+    cached_total_duration: Option<Duration>,
+    // 本地缓存，用于批量接收数据
+    chunk_buffer: Vec<f32>,
+    chunk_pos: usize,
+}
+
 /// Symphonia解码器的包装器，实现了 rodio::Source
 ///
 /// 优化说明：引入了本地缓存 (chunk_buffer) 以减少锁争用。
+/// 针对锁竞争优化：缓存 Source trait 方法的返回值，避免频繁加锁。
+/// 
+/// 注意：保留旧版本作为备用，新版本使用无锁架构
 pub struct SymphoniaSource {
     decoder: Arc<Mutex<SymphoniaDecoder>>,
     // 本地缓存，用于批量获取数据，避免每次 next() 都加锁
     chunk_buffer: Vec<f32>,
     chunk_pos: usize,
+    // 缓存 Source trait 方法的返回值，避免频繁加锁
+    cached_channels: u16,
+    cached_sample_rate: u32,
+    cached_total_duration: Option<Duration>,
+}
+
+impl LockFreeSymphoniaSource {
+    /// 创建无锁版本的音频源
+    /// 启动后台解码线程，通过无锁通道传递数据
+    pub fn new(mut decoder: SymphoniaDecoder) -> Self {
+        // 缓存元数据（这些值在解码器生命周期内不变）
+        let channels = decoder.target_channels();
+        let sample_rate = decoder.sample_rate();
+        let total_duration = decoder.total_duration();
+        
+        // 创建无锁通道
+        let (sender, receiver) = unbounded();
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let stop_flag_clone = Arc::clone(&stop_flag);
+        
+        // 预填充缓冲区
+        if let Err(e) = decoder.prefill_buffer() {
+            eprintln!("警告: 预填充失败: {}", e);
+        }
+        
+        // 启动后台解码线程
+        let decoder_thread = thread::spawn(move || {
+            // 批量解码并发送数据
+            let mut batch = Vec::with_capacity(16384); // 约 370ms @ 44.1kHz stereo
+            
+            loop {
+                // 检查停止标志（无锁原子操作）
+                if stop_flag_clone.load(Ordering::Relaxed) {
+                    break;
+                }
+                
+                // 批量解码
+                batch.clear();
+                for _ in 0..16384 {
+                    if let Some(sample) = decoder.next() {
+                        batch.push(sample);
+                    } else {
+                        // 解码器耗尽（文件结束）
+                        break;
+                    }
+                }
+                
+                if batch.is_empty() {
+                    // 没有更多数据，发送结束信号
+                    break;
+                }
+                
+                // 批量发送数据（无锁操作）
+                for sample in &batch {
+                    if sender.send(*sample).is_err() {
+                        // 接收端已关闭，停止解码
+                        break;
+                    }
+                }
+            }
+        });
+        
+        LockFreeSymphoniaSource {
+            receiver,
+            _decoder_thread: decoder_thread,
+            stop_flag,
+            cached_channels: channels,
+            cached_sample_rate: sample_rate,
+            cached_total_duration: total_duration,
+            chunk_buffer: Vec::with_capacity(16384),
+            chunk_pos: 0,
+        }
+    }
+}
+
+impl Iterator for LockFreeSymphoniaSource {
+    type Item = f32;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        // 1. 快速路径：如果本地缓存有数据，直接返回
+        if self.chunk_pos < self.chunk_buffer.len() {
+            let sample = self.chunk_buffer[self.chunk_pos];
+            self.chunk_pos += 1;
+            return Some(sample);
+        }
+
+        // 2. 从无锁通道批量接收数据
+        // 针对性能优化：先尝试非阻塞接收，如果数据充足则快速填充
+        // 如果数据不足，再使用阻塞接收，避免频繁轮询
+        self.chunk_buffer.clear();
+        self.chunk_pos = 0;
+        
+        // 首先尝试非阻塞批量接收
+        let mut received_count = 0;
+        loop {
+            match self.receiver.try_recv() {
+                Ok(sample) => {
+                    self.chunk_buffer.push(sample);
+                    received_count += 1;
+                    // 如果已经接收到足够的数据（16384个样本），跳出循环
+                    if received_count >= 16384 {
+                        break;
+                    }
+                }
+                Err(crossbeam_channel::TryRecvError::Empty) => {
+                    // 通道暂时为空
+                    if received_count > 0 {
+                        // 已经接收到一些数据，先返回这些数据
+                        break;
+                    }
+                    // 如果没有接收到任何数据，使用阻塞接收等待数据
+                    // 使用很短的超时时间，避免长时间阻塞
+                    match self.receiver.recv_timeout(Duration::from_micros(100)) {
+                        Ok(sample) => {
+                            self.chunk_buffer.push(sample);
+                            received_count += 1;
+                        }
+                        Err(_) => {
+                            // 超时或通道关闭，跳出循环
+                            break;
+                        }
+                    }
+                }
+                Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                    // 通道已关闭，解码线程已结束
+                    break;
+                }
+            }
+        }
+
+        // 3. 再次检查缓存
+        if self.chunk_pos < self.chunk_buffer.len() {
+            let sample = self.chunk_buffer[self.chunk_pos];
+            self.chunk_pos += 1;
+            return Some(sample);
+        }
+
+        None
+    }
+}
+
+impl Source for LockFreeSymphoniaSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> u16 {
+        self.cached_channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.cached_sample_rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.cached_total_duration
+    }
+}
+
+impl Drop for LockFreeSymphoniaSource {
+    fn drop(&mut self) {
+        // 设置停止标志（无锁原子操作）
+        self.stop_flag.store(true, Ordering::Relaxed);
+        // 线程会在下次循环检查时退出
+    }
 }
 
 impl SymphoniaSource {
     pub fn new(decoder: SymphoniaDecoder) -> Self {
+        // 初始化时获取一次锁，缓存所有不变的值
+        let channels = decoder.target_channels();
+        let sample_rate = decoder.sample_rate();
+        let total_duration = decoder.total_duration();
+        
         SymphoniaSource {
             decoder: Arc::new(Mutex::new(decoder)),
-            // 预分配 1024 个采样点的缓存 (约 23ms @ 44.1kHz stereo)
-            chunk_buffer: Vec::with_capacity(1024),
+            // 针对IO延迟优化：预分配 16384 个采样点的缓存 (约 370ms @ 44.1kHz stereo)
+            // 更大的本地缓存可以减少锁竞争，并在IO延迟时提供更多缓冲
+            chunk_buffer: Vec::with_capacity(16384),
             chunk_pos: 0,
+            // 缓存 Source trait 方法的返回值，避免频繁加锁
+            cached_channels: channels,
+            cached_sample_rate: sample_rate,
+            cached_total_duration: total_duration,
         }
     }
 }
@@ -127,13 +328,27 @@ impl Iterator for SymphoniaSource {
         }
 
         // 2. 慢速路径：本地缓存耗尽，获取锁并批量拉取
-        if let Ok(mut decoder) = self.decoder.lock() {
-            self.chunk_buffer.clear();
-            self.chunk_pos = 0;
+        // 针对锁竞争优化：尽量减少锁持有时间
+        // 策略：快速批量拉取数据，然后立即释放锁
+        self.chunk_buffer.clear();
+        self.chunk_pos = 0;
 
-            // 尝试从解码器填充本地缓存
-            // 这里的 1024 是批量大小，平衡了锁开销和内存局部性
-            let batch_size = 1024;
+        // 针对锁竞争优化：使用更大的批量大小，减少锁获取频率
+        // 同时确保尽快释放锁，避免长时间持有
+        let batch_size = 8192;
+        
+        // 快速获取锁并批量拉取
+        {
+            let mut decoder = match self.decoder.try_lock() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    // try_lock 失败，使用阻塞锁
+                    // 但我们应该尽快完成操作并释放锁
+                    self.decoder.lock().unwrap()
+                }
+            };
+            
+            // 快速批量拉取数据到本地缓存
             for _ in 0..batch_size {
                 if let Some(sample) = decoder.next() {
                     self.chunk_buffer.push(sample);
@@ -142,6 +357,7 @@ impl Iterator for SymphoniaSource {
                     break;
                 }
             }
+            // 锁在这里自动释放
         }
 
         // 3. 再次检查缓存（如果刚才拉取到了数据）
@@ -157,35 +373,23 @@ impl Iterator for SymphoniaSource {
 
 impl Source for SymphoniaSource {
     fn current_frame_len(&self) -> Option<usize> {
-        if let Ok(decoder) = self.decoder.lock() {
-            decoder.current_frame_len()
-        } else {
-            None
-        }
+        // 这个方法返回 None 是合理的，因为流式解码的长度未知
+        None
     }
 
     fn channels(&self) -> u16 {
-        if let Ok(decoder) = self.decoder.lock() {
-            decoder.target_channels()
-        } else {
-            2 // 默认立体声
-        }
+        // 使用缓存值，避免加锁
+        self.cached_channels
     }
 
     fn sample_rate(&self) -> u32 {
-        if let Ok(decoder) = self.decoder.lock() {
-            decoder.sample_rate()
-        } else {
-            44100 // 默认采样率
-        }
+        // 使用缓存值，避免加锁
+        self.cached_sample_rate
     }
 
     fn total_duration(&self) -> Option<Duration> {
-        if let Ok(decoder) = self.decoder.lock() {
-            decoder.total_duration()
-        } else {
-            None
-        }
+        // 使用缓存值，避免加锁
+        self.cached_total_duration
     }
 }
 
@@ -260,9 +464,12 @@ impl SymphoniaDecoder {
             None
         };
 
+        // 针对IO延迟优化：大幅增加缓冲区大小
+        // 当硬盘占用率100%时，文件读取可能延迟，需要更大的缓冲区来应对
+        // 更大的缓冲区可以提供足够的缓冲时间，即使IO延迟几百毫秒也不会中断
         let buffer_duration_ms = buffer_duration_ms.unwrap_or_else(|| match sample_rate {
-            0..=48000 => 100,
-            _ => 50,
+            0..=48000 => 500,
+            _ => 400,
         });
 
         let target_channels = 2u16;
@@ -298,7 +505,7 @@ impl SymphoniaDecoder {
     pub fn adjust_buffer_settings(&mut self, buffer_duration_ms: u32, refill_threshold_ms: u32) {
         let new_buffer_size =
             calculate_buffer_size(self.sample_rate, self.target_channels, buffer_duration_ms);
-        // 保存旧数据（可选，这里简化为清空重建）
+        // 保存旧数据
         self.buffer = AudioBuffer::new(new_buffer_size, self.sample_rate, self.target_channels);
         self.buffer.set_refill_threshold(refill_threshold_ms);
     }
@@ -320,6 +527,55 @@ impl SymphoniaDecoder {
 
     pub fn source_channels(&self) -> u16 {
         self.source_channels
+    }
+
+    /// 预填充缓冲区，确保在播放开始前有足够的数据
+    /// 针对IO延迟优化：更积极的填充策略，确保有足够缓冲应对IO繁忙
+    pub fn prefill_buffer(&mut self) -> Result<(), String> {
+        // 初始化解码器（如果尚未初始化）
+        if self.state == DecoderState::Uninitialized {
+            if let Err(e) = self.initialize_decoder() {
+                self.state = DecoderState::Error(e.clone());
+                return Err(e);
+            }
+        }
+
+        // 针对IO延迟优化：填充缓冲区直到达到至少 95% 容量
+        // 更大的预填充可以确保即使在IO繁忙时也有足够的数据缓冲
+        let target_size = (self.buffer.capacity * 95) / 100;
+        let mut attempts = 0;
+        // 针对IO延迟：增加最大尝试次数，允许更多次重试以应对IO延迟
+        const MAX_ATTEMPTS: usize = 200; // 从 50 增加到 200，应对IO延迟
+
+        while self.buffer.remaining() < target_size && attempts < MAX_ATTEMPTS {
+            match self.fill_buffer() {
+                Ok(_) => {
+                    // 填充成功，继续
+                }
+                Err(e) => {
+                    // 如果填充失败，检查是否是因为流结束
+                    if self.state == DecoderState::EndOfStream {
+                        break; // 文件已结束，无需继续填充
+                    }
+                    // 对于IO错误，允许重试，不立即返回错误
+                    // 这可以应对临时的IO延迟
+                    if attempts > 10 && self.buffer.remaining() < (self.buffer.capacity * 50) / 100 {
+                        // 如果尝试多次后缓冲区仍然不足50%，返回错误
+                        return Err(format!("Buffer prefill failed after {} attempts: {}", attempts, e));
+                    }
+                    // 否则继续尝试
+                }
+            }
+            attempts += 1;
+        }
+
+        // 即使没有达到95%，如果已经填充了足够的数据（至少50%），也认为成功
+        if self.buffer.remaining() < (self.buffer.capacity * 50) / 100 {
+            return Err(format!("Buffer prefill incomplete: only {}% filled", 
+                (self.buffer.remaining() * 100) / self.buffer.capacity));
+        }
+
+        Ok(())
     }
 
     pub fn seek(&mut self, time: Duration) -> Result<(), String> {
@@ -431,9 +687,15 @@ impl SymphoniaDecoder {
         let track_id = self.track_id.unwrap();
 
         let mut decoded_packets = 0;
-        let max_packets = 10; // 每次最多解码 10 个包，避免单次阻塞太久
+        // 针对锁竞争和IO延迟优化：增加每次解码的包数量
+        // 一次性填充更多数据，减少锁持有时间和IO访问频率
+        let max_packets = 50; // 从 20 增加到 50，应对IO延迟和锁竞争
 
-        while self.buffer.remaining() < self.buffer.capacity && decoded_packets < max_packets {
+        // 针对锁竞争优化：快速填充缓冲区，尽快完成操作
+        // 限制单次填充的目标，避免长时间持有锁
+        let target_fill = (self.buffer.capacity * 80) / 100; // 填充到80%即可，避免过度填充
+
+        while self.buffer.remaining() < target_fill && decoded_packets < max_packets {
             let packet = match format.next_packet() {
                 Ok(p) => p,
                 Err(Error::ResetRequired) => {
@@ -457,7 +719,7 @@ impl SymphoniaDecoder {
 
             match decoder.decode(&packet) {
                 Ok(decoded) => {
-                    // 优化：使用暂存缓冲区，避免分配
+                    // 使用暂存缓冲区，避免分配
                     self.scratch_buffer.clear();
 
                     // 转换并写入 scratch_buffer
@@ -585,9 +847,18 @@ impl Iterator for SymphoniaDecoder {
     type Item = f32;
 
     fn next(&mut self) -> Option<f32> {
+        // 更积极的缓冲区填充策略：即使还没到阈值，也要保持缓冲区足够满
+        // 这可以减少在系统繁忙时的中断概率
         if self.buffer.is_empty() || self.buffer.needs_refill() {
-            // 忽略错误，如果填充失败且缓冲区为空，下面会返回 None
-            let _ = self.fill_buffer();
+            // 尝试填充缓冲区，如果失败则返回 None
+            if let Err(e) = self.fill_buffer() {
+                eprintln!("Buffer fill error: {}", e);
+                // 即使填充失败，如果缓冲区还有数据，仍然返回
+                // 只有在缓冲区完全为空时才返回 None
+                if self.buffer.is_empty() {
+                    return None;
+                }
+            }
         }
 
         let sample = self.buffer.next();

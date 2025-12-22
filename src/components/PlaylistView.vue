@@ -19,15 +19,16 @@
       <div v-else class="playlist-songs">
         <div class="list">
           <div 
-            v-for="(track, index) in processedPlaylist" 
-            :key="index"
+            v-for="track in processedPlaylist" 
+            :key="track.path"
+            v-memo="[track.path, isCurrentTrackMap.get(track.path), playerStore.isPlaying]"
             class="list-item"
-            :class="{ selected: isCurrentTrack(track) }"
+            :class="{ selected: isCurrentTrackMap.get(track.path) }"
             @click="playTrack(track)"
           >
 
             <div class="track-cover" v-if="track.cover">
-              <img :src="track.cover" :alt="track.cachedTitle" />
+              <img :src="track.cover" :alt="track.cachedTitle" loading="lazy" decoding="async" />
             </div>
             <div class="track-cover-placeholder" v-else>
               <span class="material-symbols-rounded">album</span>
@@ -38,7 +39,7 @@
             </div>
             <div class="list-item-trailing">
               <button 
-                v-if="!isCurrentTrack(track) || !playerStore.isPlaying"
+                v-if="!isCurrentTrackMap.get(track.path) || !playerStore.isPlaying"
                 class="icon-button play-button" 
                 @click.stop="playTrack(track)"
                 :title="$t('playlist.play')"
@@ -46,14 +47,14 @@
                 <span class="material-symbols-rounded">play_arrow</span>
               </button>
               <button 
-                v-if="isCurrentTrack(track) && playerStore.isPlaying"
+                v-if="isCurrentTrackMap.get(track.path) && playerStore.isPlaying"
                 class="icon-button pause-button" 
                 @click.stop="pauseTrack"
                 :title="$t('playlist.pause')"
               >
                 <span class="material-symbols-rounded">pause</span>
               </button>
-              <button class="icon-button remove-button" @click.stop="removeTrack(index)" :title="$t('playlist.remove')">
+              <button class="icon-button remove-button" @click.stop="removeTrackByPath(track.path)" :title="$t('playlist.remove')">
                 <span class="material-symbols-rounded">close</span>
               </button>
             </div>
@@ -65,7 +66,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, shallowRef, nextTick, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
 import FileUtils from '../utils/fileUtils'
@@ -77,18 +78,82 @@ const { playlist, currentTrack, isPlaying } = storeToRefs(playerStore)
 
 // 控制动画状态
 const isClosing = ref(false)
+let closeTimeout = null
 
 // 关闭动画处理
 const handleClose = () => {
   isClosing.value = true
-  setTimeout(() => {
+  if (closeTimeout) clearTimeout(closeTimeout)
+  closeTimeout = setTimeout(() => {
     emit('close')
+    closeTimeout = null
   }, 300) // 与CSS动画时间一致
 }
 
-const isCurrentTrack = (track) => {
-  return currentTrack.value && currentTrack.value.path === track.path
+// 使用 shallowRef 和延迟更新，减少主线程阻塞
+// 只在 currentTrack 实际变化时更新，而不是在每次渲染时计算
+const isCurrentTrackMap = shallowRef(new Map())
+const currentPathRef = ref(null)
+
+// 存储待清理的回调ID
+let idleCallbackIds = []
+let timeoutIds = []
+
+// 使用 requestIdleCallback 延迟更新，避免阻塞滚动
+const updateCurrentTrackMap = () => {
+  const map = new Map()
+  const currentPath = currentPathRef.value
+  if (currentPath && playlist.value.length > 0) {
+    // 批量更新，减少循环开销
+    for (let i = 0; i < playlist.value.length; i++) {
+      const track = playlist.value[i]
+      map.set(track.path, track.path === currentPath)
+    }
+  }
+  isCurrentTrackMap.value = map
 }
+
+// 清理所有待处理的回调
+const cleanupCallbacks = () => {
+  // 清理 requestIdleCallback（如果支持）
+  if ('cancelIdleCallback' in window) {
+    idleCallbackIds.forEach(id => cancelIdleCallback(id))
+  }
+  idleCallbackIds = []
+  
+  // 清理 setTimeout
+  timeoutIds.forEach(id => clearTimeout(id))
+  timeoutIds = []
+}
+
+// 安全的延迟执行函数
+const scheduleUpdate = (fn) => {
+  cleanupCallbacks() // 清理之前的回调
+  
+  if ('requestIdleCallback' in window) {
+    const id = requestIdleCallback(fn, { timeout: 100 })
+    idleCallbackIds.push(id)
+  } else {
+    const id = setTimeout(fn, 0)
+    timeoutIds.push(id)
+  }
+}
+
+// 监听 currentTrack 变化，使用 requestIdleCallback 延迟更新
+const stopWatchCurrentTrack = watch(currentTrack, (newTrack) => {
+  const newPath = newTrack?.path || null
+  if (newPath !== currentPathRef.value) {
+    currentPathRef.value = newPath
+    scheduleUpdate(updateCurrentTrackMap)
+  }
+}, { immediate: true })
+
+// 监听 playlist 变化，但延迟更新
+const stopWatchPlaylist = watch(playlist, () => {
+  if (currentPathRef.value) {
+    scheduleUpdate(updateCurrentTrackMap)
+  }
+}, { deep: false })
 
 const playTrack = (track) => {
   playerStore.playTrack(track)
@@ -98,9 +163,19 @@ const pauseTrack = () => {
   playerStore.pause()
 }
 
-// 创建标题缓存
+// 创建标题缓存，限制大小防止内存溢出
+const MAX_CACHE_SIZE = 1000 // 最多缓存1000个音轨的信息
 const titleCache = new Map()
 const artistCache = new Map()
+
+// 清理缓存函数，保持缓存大小在限制内
+const cleanupCache = (cache) => {
+  if (cache.size > MAX_CACHE_SIZE) {
+    // 删除最旧的条目（Map 保持插入顺序）
+    const entriesToDelete = Array.from(cache.keys()).slice(0, cache.size - MAX_CACHE_SIZE)
+    entriesToDelete.forEach(key => cache.delete(key))
+  }
+}
 
 // 智能获取音轨标题 - 使用缓存提高性能
 const getTrackTitle = (track) => {
@@ -125,6 +200,7 @@ const getTrackTitle = (track) => {
   
   // 缓存结果
   titleCache.set(track.path, title)
+  cleanupCache(titleCache) // 防止缓存无限增长
   return title
 }
 
@@ -151,21 +227,91 @@ const getTrackArtist = (track) => {
   
   // 缓存结果
   artistCache.set(track.path, artist)
+  cleanupCache(artistCache) // 防止缓存无限增长
   return artist
 }
 
-// 创建计算属性以提高性能
-const processedPlaylist = computed(() => {
-  return playlist.value.map(track => ({
-    ...track,
-    cachedTitle: getTrackTitle(track),
-    cachedArtist: getTrackArtist(track)
-  }))
+// 使用 shallowRef 减少响应式开销，避免深度响应式追踪
+// 使用延迟更新策略，避免在滚动时阻塞主线程
+const processedPlaylist = shallowRef([])
+let processingIdleCallbackId = null
+let processingTimeoutId = null
+
+// 延迟处理播放列表，避免阻塞主线程
+const processPlaylistAsync = () => {
+  // 清理之前的回调
+  if (processingIdleCallbackId && 'cancelIdleCallback' in window) {
+    cancelIdleCallback(processingIdleCallbackId)
+    processingIdleCallbackId = null
+  }
+  if (processingTimeoutId) {
+    clearTimeout(processingTimeoutId)
+    processingTimeoutId = null
+  }
+  
+  // 使用 requestIdleCallback 在浏览器空闲时处理
+  const process = () => {
+    if (playlist.value.length === 0) {
+      processedPlaylist.value = []
+      return
+    }
+    
+    // 批量处理，减少中间对象创建
+    const result = []
+    for (let i = 0; i < playlist.value.length; i++) {
+      const track = playlist.value[i]
+      result.push({
+        ...track,
+        cachedTitle: getTrackTitle(track),
+        cachedArtist: getTrackArtist(track)
+      })
+    }
+    processedPlaylist.value = result
+  }
+  
+  if ('requestIdleCallback' in window) {
+    processingIdleCallbackId = requestIdleCallback(process, { timeout: 200 })
+  } else {
+    // 降级到 setTimeout，使用较短的延迟
+    processingTimeoutId = setTimeout(process, 16) // 约一帧的时间
+  }
+}
+
+// 监听 playlist 变化，延迟处理
+const stopWatchProcessedPlaylist = watch(playlist, processPlaylistAsync, { immediate: true, deep: false })
+
+// 组件卸载时清理所有资源
+onUnmounted(() => {
+  // 清理定时器
+  if (closeTimeout) {
+    clearTimeout(closeTimeout)
+    closeTimeout = null
+  }
+  
+  // 清理 watch
+  stopWatchCurrentTrack()
+  stopWatchPlaylist()
+  stopWatchProcessedPlaylist()
+  
+  // 清理所有回调
+  cleanupCallbacks()
+  
+  // 清理处理播放列表的回调
+  if (processingIdleCallbackId && 'cancelIdleCallback' in window) {
+    cancelIdleCallback(processingIdleCallbackId)
+  }
+  if (processingTimeoutId) {
+    clearTimeout(processingTimeoutId)
+  }
+  
+  // 清理缓存（可选，如果需要立即释放内存）
+  // titleCache.clear()
+  // artistCache.clear()
 })
 
-const removeTrack = (index) => {
-  const newPlaylist = [...playlist.value]
-  newPlaylist.splice(index, 1)
+// 通过路径删除音轨，而不是索引
+const removeTrackByPath = (path) => {
+  const newPlaylist = playlist.value.filter(track => track.path !== path)
   playerStore.loadPlaylist(newPlaylist)
 }
 </script>
@@ -212,7 +358,9 @@ const removeTrack = (index) => {
   padding: 16px;
   transform: translateZ(0);
   -webkit-overflow-scrolling: touch;
-  will-change: scroll-position;
+  /* 使用 content-visibility 优化滚动性能 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 500px;
 }
 
 .playlist-empty {
@@ -259,6 +407,7 @@ const removeTrack = (index) => {
   overflow: visible;
   padding: 2px;
   contain: layout style paint;
+  content-visibility: auto;
 }
 
 .list-item {
@@ -270,7 +419,12 @@ const removeTrack = (index) => {
   position: relative;
   overflow: hidden;
   border-radius: 8px;
-  will-change: background-color;
+  /* 优化滚动性能：使用 transform 启用硬件加速 */
+  transform: translateZ(0);
+  /* 使用 contain 优化渲染性能，限制重绘范围 */
+  contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
 }
 
 .list-item:hover {

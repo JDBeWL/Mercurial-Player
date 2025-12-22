@@ -2246,9 +2246,9 @@ dependencies = [
 name = "music-player"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "base64 0.21.7",
  "cpal",
+ "crossbeam-channel",
  "dirs 5.0.1",
  "lofty",
  "rayon",
@@ -2262,7 +2262,6 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-shell",
- "tokio",
  "walkdir",
 ]
 
@@ -4772,24 +4771,11 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
- "tokio-macros",
  "tracing",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "tokio-macros"
-version = "2.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af407857209536a95c8e56f8231ef2c2e2aff839b22e07a1ffcbc617e9db9fa5"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.110",
 ]
 
 [[package]]

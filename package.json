@@ -13,12 +13,10 @@
   },
   "dependencies": {
     "@material/material-color-utilities": "^0.3.0",
-    "@mdi/js": "^7.2.96",
     "@tauri-apps/api": "^2.9.1",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-fs": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.0.0",
-    "material-design-icons-iconfont": "^6.7.0",
     "pinia": "^2.1.6",
     "sass": "^1.64.2",
     "vue": "^3.3.4",

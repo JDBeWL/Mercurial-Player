@@ -21,7 +21,6 @@ rodio = { version = "0.18.0", features = ["wav", "vorbis", "flac", "mp3"] }
 cpal = "0.15.3"
 dirs = "5.0"
 walkdir = "2.3"
-anyhow = "1.0"
 lofty = "0.18"
 base64 = "0.21"
 symphonia = { version = "0.5", features = ["flac", "vorbis", "aac", "alac", "aiff", "wav"] }
@@ -30,7 +29,7 @@ spectrum-analyzer = "1.4"
 tauri-plugin-dialog = { version = "2.3.3", features = [] }
 tauri-plugin-fs = { version = "2.4.4", features = [] }
 tauri-plugin-shell = { version = "2.3.3", features = [] }
-tokio = { version = "1.48", features = ["full"] }
+crossbeam-channel = "0.5"
 
 [lints.rust]
 unsafe_code = "forbid"

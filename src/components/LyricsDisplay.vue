@@ -222,14 +222,23 @@ export default {
             nextTick(() => scrollToActiveLyric(true, true, index));
         };
 
+        // 保存 resize 处理函数引用，以便正确清理
+        const handleResize = () => scrollToActiveLyric(true);
+
         onMounted(() => {
             startAnimationLoop();
-            window.addEventListener("resize", () => scrollToActiveLyric(true));
+            window.addEventListener("resize", handleResize);
         });
 
         onUnmounted(() => {
             if (rafId) cancelAnimationFrame(rafId);
-            window.removeEventListener("resize", () => scrollToActiveLyric(true));
+            // 清理 scrollTimeout
+            if (scrollTimeout) {
+                clearTimeout(scrollTimeout);
+                scrollTimeout = null;
+            }
+            // 清理 resize 事件监听器
+            window.removeEventListener("resize", handleResize);
         });
 
         return {

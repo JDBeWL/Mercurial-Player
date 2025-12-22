@@ -138,7 +138,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useMusicLibraryStore } from '../stores/musicLibrary'
 import { usePlayerStore } from '../stores/player'
@@ -157,12 +157,24 @@ const configStore = useConfigStore()
 const isClosing = ref(false)
 
 // 关闭动画处理
+let closeTimeout = null
+
 const handleClose = () => {
   isClosing.value = true
-  setTimeout(() => {
+  if (closeTimeout) clearTimeout(closeTimeout)
+  closeTimeout = setTimeout(() => {
     emit('close')
+    closeTimeout = null
   }, 300) // 与CSS动画时间一致
 }
+
+// 组件卸载时清理
+onUnmounted(() => {
+  if (closeTimeout) {
+    clearTimeout(closeTimeout)
+    closeTimeout = null
+  }
+})
 
 const { musicFolders, playlists } = storeToRefs(musicLibraryStore)
 const searchTerm = ref('')
