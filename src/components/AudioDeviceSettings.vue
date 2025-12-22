@@ -1,8 +1,8 @@
 <template>
   <div class="audio-device-settings">
-    <div class="settings-header">
+    <div class="content-header">
       <h3>{{ $t('config.audioDeviceSettings') }}</h3>
-      <button @click="refreshDevices" class="refresh-button">
+      <button @click="refreshDevices" class="filled-tonal-button">
         <span class="material-symbols-rounded">refresh</span>
         {{ $t('config.refreshDevices') }}
       </button>
@@ -78,7 +78,15 @@
       <p>{{ $t('config.loadingDevices') }}</p>
     </div>
     
-    <div v-if="error" class="error-state">
+    <div v-if="error === 'restart_required'" class="restart-notice">
+      <span class="material-symbols-rounded">restart_alt</span>
+      <div class="notice-content">
+        <p>{{ $t('config.exclusiveModeRestartRequired') }}</p>
+        <p class="notice-hint">{{ $t('config.exclusiveModeRestartHint') }}</p>
+      </div>
+    </div>
+    
+    <div v-else-if="error" class="error-state">
       <span class="material-symbols-rounded">error</span>
       <p>{{ $t('config.deviceLoadError') }}: {{ error }}</p>
       <button @click="refreshDevices" class="retry-button">
@@ -180,8 +188,18 @@ const toggleExclusiveMode = async () => {
       console.error('Failed to update current device info:', deviceErr);
     }
   } catch (err) {
-    console.error('Failed to toggle exclusive mode:', err);
-    error.value = err.message || 'Failed to toggle exclusive mode';
+    const errorMessage = err.message || err.toString() || '';
+    
+    // 检查是否是需要重启的提示
+    if (errorMessage.includes('RESTART_REQUIRED')) {
+      // 更新本地状态以反映配置已更改
+      useExclusiveMode.value = !useExclusiveMode.value;
+      // 显示需要重启的提示
+      error.value = 'restart_required';
+    } else {
+      console.error('Failed to toggle exclusive mode:', err);
+      error.value = errorMessage || 'Failed to toggle exclusive mode';
+    }
   }
 };
 
@@ -226,85 +244,76 @@ watch(useExclusiveMode, (newValue) => {
 
 <style scoped>
 .audio-device-settings {
-  padding: 16px;
-  background-color: var(--md-sys-color-surface);
-  border-radius: var(--md-sys-shape-corner-medium);
-  height: 100%;
-  display: flex;
-  flex-direction: column;
+  max-width: 720px;
 }
 
-.settings-header {
+.content-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
 }
 
-.settings-header h3 {
+.content-header h3 {
   margin: 0;
+  font-size: 24px;
+  font-weight: 400;
   color: var(--md-sys-color-on-surface);
-  font-size: 1.25rem;
-  font-weight: 500;
 }
 
 .device-list {
-  flex: 1;
-  overflow-y: auto;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
 }
 
 .device-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  padding: 16px;
   margin-bottom: 8px;
-  border-radius: var(--md-sys-shape-corner-small);
-  background-color: var(--md-sys-color-surface-variant);
+  border-radius: 12px;
+  background-color: var(--md-sys-color-surface-container);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .device-item:hover {
-  background-color: var(--md-sys-color-secondary-container);
+  background-color: var(--md-sys-color-surface-container-high);
 }
 
 .device-item.active {
-  background-color: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
+  background-color: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
 }
 
 .device-info {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
   flex: 1;
   overflow: hidden;
 }
 
 .device-name {
+  font-size: 16px;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1;
-}
-
-.device-badge {
-  font-size: 0.75rem;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  flex-shrink: 0;
-  margin-right: 8px;
 }
 
 .device-badges {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   flex-wrap: wrap;
+}
+
+.device-badge {
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .device-badge.default {
@@ -317,106 +326,125 @@ watch(useExclusiveMode, (newValue) => {
   color: var(--md-sys-color-on-primary-container);
 }
 
-.device-item.active .device-badge.default {
-  background-color: var(--md-sys-color-secondary-container);
-  color: var(--md-sys-color-on-secondary-container);
-}
-
-.device-item.active .device-badge.exclusive {
-  background-color: var(--md-sys-color-secondary-container);
-  color: var(--md-sys-color-on-secondary-container);
+.device-item.active .device-badge {
+  background-color: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
 }
 
 .device-icon {
   color: var(--md-sys-color-on-surface-variant);
+  display: flex;
+  align-items: center;
 }
 
 .device-item.active .device-icon {
   color: var(--md-sys-color-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .audio-options {
-  margin-top: 16px;
   border-top: 1px solid var(--md-sys-color-outline-variant);
-  padding-top: 16px;
+  padding-top: 24px;
 }
 
 .option-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
-  border-radius: var(--md-sys-shape-corner-small);
+  padding: 16px;
+  border-radius: 12px;
   cursor: pointer;
   transition: background-color 0.2s ease;
 }
 
 .option-item:hover {
-  background-color: var(--md-sys-color-surface-container-high);
+  background-color: var(--md-sys-color-surface-container);
 }
 
 .option-label {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 16px;
+  flex: 1;
+}
+
+.option-label > .material-symbols-rounded {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 24px;
+  margin-top: 2px;
+}
+
+.option-text {
+  flex: 1;
 }
 
 .option-text h4 {
-  margin: 0;
-  font-size: 1rem;
+  margin: 0 0 4px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--md-sys-color-on-surface);
 }
 
 .option-text p {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: 14px;
   color: var(--md-sys-color-on-surface-variant);
 }
 
+/* MD3 Switch */
 .option-control .switch {
-  width: 36px;
-  height: 20px;
-  background-color: var(--md-sys-color-surface-variant);
-  border-radius: 10px;
   position: relative;
-  transition: background-color 0.2s ease;
+  width: 52px;
+  height: 32px;
+  flex-shrink: 0;
 }
 
-.option-control .switch.active {
+.option-control .switch::before {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background-color: var(--md-sys-color-surface-container-highest);
+  border: 2px solid var(--md-sys-color-outline);
+  border-radius: 16px;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.option-control .switch.active::before {
   background-color: var(--md-sys-color-primary);
+  border-color: var(--md-sys-color-primary);
 }
 
 .option-control .switch.disabled {
-  opacity: 0.6;
+  opacity: 0.38;
   cursor: not-allowed;
 }
 
 .option-control .switch-handle {
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  transform: translateY(-50%);
   width: 16px;
   height: 16px;
-  background-color: var(--md-sys-color-on-surface);
+  background-color: var(--md-sys-color-outline);
   border-radius: 50%;
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  transition: transform 0.2s ease;
+  transition: all 0.2s ease;
 }
 
 .option-control .switch.active .switch-handle {
-  transform: translateX(16px);
+  left: 22px;
+  width: 24px;
+  height: 24px;
   background-color: var(--md-sys-color-on-primary);
 }
 
 .device-status {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 4px;
-  font-size: 0.875rem;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 14px;
 }
 
 .status-label {
@@ -439,25 +467,62 @@ watch(useExclusiveMode, (newValue) => {
   color: var(--md-sys-color-on-surface-variant);
 }
 
-.capability-notice,
-.exclusive-warning {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-  border-radius: var(--md-sys-shape-corner-small);
-  margin-top: 8px;
-  font-size: 0.875rem;
-}
-
 .capability-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  margin-top: 12px;
+  font-size: 14px;
   background-color: var(--md-sys-color-tertiary-container);
   color: var(--md-sys-color-on-tertiary-container);
 }
 
-.exclusive-warning {
-  background-color: var(--md-sys-color-error-container);
-  color: var(--md-sys-color-on-error-container);
+.capability-notice .material-symbols-rounded {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.capability-notice p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.restart-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 12px;
+  margin-top: 16px;
+  background-color: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+.restart-notice .material-symbols-rounded {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.restart-notice .notice-content {
+  flex: 1;
+}
+
+.restart-notice .notice-content p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.restart-notice .notice-content p:first-child {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.restart-notice .notice-hint {
+  opacity: 0.8;
+  font-size: 13px;
 }
 
 .loading-state,
@@ -467,7 +532,7 @@ watch(useExclusiveMode, (newValue) => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 48px;
   color: var(--md-sys-color-on-surface-variant);
   text-align: center;
 }
@@ -475,7 +540,7 @@ watch(useExclusiveMode, (newValue) => {
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid var(--md-sys-color-surface-variant);
+  border: 3px solid var(--md-sys-color-surface-container-highest);
   border-top: 3px solid var(--md-sys-color-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -491,55 +556,68 @@ watch(useExclusiveMode, (newValue) => {
   color: var(--md-sys-color-error);
 }
 
+.error-state .material-symbols-rounded {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
 
+.empty-state .material-symbols-rounded {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.6;
+}
 
-.refresh-button {
+.filled-tonal-button {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 10px 24px;
+  background-color: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
   border: none;
-  border-radius: var(--md-sys-shape-corner-small);
-  background-color: var(--md-sys-color-primary);
-  color: var(--md-sys-color-on-primary);
+  border-radius: 20px;
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
-  transition: background-color 0.2s ease;
+  transition: all 0.2s ease;
 }
 
-.refresh-button:hover {
-  background-color: var(--md-sys-color-outline);
-  color: var(--md-sys-color-on-primary-container);
+.filled-tonal-button:hover {
+  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-secondary-container));
 }
 
 .retry-button {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 10px 24px;
   border: none;
-  border-radius: var(--md-sys-shape-corner-small);
+  border-radius: 20px;
   background-color: var(--md-sys-color-error-container);
   color: var(--md-sys-color-on-error-container);
   cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
   transition: all 0.2s ease;
-  font-family: inherit;
-  font-size: 0.875rem;
 }
 
 .retry-button:hover {
-  background-color: var(--md-sys-color-error-container-hover);
+  box-shadow: var(--md-sys-elevation-level1);
 }
 
 .material-symbols-rounded {
-  font-size: 1.2rem;
+  font-size: 20px;
 }
 
-/* 响应式设计 */
 @media (max-width: 768px) {
   .device-name {
-    max-width: 250px;
+    max-width: 200px;
+  }
+  
+  .content-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
   }
 }
 </style>

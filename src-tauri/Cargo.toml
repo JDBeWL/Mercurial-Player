@@ -19,11 +19,13 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rodio = { version = "0.18.0", features = ["wav", "vorbis", "flac", "mp3"] }
 cpal = "0.15.3"
+wasapi = "0.22"
 dirs = "5.0"
 walkdir = "2.3"
 lofty = "0.18"
 base64 = "0.21"
 symphonia = { version = "0.5", features = ["flac", "vorbis", "aac", "alac", "aiff", "wav"] }
+rubato = "0.15"
 rayon = "1.8"
 spectrum-analyzer = "1.4"
 tauri-plugin-dialog = { version = "2.3.3", features = [] }

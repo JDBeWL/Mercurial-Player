@@ -1,4 +1,7 @@
 {
+  "common": {
+    "close": "关闭"
+  },
   "nav": {
     "title": "Music Player",
     "library": "音乐库",
@@ -94,6 +97,7 @@
     "startupLoadLastConfig": "启动时加载上次配置",
     "autoSaveConfig": "自动保存配置",
     "showAudioInfo": "显示音频信息",
+    "display": "显示设置",
     "lyricsAlignment": "歌词对齐",
     "alignLeft": "左对齐",
     "alignCenter": "居中",
@@ -104,9 +108,9 @@
     "lyricsStyleClassic": "经典",
     "audioDeviceSettings": "音频设备",
     "defaultDevice": "默认",
-    "exclusiveMode": "低延迟模式",
-    "exclusiveModeDesc": "优化音频延迟，减少缓冲区大小提高响应性",
-    "exclusiveModeWarning": "启用此模式可能会影响音频系统性能",
+    "exclusiveMode": "独占模式",
+    "exclusiveModeDesc": "使用 WASAPI 独占模式直接访问音频设备，获得最佳音质",
+    "exclusiveModeWarning": "启用此模式时其他应用程序将无法使用该音频设备",
     "exclusiveModeStatus": {
       "exclusive": "独占模式",
       "optimized": "优化模式",
@@ -122,7 +126,9 @@
     "noAudioDevices": "未找到音频设备",
     "retry": "重试",
     "refresh": "刷新",
-    "refreshDevices": "刷新设备列表"
+    "refreshDevices": "刷新设备列表",
+    "exclusiveModeRestartRequired": "独占模式设置已更改，需要重启应用程序才能生效",
+    "exclusiveModeRestartHint": "请关闭并重新打开应用程序以应用新的音频模式设置"
   },
   "themeSelector": {
     "chooseThemeColor": "选择主题颜色",

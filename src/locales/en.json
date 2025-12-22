@@ -1,4 +1,7 @@
 {
+  "common": {
+    "close": "Close"
+  },
   "nav": {
     "title": "Music Player",
     "library": "Library",
@@ -94,6 +97,7 @@
     "startupLoadLastConfig": "Load last configuration on startup",
     "autoSaveConfig": "Auto save configuration",
     "showAudioInfo": "Show Audio Info",
+    "display": "Display",
     "lyricsAlignment": "Lyrics Alignment",
     "alignLeft": "Left",
     "alignCenter": "Center",
@@ -104,9 +108,9 @@
     "lyricsStyleClassic": "Classic",
     "audioDeviceSettings": "Audio Device",
     "defaultDevice": "Default",
-    "exclusiveMode": "Low Latency Mode",
-    "exclusiveModeDesc": "Optimize audio latency by reducing buffer sizes for better responsiveness",
-    "exclusiveModeWarning": "Enabling this mode may affect audio system performance",
+    "exclusiveMode": "Exclusive Mode",
+    "exclusiveModeDesc": "Use WASAPI exclusive mode for direct audio device access and best audio quality",
+    "exclusiveModeWarning": "Other applications cannot use this audio device while enabled",
     "exclusiveModeStatus": {
       "exclusive": "Exclusive Mode",
       "optimized": "Optimized Mode",
@@ -122,7 +126,9 @@
     "noAudioDevices": "No audio devices found",
     "retry": "Retry",
     "refresh": "Refresh",
-    "refreshDevices": "Refresh Device List"
+    "refreshDevices": "Refresh Device List",
+    "exclusiveModeRestartRequired": "Exclusive mode setting changed. Restart required to take effect",
+    "exclusiveModeRestartHint": "Please close and reopen the application to apply the new audio mode settings"
   },
   "themeSelector": {
     "chooseThemeColor": "Choose Theme Color",

@@ -14,7 +14,7 @@
           </div>
         </div>
         <!-- 悬浮遮罩：恢复按钮 -->
-        <div class="cover-overlay" @click="exitMiniMode" title="恢复主界面">
+        <div class="cover-overlay" @click="exitMiniMode" :title="$t('common.close') || '恢复主界面'">
           <span class="material-symbols-rounded">open_in_full</span>
         </div>
       </div>
@@ -23,12 +23,12 @@
       <div class="info-controls" data-tauri-drag-region>
         <!-- 歌曲信息 -->
         <div class="track-info" data-tauri-drag-region>
-          <div class="track-title" :title="getTrackTitle(currentTrack, '未播放')">{{ getTrackTitle(currentTrack, '未播放') }}</div>
-          <div class="track-artist" :title="getTrackArtist(currentTrack, '未知艺术家')">{{ getTrackArtist(currentTrack, '未知艺术家') }}</div>
+          <div class="track-title" :title="getTrackTitle(currentTrack, $t('player.noTrack'))">{{ getTrackTitle(currentTrack, $t('player.noTrack')) }}</div>
+          <div class="track-artist" :title="getTrackArtist(currentTrack, '')">{{ getTrackArtist(currentTrack, '') }}</div>
         </div>
 
         <!-- 控制按钮 -->
-        <div class="controls" data-tauri-drag-region>
+        <div class="controls">
           <button class="icon-button small" @click="playerStore.previousTrack" :disabled="!playerStore.hasPreviousTrack">
             <span class="material-symbols-rounded">skip_previous</span>
           </button>
@@ -50,7 +50,6 @@
          @mousemove="handleSeekMove"
          @mouseup="endSeeking"
          @mouseleave="endSeeking">
-      <div class="progress-background"></div>
       <div class="progress-fill" :style="{ width: progressPercentage + '%' }"></div>
     </div>
   </div>
@@ -140,19 +139,20 @@ const updateDragPosition = (e) => {
   background-color: var(--md-sys-color-surface);
   color: var(--md-sys-color-on-surface);
   user-select: none;
+  font-family: 'Roboto', sans-serif;
 }
 
 /* 背景模糊效果 */
 .background-cover {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: -20px;
+  left: -20px;
+  right: -20px;
+  bottom: -20px;
   background-size: cover;
   background-position: center;
-  filter: blur(20px);
-  opacity: 0.3;
+  filter: blur(30px) saturate(1.2);
+  opacity: 0.4;
   z-index: 0;
 }
 
@@ -162,7 +162,11 @@ const updateDragPosition = (e) => {
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.2);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--md-sys-color-surface-rgb, 0, 0, 0), 0.6) 0%,
+    rgba(var(--md-sys-color-surface-rgb, 0, 0, 0), 0.3) 100%
+  );
   z-index: 1;
 }
 
@@ -172,20 +176,20 @@ const updateDragPosition = (e) => {
   flex: 1;
   display: flex;
   align-items: center;
-  padding: 12px;
-  gap: 12px;
-  min-width: 0; /* 防止flex子项溢出 */
+  padding: 12px 16px;
+  gap: 14px;
+  min-width: 0;
 }
 
 /* 封面样式 */
 .cover-container {
   position: relative;
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   cursor: pointer;
 }
 
@@ -202,6 +206,11 @@ const updateDragPosition = (e) => {
 
 .cover-placeholder {
   color: var(--md-sys-color-on-surface-variant);
+  opacity: 0.6;
+}
+
+.cover-placeholder .material-symbols-rounded {
+  font-size: 28px;
 }
 
 .cover-overlay {
@@ -210,13 +219,17 @@ const updateDragPosition = (e) => {
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
   transition: opacity 0.2s ease;
   color: white;
+}
+
+.cover-overlay .material-symbols-rounded {
+  font-size: 24px;
 }
 
 .cover-container:hover .cover-overlay {
@@ -230,7 +243,7 @@ const updateDragPosition = (e) => {
   flex-direction: column;
   justify-content: center;
   min-width: 0;
-  gap: 4px;
+  gap: 6px;
 }
 
 .track-info {
@@ -242,6 +255,7 @@ const updateDragPosition = (e) => {
 .track-title {
   font-size: 14px;
   font-weight: 500;
+  line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -250,54 +264,62 @@ const updateDragPosition = (e) => {
 
 .track-artist {
   font-size: 12px;
+  font-weight: 400;
+  line-height: 1.2;
   color: var(--md-sys-color-on-surface-variant);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  opacity: 0.85;
 }
 
 .controls {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 4px;
+  gap: 4px;
+  margin-top: 2px;
 }
 
 .icon-button {
   background: none;
   border: none;
-  padding: 4px;
+  padding: 6px;
   border-radius: 50%;
   color: var(--md-sys-color-on-surface);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background-color 0.2s;
+  transition: all 0.15s ease;
 }
 
-.icon-button:hover {
+.icon-button:hover:not(:disabled) {
   background-color: var(--md-sys-color-surface-variant);
 }
 
+.icon-button:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
 .icon-button:disabled {
-  opacity: 0.38;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
 .icon-button.small .material-symbols-rounded {
-  font-size: 20px;
+  font-size: 22px;
 }
 
 .icon-button.play-pause {
   background-color: var(--md-sys-color-primary);
   color: var(--md-sys-color-on-primary);
-  padding: 6px;
+  padding: 8px;
+  margin: 0 4px;
 }
 
 .icon-button.play-pause:hover {
-  background-color: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
+  background-color: var(--md-sys-color-primary);
+  filter: brightness(1.1);
 }
 
 .icon-button.play-pause .material-symbols-rounded {
@@ -308,20 +330,22 @@ const updateDragPosition = (e) => {
 .progress-bar-container {
   position: relative;
   width: 100%;
-  height: 4px;
+  height: 3px;
   background-color: var(--md-sys-color-surface-variant);
   cursor: pointer;
   z-index: 3;
+  transition: height 0.15s ease;
 }
 
 .progress-bar-container:hover {
-  height: 6px;
+  height: 5px;
 }
 
 .progress-fill {
   height: 100%;
   background-color: var(--md-sys-color-primary);
   transition: width 0.1s linear;
+  border-radius: 0 2px 2px 0;
 }
 
 .material-symbols-rounded.filled {

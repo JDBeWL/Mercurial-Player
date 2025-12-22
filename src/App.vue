@@ -38,91 +38,92 @@
         <MusicLibrary v-if="showLibrary" @close="showLibrary = false" />
       </Transition>
 
-      <div class="player-container">
-        <div class="player-main">
-          <!-- 上方区域：左侧专辑封面和歌曲信息，右侧歌词 -->
-          <div class="player-upper">
-            <!-- 左侧：专辑封面和歌曲信息 -->
-            <div class="player-left">
-              <div class="album-art-container">
-                <Transition :name="transitionDirection === 'next' ? 'album-art-slide-next' : 'album-art-slide-prev'"
-                  mode="out-in">
-                  <div :key="currentTrack ? currentTrack.path : 'no-track'" class="album-art-wrapper">
-                    <div class="album-art" :style="{ backgroundImage: currentTrackCover }">
-                      <div v-if="!currentTrack || !currentTrack.cover" class="album-art-placeholder">
-                        <span class="material-symbols-rounded">music_note</span>
+      <!-- 配置面板 - 替换主内容区域 -->
+      <Transition name="fade" mode="out-in">
+        <Settings v-if="configStore.ui.showConfigPanel" key="settings" />
+        <div v-else key="player" class="player-container">
+          <div class="player-main">
+            <!-- 上方区域：左侧专辑封面和歌曲信息，右侧歌词 -->
+            <div class="player-upper">
+              <!-- 左侧：专辑封面和歌曲信息 -->
+              <div class="player-left">
+                <div class="album-art-container">
+                  <Transition :name="transitionDirection === 'next' ? 'album-art-slide-next' : 'album-art-slide-prev'"
+                    mode="out-in">
+                    <div :key="currentTrack ? currentTrack.path : 'no-track'" class="album-art-wrapper">
+                      <div class="album-art" :style="{ backgroundImage: currentTrackCover }">
+                        <div v-if="!currentTrack || !currentTrack.cover" class="album-art-placeholder">
+                          <span class="material-symbols-rounded">music_note</span>
+                        </div>
                       </div>
+                    </div>
+                  </Transition>
+                </div>
+
+                <Transition name="fade" mode="out-in">
+                  <div :key="currentTrack ? currentTrack.path : 'no-track-info'">
+                    <div class="track-info" v-if="currentTrack">
+                      <h2 
+                        class="track-title" 
+                        :title="getTrackTitle(currentTrack) || $t('player.noTrack')"
+                      >{{ getTrackTitle(currentTrack) || $t('player.noTrack') }}</h2>
+                      <div 
+                        class="track-artist" 
+                        v-if="getTrackArtist(currentTrack)" 
+                        :title="getTrackArtist(currentTrack)"
+                      >
+                        {{ getTrackArtist(currentTrack) }}
+                      </div>
+                      <!-- 文件不存在提示 -->
+                      <div v-if="currentTrack && !isTrackFileExists" class="file-missing-alert">
+                        <span class="material-symbols-rounded">warning</span>
+                        <span class="alert-text">{{ $t('player.fileNotFound') }}</span>
+                      </div>
+                    </div>
+                    <div class="track-info-placeholder" v-else>
+                      <h2 class="track-title">{{ $t('player.noTrack') }}</h2>
+                      <div class="track-artist">&nbsp;</div>
+                    </div>
+
+                    <div class="audio-info"
+                      v-if="currentTrack && formattedAudioInfo && configStore.general.showAudioInfo">
+                      <span class="text-caption">{{ formattedAudioInfo }}</span>
+                    </div>
+                    <div class="audio-info-placeholder" v-else>
+                      <span class="text-caption">&nbsp;</span>
                     </div>
                   </div>
                 </Transition>
               </div>
 
-              <Transition name="fade" mode="out-in">
-                <div :key="currentTrack ? currentTrack.path : 'no-track-info'">
-                  <div class="track-info" v-if="currentTrack">
-                    <h2 
-                      class="track-title" 
-                      :title="getTrackTitle(currentTrack) || $t('player.noTrack')"
-                    >{{ getTrackTitle(currentTrack) || $t('player.noTrack') }}</h2>
-                    <div 
-                      class="track-artist" 
-                      v-if="getTrackArtist(currentTrack)" 
-                      :title="getTrackArtist(currentTrack)"
-                    >
-                      {{ getTrackArtist(currentTrack) }}
-                    </div>
-                    <!-- 文件不存在提示 -->
-                    <div v-if="currentTrack && !isTrackFileExists" class="file-missing-alert">
-                      <span class="material-symbols-rounded">warning</span>
-                      <span class="alert-text">{{ $t('player.fileNotFound') }}</span>
-                    </div>
-                  </div>
-                  <div class="track-info-placeholder" v-else>
-                    <h2 class="track-title">{{ $t('player.noTrack') }}</h2>
-                    <div class="track-artist">&nbsp;</div>
-                  </div>
-
-                  <div class="audio-info"
-                    v-if="currentTrack && formattedAudioInfo && configStore.general.showAudioInfo">
-                    <span class="text-caption">{{ formattedAudioInfo }}</span>
-                  </div>
-                  <div class="audio-info-placeholder" v-else>
-                    <span class="text-caption">&nbsp;</span>
-                  </div>
+              <!-- 右侧：歌词/可视化 -->
+              <div class="player-right">
+                 <div class="view-toggle-container" v-if="!configStore.audio.exclusiveMode">
+                   <button class="icon-button view-toggle-btn" @click="toggleViewMode" :title="viewMode === 'lyrics' ? '切换到波形模式' : '切换到歌词模式'">
+                      <span class="material-symbols-rounded">{{ viewMode === 'lyrics' ? 'equalizer' : 'lyrics' }}</span>
+                   </button>
                 </div>
-              </Transition>
-            </div>
-
-            <!-- 右侧：歌词/可视化 -->
-            <div class="player-right">
-               <div class="view-toggle-container">
-                 <button class="icon-button view-toggle-btn" @click="toggleViewMode" :title="viewMode === 'lyrics' ? '切换到波形模式' : '切换到歌词模式'">
-                    <span class="material-symbols-rounded">{{ viewMode === 'lyrics' ? 'equalizer' : 'lyrics' }}</span>
-                 </button>
+                
+                <Transition name="fade" mode="out-in">
+                  <LyricsDisplay v-if="viewMode === 'lyrics' || configStore.audio.exclusiveMode" class="lyrics-container" />
+                  <VisualizerPanel v-else class="lyrics-container" />
+                </Transition>
               </div>
-              
-              <Transition name="fade" mode="out-in">
-                <LyricsDisplay v-if="viewMode === 'lyrics'" class="lyrics-container" />
-                <VisualizerPanel v-else class="lyrics-container" />
-              </Transition>
             </div>
-          </div>
 
-          <!-- 下方区域：进度条和控制按钮 -->
-          <div class="player-lower">
-            <ProgressBar />
-            <PlayerControls />
+            <!-- 下方区域：进度条和控制按钮 -->
+            <div class="player-lower">
+              <ProgressBar />
+              <PlayerControls />
+            </div>
           </div>
         </div>
-      </div>
+      </Transition>
     </main>
 
     <Transition name="slide-right">
       <PlaylistView v-if="showPlaylist" @close="showPlaylist = false" />
     </Transition>
-
-    <!-- 配置面板 -->
-    <Settings />
 
     <button class="fab" @click="togglePlaylist" v-if="playlist.length > 0">
       <span class="material-symbols-rounded">playlist_play</span>

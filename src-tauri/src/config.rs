@@ -144,7 +144,7 @@ impl Default for GeneralConfig {
             auto_save_config: true,
             show_audio_info: true,
             lyrics_alignment: "center".to_string(),
-            lyrics_font_family: "system-ui".to_string(),
+            lyrics_font_family: "Roboto".to_string(),
         }
     }
 }

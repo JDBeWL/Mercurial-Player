@@ -9,6 +9,8 @@ mod filesystem;
 mod metadata;
 mod playback;
 mod system;
+mod wasapi_player;
+mod wasapi_exclusive;
 mod window_commands;
 
 // 重新导出所有命令
@@ -22,8 +24,10 @@ pub use window_commands::*;
 
 use crate::audio_decoder::SymphoniaSource;
 use crate::config::ConfigManager;
+use crate::wasapi_exclusive::WasapiExclusivePlayback;
 use cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{OutputStream, Sink};
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 pub struct PlayerState {
@@ -35,6 +39,11 @@ pub struct PlayerState {
     pub exclusive_mode: Arc<Mutex<bool>>,
     pub waveform_data: Arc<Mutex<Vec<f32>>>,
     pub spectrum_data: Arc<Mutex<Vec<f32>>>,
+    pub wasapi_player: Arc<Mutex<Option<WasapiExclusivePlayback>>>,
+    /// 用于停止解码线程的标志
+    pub decode_thread_stop: Arc<AtomicBool>,
+    /// 当前解码线程的 ID（用于区分不同的播放会话）
+    pub decode_thread_id: Arc<AtomicU64>,
 }
 
 pub struct AppState {
@@ -51,16 +60,6 @@ fn main() {
     let device_name = device
         .name()
         .unwrap_or_else(|_| "Unknown Device".to_string());
-
-    // 从选定的设备创建音频输出流
-    let (_stream, stream_handle) =
-        OutputStream::try_from_device(&device).expect("Failed to create output stream from device");
-
-    // 我们需要保持流的存活，但它不是Send或Sync。
-    // 泄露它是一种简单的方法，让它在应用程序的生命周期内保持存活。
-    Box::leak(Box::new(_stream));
-
-    let sink = Sink::try_new(&stream_handle).expect("Failed to create sink");
 
     // 创建配置管理器
     let config_manager = ConfigManager::new();
@@ -81,6 +80,49 @@ fn main() {
         exclusive_mode_enabled
     );
 
+    // 根据独占模式设置创建播放器
+    let (sink, wasapi_player) = if exclusive_mode_enabled {
+        // 独占模式：创建 WASAPI 独占播放器，使用空的 rodio sink
+        println!("Starting in WASAPI exclusive mode");
+        
+        // 创建一个空的 rodio sink（使用默认设备，但不会实际使用）
+        let (_stream, stream_handle) =
+            OutputStream::try_default().expect("Failed to create default output stream");
+        Box::leak(Box::new(_stream));
+        let sink = Sink::try_new(&stream_handle).expect("Failed to create sink");
+        
+        // 创建 WASAPI 独占播放器
+        let wasapi_playback = WasapiExclusivePlayback::new();
+        match wasapi_playback.initialize(Some(&device_name)) {
+            Ok((sample_rate, channels, actual_name)) => {
+                println!(
+                    "WASAPI Exclusive initialized: {} @ {}Hz, {} channels",
+                    actual_name, sample_rate, channels
+                );
+                (sink, Some(wasapi_playback))
+            }
+            Err(e) => {
+                eprintln!("Failed to initialize WASAPI exclusive mode: {}", e);
+                eprintln!("Falling back to shared mode");
+                (sink, None)
+            }
+        }
+    } else {
+        // 共享模式：使用 rodio
+        println!("Starting in shared mode");
+        
+        // 从选定的设备创建音频输出流
+        let (_stream, stream_handle) =
+            OutputStream::try_from_device(&device).expect("Failed to create output stream from device");
+
+        // 我们需要保持流的存活，但它不是Send或Sync。
+        // 泄露它是一种简单的方法，让它在应用程序的生命周期内保持存活。
+        Box::leak(Box::new(_stream));
+
+        let sink = Sink::try_new(&stream_handle).expect("Failed to create sink");
+        (sink, None)
+    };
+
     // 创建应用程序状态
     let app_state = AppState {
         player: PlayerState {
@@ -89,9 +131,12 @@ fn main() {
             current_path: Arc::new(Mutex::new(None)),
             target_volume: Arc::new(Mutex::new(1.0)),
             current_device_name: Arc::new(Mutex::new(device_name)),
-            exclusive_mode: Arc::new(Mutex::new(exclusive_mode_enabled)),
+            exclusive_mode: Arc::new(Mutex::new(exclusive_mode_enabled && wasapi_player.is_some())),
             waveform_data: Arc::new(Mutex::new(Vec::with_capacity(1024))),
             spectrum_data: Arc::new(Mutex::new(vec![0.0; 128])),
+            wasapi_player: Arc::new(Mutex::new(wasapi_player)),
+            decode_thread_stop: Arc::new(AtomicBool::new(false)),
+            decode_thread_id: Arc::new(AtomicU64::new(0)),
         },
         config_manager,
     };
