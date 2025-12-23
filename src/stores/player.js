@@ -20,6 +20,7 @@ export const usePlayerStore = defineStore('player', {
     // 歌词
     lyrics: null,
     currentLyricIndex: -1,
+    lyricsOffset: 0, // 歌词偏移（秒），正值表示歌词提前，负值表示歌词延后
 
     // 音频信息
     audioInfo: {
@@ -668,6 +669,31 @@ export const usePlayerStore = defineStore('player', {
       if (this.isShuffle) {
         this.repeatMode = 'none';
       }
+    },
+
+    // --- 歌词偏移 ---
+    
+    /**
+     * 设置歌词偏移（秒）
+     * @param {number} offset - 偏移值，正值表示歌词提前，负值表示歌词延后
+     */
+    setLyricsOffset(offset) {
+      this.lyricsOffset = offset;
+    },
+
+    /**
+     * 调整歌词偏移
+     * @param {number} delta - 调整量（秒）
+     */
+    adjustLyricsOffset(delta) {
+      this.lyricsOffset = Math.round((this.lyricsOffset + delta) * 10) / 10; // 保留一位小数
+    },
+
+    /**
+     * 重置歌词偏移
+     */
+    resetLyricsOffset() {
+      this.lyricsOffset = 0;
     },
 
     // --- 数据加载 ---

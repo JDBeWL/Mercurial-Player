@@ -70,7 +70,10 @@
     "loading": "Loading lyrics...",
     "fetchOnline": "Fetch Online Lyrics",
     "fetching": "Fetching...",
-    "fromOnline": "Online Lyrics"
+    "fromOnline": "Online Lyrics",
+    "offsetAdvance": "Advance lyrics 0.5s",
+    "offsetDelay": "Delay lyrics 0.5s",
+    "offsetReset": "Click to reset offset"
   },
   "config": {
     "title": "Configuration",

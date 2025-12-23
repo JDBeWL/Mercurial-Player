@@ -47,10 +47,20 @@
             </div>
         </div>
         
-        <!-- 歌词来源指示器 -->
-        <div v-if="lyricsSource === 'online' && lyrics.length" class="lyrics-source-indicator">
-            <span class="material-symbols-rounded">cloud_done</span>
-            {{ $t('lyrics.fromOnline') }}
+        <!-- 底部控制栏 - 只保留偏移控制 -->
+        <div v-if="lyrics.length" class="lyrics-bottom-bar">
+            <!-- 歌词偏移控制 -->
+            <div class="lyrics-offset-control">
+                <button class="offset-btn" @click="adjustOffset(-0.5)" :title="$t('lyrics.offsetDelay')">
+                    <span class="material-symbols-rounded">remove</span>
+                </button>
+                <span class="offset-value" @click="resetOffset" :title="$t('lyrics.offsetReset')">
+                    {{ formatOffset(playerStore.lyricsOffset) }}
+                </span>
+                <button class="offset-btn" @click="adjustOffset(0.5)" :title="$t('lyrics.offsetAdvance')">
+                    <span class="material-symbols-rounded">add</span>
+                </button>
+            </div>
         </div>
     </div>
 </template>
@@ -147,14 +157,18 @@ export default {
         const isActive = (index) => index === activeIndex.value;
 
         const isWordActive = (word) => {
-            const t = visualTime.value;
+            // 应用歌词偏移
+            const offset = playerStore.lyricsOffset || 0;
+            const t = visualTime.value - offset;
             // 只有在时间范围内才算激活，并且考虑下一个单词的开始时间
             return t >= word.start && t < word.end;
         };
 
         // 计算卡拉OK单词的填充进度 (0% - 100%)
         const getKaraokeStyle = (word) => {
-            const t = visualTime.value;
+            // 应用歌词偏移
+            const offset = playerStore.lyricsOffset || 0;
+            const t = visualTime.value - offset;
             if (t >= word.end) return { '--progress': '100%' };
             if (t < word.start) return { '--progress': '0%' };
 
@@ -268,6 +282,21 @@ export default {
         // 保存 resize 处理函数引用，以便正确清理
         const handleResize = () => scrollToActiveLyric(true);
 
+        // 歌词偏移控制
+        const adjustOffset = (delta) => {
+            playerStore.adjustLyricsOffset(delta);
+        };
+        
+        const resetOffset = () => {
+            playerStore.resetLyricsOffset();
+        };
+        
+        const formatOffset = (offset) => {
+            if (offset === 0) return '0s';
+            const sign = offset > 0 ? '+' : '';
+            return `${sign}${offset.toFixed(1)}s`;
+        };
+
         onMounted(() => {
             startAnimationLoop();
             window.addEventListener("resize", handleResize);
@@ -285,9 +314,10 @@ export default {
         });
 
         return {
-            lyrics, loading, containerRef, configStore, lyricsSource, hasCurrentTrack,
+            lyrics, loading, containerRef, configStore, lyricsSource, hasCurrentTrack, playerStore,
             isActive, isWordActive, getKaraokeStyle, handleLyricClick,
-            handleScroll, isHovering, fetchingLyrics, handleFetchLyrics
+            handleScroll, isHovering, fetchingLyrics, handleFetchLyrics,
+            adjustOffset, resetOffset, formatOffset
         };
     }
 };
@@ -366,23 +396,69 @@ export default {
     font-size: 20px;
 }
 
-.lyrics-source-indicator {
+.lyrics-bottom-bar {
     position: absolute;
     bottom: 16px;
+    left: 16px;
     right: 16px;
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 6px 12px;
-    background-color: var(--md-sys-color-surface-container);
-    color: var(--md-sys-color-on-surface-variant);
-    border-radius: 16px;
-    font-size: 12px;
-    opacity: 0.7;
+    justify-content: flex-end;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
 }
 
-.lyrics-source-indicator .material-symbols-rounded {
+.lyrics-wrapper:hover .lyrics-bottom-bar {
+    opacity: 1;
+}
+
+.lyrics-offset-control {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px;
+    background-color: var(--md-sys-color-surface-container);
+    border-radius: 20px;
+    pointer-events: auto;
+}
+
+.offset-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 50%;
+    background-color: transparent;
+    color: var(--md-sys-color-on-surface-variant);
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.offset-btn:hover {
+    background-color: var(--md-sys-color-surface-container-highest);
+}
+
+.offset-btn .material-symbols-rounded {
     font-size: 16px;
+}
+
+.offset-value {
+    min-width: 40px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--md-sys-color-on-surface-variant);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 10px;
+    transition: background-color 0.2s ease;
+}
+
+.offset-value:hover {
+    background-color: var(--md-sys-color-surface-container-highest);
 }
 
 .lyrics-spacer-up {

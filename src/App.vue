@@ -98,8 +98,14 @@
 
               <!-- 右侧：歌词/可视化 -->
               <div class="player-right">
-                 <div class="view-toggle-container" v-if="!configStore.audio.exclusiveMode">
-                   <button class="icon-button view-toggle-btn" @click="toggleViewMode" :title="viewMode === 'lyrics' ? '切换到波形模式' : '切换到歌词模式'">
+                 <!-- 右上角控制区域 -->
+                 <div class="view-controls-container">
+                   <!-- 在线歌词指示图标 -->
+                   <div v-if="lyricsSource === 'online'" class="online-lyrics-indicator" :title="$t('lyrics.fromOnline')">
+                     <span class="material-symbols-rounded">cloud_done</span>
+                   </div>
+                   <!-- 视图切换按钮（非独占模式） -->
+                   <button v-if="!configStore.audio.exclusiveMode" class="icon-button view-toggle-btn" @click="toggleViewMode" :title="viewMode === 'lyrics' ? '切换到波形模式' : '切换到歌词模式'">
                       <span class="material-symbols-rounded">{{ viewMode === 'lyrics' ? 'equalizer' : 'lyrics' }}</span>
                    </button>
                 </div>
@@ -150,6 +156,7 @@ import ThemeSelector from './components/ThemeSelector.vue'
 import Settings from './components/Settings.vue'
 import MiniPlayer from './components/MiniPlayer.vue'
 import { useTrackInfo } from './composables/useTrackInfo'
+import { useLyrics } from './composables/useLyrics'
 
 const playerStore = usePlayerStore()
 const themeStore = useThemeStore()
@@ -162,6 +169,9 @@ const { currentTrack, playlist, audioInfo, currentTrackIndex, lastTrackIndex } =
 
 // 使用 composable 处理音轨信息
 const { getTrackTitle, getTrackArtist, watchTrack } = useTrackInfo()
+
+// 获取歌词来源
+const { lyricsSource } = useLyrics()
 
 const showLibrary = ref(false)
 const showPlaylist = ref(false)
@@ -523,11 +533,28 @@ onUnmounted(() => {
   position: relative;
 }
 
-.view-toggle-container {
+.view-controls-container {
   position: absolute;
   top: 0;
   right: 0;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.online-lyrics-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.online-lyrics-indicator .material-symbols-rounded {
+  font-size: 24px;
 }
 
 /* 响应式设计 */

@@ -328,12 +328,16 @@ const updateDragPosition = (e) => {
 
 /* 进度条样式 */
 .progress-bar-container {
-  position: relative;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
   width: 100%;
-  height: 3px;
+  height: 4px;
   background-color: var(--md-sys-color-surface-variant);
   cursor: pointer;
-  z-index: 3;
+  z-index: 10;
+  flex-shrink: 0;
   transition: height 0.15s ease;
 }
 

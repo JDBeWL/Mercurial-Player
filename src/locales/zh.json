@@ -70,7 +70,10 @@
     "loading": "加载歌词中...",
     "fetchOnline": "在线获取歌词",
     "fetching": "获取中...",
-    "fromOnline": "在线歌词"
+    "fromOnline": "在线歌词",
+    "offsetAdvance": "歌词提前 0.5s",
+    "offsetDelay": "歌词延后 0.5s",
+    "offsetReset": "点击重置偏移"
   },
   "config": {
     "title": "配置",

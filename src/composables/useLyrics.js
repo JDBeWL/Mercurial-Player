@@ -8,13 +8,17 @@ import { invoke } from '@tauri-apps/api/core';
 // 模块级别的在线歌词缓存，避免组件重新挂载时丢失
 const onlineLyricsCache = new Map(); // key: trackPath, value: { lrc: string, parsed: array, source: string }
 
+// 模块级别的共享状态，确保所有 useLyrics 实例共享同一个 lyricsSource
+const sharedLyricsSource = ref('local');
+
 export function useLyrics() {
     const playerStore = usePlayerStore();
     const configStore = useConfigStore();
     const lyrics = ref([]);
     const loading = ref(false);
     const activeIndex = ref(-1);
-    const lyricsSource = ref('local');
+    // 使用共享的 lyricsSource
+    const lyricsSource = sharedLyricsSource;
     const onlineLyricsError = ref(null);
 
     const parseLRC = (lrcText) => {
@@ -247,7 +251,9 @@ export function useLyrics() {
     watch(() => playerStore.currentTrack?.path, loadLyrics, { immediate: true });
 
     watchEffect(() => {
-        const currentTime = playerStore.currentTime + 0.05;
+        // 应用歌词偏移：正值表示歌词提前（时间减小），负值表示歌词延后（时间增大）
+        const offset = playerStore.lyricsOffset || 0;
+        const currentTime = playerStore.currentTime + 0.05 - offset;
         let l = 0, r = lyrics.value.length - 1, idx = -1;
         while (l <= r) {
             const mid = (l + r) >> 1;
