@@ -5,32 +5,32 @@ description = "Mer Music App"
 authors = ["jdbEwl"]
 license = ""
 repository = ""
-edition = "2021"
-rust-version = "1.70"
-
+edition = "2024"
+rust-version = "1.92"
 default-run = "mer-music-player"
 
 [build-dependencies]
-tauri-build = { version = "2.0.0", features = [] }
+tauri-build = { version = "2.5", features = [] }
 
 [dependencies]
-tauri = { version = "2.9.5", features = ["rustls-tls"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-rodio = { version = "0.18.0", features = ["wav", "vorbis", "flac", "mp3"] }
-cpal = "0.15.3"
+tauri = { version = "2.9", features = ["rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 暂时不更新rodio
+rodio = { version = "0.18", features = ["wav", "vorbis", "flac", "mp3"] }
+cpal = "0.15"
 wasapi = "0.22"
-dirs = "5.0"
-walkdir = "2.3"
-lofty = "0.18"
-base64 = "0.21"
+dirs = "6"
+walkdir = "2"
+lofty = "0.22"
+base64 = "0.22"
 symphonia = { version = "0.5", features = ["flac", "vorbis", "aac", "alac", "aiff", "wav"] }
 rubato = "0.15"
-rayon = "1.8"
-spectrum-analyzer = "1.4"
-tauri-plugin-dialog = { version = "2.3.3", features = [] }
-tauri-plugin-fs = { version = "2.4.4", features = [] }
-tauri-plugin-shell = { version = "2.3.3", features = [] }
+rayon = "1"
+spectrum-analyzer = "1.7"
+tauri-plugin-dialog = "2.4"
+tauri-plugin-fs = "2.4"
+tauri-plugin-shell = "2.3"
 crossbeam-channel = "0.5"
 
 [lints.rust]
@@ -39,14 +39,25 @@ unused_extern_crates = "warn"
 unused_import_braces = "warn"
 unused_qualifications = "warn"
 variant_size_differences = "warn"
+keyword_idents_2024 = "forbid"
+unsafe_op_in_unsafe_fn = "warn"
 
 [lints.clippy]
-all = "warn"
-nursery = "warn"
-pedantic = "warn"
+# 基础lint组
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# 允许的例外
 module_name_repetitions = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+# 额外的严格检查
+unwrap_used = "warn"
+expect_used = "warn"
+clone_on_ref_ptr = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
 
 [features]
 default = ["custom-protocol"]
@@ -56,5 +67,14 @@ custom-protocol = ["tauri/custom-protocol"]
 name = "mer-music-player"
 path = "src/main.rs"
 
-[profile.release]
+[profile.dev]
+opt-level = 0
 debug = true
+incremental = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

@@ -238,6 +238,11 @@
       <div v-if="activeTab === 'audioDevice'" class="tab-content">
         <AudioDeviceSettings />
       </div>
+      
+      <!-- EQ 均衡器设置 -->
+      <div v-if="activeTab === 'equalizer'" class="tab-content">
+        <EqualizerSettings />
+      </div>
     </div>
   </div>
 </template>
@@ -250,6 +255,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { setLocale } from '../i18n';
 import { useI18n } from 'vue-i18n';
 import AudioDeviceSettings from './AudioDeviceSettings.vue';
+import EqualizerSettings from './EqualizerSettings.vue';
 
 const configStore = useConfigStore();
 const activeTab = ref('folders');
@@ -263,6 +269,7 @@ const tabs = [
   { id: 'titleExtraction', icon: 'title', label: 'config.titleExtraction' },
   { id: 'playlist', icon: 'queue_music', label: 'config.playlistSettings' },
   { id: 'audioDevice', icon: 'speaker', label: 'config.audioDeviceSettings' },
+  { id: 'equalizer', icon: 'equalizer', label: 'config.equalizer' },
 ];
 
 // 获取系统字体列表

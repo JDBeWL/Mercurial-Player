@@ -66,7 +66,8 @@ export const useConfigStore = defineStore('config', {
 
     // 音频设置
     audio: {
-      exclusiveMode: false              // 独占模式
+      exclusiveMode: false,             // 独占模式
+      volume: 0.5                       // 音量 (0.0 - 1.0)
     }
   }),
 

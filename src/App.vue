@@ -352,6 +352,16 @@ onMounted(async () => {
     console.error('Failed to apply language from config:', error)
   }
 
+  // 从配置加载主题设置
+  try {
+    const savedTheme = configStore.general.theme
+    if (savedTheme) {
+      themeStore.setThemePreference(savedTheme)
+    }
+  } catch (error) {
+    console.error('Failed to apply theme from config:', error)
+  }
+
   // 应用主题
   themeStore.applyTheme()
 

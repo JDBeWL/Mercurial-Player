@@ -39,6 +39,7 @@
 - [x] 子目录扫描（可配置深度）
 - [x] 元数据读取（封面、标题、艺术家）
 - [x] 按文件夹创建播放列表
+- [x] 批量元数据获取优化
 
 ## 界面
 - [x] 浅色/深色主题
@@ -55,21 +56,62 @@
 - [ ] 更好的字体显示
 - [ ] OGG、M4A、AAC格式测试
 - [ ] 歌词编辑功能
-- [ ] 均衡器
+- [x] 均衡器
 
-# 部署？
-```cmd
-pnpm/npm install
+# 技术栈
 
-# 使用Tauri dev环境
-pnpm/npm run tauri dev
+## 前端
+| 技术 | 版本 |
+|------|------|
+| Vue | ^3.3.4 |
+| Vite | ^6.0.0 |
+| Pinia | ^2.1.6 |
+| Vue I18n | ^9.14.5 |
+| Sass | ^1.64.2 |
+| Tauri API | ^2.9.1 |
 
-#使用Vite dev环境（不建议，因为大部分使用了Tauri的api接口，如果你觉得有帮助的那你可以这样做）
-pnpm/npm run dev
+## 后端 (Rust)
+| 技术 | 版本 |
+|------|------|
+| Rust | 1.92+ |
+| Tauri | 2.9 |
+| Symphonia | 0.5 (音频解码) |
+| Rodio | 0.18 (音频播放) |
+| CPAL | 0.15 (跨平台音频) |
+| WASAPI | 0.22 (Windows独占模式) |
+| Rubato | 0.15 (音频重采) |
+| Lofty | 0.22 (元数据读取) |
+
+# 部署
+
+## 环境要求
+
+1. **Node.js** - 推荐v18+
+2. **Rust** - 需要1.92或更高版本
+   - Windows: 访问 [rustup.rs](https://rustup.rs/) 下载安装
+   - 安装后运行 `rustup update` 确保版本最新
+3. **Tauri 依赖** - 参考 [Tauri 官方文档](https://tauri.app/start/prerequisites/)
+
+## 开发环境
+
+```bash
+# 安装前端依赖
+pnpm install
+# 或
+npm install
+
+# 启动Tauri开发环境（推荐）
+pnpm run tauri dev
+# 或
+npm run tauri dev
+
+# 仅启动Vite开发环境（不建议，因为大部分使用了Tauri的API接口）
+npm run dev
 ```
 
-# 打包
-```
+## 打包构建
+
+```bash
 npm run tauri build
 ```
 

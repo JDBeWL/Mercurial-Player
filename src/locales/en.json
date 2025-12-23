@@ -128,7 +128,12 @@
     "refresh": "Refresh",
     "refreshDevices": "Refresh Device List",
     "exclusiveModeRestartRequired": "Exclusive mode setting changed. Restart required to take effect",
-    "exclusiveModeRestartHint": "Please close and reopen the application to apply the new audio mode settings"
+    "exclusiveModeRestartHint": "Please close and reopen the application to apply the new audio mode settings",
+    "equalizer": "Equalizer",
+    "enableEq": "Enable Equalizer",
+    "eqPreset": "Preset",
+    "preamp": "Preamp",
+    "eqBands": "Band Adjustment"
   },
   "themeSelector": {
     "chooseThemeColor": "Choose Theme Color",

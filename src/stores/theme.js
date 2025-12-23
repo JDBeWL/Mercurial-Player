@@ -13,19 +13,25 @@ export const useThemeStore = defineStore('theme', {
   }),
 
   actions: {
-    toggleDarkMode() {
+    async toggleDarkMode() {
       this.isDarkMode = !this.isDarkMode;
       document.documentElement.setAttribute('data-theme', this.isDarkMode ? 'dark' : 'light');
       if (this.themePreference !== 'auto') {
         this.themePreference = this.isDarkMode ? 'dark' : 'light';
       }
       this.applyTheme();
+      
+      // 保存主题设置到配置
+      await this.saveThemeToConfig();
     },
 
-    setPrimaryColor(color) {
+    async setPrimaryColor(color) {
       this.primaryColor = color;
       this.themePreference = color; // 设置为自定义颜色
       this.applyTheme();
+      
+      // 保存主题设置到配置
+      await this.saveThemeToConfig();
     },
 
     setThemePreference(preference) {
@@ -53,6 +59,18 @@ export const useThemeStore = defineStore('theme', {
       // 设置MD3基础颜色
       document.documentElement.style.setProperty('--md-sys-color-primary', this.primaryColor);
       console.log('Generated Theme:', theme);
+    },
+    
+    async saveThemeToConfig() {
+      try {
+        const { useConfigStore } = await import('./config');
+        const configStore = useConfigStore();
+        // 保存主题偏好（可能是 'light', 'dark', 'auto' 或颜色值）
+        configStore.general.theme = this.themePreference;
+        await configStore.saveConfigNow();
+      } catch (error) {
+        console.error('Failed to save theme to config:', error);
+      }
     },
   },
 });

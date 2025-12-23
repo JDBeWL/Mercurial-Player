@@ -1,9 +1,9 @@
 //! 配置管理相关的 Tauri 命令
-//! 
-//! 这个模块包含所有与配置管理相关的功能，包括加载、保存、导入、导出等
+//!
+//! 这个模块包含所有与配置管理相关的功能，包括加载、保存、导入、导出等。
 
-use super::config::AppConfig;
-use super::AppState;
+use super::manager::AppConfig;
+use crate::AppState;
 use tauri::{command, State};
 
 /// 初始化配置文件

@@ -66,9 +66,20 @@ export const usePlayerStore = defineStore('player', {
 
   actions: {
     // --- 初始化 ---
-    initAudio() {
+    async initAudio() {
       // 初始化音频播放器
-      // 获取音频信息
+      // 从配置加载音量
+      try {
+        const { useConfigStore } = await import('./config');
+        const configStore = useConfigStore();
+        const savedVolume = configStore.audio.volume;
+        if (typeof savedVolume === 'number' && savedVolume >= 0 && savedVolume <= 1) {
+          this.volume = savedVolume;
+          await invoke('set_volume', { volume: savedVolume });
+        }
+      } catch (err) {
+        console.error('Failed to load volume from config:', err);
+      }
       console.log('Player store initialized.');
     },
 
@@ -629,8 +640,13 @@ export const usePlayerStore = defineStore('player', {
     setVolume(volume) {
       const newVolume = Math.max(0, Math.min(1, volume));
       invoke('set_volume', { volume: newVolume })
-        .then(() => {
+        .then(async () => {
           this.volume = newVolume;
+          // 保存音量到配置
+          const { useConfigStore } = await import('./config');
+          const configStore = useConfigStore();
+          configStore.audio.volume = newVolume;
+          configStore.saveConfigNow();
         })
         .catch(err => console.error("Failed to set volume:", err));
     },
@@ -683,114 +699,41 @@ export const usePlayerStore = defineStore('player', {
 
     /**
      * 预处理播放列表中所有文件的元数据
+     * 优化版本：直接使用播放列表中已有的元数据（由 playlistManager 批量获取）
      * @param {Array} playlist - 播放列表
      */
     async preprocessPlaylistMetadata(playlist) {
       if (!playlist || playlist.length === 0) return;
 
-      console.log(`开始预处理播放列表元数据，共 ${playlist.length} 个文件`);
+      console.log(`预处理播放列表元数据，共 ${playlist.length} 个文件`);
 
       // 初始化元数据缓存（如果还没有）
       if (!this._metadataCache) {
         this._metadataCache = {};
       }
 
-      // 批量获取元数据
-      const { useConfigStore } = await import('./config.js');
-      const configStore = useConfigStore();
+      // 处理每个轨道，直接使用已有的元数据
+      for (const track of playlist) {
+        const trackPath = track.path;
 
-      // 并行处理所有文件，但限制并发数以避免性能问题
-      const BATCH_SIZE = 5; // 每批处理5个文件
-      for (let i = 0; i < playlist.length; i += BATCH_SIZE) {
-        const batch = playlist.slice(i, i + BATCH_SIZE);
+        // 如果缓存中已经有，跳过
+        if (this._metadataCache[trackPath]) {
+          continue;
+        }
 
-        await Promise.all(batch.map(async (track) => {
-          const trackPath = track.path;
-
-          // 如果已经处理过，跳过
-          if (this._metadataCache[trackPath]) {
-            return;
-          }
-
-          try {
-            // 获取配置
-            const config = {
-              preferMetadata: configStore.titleExtraction?.preferMetadata ?? true,
-              hideFileExtension: configStore.titleExtraction?.hideFileExtension ?? true,
-              parseArtistTitle: configStore.titleExtraction?.parseArtistTitle ?? true,
-              separator: configStore.titleExtraction?.separator ?? '-',
-              customSeparators: configStore.titleExtraction?.customSeparators ?? ['-', '_', '.', ' ']
-            };
-
-            // 使用 TitleExtractor 提取标题信息
-            const { TitleExtractor } = await import('../utils/titleExtractor.js');
-            const titleInfo = await TitleExtractor.extractTitle(trackPath, config);
-
-            // 获取音频元数据
-            let audioMetadata = {
-              duration: 0,
-              bitrate: null,
-              sampleRate: null,
-              channels: null
-            };
-
-            try {
-              const metadata = await invoke('get_track_metadata', { path: trackPath });
-              if (metadata) {
-                audioMetadata = {
-                  duration: metadata.duration || 0,
-                  bitrate: metadata.bitrate || null,
-                  sampleRate: metadata.sampleRate || null,
-                  channels: metadata.channels || null
-                };
-              }
-            } catch (error) {
-              console.warn(`获取音频元数据失败: ${trackPath}`, error);
-            }
-
-            // 存储处理结果
-            this._metadataCache[trackPath] = {
-              ...titleInfo,
-              ...audioMetadata,
-              lastUpdated: new Date().toISOString()
-            };
-
-            // 更新播放列表中的轨道信息
-            const trackIndex = this.playlist.findIndex(t => t.path === trackPath);
-            if (trackIndex !== -1) {
-              this.playlist[trackIndex] = {
-                ...this.playlist[trackIndex],
-                title: titleInfo.title,
-                artist: titleInfo.artist,
-                album: titleInfo.album,
-                displayTitle: titleInfo.title,
-                displayArtist: titleInfo.artist,
-                duration: audioMetadata.duration,
-                bitrate: audioMetadata.bitrate,
-                sampleRate: audioMetadata.sampleRate,
-                channels: audioMetadata.channels
-              };
-            }
-
-          } catch (error) {
-            console.error(`处理音轨信息失败: ${trackPath}`, error);
-
-            // 即使出错也要缓存，避免重复处理
-            this._metadataCache[trackPath] = {
-              title: FileUtils.getFileName(trackPath),
-              artist: '',
-              album: '',
-              displayTitle: FileUtils.getFileName(trackPath),
-              displayArtist: '',
-              duration: 0,
-              bitrate: null,
-              sampleRate: null,
-              channels: null,
-              lastUpdated: new Date().toISOString(),
-              error: true
-            };
-          }
-        }));
+        // 使用播放列表中已有的数据填充缓存
+        // playlistManager.processAudioFiles 已经批量获取了所有需要的信息
+        this._metadataCache[trackPath] = {
+          title: track.displayTitle || track.title || track.name || FileUtils.getFileName(trackPath),
+          artist: track.displayArtist || track.artist || '',
+          album: track.album || '',
+          duration: track.duration || 0,
+          bitrate: track.bitrate || null,
+          sampleRate: track.sampleRate || null,
+          channels: track.channels || null,
+          isFromMetadata: track.isFromMetadata || false,
+          lastUpdated: new Date().toISOString()
+        };
       }
 
       console.log(`播放列表元数据预处理完成`);

@@ -128,7 +128,12 @@
     "refresh": "刷新",
     "refreshDevices": "刷新设备列表",
     "exclusiveModeRestartRequired": "独占模式设置已更改，需要重启应用程序才能生效",
-    "exclusiveModeRestartHint": "请关闭并重新打开应用程序以应用新的音频模式设置"
+    "exclusiveModeRestartHint": "请关闭并重新打开应用程序以应用新的音频模式设置",
+    "equalizer": "EQ 均衡器",
+    "enableEq": "启用均衡器",
+    "eqPreset": "预设",
+    "preamp": "前置增益",
+    "eqBands": "频段调节"
   },
   "themeSelector": {
     "chooseThemeColor": "选择主题颜色",
