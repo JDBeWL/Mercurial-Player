@@ -34,20 +34,21 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-  # Tauri 应用构建
+  # Tauri 应用构建和发布
   build-tauri:
     needs: build-frontend
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
-        platform: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - platform: ubuntu-latest
-            os: linux
+            args: ''
           - platform: macos-latest
-            os: macos
+            args: '--target universal-apple-darwin'
           - platform: windows-latest
-            os: windows
+            args: ''
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -65,6 +66,8 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Setup Rust cache
         uses: swatinem/rust-cache@v2
@@ -83,30 +86,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tauriScript: npm run tauri
-
-  # 创建 GitHub Release
-  release:
-    needs: build-tauri
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./artifacts
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ./artifacts/**/*
-          draft: false
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Mer Music Player ${{ github.ref_name }}'
+          releaseBody: 'See the assets to download and install this version.'
+          releaseDraft: false
           prerelease: false
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          args: ${{ matrix.args }}
