@@ -16,8 +16,6 @@ GEMINI.md
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
-.gemini/
-.codebuddy/*
 .idea
 .DS_Store
 *.suo

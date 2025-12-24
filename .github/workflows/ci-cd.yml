@@ -12,7 +12,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # 前端构建测试
   build-frontend:
     runs-on: ubuntu-latest
     steps:
@@ -80,7 +79,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
 
-      - name: Build Tauri app
+      - name: Build and Release Tauri app
+        if: startsWith(github.ref, 'refs/tags/')
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
