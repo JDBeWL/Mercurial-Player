@@ -149,7 +149,18 @@
     "enableEq": "启用均衡器",
     "eqPreset": "预设",
     "preamp": "前置增益",
-    "eqBands": "频段调节"
+    "eqBands": "频段调节",
+    "plugins": "插件",
+    "openPluginsFolder": "打开插件目录",
+    "noPlugins": "暂无已安装的插件",
+    "pluginHint": "将插件文件夹放入插件目录即可安装",
+    "activate": "激活",
+    "deactivate": "停用",
+    "uninstall": "卸载",
+    "forDevelopers": "开发者",
+    "pluginDevHint": "想要开发插件？查看插件开发文档了解如何创建自己的插件。",
+    "viewTemplate": "查看模板",
+    "playStats": "播放统计"
   },
   "themeSelector": {
     "chooseThemeColor": "选择主题颜色",

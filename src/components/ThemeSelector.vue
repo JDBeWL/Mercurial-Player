@@ -125,6 +125,7 @@ const colorPresets = [
   { hex: '#304FFE', name: '深靛蓝', category: 'purple' },
   
   // 粉色系 - 浪漫、温柔、活力
+  { hex: '#E67EA5', name: '杏山和纱', category: 'pink' },
   { hex: '#F48FB1', name: '樱花粉', category: 'pink' },
   { hex: '#F06292', name: '玫瑰粉', category: 'pink' },
   { hex: '#EC407A', name: '亮粉', category: 'pink' },

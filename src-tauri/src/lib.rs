@@ -1,4 +1,4 @@
-//! Mer Music Player - 库模块
+//! Mercurial Player - 库模块
 //!
 //! 导出所有公共模块和类型。
 
@@ -7,6 +7,7 @@ pub mod config;
 pub mod equalizer;
 pub mod error;
 pub mod media;
+pub mod plugins;
 pub mod system;
 
 use audio::SymphoniaSource;

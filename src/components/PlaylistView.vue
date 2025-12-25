@@ -66,7 +66,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, shallowRef, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, shallowRef, nextTick, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
 import FileUtils from '../utils/fileUtils'
@@ -76,9 +76,45 @@ const emit = defineEmits(['close'])
 const playerStore = usePlayerStore()
 const { playlist, currentTrack, isPlaying } = storeToRefs(playerStore)
 
+// 播放列表内容容器的引用
+const playlistContentRef = ref(null)
+
 // 控制动画状态
 const isClosing = ref(false)
 let closeTimeout = null
+
+// 滚动到当前播放的歌曲
+const scrollToCurrentTrack = () => {
+  if (!currentTrack.value || playlist.value.length === 0) return
+  
+  const currentIndex = playlist.value.findIndex(t => t.path === currentTrack.value.path)
+  if (currentIndex === -1) return
+  
+  nextTick(() => {
+    const container = document.querySelector('.playlist-content')
+    const items = document.querySelectorAll('.list-item')
+    
+    if (container && items[currentIndex]) {
+      const item = items[currentIndex]
+      const containerRect = container.getBoundingClientRect()
+      const itemRect = item.getBoundingClientRect()
+      
+      // 计算滚动位置，让当前歌曲显示在容器中间
+      const scrollTop = item.offsetTop - container.offsetTop - (containerRect.height / 2) + (itemRect.height / 2)
+      
+      container.scrollTo({
+        top: Math.max(0, scrollTop),
+        behavior: 'smooth'
+      })
+    }
+  })
+}
+
+// 组件挂载时滚动到当前歌曲
+onMounted(() => {
+  // 稍微延迟以确保列表已渲染
+  setTimeout(scrollToCurrentTrack, 100)
+})
 
 // 关闭动画处理
 const handleClose = () => {

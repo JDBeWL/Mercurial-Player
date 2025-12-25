@@ -10,7 +10,7 @@
       <div class="cover-container" data-tauri-drag-region>
         <div class="cover" :style="{ backgroundImage: currentTrackCover }">
           <div v-if="!currentTrack || !currentTrack.cover" class="cover-placeholder">
-            <span class="material-symbols-rounded">music_note</span>
+            <span class="material-symbols-rounded">album</span>
           </div>
         </div>
         <!-- 悬浮遮罩：恢复按钮 -->
@@ -51,6 +51,10 @@
          @mouseup="endSeeking"
          @mouseleave="endSeeking">
       <div class="progress-fill" :style="{ width: progressPercentage + '%' }"></div>
+      <!-- 时间预览提示 -->
+      <div v-if="isDragging" class="time-tooltip" :style="{ left: dragPercentage + '%' }">
+        {{ formatTime(previewTime) }}
+      </div>
     </div>
   </div>
 </template>
@@ -91,6 +95,20 @@ const progressPercentage = computed(() => {
   if (!duration.value) return 0
   return (currentTime.value / duration.value) * 100
 })
+
+// 预览时间（拖拽时显示）
+const previewTime = computed(() => {
+  if (!duration.value) return 0
+  return (dragPercentage.value / 100) * duration.value
+})
+
+// 格式化时间
+const formatTime = (seconds) => {
+  if (!seconds || isNaN(seconds)) return '0:00'
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.floor(seconds % 60)
+  return `${mins}:${secs.toString().padStart(2, '0')}`
+}
 
 // 方法
 const exitMiniMode = () => {
@@ -176,20 +194,20 @@ const updateDragPosition = (e) => {
   flex: 1;
   display: flex;
   align-items: center;
-  padding: 12px 16px;
-  gap: 14px;
+  padding: 8px 12px;
+  gap: 12px;
   min-width: 0;
 }
 
 /* 封面样式 */
 .cover-container {
   position: relative;
-  width: 56px;
-  height: 56px;
+  height: calc(100% - 10px);
+  aspect-ratio: 1;
   flex-shrink: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
   cursor: pointer;
 }
 
@@ -210,7 +228,7 @@ const updateDragPosition = (e) => {
 }
 
 .cover-placeholder .material-symbols-rounded {
-  font-size: 28px;
+  font-size: 26px;
 }
 
 .cover-overlay {
@@ -229,7 +247,7 @@ const updateDragPosition = (e) => {
 }
 
 .cover-overlay .material-symbols-rounded {
-  font-size: 24px;
+  font-size: 22px;
 }
 
 .cover-container:hover .cover-overlay {
@@ -243,13 +261,13 @@ const updateDragPosition = (e) => {
   flex-direction: column;
   justify-content: center;
   min-width: 0;
-  gap: 6px;
+  gap: 4px;
 }
 
 .track-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .track-title {
@@ -276,14 +294,14 @@ const updateDragPosition = (e) => {
 .controls {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   margin-top: 2px;
 }
 
 .icon-button {
   background: none;
   border: none;
-  padding: 6px;
+  padding: 4px;
   border-radius: 50%;
   color: var(--md-sys-color-on-surface);
   cursor: pointer;
@@ -307,14 +325,14 @@ const updateDragPosition = (e) => {
 }
 
 .icon-button.small .material-symbols-rounded {
-  font-size: 22px;
+  font-size: 20px;
 }
 
 .icon-button.play-pause {
   background-color: var(--md-sys-color-primary);
   color: var(--md-sys-color-on-primary);
-  padding: 8px;
-  margin: 0 4px;
+  padding: 6px;
+  margin: 0 2px;
 }
 
 .icon-button.play-pause:hover {
@@ -323,7 +341,7 @@ const updateDragPosition = (e) => {
 }
 
 .icon-button.play-pause .material-symbols-rounded {
-  font-size: 24px;
+  font-size: 20px;
 }
 
 /* 进度条样式 */
@@ -333,7 +351,7 @@ const updateDragPosition = (e) => {
   left: 0;
   right: 0;
   width: 100%;
-  height: 4px;
+  height: 3px;
   background-color: var(--md-sys-color-surface-variant);
   cursor: pointer;
   z-index: 10;
@@ -349,7 +367,34 @@ const updateDragPosition = (e) => {
   height: 100%;
   background-color: var(--md-sys-color-primary);
   transition: width 0.1s linear;
-  border-radius: 0 2px 2px 0;
+}
+
+/* 时间预览提示 */
+.time-tooltip {
+  position: absolute;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  background-color: var(--md-sys-color-inverse-surface);
+  color: var(--md-sys-color-inverse-on-surface);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+}
+
+.time-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: var(--md-sys-color-inverse-surface);
 }
 
 .material-symbols-rounded.filled {

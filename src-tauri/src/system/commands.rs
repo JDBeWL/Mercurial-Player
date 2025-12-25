@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use tauri::{command, AppHandle, LogicalSize, Manager, Size};
 
 /// 迷你模式窗口尺寸
-const MINI_SIZE: LogicalSize<f64> = LogicalSize { width: 320.0, height: 100.0 };
+const MINI_SIZE: LogicalSize<f64> = LogicalSize { width: 300.0, height: 100.0 };
 /// 默认窗口尺寸
 const DEFAULT_SIZE: LogicalSize<f64> = LogicalSize { width: 1250.0, height: 720.0 };
 /// 最小窗口尺寸

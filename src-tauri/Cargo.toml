@@ -1,13 +1,13 @@
 [package]
-name = "music-player"
+name = "mercurial-player"
 version = "0.1.0"
-description = "Mer Music App"
+description = "Mercurial Player - A modern music player with fluid experience"
 authors = ["jdbEwl"]
 license = ""
 repository = ""
 edition = "2024"
 rust-version = "1.92"
-default-run = "mer-music-player"
+default-run = "mercurial-player"
 
 [build-dependencies]
 tauri-build = { version = "2.5", features = [] }
@@ -73,7 +73,7 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [[bin]]
-name = "mer-music-player"
+name = "mercurial-player"
 path = "src/main.rs"
 
 [profile.dev]
@@ -82,10 +82,9 @@ debug = true
 incremental = true
 
 [profile.release]
-opt-level = "z"  # 优化体积而非速度
-lto = "fat"      # 全链接时优化，进一步减小体积
+opt-level = "z"
+lto = "fat"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
-# 减小二进制体积
 debug = false

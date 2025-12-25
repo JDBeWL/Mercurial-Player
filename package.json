@@ -1,5 +1,5 @@
 {
-  "name": "mer-music-player",
+  "name": "mercurial-player",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -18,7 +18,6 @@
     "@tauri-apps/plugin-fs": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.0.0",
     "pinia": "^2.1.6",
-    "sass": "^1.64.2",
     "vue": "^3.3.4",
     "vue-i18n": "^9.14.5"
   },

@@ -2256,6 +2256,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "mercurial-player"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "base64 0.22.1",
+ "cpal",
+ "crossbeam-channel",
+ "dirs",
+ "lofty",
+ "md5",
+ "once_cell",
+ "rayon",
+ "reqwest",
+ "rodio",
+ "rubato",
+ "serde",
+ "serde_json",
+ "spectrum-analyzer",
+ "symphonia",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-shell",
+ "tokio",
+ "urlencoding",
+ "walkdir",
+ "wasapi",
+]
+
+[[package]]
 name = "microfft"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2318,37 +2349,6 @@ dependencies = [
  "serde",
  "thiserror 2.0.17",
  "windows-sys 0.60.2",
-]
-
-[[package]]
-name = "music-player"
-version = "0.1.0"
-dependencies = [
- "aes",
- "base64 0.22.1",
- "cpal",
- "crossbeam-channel",
- "dirs",
- "lofty",
- "md5",
- "once_cell",
- "rayon",
- "reqwest",
- "rodio",
- "rubato",
- "serde",
- "serde_json",
- "spectrum-analyzer",
- "symphonia",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-shell",
- "tokio",
- "urlencoding",
- "walkdir",
- "wasapi",
 ]
 
 [[package]]

@@ -149,7 +149,18 @@
     "enableEq": "Enable Equalizer",
     "eqPreset": "Preset",
     "preamp": "Preamp",
-    "eqBands": "Band Adjustment"
+    "eqBands": "Band Adjustment",
+    "plugins": "Plugins",
+    "openPluginsFolder": "Open Plugins Folder",
+    "noPlugins": "No plugins installed",
+    "pluginHint": "Place plugin folders in the plugins directory to install",
+    "activate": "Activate",
+    "deactivate": "Deactivate",
+    "uninstall": "Uninstall",
+    "forDevelopers": "For Developers",
+    "pluginDevHint": "Want to develop plugins? Check out the plugin development documentation to learn how to create your own plugins.",
+    "viewTemplate": "View Template",
+    "playStats": "Play Stats"
   },
   "themeSelector": {
     "chooseThemeColor": "Choose Theme Color",

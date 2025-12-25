@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Mer Music Player",
+  "productName": "Mercurial Player",
   "version": "0.1.0",
-  "identifier": "com.mercury.musicplayer",
+  "identifier": "com.mercurial.player",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,8 +13,8 @@
     "windows": [
       {
         "label": "main",
-        "title": "Music Player",
-        "userAgent": "Music Player",
+        "title": "Mercurial Player",
+        "userAgent": "Mercurial Player",
         "width": 1250,
         "height": 720,
         "minWidth": 1200,
@@ -42,8 +42,8 @@
     "resources": [],
     "copyright": "",
     "category": "Music",
-    "shortDescription": "A modern music player",
-    "longDescription": "A modern music player with advanced audio features"
+    "shortDescription": "A modern music player with fluid experience",
+    "longDescription": "Mercurial Player - A modern music player with advanced audio features and plugin support"
   },
   "plugins": {
     "fs": {

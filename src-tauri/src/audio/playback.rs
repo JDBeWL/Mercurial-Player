@@ -227,6 +227,15 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
     let player = &state.player;
     {
         let sink = player.sink.lock().unwrap();
+        // 先淡出当前音频，避免爆音
+        let current_vol = sink.volume();
+        if current_vol > 0.0 && !sink.empty() {
+            // 快速淡出
+            for i in (0..10).rev() {
+                sink.set_volume(current_vol * (i as f32 / 10.0));
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
         sink.stop();
         sink.set_volume(*player.target_volume.lock().unwrap());
     }
@@ -243,12 +252,21 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
             if let Some(t) = position { let _ = dec.seek(Duration::from_secs_f32(t)); }
             let _ = dec.prefill_buffer();
             println!("使用Symphonia解码器: {path}");
-            Box::new(VisualizationSource::new(LockFreeSymphoniaSource::new(dec), waveform, spectrum, Some(app.clone())).with_eq_settings(eq_settings))
+            // 添加淡入效果
+            Box::new(
+                VisualizationSource::new(LockFreeSymphoniaSource::new(dec), waveform, spectrum, Some(app.clone()))
+                    .with_eq_settings(eq_settings)
+                    .fade_in(Duration::from_millis(50))
+            )
         }
         Err(e) => {
             println!("Symphonia解码失败，回退到rodio: {e}");
             let file = File::open(path).map_err(|e| e.to_string())?;
-            Box::new(VisualizationSource::new(rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?.convert_samples::<f32>(), waveform, spectrum, Some(app.clone())).with_eq_settings(eq_settings))
+            Box::new(
+                VisualizationSource::new(rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?.convert_samples::<f32>(), waveform, spectrum, Some(app.clone()))
+                    .with_eq_settings(eq_settings)
+                    .fade_in(Duration::from_millis(50))
+            )
         }
     };
     let sink = player.sink.lock().unwrap();
@@ -401,7 +419,17 @@ fn decode_and_push_to_wasapi(
         let output_frames: Vec<Vec<f32>> = if let Some(ref mut r) = resampler {
             let actual = input_frames[0].len();
             if actual < chunk_size {
-                for ch in &mut input_frames { ch.resize(chunk_size, 0.0); }
+                // 使用最后一个样本值进行平滑填充，而不是用 0 填充
+                // 这样可以避免突然的静音导致的爆音
+                for ch in &mut input_frames {
+                    let last_sample = ch.last().copied().unwrap_or(0.0);
+                    // 渐变到 0，而不是直接填充 0
+                    let samples_to_add = chunk_size - ch.len();
+                    for i in 0..samples_to_add {
+                        let fade = 1.0 - (i as f32 / samples_to_add as f32);
+                        ch.push(last_sample * fade);
+                    }
+                }
             }
             r.process(&input_frames, None).unwrap_or_else(|_| input_frames.clone())
         } else { input_frames.clone() };
@@ -474,9 +502,18 @@ pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, t
             Arc::clone(&player.spectrum_data),
             Some(app.clone()),
         ).with_eq_settings(eq_settings)
+        .fade_in(Duration::from_millis(30)) // seek 时使用更短的淡入
     );
     {
         let sink = player.sink.lock().unwrap();
+        // 快速淡出避免爆音
+        let current_vol = sink.volume();
+        if current_vol > 0.0 && !sink.empty() {
+            for i in (0..5).rev() {
+                sink.set_volume(current_vol * (i as f32 / 5.0));
+                std::thread::sleep(Duration::from_millis(3));
+            }
+        }
         sink.stop();
         sink.set_volume(*player.target_volume.lock().unwrap());
     }

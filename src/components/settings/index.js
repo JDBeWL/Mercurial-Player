@@ -1,0 +1,6 @@
+export { default as SettingsNav } from './SettingsNav.vue'
+export { default as FolderSettings } from './FolderSettings.vue'
+export { default as GeneralSettings } from './GeneralSettings.vue'
+export { default as TitleExtractionSettings } from './TitleExtractionSettings.vue'
+export { default as LyricsSettings } from './LyricsSettings.vue'
+export { default as PlaylistSettings } from './PlaylistSettings.vue'

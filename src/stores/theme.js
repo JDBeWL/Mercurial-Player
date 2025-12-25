@@ -68,7 +68,7 @@ export const useThemeStore = defineStore('theme', {
   state: () => ({
     isDarkMode: false,
     themePreference: 'auto', // 'auto', 'light', 'dark', or a hex color
-    primaryColor: '#64B5F6', // 默认天空蓝
+    primaryColor: '#E67EA5', // 默认杏山和纱主题色
     enableGlassEffect: true, // 玻璃态效果
     enableGradients: true, // 渐变效果
   }),
@@ -100,13 +100,13 @@ export const useThemeStore = defineStore('theme', {
       if (preference === 'auto') {
         const prefersDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
         this.isDarkMode = prefersDarkMode;
-        this.primaryColor = '#64B5F6'; // 默认天空蓝
+        this.primaryColor = '#E67EA5'; // 默认杏山和纱主题色
       } else if (preference === 'light') {
         this.isDarkMode = false;
-        this.primaryColor = '#64B5F6'; // 默认天空蓝
+        this.primaryColor = '#E67EA5'; // 默认杏山和纱主题色
       } else if (preference === 'dark') {
         this.isDarkMode = true;
-        this.primaryColor = '#64B5F6'; // 默认天空蓝
+        this.primaryColor = '#E67EA5'; // 默认杏山和纱主题色
       } else if (preference.startsWith('#')) {
         this.primaryColor = preference;
       }

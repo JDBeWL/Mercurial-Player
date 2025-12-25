@@ -1,4 +1,4 @@
-![light-virtview-pic](/RISE-darkpink-light-virtview-ass.png)
+![light-virtview-pic](/RISE-pink-light-virtview-ass.png)
 ![dark-modlyrics-pic](/ツキノカメ-blue-dark-modlyrics-ass.png)
 ![light-classic-pic](/BUZZ_CUTZ-blue-light-classiclyrics-lrc.png)
 > 如你所见，这就是一个非常简单的音乐播放器，部分功能未经验证其高可靠性。
@@ -6,12 +6,12 @@
 # 功能特性
 
 ## 音频播放
-- [x] 支持格式：MP3、FLAC、WAV（8/16/24/32位）的解码（WAV格式才发现问题，测试不完全，OGG、M4A、AAC的格式没有测试）
+- [x] 支持格式：MP3、FLAC、WAV（8/16/24/32位）的解码（AAC好像解不开，OGG、M4A、AAC的格式没有测试）
 - [x] Symphonia作为解码器
 - [x] 支持切换输出设备
-- [x] WASAPI独占模式（直接访问音频设备，获得最佳音质）
-- [x] 高采样率支持（最高384kHz）
-- [x] 高质量重采样（使用rubato库）
+- [x] WASAPI独占模式（Windows下的直接访问音频设备，获得最佳音质）
+- [x] 高采样率支持
+- [x] 高质量重采样
 
 ## 歌词功能
 - [x] 多格式支持：LRC、ASS
@@ -53,11 +53,17 @@
 - [x] 标题提取配置
 - [ ] 配置导入/导出
 
-# TODO
+## 插件
+- [x] 插件系统
+- [x] 播放统计（内置插件）
+
+## 安全
+- [x] 文件系统安全限制
+
+## 其他
 - [ ] 更好的字体显示
 - [ ] OGG、M4A、AAC格式测试
 - [ ] 歌词编辑功能
-- [x] 均衡器
 
 # 技术栈
 

@@ -1,21 +1,21 @@
-//! Mer Music Player - 主入口模块
+//! Mercurial Player - 主入口模块
 //!
 //! 这是一个基于 Tauri 的音乐播放器应用程序。
 //! 支持 WASAPI 独占模式和共享模式播放。
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use music_player::{
+use mercurial_player::{
     AppState, PlayerState, audio,
     config,
     config::ConfigManager,
     equalizer,
     equalizer::{Equalizer, GlobalEqualizer},
-    media, system,
+    media, plugins, system,
 };
 
 #[cfg(windows)]
-use music_player::audio::WasapiExclusivePlayback;
+use mercurial_player::audio::WasapiExclusivePlayback;
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{OutputStream, Sink};
@@ -176,6 +176,14 @@ fn main() {
             equalizer::commands::reset_eq,
             // 窗口命令
             system::commands::set_mini_mode,
+            // 插件命令
+            plugins::commands::list_plugins,
+            plugins::commands::read_plugin_manifest,
+            plugins::commands::read_plugin_main,
+            plugins::commands::install_plugin,
+            plugins::commands::uninstall_plugin,
+            plugins::commands::get_plugins_directory,
+            plugins::commands::open_plugins_directory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

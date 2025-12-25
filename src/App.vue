@@ -53,7 +53,7 @@
                     <div :key="currentTrack ? currentTrack.path : 'no-track'" class="album-art-wrapper">
                       <div class="album-art" :style="{ backgroundImage: currentTrackCover }">
                         <div v-if="!currentTrack || !currentTrack.cover" class="album-art-placeholder">
-                          <span class="material-symbols-rounded">music_note</span>
+                          <span class="material-symbols-rounded">album</span>
                         </div>
                       </div>
                     </div>
@@ -821,7 +821,7 @@ onUnmounted(() => {
   border-radius: 0;
 }
 
-/* 错误通知样式 - 增强玻璃态效果 */
+/* 错误通知样式 */
 .error-notifications {
   position: fixed;
   top: 80px;
@@ -839,19 +839,17 @@ onUnmounted(() => {
   gap: 12px;
   padding: 12px 16px;
   border-radius: var(--md-sys-shape-corner-medium);
-  background-color: var(--md-sys-color-surface-container-high);
-  backdrop-filter: blur(var(--glass-blur, 12px));
-  box-shadow: var(--shadow-medium, 0 4px 12px rgba(0, 0, 0, 0.15));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   min-width: 300px;
   max-width: 500px;
   pointer-events: auto;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.2s ease;
 }
 
 .error-notification:hover {
-  transform: translateX(-4px) scale(1.02);
-  box-shadow: var(--shadow-strong, 0 6px 16px rgba(0, 0, 0, 0.2));
+  transform: translateX(-4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .error-notification--error {
@@ -861,9 +859,9 @@ onUnmounted(() => {
 }
 
 .error-notification--warning {
-  border-left: 4px solid var(--md-sys-color-warning);
-  background-color: var(--md-sys-color-warning-container);
-  color: var(--md-sys-color-on-warning-container);
+  border-left: 4px solid #f59e0b;
+  background-color: #fef3c7;
+  color: #92400e;
 }
 
 .error-notification--info {
