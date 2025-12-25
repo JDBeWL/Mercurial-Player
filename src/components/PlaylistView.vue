@@ -483,7 +483,7 @@ const removeTrackByPath = (path) => {
 }
 
 .list-item.selected .list-item-headline {
-  color: var(--theme-on-primary-container);
+  color: var(--md-sys-color-on-primary-container);
 }
 
 .list-item-supporting {
@@ -495,7 +495,7 @@ const removeTrackByPath = (path) => {
 }
 
 .list-item.selected .list-item-supporting {
-  color: var(--theme-on-primary-container);
+  color: var(--md-sys-color-on-primary-container);
 }
 
 .list-item-trailing {
@@ -541,7 +541,7 @@ const removeTrackByPath = (path) => {
 
 .list-item.selected .play-button .material-symbols-rounded,
 .list-item.selected .pause-button .material-symbols-rounded {
-  color: var(--theme-on-primary-container);
+  color: var(--md-sys-color-on-primary-container);
 }
 
 @media (max-width: 480px) {

@@ -12,8 +12,8 @@
     border-radius: 12px;
     cursor: pointer;
 
-    color: var(--md-sys-color-on-surface-variant, #888);
-    opacity: 0.45;
+    color: var(--md-sys-color-on-surface-variant);
+    opacity: 0.6;
     transform: scale(0.94);
 
     transform-origin: var(--align-origin, left center);
@@ -27,9 +27,22 @@
         filter 0.25s linear;
 }
 
+/* 暗色模式下非活动歌词：只用模糊效果，不降低透明度 */
+[data-theme="dark"] .lyrics-style-modern .lyrics {
+    opacity: 0.7;
+    filter: blur(1.2px);
+}
+
 .lyrics-style-modern .lyrics:hover {
     background-color: rgba(255, 255, 255, 0.04);
     opacity: 0.7;
+    filter: blur(0px);
+}
+
+/* 暗色模式下 hover：不要矩形背景，保持原透明度 */
+[data-theme="dark"] .lyrics-style-modern .lyrics:hover {
+    background-color: transparent;
+    opacity: 0.85;
     filter: blur(0px);
 }
 
@@ -41,6 +54,12 @@
     transform: scale(1.05);
     /* 放大 */
     text-shadow: 0 0 15px rgba(255, 255, 255, 0.15);
+}
+
+/* 暗色模式下活动歌词 */
+[data-theme="dark"] .lyrics-style-modern .lyrics.active {
+    opacity: 1;
+    filter: blur(0px);
 }
 
 .lyrics-style-modern .first-line {

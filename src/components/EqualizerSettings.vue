@@ -83,6 +83,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import logger from '../utils/logger';
 
 // 状态
 const enabled = ref(false);
@@ -146,7 +147,7 @@ const loadSettings = async () => {
     
     detectCurrentPreset();
   } catch (error) {
-    console.error('Failed to load EQ settings:', error);
+    logger.error('Failed to load EQ settings:', error);
   }
 };
 
@@ -168,7 +169,7 @@ const toggleEnabled = async () => {
     await invoke('set_eq_enabled', { enabled: !enabled.value });
     enabled.value = !enabled.value;
   } catch (error) {
-    console.error('Failed to toggle EQ:', error);
+    logger.error('Failed to toggle EQ:', error);
   }
 };
 
@@ -210,7 +211,7 @@ const updatePreampFromEvent = async (e) => {
     await invoke('set_eq_preamp', { preamp: roundedValue });
     preamp.value = roundedValue;
   } catch (error) {
-    console.error('Failed to set preamp:', error);
+    logger.error('Failed to set preamp:', error);
   }
 };
 
@@ -255,7 +256,7 @@ const updateBandFromEvent = async (e, index) => {
     gains.value[index] = roundedValue;
     currentPreset.value = '';
   } catch (error) {
-    console.error('Failed to set band gain:', error);
+    logger.error('Failed to set band gain:', error);
   }
 };
 
@@ -266,7 +267,7 @@ const applyPreset = async (preset) => {
     gains.value = [...preset.gains];
     currentPreset.value = preset.name;
   } catch (error) {
-    console.error('Failed to apply preset:', error);
+    logger.error('Failed to apply preset:', error);
   }
 };
 
@@ -276,7 +277,7 @@ const resetEq = async () => {
     await invoke('reset_eq');
     await loadSettings();
   } catch (error) {
-    console.error('Failed to reset EQ:', error);
+    logger.error('Failed to reset EQ:', error);
   }
 };
 

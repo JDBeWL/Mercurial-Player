@@ -225,7 +225,7 @@ const updateDragPosition = (e) => {
   justify-content: center;
   opacity: 0;
   transition: opacity 0.2s ease;
-  color: white;
+  color: var(--md-sys-color-on-surface);
 }
 
 .cover-overlay .material-symbols-rounded {

@@ -40,6 +40,7 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { usePlayerStore } from '@/stores/player';
 import { useLyrics } from '@/composables/useLyrics';
 import { listen } from '@tauri-apps/api/event';
+import logger from '@/utils/logger';
 
 export default {
   name: 'VisualizerPanel',
@@ -82,9 +83,20 @@ export default {
     // --- 视觉时间 (用于卡拉OK) ---
     const visualTime = ref(0);
     let lastFrameTime = 0;
+    let wasPlaying = false; // 追踪上一帧的播放状态
 
+    // 监听时间跳变（seek 操作）
+    watch(() => playerStore.currentTime, (newTime, oldTime) => {
+        const jump = newTime - oldTime;
+        if (Math.abs(jump) > 1.5 || jump < -0.1) {
+            visualTime.value = newTime;
+        }
+    });
+
+    // 应用歌词偏移
     const getKaraokeStyle = (word) => {
-        const t = visualTime.value;
+        const offset = playerStore.lyricsOffset || 0;
+        const t = visualTime.value - offset;
         if (t >= word.end) return { '--progress': '100%', color: 'var(--md-sys-color-primary)' };
         if (t < word.start) return { '--progress': '0%', color: 'var(--md-sys-color-on-surface-variant)' };
 
@@ -125,11 +137,9 @@ export default {
           ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--md-sys-color-primary').trim() || '#6750a4';
           ctx.stroke();
           
-          // 更新视觉时间
-          if (!lastFrameTime) lastFrameTime = timestamp;
-          const deltaTime = (timestamp - lastFrameTime) / 1000;
-          lastFrameTime = timestamp;
+          // 暂停时同步视觉时间
           visualTime.value = playerStore.currentTime;
+          wasPlaying = false;
           
           animationId = requestAnimationFrame(drawVisualizer);
           return;
@@ -186,24 +196,33 @@ export default {
       
       // 更新视觉时间
       if (!lastFrameTime) lastFrameTime = timestamp;
-      const deltaTime = (timestamp - lastFrameTime) / 1000;
+      const deltaTime = Math.min((timestamp - lastFrameTime) / 1000, 0.1);
       lastFrameTime = timestamp;
       
       const realTime = playerStore.currentTime;
+      const isPlaying = playerStore.isPlaying;
       
-      if (playerStore.isPlaying) {
+      // 检测暂停后恢复
+      if (isPlaying && !wasPlaying) {
+          lastFrameTime = timestamp;
+      }
+      wasPlaying = isPlaying;
+      
+      if (isPlaying) {
           // 播放中：基于帧间隔累加时间，并动态调整速度以消除漂移 (P控制器)
-          let speed = 1.0;
           const diff = visualTime.value - realTime;
 
           if (Math.abs(diff) > 0.5) {
-              // 误差超过 0.5s，视为 Seek 或卡顿，硬同步
+              // 误差超过 0.5s，硬同步
               visualTime.value = realTime;
+          } else if (Math.abs(diff) > 0.05) {
+              // 误差在 0.05s ~ 0.5s 之间，平滑追赶
+              const speed = 1.0 - diff * 2.0;
+              const clampedSpeed = Math.max(0.7, Math.min(1.3, speed));
+              visualTime.value += deltaTime * clampedSpeed;
           } else {
-              // 微小误差：平滑追赶
-              speed = 1.0 - diff;
-              speed = Math.max(0.5, Math.min(1.5, speed));
-              visualTime.value += deltaTime * speed;
+              // 误差很小，正常累加
+              visualTime.value += deltaTime;
           }
       } else {
           // 暂停中：直接同步
@@ -236,7 +255,7 @@ export default {
           }
         });
       } catch (error) {
-        console.error('Failed to setup spectrum listener:', error);
+        logger.error('Failed to setup spectrum listener:', error);
       }
       
       animationId = requestAnimationFrame(drawVisualizer);

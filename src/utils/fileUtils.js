@@ -1,6 +1,8 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { readTextFile, exists } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
+import logger from './logger';
+import errorHandler, { ErrorType, ErrorSeverity, handlePromise } from './errorHandler';
 
 /**
  * 文件工具类，处理文件和目录相关操作
@@ -12,19 +14,23 @@ export class FileUtils {
    * @returns {Promise<string|null>} 选中的文件夹路径
    */
   static async selectFolder(options = {}) {
-    try {
-      const selected = await open({
+    const result = await handlePromise(
+      open({
         directory: true,
         multiple: false,
         title: 'Select a folder',
         ...options
-      });
-      
-      return selected;
-    } catch (error) {
-      console.error('Error selecting folder:', error);
-      return null;
-    }
+      }),
+      {
+        type: ErrorType.FILE_PERMISSION_DENIED,
+        severity: ErrorSeverity.MEDIUM,
+        context: { action: 'selectFolder' },
+        showToUser: false,
+        throw: false
+      }
+    );
+
+    return result.success ? result.data : null;
   }
 
   /**
@@ -33,18 +39,22 @@ export class FileUtils {
    * @returns {Promise<string[]|null>} 选中的文件路径数组
    */
   static async selectFiles(options = {}) {
-    try {
-      const selected = await open({
+    const result = await handlePromise(
+      open({
         multiple: true,
         title: 'Select files',
         ...options
-      });
-      
-      return selected;
-    } catch (error) {
-      console.error('Error selecting files:', error);
-      return null;
-    }
+      }),
+      {
+        type: ErrorType.FILE_PERMISSION_DENIED,
+        severity: ErrorSeverity.MEDIUM,
+        context: { action: 'selectFiles' },
+        showToUser: false,
+        throw: false
+      }
+    );
+
+    return result.success ? result.data : null;
   }
 
   /**
@@ -53,13 +63,18 @@ export class FileUtils {
    * @returns {Promise<string[]>} 子文件夹路径数组
    */
   static async readDirectory(path) {
-    try {
-      const folders = await invoke('read_directory', { path });
-      return folders;
-    } catch (error) {
-      console.error('Error reading directory:', error);
-      return [];
-    }
+    const result = await handlePromise(
+      invoke('read_directory', { path }),
+      {
+        type: ErrorType.FILE_READ_ERROR,
+        severity: ErrorSeverity.MEDIUM,
+        context: { path, action: 'readDirectory' },
+        showToUser: false,
+        throw: false
+      }
+    );
+
+    return result.success ? result.data : [];
   }
 
   /**
@@ -68,13 +83,18 @@ export class FileUtils {
    * @returns {Promise<Object>} 包含音频文件的播放列表对象
    */
   static async getAudioFiles(path) {
-    try {
-      const playlist = await invoke('get_audio_files', { path });
-      return playlist;
-    } catch (error) {
-      console.error('Error getting audio files:', error);
-      return { name: '', files: [] };
-    }
+    const result = await handlePromise(
+      invoke('get_audio_files', { path }),
+      {
+        type: ErrorType.FILE_READ_ERROR,
+        severity: ErrorSeverity.MEDIUM,
+        context: { path, action: 'getAudioFiles' },
+        showToUser: false,
+        throw: false
+      }
+    );
+
+    return result.success ? result.data : { name: '', files: [] };
   }
   /**
    * 检查文件是否存在
@@ -82,13 +102,18 @@ export class FileUtils {
    * @returns {Promise<boolean>} 文件是否存在
    */
   static async fileExists(path) {
-    try {
-      // 使用后端的check_file_exists命令，确保路径处理一致
-      return await invoke('check_file_exists', { path });
-    } catch (error) {
-      console.error('Error checking file existence:', error);
-      return false;
-    }
+    const result = await handlePromise(
+      invoke('check_file_exists', { path }),
+      {
+        type: ErrorType.FILE_READ_ERROR,
+        severity: ErrorSeverity.LOW,
+        context: { path, action: 'fileExists' },
+        showToUser: false,
+        throw: false
+      }
+    );
+
+    return result.success ? result.data : false;
   }
   /**
    * 读取文件内容
@@ -96,14 +121,18 @@ export class FileUtils {
    * @returns {Promise<string>} 文件内容
    */
   static async readFile(path) {
-    try {
-      // 使用后端命令读取文件，而不是直接使用 Tauri 的文件系统 API
-      const content = await invoke('read_lyrics_file', { path });
-      return content;
-    } catch (error) {
-      console.error('Error reading file:', error);
-      return '';
-    }
+    const result = await handlePromise(
+      invoke('read_lyrics_file', { path }),
+      {
+        type: ErrorType.FILE_READ_ERROR,
+        severity: ErrorSeverity.MEDIUM,
+        context: { path, action: 'readFile' },
+        showToUser: false,
+        throw: false
+      }
+    );
+
+    return result.success ? result.data : '';
   }
 
   /**

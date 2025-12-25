@@ -4,6 +4,7 @@ import { useConfigStore } from '@/stores/config';
 import { FileUtils } from '@/utils/fileUtils';
 import { neteaseApi } from '@/utils/neteaseApi';
 import { invoke } from '@tauri-apps/api/core';
+import logger from '@/utils/logger';
 
 // 模块级别的在线歌词缓存，避免组件重新挂载时丢失
 const onlineLyricsCache = new Map(); // key: trackPath, value: { lrc: string, parsed: array, source: string }
@@ -111,10 +112,10 @@ export function useLyrics() {
             const title = track.title || track.name || FileUtils.getFileNameWithoutExtension(track.path);
             const artist = track.artist || '';
             const duration = track.duration ? track.duration * 1000 : 0;
-            console.log('Fetching online lyrics for: ' + title + ' - ' + artist);
+            logger.debug('Fetching online lyrics for: ' + title + ' - ' + artist);
             const lyricsData = await neteaseApi.searchAndGetLyrics(title, artist, duration);
             if (!lyricsData || !lyricsData.lrc) {
-                console.log('No online lyrics found');
+                logger.debug('No online lyrics found');
                 return null;
             }
             let lrcContent = lyricsData.lrc;
@@ -123,7 +124,7 @@ export function useLyrics() {
             }
             return lrcContent;
         } catch (error) {
-            console.error('Failed to fetch online lyrics:', error);
+            logger.error('Failed to fetch online lyrics:', error);
             onlineLyricsError.value = error.message;
             return null;
         }
@@ -136,10 +137,10 @@ export function useLyrics() {
             const directory = FileUtils.getDirectoryPath(trackPath);
             const lyricsPath = directory + '/' + baseName + '.lrc';
             await invoke('write_lyrics_file', { path: lyricsPath, content: lrcContent });
-            console.log('Lyrics saved to: ' + lyricsPath);
+            logger.info('Lyrics saved to: ' + lyricsPath);
             return true;
         } catch (error) {
-            console.error('Failed to save lyrics:', error);
+            logger.error('Failed to save lyrics:', error);
             return false;
         }
     };
@@ -155,7 +156,7 @@ export function useLyrics() {
         // 先检查缓存中是否有这首歌的在线歌词
         const cached = onlineLyricsCache.get(trackPath);
         if (cached) {
-            console.log('Using cached online lyrics for:', trackPath);
+            logger.debug('Using cached online lyrics for:', trackPath);
             lyrics.value = cached.parsed;
             lyricsSource.value = cached.source;
             loading.value = false;
@@ -175,7 +176,7 @@ export function useLyrics() {
                 else if (ext === 'ass') lyrics.value = parseASS(content);
                 lyricsSource.value = 'local';
             } else if (configStore.lyrics?.enableOnlineFetch) {
-                console.log('No local lyrics found, trying online fetch...');
+                logger.debug('No local lyrics found, trying online fetch...');
                 const track = playerStore.currentTrack;
                 const onlineLrc = await fetchOnlineLyrics(track);
                 if (onlineLrc) {
@@ -201,7 +202,7 @@ export function useLyrics() {
                 }
             }
         } catch (e) {
-            console.error('Error loading lyrics:', e);
+            logger.error('Error loading lyrics:', e);
             onlineLyricsError.value = e.message;
         } finally {
             loading.value = false;
@@ -240,7 +241,7 @@ export function useLyrics() {
             }
             return false;
         } catch (e) {
-            console.error('Error fetching lyrics:', e);
+            logger.error('Error fetching lyrics:', e);
             onlineLyricsError.value = e.message;
             return false;
         } finally {
@@ -248,9 +249,9 @@ export function useLyrics() {
         }
     };
 
-    watch(() => playerStore.currentTrack?.path, loadLyrics, { immediate: true });
+    const stopWatchTrack = watch(() => playerStore.currentTrack?.path, loadLyrics, { immediate: true });
 
-    watchEffect(() => {
+    const stopWatchEffect = watchEffect(() => {
         // 应用歌词偏移：正值表示歌词提前（时间减小），负值表示歌词延后（时间增大）
         const offset = playerStore.lyricsOffset || 0;
         const currentTime = playerStore.currentTime + 0.05 - offset;
@@ -269,6 +270,12 @@ export function useLyrics() {
         }
     });
 
+    // 清理函数
+    const cleanup = () => {
+        stopWatchTrack();
+        stopWatchEffect();
+    };
+
     return {
         lyrics,
         loading,
@@ -276,6 +283,7 @@ export function useLyrics() {
         lyricsSource,
         onlineLyricsError,
         fetchAndSaveLyrics,
-        loadLyrics
+        loadLyrics,
+        cleanup
     };
 }

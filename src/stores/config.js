@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { useThemeStore } from './theme'
+import logger from '../utils/logger'
+import errorHandler, { ErrorType, ErrorSeverity, handlePromise } from '../utils/errorHandler'
 
 // 防抖函数
 function debounce(func, wait) {
@@ -99,66 +101,81 @@ export const useConfigStore = defineStore('config', {
       // 标记为初始化状态，防止自动保存
       this._isInitializing = true
 
-      try {
-        const config = await invoke('load_config')
-        if (config) {
-          this.$patch(config)
+      const configResult = await handlePromise(
+        invoke('load_config'),
+        {
+          type: ErrorType.CONFIG_LOAD_ERROR,
+          severity: ErrorSeverity.MEDIUM,
+          context: { action: 'loadConfig' },
+          showToUser: false,
+          throw: false
+        }
+      );
 
-          // 只在主题不同时才更新主题，避免不必要的重置
-          const themeStore = useThemeStore()
-          if (config.general && config.general.theme !== themeStore.themePreference) {
-            themeStore.setThemePreference(config.general.theme)
-          }
+      if (configResult.success && configResult.data) {
+        this.$patch(configResult.data)
 
-          console.log('Configuration loaded successfully')
+        // 只在主题不同时才更新主题，避免不必要的重置
+        const themeStore = useThemeStore()
+        if (configResult.data.general && configResult.data.general.theme !== themeStore.themePreference) {
+          themeStore.setThemePreference(configResult.data.general.theme)
         }
 
-        // 单独加载音乐文件夹列表
-        try {
-          const musicDirectories = await invoke('get_music_directories')
-          if (musicDirectories) {
-            this.musicDirectories = musicDirectories
-            // 同时更新音乐库存储中的音乐文件夹列表
-            const { useMusicLibraryStore } = await import('./musicLibrary')
-            const musicLibraryStore = useMusicLibraryStore()
-            musicLibraryStore.musicFolders = musicDirectories
-            console.log('Music directories loaded successfully')
-          }
-        } catch (error) {
-          console.warn('Failed to load music directories:', error)
-          this.musicDirectories = []
-        }
-
-        // 延迟标记初始化完成，确保所有配置都已应用
-        setTimeout(() => {
-          this.markInitializationComplete()
-        }, 1000)
-      } catch (error) {
-        console.warn('Failed to load config, using defaults:', error)
-        // 加载失败时使用默认配置
-
-        // 即使加载失败也要标记初始化完成
-        setTimeout(() => {
-          this.markInitializationComplete()
-        }, 1000)
+        logger.info('Configuration loaded successfully')
       }
+
+      // 单独加载音乐文件夹列表
+      const directoriesResult = await handlePromise(
+        invoke('get_music_directories'),
+        {
+          type: ErrorType.CONFIG_LOAD_ERROR,
+          severity: ErrorSeverity.LOW,
+          context: { action: 'loadMusicDirectories' },
+          showToUser: false,
+          throw: false
+        }
+      );
+
+      if (directoriesResult.success && directoriesResult.data) {
+        this.musicDirectories = directoriesResult.data
+        // 同时更新音乐库存储中的音乐文件夹列表
+        const { useMusicLibraryStore } = await import('./musicLibrary')
+        const musicLibraryStore = useMusicLibraryStore()
+        musicLibraryStore.musicFolders = directoriesResult.data
+        logger.info('Music directories loaded successfully')
+      } else {
+        this.musicDirectories = []
+      }
+
+      // 延迟标记初始化完成，确保所有配置都已应用
+      setTimeout(() => {
+        this.markInitializationComplete()
+      }, 1000)
     },
 
     /**
      * 立即保存配置到后端（用于手动保存）
      */
     async saveConfigNow() {
-      try {
-        // 深拷贝配置，以便在保存前更新主题
-        const configToSave = JSON.parse(JSON.stringify(this.$state))
-        // 更新主题
-        const themeStore = useThemeStore()
-        configToSave.general.theme = themeStore.themePreference
-        await invoke('save_config', { config: configToSave })
-        console.log('Configuration saved successfully')
-      } catch (error) {
-        console.error('Failed to save config:', error)
-        throw new Error('Failed to save configuration')
+      // 深拷贝配置，以便在保存前更新主题
+      const configToSave = JSON.parse(JSON.stringify(this.$state))
+      // 更新主题
+      const themeStore = useThemeStore()
+      configToSave.general.theme = themeStore.themePreference
+
+      const result = await handlePromise(
+        invoke('save_config', { config: configToSave }),
+        {
+          type: ErrorType.CONFIG_SAVE_ERROR,
+          severity: ErrorSeverity.MEDIUM,
+          context: { action: 'saveConfig' },
+          showToUser: true,
+          throw: true
+        }
+      );
+
+      if (result.success) {
+        logger.debug('Configuration saved successfully')
       }
     },
 
@@ -179,9 +196,9 @@ export const useConfigStore = defineStore('config', {
           config: configToExport,
           filePath
         })
-        console.log('Configuration exported successfully')
+        logger.info('Configuration exported successfully')
       } catch (error) {
-        console.error('Failed to export config:', error)
+        logger.error('Failed to export config:', error)
         throw new Error('Failed to export configuration')
       }
     },
@@ -194,10 +211,10 @@ export const useConfigStore = defineStore('config', {
         const config = await invoke('import_config', { filePath })
         if (config) {
           this.$patch(config)
-          console.log('Configuration imported successfully')
+          logger.info('Configuration imported successfully')
         }
       } catch (error) {
-        console.error('Failed to import config:', error)
+        logger.error('Failed to import config:', error)
         throw new Error('Failed to import configuration')
       }
     },
@@ -374,7 +391,7 @@ export const useConfigStore = defineStore('config', {
         await invoke('set_mini_mode', { enable: newMode })
         this.ui.miniMode = newMode
       } catch (error) {
-        console.error('Failed to toggle mini mode:', error)
+        logger.error('Failed to toggle mini mode:', error)
         // 如果后端失败，回滚状态
         this.ui.miniMode = !this.ui.miniMode
       }

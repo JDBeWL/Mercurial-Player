@@ -152,6 +152,13 @@ fn switch_to_wasapi_exclusive(
 
     std::thread::sleep(std::time::Duration::from_millis(200));
 
+    // 确保旧的 WASAPI 播放器被正确清理
+    {
+        let mut old_wasapi = state.player.wasapi_player.lock().unwrap();
+        // take() 会获取所有权，drop 会自动清理线程和资源
+        let _ = old_wasapi.take();
+    }
+
     let wasapi_playback = WasapiExclusivePlayback::new();
 
     match wasapi_playback.initialize(Some(device_name)) {

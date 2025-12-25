@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { TitleExtractor } from './titleExtractor.js'
+import logger from './logger'
 
 /**
  * 播放列表管理器
@@ -41,7 +42,7 @@ export class PlaylistManager {
       }
 
     } catch (error) {
-      console.error('Error getting audio file tree:', error)
+      logger.error('Error getting audio file tree:', error)
       throw error
     }
   }
@@ -75,7 +76,7 @@ export class PlaylistManager {
             const playlist = await invoke('get_audio_files', { path })
             node.audioFiles = playlist.files
           } catch (error) {
-            console.warn(`Failed to get audio files from ${path}:`, error)
+            logger.warn(`Failed to get audio files from ${path}:`, error)
           }
         }
 
@@ -97,7 +98,7 @@ export class PlaylistManager {
         return node
 
       } catch (error) {
-        console.error(`Error scanning directory ${path}:`, error)
+        logger.error(`Error scanning directory ${path}:`, error)
         return null
       }
     }
@@ -156,7 +157,7 @@ export class PlaylistManager {
   }
 
   /**
-   * 处理音频文件，应用标题提取规则（使用批量 API 优化）
+   * 处理音频文件，应用标题提取规则（使用批量API）
    */
   static async processAudioFiles(files, config) {
     if (!files || files.length === 0) {
@@ -185,7 +186,9 @@ export class PlaylistManager {
           duration: titleInfo.duration || file.duration || 0,
           bitrate: titleInfo.bitrate || file.bitrate || null,
           sampleRate: titleInfo.sampleRate || file.sampleRate || null,
-          channels: titleInfo.channels || file.channels || null
+          channels: titleInfo.channels || file.channels || null,
+          bitDepth: titleInfo.bitDepth || file.bitDepth || null,
+          format: titleInfo.format || file.format || null
         })
       } else {
         // 回退方案：如果批量获取失败
@@ -316,7 +319,7 @@ export class PlaylistManager {
       return results
 
     } catch (error) {
-      console.error('Error searching audio files:', error)
+      logger.error('Error searching audio files:', error)
       throw error
     }
   }
@@ -352,7 +355,7 @@ export class PlaylistManager {
       return findPlaylist(fileTree.directoryTree)
 
     } catch (error) {
-      console.error('Error getting playlist by path:', error)
+      logger.error('Error getting playlist by path:', error)
       throw error
     }
   }
@@ -374,7 +377,7 @@ export class PlaylistManager {
       return stats
 
     } catch (error) {
-      console.error('Error getting directory stats:', error)
+      logger.error('Error getting directory stats:', error)
       throw error
     }
   }

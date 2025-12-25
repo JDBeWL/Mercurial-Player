@@ -59,6 +59,9 @@ pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     last_emit_time: std::sync::atomic::AtomicU64,
     eq_settings: Arc<RwLock<EqSettings>>,
     eq_processor: EqProcessor,
+    // 缓存的 EQ 设置，减少锁读取频率
+    cached_eq_enabled: bool,
+    eq_update_counter: u32,
 }
 
 struct EqProcessor {
@@ -96,9 +99,18 @@ impl EqProcessor {
 }
 
 fn soft_clip(x: f32) -> f32 {
-    if x.abs() < 0.9 { x }
-    else if x > 0.0 { 0.9 + 0.1 * ((x - 0.9) / 0.1).tanh() }
-    else { -0.9 - 0.1 * ((-x - 0.9) / 0.1).tanh() }
+    // 使用更平滑的软削波，阈值提高到 0.95，过渡更柔和
+    let threshold = 0.95;
+    if x.abs() <= threshold {
+        x
+    } else {
+        // 使用 tanh 进行平滑压缩，保留更多动态范围
+        let sign = x.signum();
+        let abs_x = x.abs();
+        let over = abs_x - threshold;
+        // 更平滑的过渡：threshold + (1 - threshold) * tanh(over / (1 - threshold))
+        sign * (threshold + (1.0 - threshold) * (over / (1.0 - threshold) * 0.5).tanh())
+    }
 }
 
 impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
@@ -114,6 +126,8 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             last_emit_time: std::sync::atomic::AtomicU64::new(0),
             eq_settings: Arc::new(RwLock::new(EqSettings::default())),
             eq_processor: EqProcessor::new(sr, ch),
+            cached_eq_enabled: false,
+            eq_update_counter: 0,
         }
     }
 
@@ -122,6 +136,7 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         self.eq_settings = eq_settings;
         if let Ok(s) = self.eq_settings.read() {
             self.eq_processor.update_coefficients(&s);
+            self.cached_eq_enabled = s.enabled;
         }
         self
     }
@@ -133,10 +148,38 @@ impl<I: Source<Item = f32> + Send> Iterator for VisualizationSource<I> {
     fn next(&mut self) -> Option<Self::Item> {
         let sample = self.input.next()?;
         let ch = self.buffer.len() % self.eq_processor.channels;
-        let processed = if let Ok(s) = self.eq_settings.try_read() {
-            if self.buffer.is_empty() { self.eq_processor.update_coefficients(&s); }
-            self.eq_processor.process_sample(sample, ch, &s)
-        } else { sample };
+        
+        // 每 512 个采样才检查一次 EQ 设置，减少锁竞争
+        self.eq_update_counter += 1;
+        let should_update_eq = self.eq_update_counter >= 512;
+        
+        let processed = if should_update_eq {
+            self.eq_update_counter = 0;
+            if let Ok(s) = self.eq_settings.try_read() {
+                self.cached_eq_enabled = s.enabled;
+                if self.cached_eq_enabled {
+                    self.eq_processor.update_coefficients(&s);
+                }
+                self.eq_processor.process_sample(sample, ch, &s)
+            } else {
+                // 锁获取失败时使用缓存的状态
+                if self.cached_eq_enabled {
+                    // 使用上次的系数处理
+                    let settings = EqSettings { enabled: true, ..Default::default() };
+                    self.eq_processor.process_sample(sample, ch, &settings)
+                } else {
+                    sample
+                }
+            }
+        } else {
+            // 不更新设置，直接使用缓存的状态处理
+            if self.cached_eq_enabled {
+                let settings = EqSettings { enabled: true, ..Default::default() };
+                self.eq_processor.process_sample(sample, ch, &settings)
+            } else {
+                sample
+            }
+        };
 
         self.buffer.push(processed);
         if self.buffer.len() >= 1024 {

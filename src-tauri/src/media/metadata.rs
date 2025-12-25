@@ -22,6 +22,8 @@ pub struct TrackMetadata {
     pub bitrate: Option<u32>,
     pub sample_rate: Option<u32>,
     pub channels: Option<u8>,
+    pub bit_depth: Option<u8>,
+    pub format: Option<String>,
 }
 
 impl TrackMetadata {
@@ -110,6 +112,12 @@ pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> 
 
     let properties = tagged_file.properties();
     let duration = properties.duration().as_secs_f64();
+    
+    // 获取文件格式
+    let format = file_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_uppercase());
 
     let mut metadata = TrackMetadata {
         path: path.replace('/', "\\"),
@@ -118,6 +126,8 @@ pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> 
         bitrate: properties.audio_bitrate(),
         sample_rate: properties.sample_rate(),
         channels: properties.channels(),
+        bit_depth: properties.bit_depth(),
+        format,
         ..Default::default()
     };
 

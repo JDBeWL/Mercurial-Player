@@ -134,6 +134,24 @@
     <button class="fab" @click="togglePlaylist" v-if="playlist.length > 0">
       <span class="material-symbols-rounded">playlist_play</span>
     </button>
+
+    <!-- 错误通知 -->
+    <TransitionGroup name="error-notification" tag="div" class="error-notifications">
+      <div
+        v-for="notification in errorNotifications"
+        :key="notification.id"
+        :class="['error-notification', `error-notification--${notification.severity}`]"
+        @click="removeError(notification.id)"
+      >
+        <span class="material-symbols-rounded error-icon">
+          {{ notification.severity === 'error' ? 'error' : notification.severity === 'warning' ? 'warning' : 'info' }}
+        </span>
+        <span class="error-message">{{ notification.message }}</span>
+        <button class="error-close" @click.stop="removeError(notification.id)">
+          <span class="material-symbols-rounded">close</span>
+        </button>
+      </div>
+    </TransitionGroup>
   </div>
 </template>
 
@@ -146,6 +164,8 @@ import { usePlayerStore } from './stores/player'
 import { useThemeStore } from './stores/theme'
 import { useConfigStore } from './stores/config'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import logger from './utils/logger'
+import { useErrorNotification } from './composables/useErrorNotification'
 import PlayerControls from './components/PlayerControls.vue'
 import ProgressBar from './components/ProgressBar.vue'
 import LyricsDisplay from './components/LyricsDisplay.vue'
@@ -161,6 +181,9 @@ import { useLyrics } from './composables/useLyrics'
 const playerStore = usePlayerStore()
 const themeStore = useThemeStore()
 const configStore = useConfigStore()
+
+// 初始化错误通知
+const { errorNotifications, removeError, unsubscribe: unsubscribeErrorNotification } = useErrorNotification()
 
 // 获取当前窗口实例
 const appWindow = getCurrentWindow()
@@ -193,27 +216,43 @@ const currentTrackCover = computed(() => {
 })
 
 const formattedAudioInfo = computed(() => {
-  const { bitrate, sampleRate, channels } = audioInfo.value;
+  const { bitrate, sampleRate, channels, bitDepth, format } = audioInfo.value;
 
   const parts = [];
-  if (bitrate && bitrate !== 'N/A') {
+  
+  // 格式 (FLAC, MP3, WAV, etc.)
+  if (format) {
+    parts.push(format);
+  }
+  
+  // 比特率
+  if (bitrate) {
     parts.push(`${bitrate} kbps`);
   }
-  if (sampleRate && sampleRate !== 'N/A') {
-    parts.push(`${sampleRate} kHz`);
+  
+  // 采样率 (44100 -> 44.1 kHz)
+  if (sampleRate) {
+    const kHz = sampleRate >= 1000 ? (sampleRate / 1000).toFixed(1).replace(/\.0$/, '') : sampleRate;
+    parts.push(`${kHz} kHz`);
   }
-  if (channels && channels !== 'N/A') {
-    // 将 "2 channels" 显示为 "Stereo"
-    if (channels == 2) {
+  
+  // 位深度
+  if (bitDepth) {
+    parts.push(`${bitDepth} bit`);
+  }
+  
+  // 声道
+  if (channels) {
+    if (channels === 2) {
       parts.push('Stereo');
-    } else if (channels == 1) {
+    } else if (channels === 1) {
       parts.push('Mono');
     } else {
-      parts.push(`${channels} channels`);
+      parts.push(`${channels}ch`);
     }
   }
 
-  return parts.join(' • ');
+  return parts.join(' | ');
 });
 
 // 检查当前歌曲文件是否存在
@@ -284,7 +323,7 @@ const minimizeWindow = async () => {
   try {
     await appWindow.minimize()
   } catch (error) {
-    console.error('Failed to minimize window:', error)
+    logger.error('Failed to minimize window:', error)
   }
 }
 
@@ -304,7 +343,7 @@ const toggleFullscreen = async () => {
       isFullscreen.value = true
     }
   } catch (error) {
-    console.error('Failed to toggle fullscreen:', error)
+    logger.error('Failed to toggle fullscreen:', error)
   }
 }
 
@@ -312,14 +351,14 @@ const closeWindow = async () => {
   try {
     await appWindow.close()
   } catch (error) {
-    console.error('Failed to close window:', error)
+    logger.error('Failed to close window:', error)
   }
 }
 
 
 
 // 监听当前音轨变化，自动处理标题信息
-watchTrack(() => currentTrack.value)
+const stopWatchTrack = watchTrack(() => currentTrack.value)
 
 const transitionDirection = ref(null)
 
@@ -351,7 +390,7 @@ onMounted(async () => {
   try {
     await configStore.loadConfig()
   } catch (error) {
-    console.warn('Failed to load configuration:', error)
+    logger.warn('Failed to load configuration:', error)
   }
 
   // 设置语言
@@ -359,7 +398,7 @@ onMounted(async () => {
     const { setLocale } = await import('./i18n')
     setLocale(configStore.general.language || 'zh')
   } catch (error) {
-    console.error('Failed to apply language from config:', error)
+    logger.error('Failed to apply language from config:', error)
   }
 
   // 从配置加载主题设置
@@ -369,7 +408,7 @@ onMounted(async () => {
       themeStore.setThemePreference(savedTheme)
     }
   } catch (error) {
-    console.error('Failed to apply theme from config:', error)
+    logger.error('Failed to apply theme from config:', error)
   }
 
   // 应用主题
@@ -383,7 +422,7 @@ onMounted(async () => {
     isFullscreen.value = await appWindow.isFullscreen()
     isMaximized.value = await appWindow.isMaximized()
   } catch (error) {
-    console.error('Failed to check window state:', error)
+    logger.error('Failed to check window state:', error)
   }
 
   // 添加全局键盘事件监听器
@@ -393,6 +432,12 @@ onMounted(async () => {
 onUnmounted(() => {
   // 清理键盘事件监听器
   document.removeEventListener('keydown', handleKeyDown)
+  // 清理错误通知监听器
+  unsubscribeErrorNotification()
+  // 清理音轨监听器
+  if (stopWatchTrack) {
+    stopWatchTrack()
+  }
 })
 </script>
 
@@ -472,13 +517,14 @@ onUnmounted(() => {
   overflow: hidden;
   border-radius: 12px;
   transition: border-radius 0.3s ease;
+  background-color: var(--md-sys-color-surface-container-low);
 }
 
 .main-content {
   flex: 1;
   display: flex;
   overflow: hidden;
-  padding: 0.5% 6%;
+  padding: 0 6% 0.5%;
   background-color: var(--md-sys-color-surface-container-low);
 }
 
@@ -612,6 +658,7 @@ onUnmounted(() => {
   height: 100%;
   border-radius: var(--md-sys-shape-corner-medium);
   overflow: hidden;
+  box-shadow: var(--shadow-medium);
 }
 
 .album-art {
@@ -623,6 +670,11 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.album-art:hover {
+  transform: scale(1.02);
 }
 
 .album-art-placeholder {
@@ -767,5 +819,106 @@ onUnmounted(() => {
 .app-container[data-fullscreen="true"],
 .app-container[data-maximized="true"] {
   border-radius: 0;
+}
+
+/* 错误通知样式 - 增强玻璃态效果 */
+.error-notifications {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.error-notification {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--md-sys-shape-corner-medium);
+  background-color: var(--md-sys-color-surface-container-high);
+  backdrop-filter: blur(var(--glass-blur, 12px));
+  box-shadow: var(--shadow-medium, 0 4px 12px rgba(0, 0, 0, 0.15));
+  min-width: 300px;
+  max-width: 500px;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.error-notification:hover {
+  transform: translateX(-4px) scale(1.02);
+  box-shadow: var(--shadow-strong, 0 6px 16px rgba(0, 0, 0, 0.2));
+}
+
+.error-notification--error {
+  border-left: 4px solid var(--md-sys-color-error);
+  background-color: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
+}
+
+.error-notification--warning {
+  border-left: 4px solid var(--md-sys-color-warning);
+  background-color: var(--md-sys-color-warning-container);
+  color: var(--md-sys-color-on-warning-container);
+}
+
+.error-notification--info {
+  border-left: 4px solid var(--md-sys-color-primary);
+  background-color: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+.error-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.error-message {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.error-close {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+  flex-shrink: 0;
+}
+
+.error-close:hover {
+  opacity: 1;
+}
+
+.error-close .material-symbols-rounded {
+  font-size: 20px;
+}
+
+/* 错误通知动画 */
+.error-notification-enter-active,
+.error-notification-leave-active {
+  transition: all 0.3s ease;
+}
+
+.error-notification-enter-from {
+  opacity: 0;
+  transform: translateX(100%);
+}
+
+.error-notification-leave-to {
+  opacity: 0;
+  transform: translateX(100%);
 }
 </style>

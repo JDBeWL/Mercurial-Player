@@ -138,13 +138,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useMusicLibraryStore } from '../stores/musicLibrary'
 import { usePlayerStore } from '../stores/player'
 import { useConfigStore } from '../stores/config'
 
 import FileUtils from '../utils/fileUtils'
+import logger from '../utils/logger'
 
 const emit = defineEmits(['close'])
 
@@ -187,9 +188,19 @@ const directoryStats = reactive({
   maxDepth: 0
 })
 
+// 使用 shallowRef 缓存 enhancedPlaylists 结果，减少响应式开销
+const cachedEnhancedPlaylists = shallowRef([])
+const lastPlaylistsHash = ref('')
+const lastSortOrder = ref('')
 
+// 计算播放列表的哈希值用于检测变化
+const getPlaylistsHash = () => {
+  if (!playlists.value.length) return ''
+  return playlists.value.map(p => `${p.name}:${p.files?.length || 0}`).join('|')
+}
 
-const enhancedPlaylists = computed(() => {
+// 实际的计算逻辑
+const computeEnhancedPlaylists = () => {
   if (!playlists.value.length) return []
 
   let allPlaylists = []
@@ -270,7 +281,27 @@ const enhancedPlaylists = computed(() => {
     
     return 0
   })
-})
+}
+
+// 监听播放列表和排序变化，只在必要时重新计算
+watch(
+  [playlists, () => configStore.playlist.sortOrder],
+  () => {
+    const currentHash = getPlaylistsHash()
+    const currentSortOrder = configStore.playlist.sortOrder
+    
+    // 只有当播放列表或排序顺序真正变化时才重新计算
+    if (currentHash !== lastPlaylistsHash.value || currentSortOrder !== lastSortOrder.value) {
+      lastPlaylistsHash.value = currentHash
+      lastSortOrder.value = currentSortOrder
+      cachedEnhancedPlaylists.value = computeEnhancedPlaylists()
+    }
+  },
+  { immediate: true }
+)
+
+// 使用缓存的结果
+const enhancedPlaylists = computed(() => cachedEnhancedPlaylists.value)
 
 // 生命周期
 onMounted(async () => {
@@ -294,7 +325,7 @@ const refreshDirectoryTrees = async () => {
     await musicLibraryStore.refreshMusicFolders()
     await calculateDirectoryStats()
   } catch (error) {
-    console.error('Error refreshing directory trees:', error)
+    logger.error('Error refreshing directory trees:', error)
   } finally {
     isLoading.value = false
   }
@@ -406,11 +437,11 @@ const openFolderDialog = async () => {
     if (selected) {
       const result = await musicLibraryStore.addMusicFolder(selected)
       await calculateDirectoryStats()
-      console.log(result.message)
+      logger.info(result.message)
       
       // 检查是否是初次添加音乐库
       if (musicLibraryStore.musicFolders.length === 1) {
-        console.log('初次添加音乐库，正在刷新配置和播放列表...')
+        logger.info('初次添加音乐库，正在刷新配置和播放列表...')
         
         // 初次添加音乐库时，主动加载配置
         await configStore.loadConfig()
@@ -419,11 +450,11 @@ const openFolderDialog = async () => {
         await musicLibraryStore.refreshMusicFolders()
         await calculateDirectoryStats()
         
-        console.log('初次音乐库配置和播放列表生成完成')
+        logger.info('初次音乐库配置和播放列表生成完成')
       }
     }
   } catch (error) {
-    console.error('Error opening folder dialog:', error)
+    logger.error('Error opening folder dialog:', error)
   }
 }
 
@@ -727,7 +758,7 @@ const playFile = (file) => {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  color: white;
+  color: var(--md-sys-color-on-surface);
 }
 
 .loading-spinner .material-symbols-rounded {
@@ -746,18 +777,22 @@ const playFile = (file) => {
 }
 
 .filled-button {
-  background-color: var(--md-sys-color-primary);
-  color: var(--md-sys-color-on-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  background-color: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
   border: none;
-  padding: 10px 16px;
-  border-radius: var(--md-sys-shape-corner-medium);
+  border-radius: 20px;
   cursor: pointer;
   font-size: 14px;
-  transition: background-color 0.2s;
+  font-weight: 500;
+  transition: all 0.2s ease;
 }
 
 .filled-button:hover {
-  background-color: var(--md-sys-color-on-surface-variant);
+  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-primary-container));
 }
 
 .text-button {

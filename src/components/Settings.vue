@@ -300,6 +300,7 @@ import { setLocale } from '../i18n';
 import { useI18n } from 'vue-i18n';
 import AudioDeviceSettings from './AudioDeviceSettings.vue';
 import EqualizerSettings from './EqualizerSettings.vue';
+import logger from '../utils/logger';
 
 const configStore = useConfigStore();
 const activeTab = ref('folders');
@@ -323,7 +324,7 @@ const loadSystemFonts = async () => {
     const fonts = await invoke('get_system_fonts');
     systemFonts.value = ['sans-serif', 'serif', 'monospace', ...fonts];
   } catch (error) {
-    console.error('Failed to load system fonts:', error);
+    logger.error('Failed to load system fonts:', error);
   }
 };
 
@@ -350,7 +351,7 @@ const addFolder = async () => {
       }
     }
   } catch (error) {
-    console.error('Failed to add folder:', error);
+    logger.error('Failed to add folder:', error);
   }
 };
 
@@ -363,7 +364,7 @@ const removeFolder = async (index) => {
     const musicLibraryStore = useMusicLibraryStore();
     musicLibraryStore.musicFolders = result;
   } catch (error) {
-    console.error('Failed to remove folder:', error);
+    logger.error('Failed to remove folder:', error);
   }
 };
 
@@ -372,7 +373,7 @@ const saveConfig = async () => {
   try {
     await configStore.saveConfigNow();
   } catch (error) {
-    console.error('Failed to save config:', error);
+    logger.error('Failed to save config:', error);
   }
 };
 
@@ -414,7 +415,7 @@ const handleLanguageChange = async () => {
     setLocale(configStore.general.language);
     await configStore.saveConfigNow();
   } catch (error) {
-    console.error('Failed to change language:', error);
+    logger.error('Failed to change language:', error);
   }
 };
 

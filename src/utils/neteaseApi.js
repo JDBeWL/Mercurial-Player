@@ -4,6 +4,8 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import logger from './logger';
+import errorHandler, { ErrorType, ErrorSeverity, handlePromise } from './errorHandler';
 
 /**
  * 网易云音乐API类
@@ -17,17 +19,22 @@ export class NeteaseAPI {
    * @returns {Promise<Array>} 搜索结果
    */
   async searchSongs(keyword, limit = 10, offset = 0) {
-    try {
-      const songs = await invoke('netease_search_songs', {
+    const result = await handlePromise(
+      invoke('netease_search_songs', {
         keyword,
         limit,
         offset
-      });
-      return songs;
-    } catch (error) {
-      console.error('Search songs error:', error);
-      return [];
-    }
+      }),
+      {
+        type: ErrorType.NETWORK,
+        severity: ErrorSeverity.MEDIUM,
+        context: { keyword, limit, offset, action: 'searchSongs' },
+        showToUser: false,
+        throw: false
+      }
+    );
+
+    return result.success ? result.data : [];
   }
 
   /**
@@ -36,13 +43,18 @@ export class NeteaseAPI {
    * @returns {Promise<Object>} 歌词数据
    */
   async getLyrics(songId) {
-    try {
-      const lyrics = await invoke('netease_get_lyrics', { songId });
-      return lyrics;
-    } catch (error) {
-      console.error('Get lyrics error:', error);
-      return null;
-    }
+    const result = await handlePromise(
+      invoke('netease_get_lyrics', { songId }),
+      {
+        type: ErrorType.NETWORK,
+        severity: ErrorSeverity.MEDIUM,
+        context: { songId, action: 'getLyrics' },
+        showToUser: false,
+        throw: false
+      }
+    );
+
+    return result.success ? result.data : null;
   }
 
   /**
@@ -85,7 +97,12 @@ export class NeteaseAPI {
       // 获取歌词
       return await this.getLyrics(bestMatch.id);
     } catch (error) {
-      console.error('Search and get lyrics error:', error);
+      errorHandler.handle(error, {
+        type: ErrorType.NETWORK,
+        severity: ErrorSeverity.LOW,
+        context: { title, artist, duration, action: 'searchAndGetLyrics' },
+        showToUser: false
+      });
       return null;
     }
   }

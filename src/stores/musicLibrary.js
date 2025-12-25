@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { useConfigStore } from './config.js'
+import logger from '../utils/logger'
 
 export const useMusicLibraryStore = defineStore('musicLibrary', {
   state: () => ({
@@ -125,7 +126,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         this.musicFolders = await invoke('get_music_directories')
         return { success: true, message: 'Music directories loaded successfully' }
       } catch (error) {
-        console.error('Error loading music directories:', error)
+        logger.error('Error loading music directories:', error)
         return { success: false, message: error.toString() }
       }
     },
@@ -142,7 +143,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         configStore.musicDirectories = updatedFolders
         return { success: true, message: 'Folder added successfully' }
       } catch (error) {
-        console.error('Error adding music folder:', error)
+        logger.error('Error adding music folder:', error)
         return { success: false, message: error.toString() }
       }
     },
@@ -165,7 +166,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         
         return { success: true, message: 'Folder removed successfully' }
       } catch (error) {
-        console.error('Error removing music folder:', error)
+        logger.error('Error removing music folder:', error)
         return { success: false, message: error.toString() }
       }
     },
@@ -182,7 +183,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         configStore.musicDirectories = updatedFolders
         return { success: true, message: 'Music directories updated successfully' }
       } catch (error) {
-        console.error('Error setting music directories:', error)
+        logger.error('Error setting music directories:', error)
         return { success: false, message: error.toString() }
       }
     },
@@ -222,7 +223,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         
         return { success: true, message: 'Library refreshed successfully' }
       } catch (error) {
-        console.error('Error refreshing music folders:', error)
+        logger.error('Error refreshing music folders:', error)
         return { success: false, message: error.toString() }
       }
     },
@@ -329,7 +330,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         }
         
       } catch (error) {
-        console.error('Error searching files:', error)
+        logger.error('Error searching files:', error)
         this.error = error.message
         throw error
       } finally {

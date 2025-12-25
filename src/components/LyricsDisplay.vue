@@ -5,7 +5,6 @@
             
             <!-- 没有播放音乐时显示空闲状态 -->
             <div v-else-if="!hasCurrentTrack" class="no-lyrics idle-state">
-                <span class="material-symbols-rounded idle-icon">music_note</span>
                 <span>{{ $t('lyrics.noTrackPlaying') }}</span>
             </div>
             
@@ -70,6 +69,7 @@ import { usePlayerStore } from '@/stores/player';
 import { useConfigStore } from '@/stores/config';
 import { nextTick, ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import { useLyrics } from '@/composables/useLyrics';
+import logger from '@/utils/logger';
 
 export default {
     name: "LyricsDisplay",
@@ -80,8 +80,8 @@ export default {
 
         // 使用 composable
         const lyricsComposable = useLyrics();
-        console.log('lyricsComposable:', lyricsComposable);
-        console.log('fetchAndSaveLyrics:', lyricsComposable.fetchAndSaveLyrics);
+        logger.debug('lyricsComposable:', lyricsComposable);
+        logger.debug('fetchAndSaveLyrics:', lyricsComposable.fetchAndSaveLyrics);
         const { lyrics, loading, activeIndex, lyricsSource } = lyricsComposable;
         
         // 是否有当前播放的曲目
@@ -91,13 +91,13 @@ export default {
         const fetchingLyrics = ref(false);
         
         const handleFetchLyrics = async () => {
-            console.log('handleFetchLyrics called, composable:', lyricsComposable);
+            logger.debug('handleFetchLyrics called, composable:', lyricsComposable);
             fetchingLyrics.value = true;
             try {
                 if (typeof lyricsComposable.fetchAndSaveLyrics === 'function') {
                     await lyricsComposable.fetchAndSaveLyrics();
                 } else {
-                    console.error('fetchAndSaveLyrics is not a function:', lyricsComposable);
+                    logger.error('fetchAndSaveLyrics is not a function:', lyricsComposable);
                 }
             } finally {
                 fetchingLyrics.value = false;
@@ -110,45 +110,64 @@ export default {
         let rafId = null;
         let lastFrameTime = 0;
 
-        // 启动高频时间循环
+        // 启动高频时间循环（仅在播放时运行）
         const startAnimationLoop = () => {
+            if (rafId) return; // 防止重复启动
+            lastFrameTime = 0; // 重置时间戳
+            
             const animate = (timestamp) => {
                 if (!lastFrameTime) lastFrameTime = timestamp;
-                const deltaTime = (timestamp - lastFrameTime) / 1000;
+                const deltaTime = Math.min((timestamp - lastFrameTime) / 1000, 0.1); // 限制最大 deltaTime 为 100ms
                 lastFrameTime = timestamp;
 
                 const realTime = playerStore.currentTime;
                 
-                if (playerStore.isPlaying) {
-                    // 播放中：基于帧间隔累加时间，并动态调整速度以消除漂移
-                    let speed = 1.0;
-                    const diff = visualTime.value - realTime; // 正值表示视觉领先，负值表示落后
+                // 播放中：基于帧间隔累加时间，并动态调整速度以消除漂移
+                const diff = visualTime.value - realTime; // 正值表示视觉领先，负值表示落后
 
-                    if (Math.abs(diff) > 0.5) {
-                        // 误差超过 0.5s，视为 Seek 或严重卡顿，直接硬同步
-                        visualTime.value = realTime;
-                    } else {
-                        // P控制器：速度修正因子。diff 为正(快了)则减速，diff 为负(慢了)则加速
-                        speed = 1.0 - diff; 
-                        // 限制速度调整范围 [0.5, 1.5] 防止过度加速/减速
-                        speed = Math.max(0.5, Math.min(1.5, speed));
-                        visualTime.value += deltaTime * speed;
-                    }
-                } else {
-                    // 暂停中：直接同步
+                if (Math.abs(diff) > 0.5) {
+                    // 误差超过 0.5s，直接硬同步
                     visualTime.value = realTime;
+                } else if (Math.abs(diff) > 0.05) {
+                    // 误差在 0.05s ~ 0.5s 之间，使用 P 控制器平滑追赶
+                    const speed = 1.0 - diff * 2.0;
+                    const clampedSpeed = Math.max(0.7, Math.min(1.3, speed));
+                    visualTime.value += deltaTime * clampedSpeed;
+                } else {
+                    // 误差很小，正常累加
+                    visualTime.value += deltaTime;
                 }
 
                 rafId = requestAnimationFrame(animate);
             };
             rafId = requestAnimationFrame(animate);
         };
+        
+        // 停止动画循环
+        const stopAnimationLoop = () => {
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+        };
+        
+        // 监听播放状态，控制动画循环的启停
+        watch(() => playerStore.isPlaying, (isPlaying) => {
+            if (isPlaying) {
+                startAnimationLoop();
+            } else {
+                stopAnimationLoop();
+                // 暂停时同步到真实时间
+                visualTime.value = playerStore.currentTime;
+            }
+        }, { immediate: true });
 
         // 监听真实时间跳变（如拖拽进度条），立即同步
-        watch(() => playerStore.currentTime, (newTime) => {
-            // 只有当偏差非常大（说明发生了Seek）时才立即硬同步
-            // 小偏差交给 RAF 里的平滑算法处理，避免进度条抖动
-            if (Math.abs(visualTime.value - newTime) > 0.5) {
+        watch(() => playerStore.currentTime, (newTime, oldTime) => {
+            // 检测 seek 操作：时间跳变超过 1.5s（正常播放每次只增加 0.5s）
+            // 或者时间倒退（说明用户往回拖了）
+            const jump = newTime - oldTime;
+            if (Math.abs(jump) > 1.5 || jump < -0.1) {
                 visualTime.value = newTime;
             }
         });
@@ -298,12 +317,12 @@ export default {
         };
 
         onMounted(() => {
-            startAnimationLoop();
+            // 动画循环由 watch(isPlaying) 控制启停，无需在此启动
             window.addEventListener("resize", handleResize);
         });
 
         onUnmounted(() => {
-            if (rafId) cancelAnimationFrame(rafId);
+            stopAnimationLoop();
             // 清理 scrollTimeout
             if (scrollTimeout) {
                 clearTimeout(scrollTimeout);
@@ -352,7 +371,7 @@ export default {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    color: #888;
+    color: var(--md-sys-color-on-surface-variant);
     font-size: 24px;
     gap: 16px;
 }
@@ -371,11 +390,11 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 24px;
-    background-color: var(--md-sys-color-primary);
-    color: var(--md-sys-color-on-primary);
+    padding: 10px 24px;
+    background-color: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
     border: none;
-    border-radius: 24px;
+    border-radius: 20px;
     cursor: pointer;
     font-size: 14px;
     font-weight: 500;
@@ -383,8 +402,7 @@ export default {
 }
 
 .fetch-lyrics-btn:hover:not(:disabled) {
-    background-color: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-primary-container));
 }
 
 .fetch-lyrics-btn:disabled {

@@ -1,11 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
+import logger from './logger'
 
 /**
  * 歌曲标题提取工具类
  */
 export class TitleExtractor {
   /**
-   * 批量提取歌曲标题（优化版本，减少 IPC 调用）
+   * 批量提取歌曲标题（减少 IPC 调用）
    * @param {string[]} filePaths - 音频文件路径数组
    * @param {Object} config - 标题提取配置
    * @returns {Promise<Map<string, Object>>} 路径到标题信息的映射
@@ -30,7 +31,7 @@ export class TitleExtractor {
           }
         }
       } catch (error) {
-        console.warn('Failed to get batch metadata:', error)
+        logger.warn('Failed to get batch metadata:', error)
         // 批量获取失败，继续使用文件名解析
       }
     }
@@ -50,6 +51,8 @@ export class TitleExtractor {
           bitrate: metadata.bitrate || null,
           sampleRate: metadata.sampleRate || null,
           channels: metadata.channels || null,
+          bitDepth: metadata.bitDepth || null,
+          format: metadata.format || null,
           isFromMetadata: true
         })
       } else {
@@ -61,7 +64,9 @@ export class TitleExtractor {
           duration: metadata?.duration || 0,
           bitrate: metadata?.bitrate || null,
           sampleRate: metadata?.sampleRate || null,
-          channels: metadata?.channels || null
+          channels: metadata?.channels || null,
+          bitDepth: metadata?.bitDepth || null,
+          format: metadata?.format || null
         })
       }
     }
@@ -94,7 +99,7 @@ export class TitleExtractor {
             }
           }
         } catch (error) {
-          console.warn('Failed to get metadata for:', filePath, error)
+          logger.warn('Failed to get metadata for:', filePath, error)
           // 获取元数据失败，继续执行，尝试从文件名解析
         }
       }
@@ -103,7 +108,7 @@ export class TitleExtractor {
       return this.parseFromFileName(filePath, config)
 
     } catch (error) {
-      console.error('Error extracting title:', error)
+      logger.error('Error extracting title:', error)
       // 出现意外错误时的最终回退方案
       const fileName = this.getFileName(filePath, config.hideFileExtension)
       return {

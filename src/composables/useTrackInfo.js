@@ -2,6 +2,7 @@ import { ref, watch } from 'vue'
 import { useConfigStore } from '@/stores/config'
 import FileUtils from '@/utils/fileUtils'
 import { TitleExtractor } from '@/utils/titleExtractor'
+import logger from '@/utils/logger'
 
 /**
  * 音轨信息处理 composable
@@ -98,7 +99,7 @@ export function useTrackInfo() {
             }
 
         } catch (error) {
-            console.error('处理音轨信息失败:', trackPath, error)
+            logger.error('处理音轨信息失败:', trackPath, error)
             // 出错时使用文件名作为标题
             processedTracks.value[trackPath] = {
                 processing: false,
@@ -113,9 +114,10 @@ export function useTrackInfo() {
     /**
      * 设置音轨变化监听器
      * @param {Function} trackGetter - 返回当前音轨的函数（通常是 computed 或 ref）
+     * @returns {Function} 停止监听的函数
      */
     const watchTrack = (trackGetter) => {
-        watch(trackGetter, (newTrack) => {
+        return watch(trackGetter, (newTrack) => {
             if (newTrack && newTrack.path) {
                 processTrackInfo(newTrack.path)
             }

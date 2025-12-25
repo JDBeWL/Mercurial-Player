@@ -1,6 +1,8 @@
 /**
  * 歌词解析器类，支持多种歌词格式
  */
+import logger from './logger';
+
 export class LyricsParser {
   /**
    * 解析歌词文件
@@ -27,7 +29,7 @@ export class LyricsParser {
       case 'srt':
         return this.parseSRT(content)
       default:
-        console.warn(`Unsupported lyrics format: ${format}`)
+        logger.warn(`Unsupported lyrics format: ${format}`)
         return []
     }
   }
@@ -237,7 +239,7 @@ export class LyricsParser {
       case 'srt':
         return this.stringifySRT(lyrics)
       default:
-        console.warn(`Unsupported export format: ${format}`)
+        logger.warn(`Unsupported export format: ${format}`)
         return ''
     }
   }

@@ -38,7 +38,12 @@
       "icons/icon.icns",
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "resources": [],
+    "copyright": "",
+    "category": "Music",
+    "shortDescription": "A modern music player",
+    "longDescription": "A modern music player with advanced audio features"
   },
   "plugins": {
     "fs": {

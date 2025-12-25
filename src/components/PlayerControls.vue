@@ -75,8 +75,6 @@ const isDragging = ref(false)
 const showVolume = ref(false)
 
 // 保存事件处理函数引用，以便正确清理
-let volumeSliderClickHandler = null
-let thumbMousedownHandler = null
 let sliderMousedownHandler = null
 
 const handleVolumeChange = (event) => {
@@ -89,8 +87,15 @@ const handleVolumeChange = (event) => {
 }
 
 const startDrag = (event) => {
+  // 如果点击的是滑柄本身，不立即更新音量值，避免跳动
+  const isThumb = event.target.classList.contains('slider-thumb')
+  
   isDragging.value = true
-  handleVolumeChange(event)
+  
+  if (!isThumb) {
+    // 点击轨道时，立即跳转到点击位置
+    handleVolumeChange(event)
+  }
   
   // 添加全局事件监听器
   document.addEventListener('mousemove', handleDrag)
@@ -116,20 +121,7 @@ const stopDrag = () => {
 
 onMounted(() => {
   if (volumeSlider.value) {
-    // 保存处理函数引用
-    volumeSliderClickHandler = handleVolumeChange
     sliderMousedownHandler = startDrag
-    
-    volumeSlider.value.addEventListener('click', volumeSliderClickHandler)
-    
-    // 为滑块添加拖拽事件
-    const thumb = volumeSlider.value.querySelector('.slider-thumb')
-    if (thumb) {
-      thumbMousedownHandler = startDrag
-      thumb.addEventListener('mousedown', thumbMousedownHandler)
-    }
-    
-    // 为整个滑块区域也添加拖拽事件
     volumeSlider.value.addEventListener('mousedown', sliderMousedownHandler)
   }
 })
@@ -171,18 +163,8 @@ onUnmounted(() => {
   document.removeEventListener('mouseup', stopDrag)
   
   // 清理音量滑块的事件监听器
-  if (volumeSlider.value) {
-    if (volumeSliderClickHandler) {
-      volumeSlider.value.removeEventListener('click', volumeSliderClickHandler)
-    }
-    if (sliderMousedownHandler) {
-      volumeSlider.value.removeEventListener('mousedown', sliderMousedownHandler)
-    }
-    
-    const thumb = volumeSlider.value.querySelector('.slider-thumb')
-    if (thumb && thumbMousedownHandler) {
-      thumb.removeEventListener('mousedown', thumbMousedownHandler)
-    }
+  if (volumeSlider.value && sliderMousedownHandler) {
+    volumeSlider.value.removeEventListener('mousedown', sliderMousedownHandler)
   }
 })
 </script>
@@ -206,16 +188,14 @@ onUnmounted(() => {
 .play-button {
   width: 56px;
   height: 56px;
-  background-color: var(--md-sys-color-primary);
-  color: var(--theme-on-primary);
+  background-color: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
   border-radius: 50%;
-  /* 修复阴影造成的视觉拉伸 */
-  box-shadow: 0px 1px 2px -1px rgba(0, 0, 0, 0.2), 0px 1px 2px 0px rgba(0, 0, 0, 0.14), 0px 1px 4px 0px rgba(0, 0, 0, 0.12);
+  transition: all 0.2s ease;
 }
 
 .play-button:hover {
-  /* 修复阴影造成的视觉拉伸 */
-  box-shadow: 0px 2px 4px -1px rgba(0, 0, 0, 0.2), 0px 2px 4px 0px rgba(0, 0, 0, 0.14), 0px 1px 6px 0px rgba(0, 0, 0, 0.12);
+  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-primary-container));
 }
 
 .play-button .material-symbols-rounded {
@@ -257,7 +237,6 @@ onUnmounted(() => {
   border-radius: 3px;
   cursor: pointer;
   transition: background-color 0.2s ease;
-  padding-top: 5px;
   margin: 0 auto;
 }
 
@@ -292,23 +271,23 @@ onUnmounted(() => {
   position: absolute;
   left: 50%;
   bottom: 0;
-  transform: translateX(-50%) translateY(50%);
+  transform: translateX(-50%);
   width: 14px;
   height: 14px;
   background-color: var(--md-sys-color-primary);
   border-radius: 50%;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   cursor: grab;
-  transition: transform 0.1s ease;
+  /* 用 margin-bottom 补偿滑柄高度的一半，让滑柄中心对齐填充条顶部 */
+  margin-bottom: -7px;
 }
 
 .volume-slider-popup .slider-thumb:hover {
-  transform: translateX(-50%) translateY(50%) scale(1.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 
 .volume-slider-popup .slider.dragging .slider-thumb {
   cursor: grabbing;
-  transform: translateX(-50%) translateY(50%) scale(1.2);
   background-color: var(--md-sys-color-on-primary);
 }
 

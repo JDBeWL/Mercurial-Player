@@ -17,13 +17,13 @@ tauri = { version = "2.9", features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 暂时不更新rodio
-rodio = { version = "0.18", features = ["wav", "vorbis", "flac", "mp3"] }
+rodio = { version = "0.18", features = ["wav", "flac", "mp3", "vorbis"] }
 cpal = "0.15"
 dirs = "6"
 walkdir = "2"
 lofty = "0.22"
 base64 = "0.22"
-symphonia = { version = "0.5", features = ["flac", "vorbis", "aac", "alac", "aiff", "wav"] }
+symphonia = { version = "0.5", features = ["flac", "vorbis", "aac", "mp3", "isomp4", "wav", "alac", "pcm"] }
 rubato = "0.15"
 rayon = "1"
 spectrum-analyzer = "1.7"
@@ -36,6 +36,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 urlencoding = "2"
 aes = "0.8"
 md5 = "0.7"
+
+once_cell = "1.21"
 
 [target.'cfg(windows)'.dependencies]
 wasapi = "0.22"
@@ -80,8 +82,10 @@ debug = true
 incremental = true
 
 [profile.release]
-opt-level = 3
-lto = "thin"
+opt-level = "z"  # 优化体积而非速度
+lto = "fat"      # 全链接时优化，进一步减小体积
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
+# 减小二进制体积
+debug = false

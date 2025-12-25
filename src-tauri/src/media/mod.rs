@@ -4,6 +4,7 @@
 
 pub mod commands;
 pub mod filesystem;
+pub mod http_client;
 pub mod metadata;
 pub mod netease;
 

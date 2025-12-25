@@ -2,6 +2,8 @@ import { defineStore } from 'pinia';
 import { invoke } from '@tauri-apps/api/core';
 import FileUtils from '../utils/fileUtils';
 import LyricsParser from '../utils/lyricsParser';
+import logger from '../utils/logger';
+import errorHandler, { ErrorType, ErrorSeverity, handlePromise } from '../utils/errorHandler';
 
 export const usePlayerStore = defineStore('player', {
   state: () => ({
@@ -26,7 +28,9 @@ export const usePlayerStore = defineStore('player', {
     audioInfo: {
       bitrate: null,
       sampleRate: null,
-      channels: null
+      channels: null,
+      bitDepth: null,
+      format: null
     },
 
     // 加载状态
@@ -79,9 +83,9 @@ export const usePlayerStore = defineStore('player', {
           await invoke('set_volume', { volume: savedVolume });
         }
       } catch (err) {
-        console.error('Failed to load volume from config:', err);
+        logger.error('Failed to load volume from config:', err);
       }
-      console.log('Player store initialized.');
+      logger.info('Player store initialized.');
     },
 
     // --- 核心行为 ---
@@ -127,17 +131,17 @@ export const usePlayerStore = defineStore('player', {
       }
 
       if (!trackExists) {
-        console.log('Track file not found:', track.path);
+        logger.warn('Track file not found:', track.path);
         // 创建一个友好的错误消息
         const errorMsg = `无法找到音乐文件: ${track.name || track.path}`;
 
-        // 可以显示一个通知或设置一个错误状态，这里我们只是打印到控制台
-        console.error(errorMsg);
+        // 记录错误日志
+        logger.error(errorMsg);
 
         // 如果是播放列表中的歌曲，尝试播放下一首
         const currentTrackIndex = this.playlist.findIndex(t => t.path === track.path);
         if (this.playlist.length > 1 && currentTrackIndex < this.playlist.length - 1) {
-          console.log('Attempting to play next track...');
+          logger.debug('Attempting to play next track...');
           return this.nextTrack();
         } else {
           // 如果是最后一首或只有一首歌，则停止播放
@@ -153,16 +157,16 @@ export const usePlayerStore = defineStore('player', {
         // 确保后端停止当前播放
         await invoke('pause_track');
       } catch (error) {
-        console.error("Failed to pause before play:", error);
+        logger.error("Failed to pause before play:", error);
       }
 
       // 获取预处理的元数据
       let metadata = {};
       if (this._metadataCache && this._metadataCache[track.path]) {
         metadata = this._metadataCache[track.path];
-        console.log('使用缓存的元数据:', track.path);
+        logger.debug('使用缓存的元数据:', track.path);
       } else {
-        console.log('元数据缓存未命中:', track.path);
+        logger.debug('元数据缓存未命中:', track.path);
 
         // 如果没有缓存，尝试快速获取基本信息
         metadata = {
@@ -172,7 +176,9 @@ export const usePlayerStore = defineStore('player', {
           duration: track.duration || 0,
           bitrate: track.bitrate || null,
           sampleRate: track.sampleRate || null,
-          channels: track.channels || null
+          channels: track.channels || null,
+          bitDepth: track.bitDepth || null,
+          format: track.format || null
         };
       }
 
@@ -190,20 +196,48 @@ export const usePlayerStore = defineStore('player', {
       this.lyrics = null;
       this.currentLyricIndex = -1;
       this.audioInfo = {
-        bitrate: metadata.bitrate || 'N/A',
-        sampleRate: metadata.sampleRate || 'N/A',
-        channels: metadata.channels || 'N/A',
+        bitrate: metadata.bitrate || null,
+        sampleRate: metadata.sampleRate || null,
+        channels: metadata.channels || null,
+        bitDepth: metadata.bitDepth || null,
+        format: metadata.format || null,
       };
 
       try {
-        console.log('Playing track:', track.path);
-        await invoke('play_track', { path: track.path });
-        console.log('Track play command sent successfully');
+        logger.info('Playing track:', track.path);
+        const result = await handlePromise(
+          invoke('play_track', { path: track.path }),
+          {
+            type: ErrorType.AUDIO_PLAYBACK_ERROR,
+            severity: ErrorSeverity.HIGH,
+            context: { trackPath: track.path, trackName: track.name },
+            showToUser: true
+          }
+        );
+
+        if (!result.success) {
+          this.isPlaying = false;
+          return;
+        }
+
+        logger.debug('Track play command sent successfully');
         this.isPlaying = true;
         this.startStatusPolling();
-        this.loadLyrics(track.path).catch(err => console.error("Failed to load lyrics:", err));
+        this.loadLyrics(track.path).catch(err => {
+          errorHandler.handle(err, {
+            type: ErrorType.FILE_READ_ERROR,
+            severity: ErrorSeverity.LOW,
+            context: { trackPath: track.path },
+            showToUser: false
+          });
+        });
       } catch (error) {
-        console.error('Failed to play track:', error);
+        errorHandler.handle(error, {
+          type: ErrorType.AUDIO_PLAYBACK_ERROR,
+          severity: ErrorSeverity.HIGH,
+          context: { trackPath: track.path },
+          showToUser: true
+        });
         this.isPlaying = false;
       } finally {
         this._isLoading = false;
@@ -217,7 +251,7 @@ export const usePlayerStore = defineStore('player', {
           this.isPlaying = false;
           this.stopStatusPolling();
         })
-        .catch(err => console.error("Failed to pause:", err));
+        .catch(err => logger.error("Failed to pause:", err));
     },
 
     resume() {
@@ -227,7 +261,7 @@ export const usePlayerStore = defineStore('player', {
           this.isPlaying = true;
           this.startStatusPolling();
         })
-        .catch(err => console.error("Failed to resume:", err));
+        .catch(err => logger.error("Failed to resume:", err));
     },
 
     togglePlay() {
@@ -250,41 +284,48 @@ export const usePlayerStore = defineStore('player', {
 
     startStatusPolling() {
       this.stopStatusPolling(); // 停止之前的轮询
-      const interval = 500; // ms
-      this._statusPollId = setInterval(async () => {
+      
+      // 使用动态轮询间隔：正常播放时 500ms，接近结尾时 100ms
+      const normalInterval = 500; // ms
+      const fastInterval = 100; // ms - 接近结尾时使用更快的轮询
+      
+      const poll = async () => {
         if (!this.isPlaying) {
           this.stopStatusPolling();
           return;
         }
 
         try {
-          // 只有在接近歌曲结尾时才检查is_track_finished，减少不必要的后端调用
-          const isNearEnd = this.duration > 0 && (this.duration - this.currentTime) < 1.0;
+          // 计算距离结尾的时间
+          const timeToEnd = this.duration > 0 ? this.duration - this.currentTime : Infinity;
+          const isNearEnd = timeToEnd < 2.0; // 距离结尾2秒内
+          const currentInterval = isNearEnd ? fastInterval : normalInterval;
 
-          if (isNearEnd) {
-            // 检查后端是否还有音频在播放
+          if (isNearEnd && timeToEnd < 1.0) {
+            // 只有在非常接近结尾时才检查后端状态
             const isFinished = await invoke('is_track_finished');
-
             if (isFinished) {
-              // 如果后端音频播放完成，触发_onEnded处理
               this._onEnded();
               return;
             }
           }
-          // Increment current time
-          const newTime = this.currentTime + (interval / 1000);
+          
+          // 更新当前时间
+          const newTime = this.currentTime + (currentInterval / 1000);
 
           if (this.duration > 0 && newTime >= this.duration) {
             this.currentTime = this.duration;
-            // 不直接调用_onEnded，而是等待后端反馈
-            // 这样可以避免重复触发
+            // 不直接调用_onEnded，等待后端反馈
           } else {
             this.currentTime = newTime;
           }
+          
+          // 使用动态间隔调度下一次轮询
+          this._statusPollId = setTimeout(poll, currentInterval);
         } catch (error) {
-          console.error("Error checking track status:", error);
-          // 如果调用出错，则使用基于时长的判断作为后备方案
-          const newTime = this.currentTime + (interval / 1000);
+          logger.error("Error checking track status:", error);
+          // 出错时使用基于时长的判断作为后备
+          const newTime = this.currentTime + (normalInterval / 1000);
           if (this.duration > 0 && newTime >= this.duration) {
             this.currentTime = this.duration;
             this._onEnded();
@@ -292,13 +333,18 @@ export const usePlayerStore = defineStore('player', {
           } else {
             this.currentTime = newTime;
           }
+          // 出错后继续轮询
+          this._statusPollId = setTimeout(poll, normalInterval);
         }
-      }, interval);
+      };
+      
+      // 启动轮询
+      this._statusPollId = setTimeout(poll, normalInterval);
     },
 
     stopStatusPolling() {
       if (this._statusPollId) {
-        clearInterval(this._statusPollId);
+        clearTimeout(this._statusPollId);
         this._statusPollId = null;
       }
     },
@@ -310,10 +356,10 @@ export const usePlayerStore = defineStore('player', {
       try {
         await invoke('pause_track');
       } catch (error) {
-        console.error("Failed to pause track:", error);
+        logger.error("Failed to pause track:", error);
       }
 
-      // 优化：减少播放列表文件检查频率，只在必要时检查
+      // 减少播放列表文件检查频率，只在必要时检查
       const now = Date.now();
       const shouldCheckPlaylist = (now - this._lastPlaylistCheckTime > this._playlistCheckInterval) ||
         (this._lastPlaylistCheckTime === 0);
@@ -348,7 +394,7 @@ export const usePlayerStore = defineStore('player', {
         try {
           await invoke('pause_track');
         } catch (error) {
-          console.error("Failed to pause track after playlist ended:", error);
+          logger.error("Failed to pause track after playlist ended:", error);
         }
       }
     },
@@ -394,7 +440,7 @@ export const usePlayerStore = defineStore('player', {
           }
 
           if (!exists) {
-            console.error(`File not found in playlist: ${track.path}`);
+            logger.warn(`File not found in playlist: ${track.path}`);
             allFilesExist = false;
             break;
           }
@@ -403,7 +449,7 @@ export const usePlayerStore = defineStore('player', {
         this._lastPlaylistCheckTime = now;
         return allFilesExist;
       } catch (error) {
-        console.error('Error checking playlist files:', error);
+        logger.error('Error checking playlist files:', error);
         return false;
       }
     },
@@ -446,7 +492,7 @@ export const usePlayerStore = defineStore('player', {
         this.setCachedFileExists(this.currentTrack.path, false);
         return false;
       } catch (error) {
-        console.error('Error checking current track:', error);
+        logger.error('Error checking current track:', error);
         this.setCachedFileExists(this.currentTrack.path, false);
         return false;
       }
@@ -520,7 +566,7 @@ export const usePlayerStore = defineStore('player', {
      * 重置播放器状态到初始状态（当播放列表被删除时）
      */
     async resetPlayerState() {
-      console.log('Resetting player state due to missing playlist files');
+      logger.info('Resetting player state due to missing playlist files');
 
       // 停止播放
       this.isPlaying = false;
@@ -549,15 +595,15 @@ export const usePlayerStore = defineStore('player', {
       // 停止后端播放
       try {
         await invoke('pause_track');
-      } catch (error) {
-        console.error('Error stopping backend playback:', error);
-      }
+        } catch (error) {
+          logger.error('Error stopping backend playback:', error);
+        }
     },
 
     async nextTrack() {
       if (!this.currentTrack) return;
 
-      // 优化：减少播放列表文件检查频率，只在必要时检查
+      // 减少播放列表文件检查频率，只在必要时检查
       const now = Date.now();
       const shouldCheckPlaylist = (now - this._lastPlaylistCheckTime > this._playlistCheckInterval) ||
         (this._lastPlaylistCheckTime === 0);
@@ -589,7 +635,7 @@ export const usePlayerStore = defineStore('player', {
     async previousTrack() {
       if (!this.currentTrack) return;
 
-      // 优化：减少播放列表文件检查频率，只在必要时检查
+      // 减少播放列表文件检查频率，只在必要时检查
       const now = Date.now();
       const shouldCheckPlaylist = (now - this._lastPlaylistCheckTime > this._playlistCheckInterval) ||
         (this._lastPlaylistCheckTime === 0);
@@ -635,21 +681,23 @@ export const usePlayerStore = defineStore('player', {
             this.resume();
           }
         })
-        .catch(err => console.error("Failed to seek:", err));
+        .catch(err => logger.error("Failed to seek:", err));
     },
 
     setVolume(volume) {
       const newVolume = Math.max(0, Math.min(1, volume));
+      // 立即更新本地状态，避免滑柄抖动
+      this.volume = newVolume;
+      
       invoke('set_volume', { volume: newVolume })
         .then(async () => {
-          this.volume = newVolume;
           // 保存音量到配置
           const { useConfigStore } = await import('./config');
           const configStore = useConfigStore();
           configStore.audio.volume = newVolume;
           configStore.saveConfigNow();
         })
-        .catch(err => console.error("Failed to set volume:", err));
+        .catch(err => logger.error("Failed to set volume:", err));
     },
 
     toggleRepeat() {
@@ -706,9 +754,11 @@ export const usePlayerStore = defineStore('player', {
         this.currentTrack = firstTrack;
         this.duration = firstTrack.duration || 0;
         this.audioInfo = {
-          bitrate: firstTrack.bitrate || 'N/A',
-          sampleRate: firstTrack.sampleRate || 'N/A',
-          channels: firstTrack.channels || 'N/A',
+          bitrate: firstTrack.bitrate || null,
+          sampleRate: firstTrack.sampleRate || null,
+          channels: firstTrack.channels || null,
+          bitDepth: firstTrack.bitDepth || null,
+          format: firstTrack.format || null,
         };
       } else {
         // 播放列表为空时，重置播放器状态
@@ -725,13 +775,13 @@ export const usePlayerStore = defineStore('player', {
 
     /**
      * 预处理播放列表中所有文件的元数据
-     * 优化版本：直接使用播放列表中已有的元数据（由 playlistManager 批量获取）
+     * 直接使用播放列表中已有的元数据（由 playlistManager 批量获取）
      * @param {Array} playlist - 播放列表
      */
     async preprocessPlaylistMetadata(playlist) {
       if (!playlist || playlist.length === 0) return;
 
-      console.log(`预处理播放列表元数据，共 ${playlist.length} 个文件`);
+      logger.debug(`预处理播放列表元数据，共 ${playlist.length} 个文件`);
 
       // 初始化元数据缓存（如果还没有）
       if (!this._metadataCache) {
@@ -757,12 +807,14 @@ export const usePlayerStore = defineStore('player', {
           bitrate: track.bitrate || null,
           sampleRate: track.sampleRate || null,
           channels: track.channels || null,
+          bitDepth: track.bitDepth || null,
+          format: track.format || null,
           isFromMetadata: track.isFromMetadata || false,
           lastUpdated: new Date().toISOString()
         };
       }
 
-      console.log(`播放列表元数据预处理完成`);
+      logger.debug(`播放列表元数据预处理完成`);
     },
 
     async loadLyrics(trackPath) {
@@ -776,7 +828,7 @@ export const usePlayerStore = defineStore('player', {
           this.lyrics = null;
         }
       } catch (error) {
-        console.log('No lyrics found or failed to load:', error);
+        logger.debug('No lyrics found or failed to load:', error);
         this.lyrics = null;
       }
     },

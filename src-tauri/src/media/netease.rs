@@ -3,8 +3,8 @@
 //! 提供从网易云音乐搜索和获取歌词的功能
 
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, REFERER, USER_AGENT};
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use crate::media::http_client::get_client;
 
 /// 搜索结果中的歌曲信息
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -79,10 +79,7 @@ fn build_headers() -> HeaderMap {
 
 /// 搜索歌曲 - 使用 Web API
 pub async fn search_songs(keyword: &str, limit: u32, offset: u32) -> Result<Vec<SearchSongResult>, String> {
-    let client = Client::builder()
-        .default_headers(build_headers())
-        .build()
-        .map_err(|e| format!("Failed to create client: {}", e))?;
+    let client = get_client();
     
     // 使用 cloudsearch API（更稳定）
     let url = "https://music.163.com/api/cloudsearch/pc";
@@ -96,6 +93,7 @@ pub async fn search_songs(keyword: &str, limit: u32, offset: u32) -> Result<Vec<
 
     let response = client
         .post(url)
+        .headers(build_headers())
         .form(&params)
         .send()
         .await
@@ -156,10 +154,7 @@ pub async fn search_songs(keyword: &str, limit: u32, offset: u32) -> Result<Vec<
 
 /// 获取歌词 - 使用 Web API
 pub async fn get_lyrics(song_id: &str) -> Result<LyricsData, String> {
-    let client = Client::builder()
-        .default_headers(build_headers())
-        .build()
-        .map_err(|e| format!("Failed to create client: {}", e))?;
+    let client = get_client();
     
     let url = format!(
         "https://music.163.com/api/song/lyric?id={}&lv=-1&tv=-1&rv=-1&kv=-1",
@@ -168,6 +163,7 @@ pub async fn get_lyrics(song_id: &str) -> Result<LyricsData, String> {
 
     let response = client
         .get(&url)
+        .headers(build_headers())
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;

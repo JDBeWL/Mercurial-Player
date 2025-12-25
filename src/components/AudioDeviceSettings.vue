@@ -117,6 +117,7 @@ import { ref, onMounted, watch, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { usePlayerStore } from '../stores/player';
 import { useConfigStore } from '../stores/config';
+import logger from '../utils/logger';
 
 const playerStore = usePlayerStore();
 const configStore = useConfigStore();
@@ -147,7 +148,7 @@ const fetchAudioDevices = async () => {
     const current = await invoke('get_current_audio_device');
     currentDevice.value = current;
   } catch (err) {
-    console.error('Failed to fetch audio devices:', err);
+    logger.error('Failed to fetch audio devices:', err);
     error.value = err.message || 'Unknown error';
   } finally {
     loading.value = false;
@@ -170,7 +171,7 @@ const selectDevice = async (device) => {
     });
     currentDevice.value = device;
   } catch (err) {
-    console.error('Failed to set audio device:', err);
+    logger.error('Failed to set audio device:', err);
     error.value = err.message || 'Unknown error';
   } finally {
     loading.value = false;
@@ -181,14 +182,14 @@ const selectDevice = async (device) => {
 const toggleExclusiveMode = async () => {
   // 在非 Windows 平台上阻止启用独占模式
   if (!isWindowsPlatform.value && !useExclusiveMode.value) {
-    console.warn('Exclusive mode is only supported on Windows');
+    logger.warn('Exclusive mode is only supported on Windows');
     return;
   }
 
   // 检查当前设备是否支持独占模式
   if (currentDevice.value && !currentDevice.value.supportsExclusiveMode && !useExclusiveMode.value) {
     // 尝试启用但不支持的设备，显示警告但仍然执行
-    console.warn('Trying to enable exclusive mode on unsupported device');
+    logger.warn('Trying to enable exclusive mode on unsupported device');
   }
 
   try {
@@ -203,7 +204,7 @@ const toggleExclusiveMode = async () => {
       const updatedDevice = await invoke('get_current_audio_device');
       currentDevice.value = updatedDevice;
     } catch (deviceErr) {
-      console.error('Failed to update current device info:', deviceErr);
+      logger.error('Failed to update current device info:', deviceErr);
     }
   } catch (err) {
     const errorMessage = err.message || err.toString() || '';
@@ -215,7 +216,7 @@ const toggleExclusiveMode = async () => {
       // 显示需要重启的提示
       error.value = 'restart_required';
     } else {
-      console.error('Failed to toggle exclusive mode:', err);
+      logger.error('Failed to toggle exclusive mode:', err);
       error.value = errorMessage || 'Failed to toggle exclusive mode';
     }
   }
@@ -231,9 +232,9 @@ onMounted(async () => {
   // 获取平台信息
   try {
     currentPlatform.value = await invoke('get_platform');
-    console.log('Detected platform:', currentPlatform.value);
+    logger.debug('Detected platform:', currentPlatform.value);
   } catch (err) {
-    console.error('Failed to detect platform:', err);
+    logger.error('Failed to detect platform:', err);
     currentPlatform.value = 'unknown';
   }
 
@@ -241,7 +242,7 @@ onMounted(async () => {
   try {
     useExclusiveMode.value = await invoke('get_exclusive_mode') ?? configStore.audio?.exclusiveMode ?? false;
   } catch (err) {
-    console.warn('Failed to get exclusive mode from backend, using config value:', err);
+    logger.warn('Failed to get exclusive mode from backend, using config value:', err);
     useExclusiveMode.value = configStore.audio?.exclusiveMode ?? false;
   }
 
@@ -252,14 +253,14 @@ onMounted(async () => {
   try {
     currentDevice.value = await invoke('get_current_audio_device');
   } catch (err) {
-    console.error('Failed to get current audio device:', err);
+    logger.error('Failed to get current audio device:', err);
   }
 });
 
 // 监听当前设备变化
 watch(currentDevice, (newDevice) => {
   if (newDevice) {
-    console.log('Audio device changed to:', newDevice.name, 'Mode:', newDevice.audioModeStatus);
+    logger.debug('Audio device changed to:', newDevice.name, 'Mode:', newDevice.audioModeStatus);
   }
 });
 

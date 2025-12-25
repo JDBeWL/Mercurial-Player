@@ -227,9 +227,18 @@ impl Equalizer {
 }
 
 fn soft_clip(x: f32) -> f32 {
-    if x.abs() < 0.9 { x }
-    else if x > 0.0 { 0.9 + 0.1 * ((x - 0.9) / 0.1).tanh() }
-    else { -0.9 - 0.1 * ((-x - 0.9) / 0.1).tanh() }
+    // 使用更平滑的软削波，阈值提高到 0.95，过渡更柔和
+    let threshold = 0.95;
+    if x.abs() <= threshold {
+        x
+    } else {
+        // 使用 tanh 进行平滑压缩，保留更多动态范围
+        let sign = x.signum();
+        let abs_x = x.abs();
+        let over = abs_x - threshold;
+        // 更平滑的过渡：threshold + (1 - threshold) * tanh(over / (1 - threshold))
+        sign * (threshold + (1.0 - threshold) * (over / (1.0 - threshold) * 0.5).tanh())
+    }
 }
 
 pub struct GlobalEqualizer {
