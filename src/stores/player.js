@@ -132,43 +132,25 @@ export const usePlayerStore = defineStore('player', {
 
       if (!trackExists) {
         logger.warn('Track file not found:', track.path);
-        // 创建一个友好的错误消息
-        const errorMsg = `无法找到音乐文件: ${track.name || track.path}`;
-
-        // 记录错误日志
-        logger.error(errorMsg);
-
         // 如果是播放列表中的歌曲，尝试播放下一首
         const currentTrackIndex = this.playlist.findIndex(t => t.path === track.path);
         if (this.playlist.length > 1 && currentTrackIndex < this.playlist.length - 1) {
           logger.debug('Attempting to play next track...');
           return this.nextTrack();
         } else {
-          // 如果是最后一首或只有一首歌，则停止播放
           await this.resetPlayerState();
           return;
         }
       }
 
       this._isLoading = true;
-      this.stopStatusPolling(); // Stop polling for the old track
+      this.stopStatusPolling();
 
-      try {
-        // 确保后端停止当前播放
-        await invoke('pause_track');
-      } catch (error) {
-        logger.error("Failed to pause before play:", error);
-      }
-
-      // 获取预处理的元数据
+      // 先更新 UI 状态，让用户看到响应
       let metadata = {};
       if (this._metadataCache && this._metadataCache[track.path]) {
         metadata = this._metadataCache[track.path];
-        logger.debug('使用缓存的元数据:', track.path);
       } else {
-        logger.debug('元数据缓存未命中:', track.path);
-
-        // 如果没有缓存，尝试快速获取基本信息
         metadata = {
           title: track.title || FileUtils.getFileName(track.path),
           artist: track.artist || '',
@@ -182,8 +164,7 @@ export const usePlayerStore = defineStore('player', {
         };
       }
 
-      // Reset state for the new track
-      this.lastTrackIndex = this.currentTrackIndex; // Store current index before updating
+      this.lastTrackIndex = this.currentTrackIndex;
       this.currentTrack = {
         ...track,
         title: metadata.title,
@@ -203,10 +184,20 @@ export const usePlayerStore = defineStore('player', {
         format: metadata.format || null,
       };
 
+      // 异步暂停当前播放，不等待
+      invoke('pause_track').catch(err => logger.debug("pause before play:", err));
+
       try {
         logger.info('Playing track:', track.path);
+        
+        // 使用带超时的 Promise，防止后端卡住导致 UI 卡顿
+        const playPromise = invoke('play_track', { path: track.path });
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('播放超时')), 10000); // 10秒超时
+        });
+
         const result = await handlePromise(
-          invoke('play_track', { path: track.path }),
+          Promise.race([playPromise, timeoutPromise]),
           {
             type: ErrorType.AUDIO_PLAYBACK_ERROR,
             severity: ErrorSeverity.HIGH,
@@ -216,29 +207,37 @@ export const usePlayerStore = defineStore('player', {
         );
 
         if (!result.success) {
+          logger.error('Failed to play track:', result.error);
           this.isPlaying = false;
+          this._isLoading = false;
+          
+          // 播放失败时自动跳到下一首
+          const currentIdx = this.playlist.findIndex(t => t.path === track.path);
+          if (this.playlist.length > 1 && currentIdx < this.playlist.length - 1) {
+            logger.info('Auto-skipping to next track due to playback error');
+            // 使用 setTimeout 避免递归调用栈过深
+            setTimeout(() => this.nextTrack(), 100);
+          }
           return;
         }
 
         logger.debug('Track play command sent successfully');
         this.isPlaying = true;
         this.startStatusPolling();
+        
+        // 异步加载歌词，不阻塞播放
         this.loadLyrics(track.path).catch(err => {
-          errorHandler.handle(err, {
-            type: ErrorType.FILE_READ_ERROR,
-            severity: ErrorSeverity.LOW,
-            context: { trackPath: track.path },
-            showToUser: false
-          });
+          logger.debug('Lyrics load error:', err);
         });
       } catch (error) {
-        errorHandler.handle(error, {
-          type: ErrorType.AUDIO_PLAYBACK_ERROR,
-          severity: ErrorSeverity.HIGH,
-          context: { trackPath: track.path },
-          showToUser: true
-        });
+        logger.error('Playback error:', error);
         this.isPlaying = false;
+        
+        // 播放失败时自动跳到下一首
+        const currentIdx = this.playlist.findIndex(t => t.path === track.path);
+        if (this.playlist.length > 1 && currentIdx < this.playlist.length - 1) {
+          setTimeout(() => this.nextTrack(), 100);
+        }
       } finally {
         this._isLoading = false;
       }
@@ -352,50 +351,35 @@ export const usePlayerStore = defineStore('player', {
     // --- 播放结束 ---
 
     async _onEnded() {
-      // 确保后端停止播放
-      try {
-        await invoke('pause_track');
-      } catch (error) {
-        logger.error("Failed to pause track:", error);
-      }
+      // 异步停止后端播放，不阻塞
+      invoke('pause_track').catch(err => logger.debug("pause on ended:", err));
 
-      // 减少播放列表文件检查频率，只在必要时检查
+      // 异步检查播放列表文件
       const now = Date.now();
       const shouldCheckPlaylist = (now - this._lastPlaylistCheckTime > this._playlistCheckInterval) ||
         (this._lastPlaylistCheckTime === 0);
 
       if (shouldCheckPlaylist) {
-        const playlistExists = await this.checkPlaylistFilesExist();
-        if (!playlistExists) {
-          await this.resetPlayerState();
-          return;
-        }
+        this.checkPlaylistFilesExist().then(exists => {
+          if (!exists) {
+            this.resetPlayerState();
+          }
+        });
       }
 
       if (this.repeatMode === 'track') {
-        // 单曲循环模式：重新播放当前歌曲
         await this.playTrack(this.currentTrack);
       } else if (this.repeatMode === 'list') {
-        // 列表循环模式：继续播放下一首
         const nextIndex = (this.currentTrackIndex + 1) % this.playlist.length;
         await this.playTrack(this.playlist[nextIndex]);
       } else if (this.currentTrackIndex < this.playlist.length - 1) {
-        // 非循环模式：如果不是最后一首，播放下一首
         const nextIndex = this.currentTrackIndex + 1;
         await this.playTrack(this.playlist[nextIndex]);
       } else {
-        // 播放最后一首且没有开启循环播放
-        // 停止播放，将进度设置为歌曲结束位置，并清除播放状态
         this.isPlaying = false;
         this.stopStatusPolling();
-        this.currentTime = this.duration; // 标记为播放完成状态
-
-        // 确保后端也停止播放
-        try {
-          await invoke('pause_track');
-        } catch (error) {
-          logger.error("Failed to pause track after playlist ended:", error);
-        }
+        this.currentTime = this.duration;
+        invoke('pause_track').catch(err => logger.debug("pause after playlist ended:", err));
       }
     },
 
@@ -601,19 +585,20 @@ export const usePlayerStore = defineStore('player', {
     },
 
     async nextTrack() {
-      if (!this.currentTrack) return;
+      if (!this.currentTrack || this._isLoading) return;
 
-      // 减少播放列表文件检查频率，只在必要时检查
+      // 减少播放列表文件检查频率
       const now = Date.now();
       const shouldCheckPlaylist = (now - this._lastPlaylistCheckTime > this._playlistCheckInterval) ||
         (this._lastPlaylistCheckTime === 0);
 
       if (shouldCheckPlaylist) {
-        const playlistExists = await this.checkPlaylistFilesExist();
-        if (!playlistExists) {
-          await this.resetPlayerState();
-          return;
-        }
+        // 异步检查，不阻塞
+        this.checkPlaylistFilesExist().then(exists => {
+          if (!exists) {
+            this.resetPlayerState();
+          }
+        });
       }
 
       let nextIndex;
@@ -633,19 +618,20 @@ export const usePlayerStore = defineStore('player', {
     },
 
     async previousTrack() {
-      if (!this.currentTrack) return;
+      if (!this.currentTrack || this._isLoading) return;
 
-      // 减少播放列表文件检查频率，只在必要时检查
+      // 减少播放列表文件检查频率
       const now = Date.now();
       const shouldCheckPlaylist = (now - this._lastPlaylistCheckTime > this._playlistCheckInterval) ||
         (this._lastPlaylistCheckTime === 0);
 
       if (shouldCheckPlaylist) {
-        const playlistExists = await this.checkPlaylistFilesExist();
-        if (!playlistExists) {
-          await this.resetPlayerState();
-          return;
-        }
+        // 异步检查，不阻塞
+        this.checkPlaylistFilesExist().then(exists => {
+          if (!exists) {
+            this.resetPlayerState();
+          }
+        });
       }
 
       let prevIndex;
