@@ -54,6 +54,63 @@ class PluginManager {
     this.eventListeners = new Map()
     // 插件存储
     this.storage = new Map()
+    // 播放器状态监听器
+    this._playerWatcherStop = null
+    this._lastPlayerState = null
+  }
+
+  /**
+   * 初始化插件管理器
+   * 设置播放器状态监听，向插件发送事件
+   */
+  async init() {
+    // 延迟导入避免循环依赖
+    const { watch } = await import('vue')
+    const { usePlayerStore } = await import('../stores/player')
+    
+    const playerStore = usePlayerStore()
+    
+    // 监听播放器状态变化
+    this._playerWatcherStop = watch(
+      () => ({
+        track: playerStore.currentTrack,
+        isPlaying: playerStore.isPlaying,
+        currentTime: playerStore.currentTime,
+      }),
+      (newState, oldState) => {
+        const newTrackPath = newState.track?.path
+        const oldTrackPath = oldState?.track?.path
+        
+        // 歌曲切换事件
+        if (newTrackPath !== oldTrackPath) {
+          this.emit('player:trackChanged', {
+            track: newState.track ? { ...newState.track } : null,
+            isPlaying: newState.isPlaying,
+          })
+        }
+        
+        // 播放状态变化事件
+        if (newState.isPlaying !== oldState?.isPlaying) {
+          this.emit('player:stateChanged', {
+            track: newState.track ? { ...newState.track } : null,
+            isPlaying: newState.isPlaying,
+          })
+        }
+      },
+      { immediate: false }
+    )
+    
+    logger.info('插件管理器已初始化')
+  }
+
+  /**
+   * 清理插件管理器
+   */
+  cleanup() {
+    if (this._playerWatcherStop) {
+      this._playerWatcherStop()
+      this._playerWatcherStop = null
+    }
   }
 
   /**
@@ -110,12 +167,12 @@ class PluginManager {
       // 创建沙箱环境
       const sandbox = createPluginSandbox(api)
       
-      // 执行插件主函数
-      const instance = await plugin.main(api)
+      // 在沙箱中执行插件主函数
+      const instance = await sandbox.execute(plugin.main)
       
-      // 调用激活钩子
+      // 调用激活钩子（也在沙箱中执行）
       if (instance && typeof instance.activate === 'function') {
-        await instance.activate()
+        await sandbox.execute(() => instance.activate())
       }
 
       this.instances.set(pluginId, { instance, api, sandbox })
@@ -144,9 +201,18 @@ class PluginManager {
     const instanceData = this.instances.get(pluginId)
     if (instanceData) {
       try {
-        // 调用停用钩子
+        // 调用停用钩子（在沙箱中执行）
         if (instanceData.instance && typeof instanceData.instance.deactivate === 'function') {
-          await instanceData.instance.deactivate()
+          if (instanceData.sandbox) {
+            await instanceData.sandbox.execute(() => instanceData.instance.deactivate())
+          } else {
+            await instanceData.instance.deactivate()
+          }
+        }
+        
+        // 清理沙箱中的定时器
+        if (instanceData.sandbox && typeof instanceData.sandbox.cleanup === 'function') {
+          instanceData.sandbox.cleanup()
         }
       } catch (error) {
         logger.error(`插件停用出错: ${plugin.name}`, error)

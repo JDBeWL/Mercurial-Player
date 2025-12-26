@@ -146,6 +146,8 @@ export default {
         const startAnimationLoop = () => {
             if (rafId) return; // 防止重复启动
             lastFrameTime = 0; // 重置时间戳
+            // 启动时先同步到真实时间
+            visualTime.value = playerStore.currentTime;
             
             const animate = (timestamp) => {
                 if (!lastFrameTime) lastFrameTime = timestamp;
@@ -202,6 +204,13 @@ export default {
             if (Math.abs(jump) > 1.5 || jump < -0.1) {
                 visualTime.value = newTime;
             }
+        });
+
+        // 监听歌曲切换，立即重置 visualTime
+        watch(() => playerStore.currentTrack?.path, () => {
+            // 切歌时立即同步到当前时间（通常是 0）
+            visualTime.value = playerStore.currentTime;
+            activeIndex.value = -1;
         });
 
         // 基于高频 visualTime 计算 activeIndex，实现即时滚动
@@ -335,6 +344,8 @@ export default {
         // 歌词加载完成后滚动到当前位置
         watch(loading, (newVal) => {
             if (!newVal) {
+                // 歌词加载完成后，强制同步 visualTime
+                visualTime.value = playerStore.currentTime;
                 nextTick(() => scrollToActiveLyric(true));
             }
         });

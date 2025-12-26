@@ -4,7 +4,6 @@
  */
 
 import { PluginPermission } from '../pluginManager'
-import { watch } from 'vue'
 
 export const playCountPlugin = {
   id: 'builtin-play-count',
@@ -18,11 +17,10 @@ export const playCountPlugin = {
   ],
 
   main: (api) => {
-    let playerStore = null
     let lastTrackPath = null
-    let stopWatcher = null
     let playStartTime = null
     let hasRecordedCurrentTrack = false
+    let pollingInterval = null
 
     // 加载或初始化存储
     const loadData = () => {
@@ -122,35 +120,49 @@ export const playCountPlugin = {
       }
     }
 
+    // 通过 API 轮询播放状态
+    const pollPlayerState = async () => {
+      try {
+        const state = await api.player.getState()
+        handleTrackChange(state.currentTrack, state.isPlaying)
+      } catch (e) {
+        // 忽略错误，下次轮询重试
+      }
+    }
+
     return {
       async activate() {
         api.log.info('播放统计插件已激活')
 
-        // 获取 player store
-        const { usePlayerStore } = await import('../../stores/player')
-        playerStore = usePlayerStore()
+        // 通过事件 API 监听播放状态变化
+        api.events.on('player:trackChanged', (data) => {
+          handleTrackChange(data.track, data.isPlaying)
+        })
+        
+        api.events.on('player:stateChanged', (data) => {
+          handleTrackChange(data.track, data.isPlaying)
+        })
 
-        // 监听当前歌曲和播放状态变化
-        stopWatcher = watch(
-          () => ({ 
-            track: playerStore.currentTrack, 
-            isPlaying: playerStore.isPlaying 
-          }),
-          ({ track, isPlaying }) => {
-            handleTrackChange(track, isPlaying)
-          },
-          { immediate: true }
-        )
+        // 初始获取一次状态
+        await pollPlayerState()
+        
+        // 备用：定期轮询（每 5 秒），以防事件丢失
+        pollingInterval = setInterval(pollPlayerState, 5000)
       },
 
       deactivate() {
         // 结算当前播放时长
         settleLastTrack()
         
-        if (stopWatcher) {
-          stopWatcher()
-          stopWatcher = null
+        // 取消事件监听
+        api.events.off('player:trackChanged')
+        api.events.off('player:stateChanged')
+        
+        if (pollingInterval) {
+          clearInterval(pollingInterval)
+          pollingInterval = null
         }
+        
         lastTrackPath = null
         playStartTime = null
         hasRecordedCurrentTrack = false

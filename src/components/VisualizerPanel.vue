@@ -93,6 +93,11 @@ export default {
         }
     });
 
+    // 监听歌曲切换，立即重置 visualTime
+    watch(() => playerStore.currentTrack?.path, () => {
+        visualTime.value = playerStore.currentTime;
+    });
+
     // 应用歌词偏移
     const getKaraokeStyle = (word) => {
         const offset = playerStore.lyricsOffset || 0;

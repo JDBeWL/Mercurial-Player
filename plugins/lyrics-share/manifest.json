@@ -7,7 +7,8 @@
   "main": "index.js",
   "permissions": [
     "player:read",
-    "storage"
+    "storage",
+    "ui:extend"
   ],
   "auto_activate": true
 }

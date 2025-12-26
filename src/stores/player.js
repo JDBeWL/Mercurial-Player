@@ -108,6 +108,12 @@ export const usePlayerStore = defineStore('player', {
     
     // 销毁标志，防止清理后继续调用后端
     _isDestroyed: false,
+    
+    // 播放结束事件监听器
+    _trackEndedUnlisten: null,
+    
+    // 播放位置事件监听器
+    _positionUnlisten: null,
   }),
 
   getters: {
@@ -208,10 +214,50 @@ export const usePlayerStore = defineStore('player', {
         logger.error('Failed to load volume from config:', err);
       }
       
+      // 监听播放结束事件（减少 IPC 轮询）
+      this._setupTrackEndedListener();
+      
+      // 监听播放位置事件（从后端获取真实播放时间）
+      this._setupPositionListener();
+      
       // 启动定期清理任务
       this._startCleanupTask();
       
       logger.info('Player store initialized.');
+    },
+    
+    /**
+     * 设置播放结束事件监听
+     */
+    async _setupTrackEndedListener() {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        this._trackEndedUnlisten = await listen('track-ended', () => {
+          if (this._isDestroyed) return;
+          logger.debug('Received track-ended event');
+          this._onEnded();
+        });
+      } catch (err) {
+        logger.error('Failed to setup track-ended listener:', err);
+      }
+    },
+    
+    /**
+     * 设置播放位置事件监听（从后端获取真实播放时间）
+     */
+    async _setupPositionListener() {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        this._positionUnlisten = await listen('playback-position', (event) => {
+          if (this._isDestroyed || !this.isPlaying) return;
+          const position = event.payload?.position;
+          if (typeof position === 'number' && position >= 0) {
+            this.currentTime = position;
+          }
+        });
+      } catch (err) {
+        logger.error('Failed to setup position listener:', err);
+      }
     },
 
     // --- 核心行为 ---
@@ -380,8 +426,8 @@ export const usePlayerStore = defineStore('player', {
     startStatusPolling() {
       this.stopStatusPolling();
       
-      const normalInterval = 500;
-      const fastInterval = 100;
+      // 播放位置现在由后端事件推送，轮询只用于检测播放结束
+      const checkInterval = 500;
       
       const poll = async () => {
         // 检查是否已销毁
@@ -394,12 +440,10 @@ export const usePlayerStore = defineStore('player', {
 
         try {
           const timeToEnd = this.duration > 0 ? this.duration - this.currentTime : Infinity;
-          const isNearEnd = timeToEnd < 2.0;
-          const currentInterval = isNearEnd ? fastInterval : normalInterval;
-
-          if (isNearEnd && timeToEnd < 1.0 && !this._isDestroyed) {
+          
+          // 只在接近结束时检查是否播放完毕
+          if (timeToEnd < 1.0 && !this._isDestroyed) {
             const isFinished = await invoke('is_track_finished');
-            // 再次检查，因为 invoke 是异步的
             if (this._isDestroyed) return;
             if (isFinished) {
               this._onEnded();
@@ -407,36 +451,15 @@ export const usePlayerStore = defineStore('player', {
             }
           }
           
-          // 检查是否已销毁
-          if (this._isDestroyed) return;
-          
-          const newTime = this.currentTime + (currentInterval / 1000);
-
-          if (this.duration > 0 && newTime >= this.duration) {
-            this.currentTime = this.duration;
-          } else {
-            this.currentTime = newTime;
-          }
-          
-          this._statusPollId = setTimeout(poll, currentInterval);
+          this._statusPollId = setTimeout(poll, checkInterval);
         } catch (error) {
-          // 检查是否已销毁
           if (this._isDestroyed) return;
-          
           logger.error("Error checking track status:", error);
-          const newTime = this.currentTime + (normalInterval / 1000);
-          if (this.duration > 0 && newTime >= this.duration) {
-            this.currentTime = this.duration;
-            this._onEnded();
-            return;
-          } else {
-            this.currentTime = newTime;
-          }
-          this._statusPollId = setTimeout(poll, normalInterval);
+          this._statusPollId = setTimeout(poll, checkInterval);
         }
       };
       
-      this._statusPollId = setTimeout(poll, normalInterval);
+      this._statusPollId = setTimeout(poll, checkInterval);
     },
 
     stopStatusPolling() {
@@ -700,6 +723,18 @@ export const usePlayerStore = defineStore('player', {
       
       this.stopStatusPolling();
       this._stopCleanupTask();
+      
+      // 取消播放结束事件监听
+      if (this._trackEndedUnlisten) {
+        this._trackEndedUnlisten();
+        this._trackEndedUnlisten = null;
+      }
+      
+      // 取消播放位置事件监听
+      if (this._positionUnlisten) {
+        this._positionUnlisten();
+        this._positionUnlisten = null;
+      }
       
       // 使用 try-catch 包裹，避免在销毁时抛出错误
       try {

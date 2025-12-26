@@ -199,7 +199,76 @@ impl SymphoniaDecoder {
     }
 
     fn create_channel_mapping(channels: u16) -> Option<Vec<usize>> {
-        match channels { 6 | 8 => Some(vec![0, 1]), n if n > 2 => Some(vec![0, 1]), _ => None }
+        // 返回 None 表示需要使用专门的混音算法，而不是简单的声道映射
+        match channels {
+            1 | 2 => None, // 单声道或立体声，不需要映射
+            _ => Some(vec![]), // 多声道，标记需要混音处理
+        }
+    }
+    
+    /// 5.1/7.1 环绕声到立体声的专业混音
+    /// 使用 ITU-R BS.775-1 标准的下混系数
+    fn downmix_to_stereo(planes: &[&[f32]], frame: usize, src_channels: usize) -> (f32, f32) {
+        // 标准声道布局:
+        // 5.1: FL(0), FR(1), FC(2), LFE(3), SL/BL(4), SR/BR(5)
+        // 7.1: FL(0), FR(1), FC(2), LFE(3), BL(4), BR(5), SL(6), SR(7)
+        
+        let fl = if src_channels > 0 { planes[0][frame] } else { 0.0 };
+        let fr = if src_channels > 1 { planes[1][frame] } else { fl };
+        let fc = if src_channels > 2 { planes[2][frame] } else { 0.0 };
+        let _lfe = if src_channels > 3 { planes[3][frame] } else { 0.0 }; // LFE 通常不混入
+        
+        // 混音系数 (ITU-R BS.775-1)
+        const CENTER_MIX: f32 = 0.707; // -3dB
+        const SURROUND_MIX: f32 = 0.707; // -3dB
+        const BACK_MIX: f32 = 0.5; // -6dB (用于 7.1)
+        
+        let (mut left, mut right) = (fl, fr);
+        
+        // 添加中置声道
+        left += fc * CENTER_MIX;
+        right += fc * CENTER_MIX;
+        
+        match src_channels {
+            6 => {
+                // 5.1: SL(4), SR(5)
+                let sl = planes[4][frame];
+                let sr = planes[5][frame];
+                left += sl * SURROUND_MIX;
+                right += sr * SURROUND_MIX;
+            }
+            8 => {
+                // 7.1: BL(4), BR(5), SL(6), SR(7)
+                let bl = planes[4][frame];
+                let br = planes[5][frame];
+                let sl = planes[6][frame];
+                let sr = planes[7][frame];
+                left += sl * SURROUND_MIX + bl * BACK_MIX;
+                right += sr * SURROUND_MIX + br * BACK_MIX;
+            }
+            n if n > 2 => {
+                // 其他多声道格式，简单混合额外声道
+                for ch in 2..src_channels {
+                    let sample = planes[ch][frame];
+                    let mix = 0.5 / (src_channels - 2) as f32;
+                    left += sample * mix;
+                    right += sample * mix;
+                }
+            }
+            _ => {}
+        }
+        
+        // 归一化防止削波（5.1 最大增益约 1.414，7.1 约 1.5）
+        let normalize = match src_channels {
+            6 => 0.707,  // 1/sqrt(2)
+            8 => 0.667,  // 约 1/1.5
+            _ => 0.8,
+        };
+        
+        (
+            (left * normalize).clamp(-1.0, 1.0),
+            (right * normalize).clamp(-1.0, 1.0)
+        )
     }
 
     pub fn adjust_buffer_settings(&mut self, buffer_duration_ms: u32, refill_threshold_ms: u32) {
@@ -288,7 +357,12 @@ impl SymphoniaDecoder {
             };
             if packet.track_id() != track_id { continue; }
             match decoder.decode(&packet) {
-                Ok(decoded) => { self.scratch_buffer.clear(); Self::convert_audio_buffer(decoded, &mut self.scratch_buffer, &self.channel_map); self.buffer.append(&self.scratch_buffer); decoded_packets += 1; }
+                Ok(decoded) => { 
+                    self.scratch_buffer.clear(); 
+                    Self::convert_audio_buffer(decoded, &mut self.scratch_buffer, &self.channel_map, self.source_channels as usize); 
+                    self.buffer.append(&self.scratch_buffer); 
+                    decoded_packets += 1; 
+                }
                 Err(Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => { self.state = DecoderState::EndOfStream; break; }
                 Err(Error::DecodeError(_)) => continue,
                 Err(e) => { self.state = DecoderState::Error(format!("Decode error: {e}")); return Err(format!("Decode error: {e}")); }
@@ -297,28 +371,69 @@ impl SymphoniaDecoder {
         Ok(())
     }
 
-    fn convert_audio_buffer(audio_buf: AudioBufferRef, samples: &mut Vec<f32>, channel_map: &Option<Vec<usize>>) {
+    fn convert_audio_buffer(audio_buf: AudioBufferRef, samples: &mut Vec<f32>, channel_map: &Option<Vec<usize>>, src_channels: usize) {
         let frames = audio_buf.frames();
         let channels = audio_buf.spec().channels.count();
-        let target_ch = channel_map.as_ref().map_or(channels, Vec::len);
+        
+        // 如果需要混音（多声道到立体声）
+        let needs_downmix = channel_map.is_some() && src_channels > 2;
+        let target_ch = if needs_downmix { 2 } else { channels };
         samples.reserve(frames * target_ch);
 
         match audio_buf {
-            AudioBufferRef::F32(buf) => { let p = buf.planes(); Self::copy_planes(p.planes(), samples, frames, channels, channel_map, |s| *s); }
-            AudioBufferRef::S16(buf) => { let p = buf.planes(); Self::copy_planes(p.planes(), samples, frames, channels, channel_map, |s| (*s as f32) / 32768.0); }
-            AudioBufferRef::U8(buf) => { let p = buf.planes(); Self::copy_planes(p.planes(), samples, frames, channels, channel_map, |s| (*s as f32 - 128.0) / 128.0); }
-            AudioBufferRef::S32(buf) => { let p = buf.planes(); Self::copy_planes(p.planes(), samples, frames, channels, channel_map, |s| (*s as f32) / 2_147_483_648.0); }
-            AudioBufferRef::S24(buf) => { let p = buf.planes(); Self::copy_planes(p.planes(), samples, frames, channels, channel_map, |s| (s.inner() as f32) / 8_388_608.0); }
+            AudioBufferRef::F32(buf) => { 
+                let p = buf.planes(); 
+                Self::copy_planes_with_downmix(p.planes(), samples, frames, channels, needs_downmix, |s| *s); 
+            }
+            AudioBufferRef::S16(buf) => { 
+                let p = buf.planes(); 
+                Self::copy_planes_with_downmix(p.planes(), samples, frames, channels, needs_downmix, |s| (*s as f32) / 32768.0); 
+            }
+            AudioBufferRef::U8(buf) => { 
+                let p = buf.planes(); 
+                Self::copy_planes_with_downmix(p.planes(), samples, frames, channels, needs_downmix, |s| (*s as f32 - 128.0) / 128.0); 
+            }
+            AudioBufferRef::S32(buf) => { 
+                let p = buf.planes(); 
+                Self::copy_planes_with_downmix(p.planes(), samples, frames, channels, needs_downmix, |s| (*s as f32) / 2_147_483_648.0); 
+            }
+            AudioBufferRef::S24(buf) => { 
+                let p = buf.planes(); 
+                Self::copy_planes_with_downmix(p.planes(), samples, frames, channels, needs_downmix, |s| (s.inner() as f32) / 8_388_608.0); 
+            }
             _ => eprintln!("Unsupported audio buffer format"),
         }
     }
 
     #[inline(always)]
-    fn copy_planes<T, F>(planes: &[&[T]], out: &mut Vec<f32>, frames: usize, src_ch: usize, map: &Option<Vec<usize>>, conv: F) where T: Copy, F: Fn(&T) -> f32 {
-        if let Some(map) = map {
-            for i in 0..frames { for &ch in map { if ch < src_ch { out.push(conv(&planes[ch][i]).clamp(-1.0, 1.0)); } } }
+    fn copy_planes_with_downmix<T, F>(planes: &[&[T]], out: &mut Vec<f32>, frames: usize, src_ch: usize, needs_downmix: bool, conv: F) 
+    where 
+        T: Copy, 
+        F: Fn(&T) -> f32 
+    {
+        if needs_downmix && src_ch > 2 {
+            // 先转换所有声道到 f32
+            let mut float_planes: Vec<Vec<f32>> = Vec::with_capacity(src_ch);
+            for ch in 0..src_ch {
+                float_planes.push(planes[ch].iter().map(|s| conv(s)).collect());
+            }
+            
+            // 创建引用切片
+            let float_refs: Vec<&[f32]> = float_planes.iter().map(|v| v.as_slice()).collect();
+            
+            // 使用专业混音算法
+            for i in 0..frames {
+                let (left, right) = Self::downmix_to_stereo(&float_refs, i, src_ch);
+                out.push(left);
+                out.push(right);
+            }
         } else {
-            for i in 0..frames { for ch in 0..src_ch { out.push(conv(&planes[ch][i])); } }
+            // 直接复制（单声道或立体声）
+            for i in 0..frames { 
+                for ch in 0..src_ch { 
+                    out.push(conv(&planes[ch][i])); 
+                } 
+            }
         }
     }
 }

@@ -6,6 +6,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import logger from '../utils/logger'
 import pluginManager from './pluginManager'
+import { validatePluginCode } from './pluginSandbox'
 
 // 插件目录
 const PLUGINS_DIR = 'plugins'
@@ -51,6 +52,14 @@ export async function loadPlugin(pluginPath) {
       main: manifest.main || 'index.js' 
     })
 
+    // 验证插件代码安全性
+    try {
+      validatePluginCode(mainCode)
+    } catch (error) {
+      logger.error(`插件代码安全检查失败: ${manifest.id}`, error)
+      throw new Error(`插件安全检查失败: ${error.message}`)
+    }
+
     // 创建插件主函数
     const mainFn = createPluginFunction(mainCode, manifest.id)
 
@@ -79,23 +88,132 @@ export async function loadPlugin(pluginPath) {
 
 /**
  * 创建插件函数
+ * 插件代码在受限的沙箱环境中执行
  * @param {string} code 插件代码
  * @param {string} pluginId 插件 ID
  */
 function createPluginFunction(code, pluginId) {
-  // 包装插件代码，注入 API
+  // 返回一个接收 api 参数的函数
   return async (api) => {
     try {
-      // 使用 AsyncFunction 创建异步函数
-      const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor
+      // 创建安全的 console
+      const safeConsole = {
+        log: api.log.info,
+        info: api.log.info,
+        warn: api.log.warn,
+        error: api.log.error,
+        debug: api.log.debug,
+      }
+
+      // 创建安全的定时器
+      const timers = new Set()
+      const intervals = new Set()
+
+      const safeSetTimeout = (fn, delay, ...args) => {
+        const id = setTimeout(() => {
+          timers.delete(id)
+          try { fn(...args) } catch (e) { api.log.error('定时器错误:', e) }
+        }, Math.min(delay || 0, 60000))
+        timers.add(id)
+        return id
+      }
+
+      const safeClearTimeout = (id) => {
+        timers.delete(id)
+        clearTimeout(id)
+      }
+
+      const safeSetInterval = (fn, delay, ...args) => {
+        const safeDelay = Math.max(delay || 100, 100)
+        const id = setInterval(() => {
+          try { fn(...args) } catch (e) { api.log.error('定时器错误:', e) }
+        }, safeDelay)
+        intervals.add(id)
+        return id
+      }
+
+      const safeClearInterval = (id) => {
+        intervals.delete(id)
+        clearInterval(id)
+      }
+
+      // 构建参数名和值列表
+      // 通过显式传递参数来覆盖全局变量
+      const safeParams = {
+        // 安全的全局对象
+        Object, Array, String, Number, Boolean, Date, RegExp,
+        Error, TypeError, RangeError, SyntaxError,
+        Map, Set, WeakMap, WeakSet,
+        JSON: Object.freeze({ parse: JSON.parse, stringify: JSON.stringify }),
+        Math,
+        Promise,
+        encodeURIComponent, decodeURIComponent, encodeURI, decodeURI,
+        btoa, atob,
+        isNaN, isFinite, parseInt, parseFloat,
+        NaN, Infinity,
+        // 安全的定时器
+        console: safeConsole,
+        setTimeout: safeSetTimeout,
+        clearTimeout: safeClearTimeout,
+        setInterval: safeSetInterval,
+        clearInterval: safeClearInterval,
+        // 插件 API
+        api,
+        // 阻止危险的全局对象（设为 undefined）
+        window: undefined,
+        document: undefined,
+        globalThis: undefined,
+        self: undefined,
+        top: undefined,
+        parent: undefined,
+        frames: undefined,
+        eval: undefined,
+        Function: undefined,
+        process: undefined,
+        require: undefined,
+        module: undefined,
+        exports: undefined,
+        __dirname: undefined,
+        __filename: undefined,
+        XMLHttpRequest: undefined,
+        fetch: undefined,
+        WebSocket: undefined,
+        Worker: undefined,
+        SharedWorker: undefined,
+        localStorage: undefined,
+        sessionStorage: undefined,
+        indexedDB: undefined,
+        navigator: undefined,
+        location: undefined,
+        history: undefined,
+        alert: undefined,
+        confirm: undefined,
+        prompt: undefined,
+        open: undefined,
+        close: undefined,
+        Proxy: undefined,
+        Reflect: undefined,
+        importScripts: undefined,
+      }
+
+      const paramNames = Object.keys(safeParams)
+      const paramValues = Object.values(safeParams)
+
+      // 包装插件代码
       const wrappedCode = `
-        return (async () => {
-          ${code}
-          return typeof plugin !== 'undefined' ? plugin : {};
-        })();
+        ${code}
+        return typeof plugin !== 'undefined' ? plugin : {};
       `
-      const fn = new AsyncFunction('api', wrappedCode)
-      return await fn(api)
+
+      // 使用 Function 构造函数，通过参数传递安全的全局对象
+      const fn = new Function(...paramNames, wrappedCode)
+      const result = fn(...paramValues)
+
+      // 如果返回的是 Promise，等待它
+      if (result && typeof result.then === 'function') {
+        return await result
+      }
+      return result
     } catch (error) {
       logger.error(`插件执行失败: ${pluginId}`, error)
       throw error

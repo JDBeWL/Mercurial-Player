@@ -55,6 +55,16 @@ pub struct WasapiExclusivePlayback {
     sample_buffer: Arc<(Mutex<VecDeque<f32>>, Condvar)>,
 }
 
+/// 根据采样率和声道数计算 WASAPI 缓冲区容量
+/// 目标是保持约 4 秒的缓冲（48000 * 2 * 4 @ 48kHz stereo）
+#[must_use]
+fn calculate_wasapi_buffer_capacity(sample_rate: u32, channels: u16) -> usize {
+    // 基准：48kHz 立体声使用 4 秒缓冲
+    // 高采样率需要更大缓冲以保持相同时长
+    let duration_secs = 4;
+    sample_rate as usize * channels as usize * duration_secs
+}
+
 impl WasapiExclusivePlayback {
     #[must_use]
     pub fn new() -> Self {
@@ -64,7 +74,9 @@ impl WasapiExclusivePlayback {
         let state = Arc::new(Mutex::new(PlaybackState::Uninitialized));
         let volume = Arc::new(Mutex::new(1.0f32));
         let is_running = Arc::new(AtomicBool::new(true));
-        let sample_buffer = Arc::new((Mutex::new(VecDeque::with_capacity(48000 * 2 * 4)), Condvar::new()));
+        // 初始使用默认 48kHz 立体声的缓冲区大小，初始化后会调整
+        let initial_capacity = calculate_wasapi_buffer_capacity(48000, 2);
+        let sample_buffer = Arc::new((Mutex::new(VecDeque::with_capacity(initial_capacity)), Condvar::new()));
 
         let state_clone = Arc::clone(&state);
         let volume_clone = Arc::clone(&volume);
@@ -98,6 +110,18 @@ impl WasapiExclusivePlayback {
                 self.sample_rate.store(sample_rate, Ordering::SeqCst);
                 self.channels.store(u32::from(channels), Ordering::SeqCst);
                 *self.state.lock().unwrap() = PlaybackState::Stopped;
+                
+                // 根据实际采样率和声道数调整缓冲区容量
+                let new_capacity = calculate_wasapi_buffer_capacity(sample_rate, channels);
+                let (buffer, _) = &*self.sample_buffer;
+                let mut buf = buffer.lock().unwrap();
+                // 如果新容量更大，预留更多空间
+                let current_capacity = buf.capacity();
+                if new_capacity > current_capacity {
+                    buf.reserve(new_capacity - current_capacity);
+                }
+                drop(buf);
+                
                 Ok((sample_rate, channels, device_name))
             }
             Ok(AudioResponse::InitFailed(e)) => Err(e),

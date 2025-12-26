@@ -19,7 +19,7 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onUnmounted, watch } from 'vue'
 import { usePlayerStore } from '../stores/player'
 
 const playerStore = usePlayerStore()
@@ -28,6 +28,7 @@ const progressBarWrapper = ref(null)
 const isDragging = ref(false)
 const isHovering = ref(false)
 const dragPercent = ref(0)
+const pendingSeek = ref(false) // 标记是否有待完成的 seek 操作
 
 const progressPercent = computed(() => {
   if (playerStore.duration === 0) return 0
@@ -35,14 +36,29 @@ const progressPercent = computed(() => {
 })
 
 const displayPercent = computed(() => {
-  return isDragging.value ? dragPercent.value : progressPercent.value
+  // 拖动中或等待 seek 完成时，显示拖动位置
+  if (isDragging.value || pendingSeek.value) {
+    return dragPercent.value
+  }
+  return progressPercent.value
 })
 
 const displayTime = computed(() => {
-  if (isDragging.value) {
+  if (isDragging.value || pendingSeek.value) {
     return (dragPercent.value / 100) * playerStore.duration
   }
   return playerStore.currentTime
+})
+
+// 监听 currentTime 变化，当接近目标位置时取消 pendingSeek
+watch(() => playerStore.currentTime, (newTime) => {
+  if (pendingSeek.value && playerStore.duration > 0) {
+    const targetTime = (dragPercent.value / 100) * playerStore.duration
+    // 当实际时间接近目标时间（误差 0.5 秒内），取消等待状态
+    if (Math.abs(newTime - targetTime) < 0.5) {
+      pendingSeek.value = false
+    }
+  }
 })
 
 const updateDragPosition = (event) => {
@@ -55,6 +71,7 @@ const updateDragPosition = (event) => {
 const handleMouseDown = (event) => {
   if (playerStore.duration === 0) return
   isDragging.value = true
+  pendingSeek.value = false // 重置
   updateDragPosition(event)
   
   document.addEventListener('mousemove', handleMouseMove)
@@ -67,13 +84,21 @@ const handleMouseMove = (event) => {
   }
 }
 
-const handleMouseUp = (event) => {
+const handleMouseUp = () => {
   if (isDragging.value) {
     isDragging.value = false
+    
     // 应用新的播放位置
     if (playerStore.duration > 0) {
       const newTime = (dragPercent.value / 100) * playerStore.duration
+      // 标记等待 seek 完成，保持显示位置
+      pendingSeek.value = true
       playerStore.seek(newTime)
+      
+      // 超时保护：如果 1 秒后还没收到更新，取消等待
+      setTimeout(() => {
+        pendingSeek.value = false
+      }, 1000)
     }
   }
   document.removeEventListener('mousemove', handleMouseMove)

@@ -22,12 +22,20 @@ use tauri::{command, AppHandle, State};
 
 #[command]
 pub fn get_waveform_data(state: State<AppState>) -> Result<Vec<f32>, String> {
-    Ok(state.player.waveform_data.lock().unwrap().clone())
+    // 使用 try_lock 避免阻塞主线程
+    match state.player.waveform_data.try_lock() {
+        Ok(data) => Ok(data.clone()),
+        Err(_) => Ok(Vec::new()) // 锁被占用时返回空数据，避免阻塞
+    }
 }
 
 #[command]
 pub fn get_spectrum_data(state: State<AppState>) -> Result<Vec<f32>, String> {
-    Ok(state.player.spectrum_data.lock().unwrap().clone())
+    // 使用 try_lock 避免阻塞主线程
+    match state.player.spectrum_data.try_lock() {
+        Ok(data) => Ok(data.clone()),
+        Err(_) => Ok(vec![0.0; 128]) // 锁被占用时返回默认数据，避免阻塞
+    }
 }
 
 #[command]
@@ -41,30 +49,48 @@ pub fn play_track(app: AppHandle, state: State<AppState>, path: String, position
 
 #[command]
 pub fn pause_track(state: State<AppState>) -> Result<(), String> {
-    if *state.player.exclusive_mode.lock().unwrap() {
+    // 使用 try_lock 避免阻塞
+    let exclusive_mode = state.player.exclusive_mode.try_lock()
+        .map(|g| *g)
+        .unwrap_or(false);
+    
+    if exclusive_mode {
         #[cfg(windows)]
         {
-            if let Some(ref wasapi) = *state.player.wasapi_player.lock().unwrap() {
-                wasapi.pause()?;
+            if let Ok(guard) = state.player.wasapi_player.try_lock() {
+                if let Some(ref wasapi) = *guard {
+                    wasapi.pause()?;
+                }
             }
         }
     } else {
-        state.player.sink.lock().unwrap().pause();
+        if let Ok(sink) = state.player.sink.try_lock() {
+            sink.pause();
+        }
     }
     Ok(())
 }
 
 #[command]
 pub fn resume_track(state: State<AppState>) -> Result<(), String> {
-    if *state.player.exclusive_mode.lock().unwrap() {
+    // 使用 try_lock 避免阻塞
+    let exclusive_mode = state.player.exclusive_mode.try_lock()
+        .map(|g| *g)
+        .unwrap_or(false);
+    
+    if exclusive_mode {
         #[cfg(windows)]
         {
-            if let Some(ref wasapi) = *state.player.wasapi_player.lock().unwrap() {
-                wasapi.resume()?;
+            if let Ok(guard) = state.player.wasapi_player.try_lock() {
+                if let Some(ref wasapi) = *guard {
+                    wasapi.resume()?;
+                }
             }
         }
     } else {
-        state.player.sink.lock().unwrap().play();
+        if let Ok(sink) = state.player.sink.try_lock() {
+            sink.play();
+        }
     }
     Ok(())
 }
@@ -74,16 +100,29 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), String> {
     if !(0.0..=1.0).contains(&volume) {
         return Err("Volume must be between 0.0 and 1.0".to_string());
     }
-    *state.player.target_volume.lock().unwrap() = volume;
-    if *state.player.exclusive_mode.lock().unwrap() {
+    
+    // 使用 try_lock 避免阻塞
+    if let Ok(mut target_vol) = state.player.target_volume.try_lock() {
+        *target_vol = volume;
+    }
+    
+    let exclusive_mode = state.player.exclusive_mode.try_lock()
+        .map(|g| *g)
+        .unwrap_or(false);
+    
+    if exclusive_mode {
         #[cfg(windows)]
         {
-            if let Some(ref wasapi) = *state.player.wasapi_player.lock().unwrap() {
-                wasapi.set_volume(volume)?;
+            if let Ok(guard) = state.player.wasapi_player.try_lock() {
+                if let Some(ref wasapi) = *guard {
+                    wasapi.set_volume(volume)?;
+                }
             }
         }
     } else {
-        state.player.sink.lock().unwrap().set_volume(volume);
+        if let Ok(sink) = state.player.sink.try_lock() {
+            sink.set_volume(volume);
+        }
     }
     Ok(())
 }
@@ -149,8 +188,6 @@ fn switch_to_wasapi_exclusive(
         sink.stop();
         sink.clear();
     }
-
-    std::thread::sleep(std::time::Duration::from_millis(200));
 
     // 确保旧的 WASAPI 播放器被正确清理
     {

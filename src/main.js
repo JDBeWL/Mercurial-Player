@@ -30,6 +30,9 @@ import { loadAllPlugins } from './plugins/pluginLoader'
 import { shortcutManager } from './plugins/shortcutManager'
 
 const loadBuiltinPlugins = async () => {
+  // 先初始化插件管理器（设置播放器状态监听）
+  await pluginManager.init()
+  
   for (const plugin of builtinPlugins) {
     try {
       if (!pluginManager.plugins.has(plugin.id)) {
