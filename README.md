@@ -131,4 +131,4 @@ npm run tauri build
 
 **歌词获取**
 
-[![LDDC](https://github-readme-stats.vercel.app/api/pin/?username=chenmozhijin&repo=LDDC)](https://github.com/chenmozhijin/LDDC)
+[![LDDC](https://gh-card.dev/repos/chenmozhijin/LDDC.svg)](https://github.com/chenmozhijin/LDDC)
