@@ -15,13 +15,13 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
       '@tauri-apps/plugin-dialog':
-        specifier: ^2.0.0
+        specifier: ^2.4.0
         version: 2.4.2
       '@tauri-apps/plugin-fs':
-        specifier: ^2.0.0
+        specifier: ^2.4.0
         version: 2.4.4
       '@tauri-apps/plugin-shell':
-        specifier: ^2.0.0
+        specifier: ^2.3.0
         version: 2.3.3
       pinia:
         specifier: ^2.1.6

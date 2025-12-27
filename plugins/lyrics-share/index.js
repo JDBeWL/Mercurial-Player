@@ -72,12 +72,18 @@ const wrapText = (ctx, text, x, y, maxWidth, lineHeight, dryRun = false) => {
   return { totalHeight, lines: lines.length, startY, endY: startY + (lines.length - 1) * lineHeight }
 }
 
+// 让出主线程的辅助函数
+const yieldToMain = () => new Promise(resolve => setTimeout(resolve, 0))
+
 /**
  * 生成分享图片
  */
 const generateImage = async (options = {}) => {
   const config = { ...getConfig(), ...options }
   const { width, padding } = config
+
+  // 先让出主线程，避免阻塞 UI
+  await yieldToMain()
 
   const state = await api.player.getState()
   const lyrics = await api.player.getLyrics()
@@ -111,7 +117,7 @@ const generateImage = async (options = {}) => {
   }
 
   // 让出主线程，避免长时间阻塞
-  await new Promise(resolve => setTimeout(resolve, 0))
+  await yieldToMain()
 
   // 计算歌词需要的行数来决定高度
   const tempCanvas = api.utils.createCanvas(width, 100)
@@ -185,7 +191,7 @@ const generateImage = async (options = {}) => {
   ctx.fillRect(0, 0, width, height)
 
   // 让出主线程
-  await new Promise(resolve => setTimeout(resolve, 0))
+  await yieldToMain()
 
   // 预加载封面图片（只加载一次）
   let coverImg = null
@@ -224,7 +230,7 @@ const generateImage = async (options = {}) => {
   }
 
   // 让出主线程
-  await new Promise(resolve => setTimeout(resolve, 0))
+  await yieldToMain()
 
   // 绘制封面图片（居中显示）
   const coverX = (width - coverSize) / 2

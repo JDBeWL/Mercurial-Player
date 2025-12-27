@@ -1,7 +1,7 @@
 {
   "name": "mercurial-player",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,9 +14,9 @@
   "dependencies": {
     "@material/material-color-utilities": "^0.3.0",
     "@tauri-apps/api": "^2.9.1",
-    "@tauri-apps/plugin-dialog": "^2.0.0",
-    "@tauri-apps/plugin-fs": "^2.0.0",
-    "@tauri-apps/plugin-shell": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.4.0",
+    "@tauri-apps/plugin-fs": "^2.4.0",
+    "@tauri-apps/plugin-shell": "^2.3.0",
     "pinia": "^2.1.6",
     "vue": "^3.3.4",
     "vue-i18n": "^9.14.5"

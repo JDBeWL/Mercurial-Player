@@ -214,11 +214,20 @@ export default {
         });
 
         // 基于高频 visualTime 计算 activeIndex，实现即时滚动
+        // 使用节流来减少计算频率，避免每帧都触发响应式更新
+        let lastCalcTime = 0;
+        const CALC_INTERVAL = 50; // 每 50ms 计算一次，足够流畅且减少开销
+        
         watch(visualTime, (time) => {
             if (!lyrics.value.length) {
                 if (activeIndex.value !== -1) activeIndex.value = -1;
                 return;
             }
+            
+            // 节流：避免每帧都计算
+            const now = performance.now();
+            if (now - lastCalcTime < CALC_INTERVAL) return;
+            lastCalcTime = now;
             
             // 应用歌词偏移
             const offset = playerStore.lyricsOffset || 0;
@@ -238,6 +247,7 @@ export default {
             
             if (idx !== activeIndex.value) {
                 activeIndex.value = idx;
+                playerStore.currentLyricIndex = idx; // 同步到 store
             }
         });
 

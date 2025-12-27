@@ -113,7 +113,7 @@ impl Iterator for LockFreeSymphoniaSource {
 }
 
 impl Source for LockFreeSymphoniaSource {
-    fn current_frame_len(&self) -> Option<usize> { None }
+    fn current_span_len(&self) -> Option<usize> { None }
     fn channels(&self) -> u16 { self.cached_channels }
     fn sample_rate(&self) -> u32 { self.cached_sample_rate }
     fn total_duration(&self) -> Option<Duration> { self.cached_total_duration }
@@ -152,7 +152,7 @@ impl Iterator for SymphoniaSource {
 }
 
 impl Source for SymphoniaSource {
-    fn current_frame_len(&self) -> Option<usize> { None }
+    fn current_span_len(&self) -> Option<usize> { None }
     fn channels(&self) -> u16 { self.cached_channels }
     fn sample_rate(&self) -> u32 { self.cached_sample_rate }
     fn total_duration(&self) -> Option<Duration> { self.cached_total_duration }
@@ -451,7 +451,7 @@ impl Iterator for SymphoniaDecoder {
 }
 
 impl Source for SymphoniaDecoder {
-    fn current_frame_len(&self) -> Option<usize> { None }
+    fn current_span_len(&self) -> Option<usize> { None }
     fn channels(&self) -> u16 { self.target_channels }
     fn sample_rate(&self) -> u32 { self.sample_rate }
     fn total_duration(&self) -> Option<Duration> { self.total_duration }

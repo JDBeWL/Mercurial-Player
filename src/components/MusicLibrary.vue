@@ -371,53 +371,61 @@ const calculateDirectoryStats = async () => {
   })
 }
 
-// 搜索功能
+// 搜索功能 - 添加防抖
+let searchTimeout = null
 const handleSearch = async () => {
+  // 清除之前的定时器
+  if (searchTimeout) {
+    clearTimeout(searchTimeout)
+  }
+  
   if (!searchTerm.value.trim()) {
     searchResults.value = []
     return
   }
   
-  searchResults.value = []
-  const lowerCaseSearchTerm = searchTerm.value.toLowerCase()
-  const uniqueResults = new Map() // 使用Map来去重
+  // 防抖：300ms 后执行搜索
+  searchTimeout = setTimeout(() => {
+    const lowerCaseSearchTerm = searchTerm.value.toLowerCase()
+    const uniqueResults = new Map() // 使用Map来去重
 
-  for (const playlist of playlists.value) {
-    if (playlist.files) {
-      const results = playlist.files.filter(file => 
-        (file.title && file.title.toLowerCase().includes(lowerCaseSearchTerm)) ||
-        (file.artist && file.artist.toLowerCase().includes(lowerCaseSearchTerm)) ||
-        (file.album && file.album.toLowerCase().includes(lowerCaseSearchTerm)) ||
-        (file.name && file.name.toLowerCase().includes(lowerCaseSearchTerm))
-      )
-      
-      // 去重
-      for (const file of results) {
-        if (!uniqueResults.has(file.path)) {
-          uniqueResults.set(file.path, file)
+    for (const playlist of playlists.value) {
+      if (playlist.files) {
+        const results = playlist.files.filter(file => 
+          (file.title && file.title.toLowerCase().includes(lowerCaseSearchTerm)) ||
+          (file.artist && file.artist.toLowerCase().includes(lowerCaseSearchTerm)) ||
+          (file.album && file.album.toLowerCase().includes(lowerCaseSearchTerm)) ||
+          (file.name && file.name.toLowerCase().includes(lowerCaseSearchTerm))
+        )
+        
+        // 去重
+        for (const file of results) {
+          if (!uniqueResults.has(file.path)) {
+            uniqueResults.set(file.path, file)
+          }
         }
       }
     }
-  }
-  
-  // 根据配置排序
-  const isAscOrder = configStore.playlist.sortOrder === 'asc'
-  searchResults.value = Array.from(uniqueResults.values()).sort((a, b) => {
-    const titleA = (a.title || a.name || '').toLowerCase()
-    const titleB = (b.title || b.name || '').toLowerCase()
     
-    if (isAscOrder) {
-      // A-Z order
-      if (titleA < titleB) return -1
-      if (titleA > titleB) return 1
-    } else {
-      // Z-A order
-      if (titleA > titleB) return -1
-      if (titleA < titleB) return 1
-    }
-    
-    return 0
-  })
+    // 根据配置排序
+    const isAscOrder = configStore.playlist.sortOrder === 'asc'
+    searchResults.value = Array.from(uniqueResults.values()).sort((a, b) => {
+      const titleA = (a.title || a.name || '').toLowerCase()
+      const titleB = (b.title || b.name || '').toLowerCase()
+      
+      if (isAscOrder) {
+        // A-Z order
+        if (titleA < titleB) return -1
+        if (titleA > titleB) return 1
+      } else {
+        // Z-A order
+        if (titleA > titleB) return -1
+        if (titleA < titleB) return 1
+      }
+      
+      return 0
+    })
+  }, 300)
 }
 
 const clearSearch = () => {

@@ -114,11 +114,11 @@ export function createPluginAPI(pluginId, permissions, manager) {
               const content = await FileUtils.readFile(lyricsPath)
               const ext = FileUtils.getFileExtension(lyricsPath)
               
-              // 使用和 useLyrics 相同的解析逻辑
+              // 使用和 useLyrics 相同的解析逻辑（异步版本）
               if (ext === 'lrc') {
-                return this._parseLRC(content)
+                return await this._parseLRC(content)
               } else if (ext === 'ass') {
-                return this._parseASS(content)
+                return await this._parseASS(content)
               }
             }
           } catch (e) {
@@ -129,12 +129,20 @@ export function createPluginAPI(pluginId, permissions, manager) {
         return null
       },
 
-      // LRC 解析（与 useLyrics 一致）
-      _parseLRC(lrcText) {
+      // LRC 解析（异步版本，避免阻塞主线程）
+      async _parseLRC(lrcText) {
         const lines = lrcText.split("\n")
         const pattern = /\[(\d{2}):(\d{2}):(\d{2})\]|\[(\d{2}):(\d{2})\.(\d{2,3})\]/g
         const resultMap = {}
-        for (const line of lines) {
+        
+        // 分块处理，每 100 行让出一次主线程
+        const CHUNK_SIZE = 100
+        for (let i = 0; i < lines.length; i++) {
+          if (i > 0 && i % CHUNK_SIZE === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0))
+          }
+          
+          const line = lines[i]
           const timestamps = []
           let match
           while ((match = pattern.exec(line)) !== null) {
@@ -162,15 +170,23 @@ export function createPluginAPI(pluginId, permissions, manager) {
         return Object.values(resultMap).sort((a, b) => a.time - b.time)
       },
 
-      // ASS 解析（与 useLyrics 一致）
-      _parseASS(assText) {
+      // ASS 解析（异步版本，避免阻塞主线程）
+      async _parseASS(assText) {
         const lines = assText.split('\n')
         const dialogues = []
         const toSeconds = (t) => {
           const [h, m, s] = t.split(':')
           return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s)
         }
-        for (const line of lines) {
+        
+        // 分块处理
+        const CHUNK_SIZE = 100
+        for (let i = 0; i < lines.length; i++) {
+          if (i > 0 && i % CHUNK_SIZE === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0))
+          }
+          
+          const line = lines[i]
           if (!line.startsWith('Dialogue:')) continue
           const parts = line.split(',')
           if (parts.length < 10) continue
@@ -180,6 +196,7 @@ export function createPluginAPI(pluginId, permissions, manager) {
           const text = parts.slice(9).join(',').trim()
           dialogues.push({ startTime: toSeconds(start), endTime: toSeconds(end), style, text })
         }
+        
         const groupedMap = new Map()
         dialogues.forEach(d => {
           const key = d.startTime.toFixed(3) + '-' + d.endTime.toFixed(3)

@@ -183,18 +183,29 @@ export const usePlayerStore = defineStore('player', {
     },
 
     /**
-     * 清理过期缓存
+     * 清理过期缓存 - 使用异步分块处理避免阻塞
      */
-    _cleanupCaches() {
-      // LRU 缓存会在 get 时自动清理过期项，这里触发一次遍历
+    async _cleanupCaches() {
+      // LRU 缓存会在 get 时自动清理过期项
+      // 使用分块处理避免大缓存时阻塞主线程
+      const CHUNK_SIZE = 50;
+      
       if (this._fileExistsCache) {
-        for (const key of this._fileExistsCache.cache.keys()) {
-          this._fileExistsCache.get(key);
+        const keys = Array.from(this._fileExistsCache.cache.keys());
+        for (let i = 0; i < keys.length; i++) {
+          this._fileExistsCache.get(keys[i]);
+          if (i > 0 && i % CHUNK_SIZE === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
         }
       }
       if (this._metadataCache) {
-        for (const key of this._metadataCache.cache.keys()) {
-          this._metadataCache.get(key);
+        const keys = Array.from(this._metadataCache.cache.keys());
+        for (let i = 0; i < keys.length; i++) {
+          this._metadataCache.get(keys[i]);
+          if (i > 0 && i % CHUNK_SIZE === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
         }
       }
       logger.debug('Cache cleanup completed');
@@ -674,14 +685,17 @@ export const usePlayerStore = defineStore('player', {
     },
 
     /**
-     * 缓存播放列表元数据
+     * 缓存播放列表元数据 - 使用异步分块处理
      */
-    _cachePlaylistMetadata(playlist) {
+    async _cachePlaylistMetadata(playlist) {
       if (!playlist || playlist.length === 0) return;
 
       const cache = this._getMetadataCache();
+      const CHUNK_SIZE = 50; // 每 50 个让出一次主线程
+      let cached = 0;
 
-      for (const track of playlist) {
+      for (let i = 0; i < playlist.length; i++) {
+        const track = playlist[i];
         if (!track.path || cache.has(track.path)) continue;
 
         cache.set(track.path, {
@@ -695,9 +709,15 @@ export const usePlayerStore = defineStore('player', {
           bitDepth: track.bitDepth || null,
           format: track.format || null,
         });
+        cached++;
+        
+        // 分块让出主线程
+        if (cached > 0 && cached % CHUNK_SIZE === 0) {
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
       }
 
-      logger.debug(`Cached metadata for ${playlist.length} tracks`);
+      logger.debug(`Cached metadata for ${cached} tracks`);
     },
 
     async loadLyrics(trackPath) {

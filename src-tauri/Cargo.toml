@@ -1,6 +1,6 @@
 [package]
 name = "mercurial-player"
-version = "0.1.0"
+version = "0.1.2"
 description = "Mercurial Player - A modern music player with fluid experience"
 authors = ["jdbEwl"]
 license = ""
@@ -16,14 +16,14 @@ tauri-build = { version = "2.5", features = [] }
 tauri = { version = "2.9", features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# 暂时不更新rodio
-rodio = { version = "0.18", features = ["wav", "flac", "mp3", "vorbis"] }
-cpal = "0.15"
+rodio = { version = "0.21", default-features = false, features = ["playback"] }
+cpal = "0.16"
 dirs = "6"
 walkdir = "2"
 lofty = "0.22"
 base64 = "0.22"
-symphonia = { version = "0.5", features = ["flac", "vorbis", "aac", "mp3", "isomp4", "wav", "alac", "pcm"] }
+# 启用Symphonia所有格式和编解码器
+symphonia = { version = "0.5", features = ["all", "opt-simd"] }
 rubato = "0.15"
 rayon = "1"
 spectrum-analyzer = "1.7"

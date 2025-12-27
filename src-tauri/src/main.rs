@@ -18,7 +18,7 @@ use mercurial_player::{
 use mercurial_player::audio::WasapiExclusivePlayback;
 
 use cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{OutputStream, Sink};
+use rodio::{OutputStreamBuilder, Sink};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
@@ -198,10 +198,9 @@ fn create_exclusive_mode_player(device_name: &str) -> (Sink, Option<PlatformPlay
     println!("Starting in WASAPI exclusive mode");
 
     // 创建一个空的 rodio sink（使用默认设备，但不会实际使用）
-    let (_stream, stream_handle) =
-        OutputStream::try_default().expect("Failed to create default output stream");
-    Box::leak(Box::new(_stream));
-    let sink = Sink::try_new(&stream_handle).expect("Failed to create sink");
+    let stream = OutputStreamBuilder::open_default_stream().expect("Failed to create default output stream");
+    let sink = Sink::connect_new(stream.mixer());
+    Box::leak(Box::new(stream));
 
     // 创建 WASAPI 独占播放器
     let wasapi_playback = WasapiExclusivePlayback::new();
@@ -224,10 +223,9 @@ fn create_exclusive_mode_player(device_name: &str) -> (Sink, Option<PlatformPlay
 #[cfg(not(windows))]
 fn create_exclusive_mode_player(_device_name: &str) -> (Sink, Option<PlatformPlayer>) {
     println!("Exclusive mode is only supported on Windows, falling back to shared mode");
-    let (_stream, stream_handle) =
-        OutputStream::try_default().expect("Failed to create default output stream");
-    Box::leak(Box::new(_stream));
-    let sink = Sink::try_new(&stream_handle).expect("Failed to create sink");
+    let stream = OutputStreamBuilder::open_default_stream().expect("Failed to create default output stream");
+    let sink = Sink::connect_new(stream.mixer());
+    Box::leak(Box::new(stream));
     (sink, None)
 }
 
@@ -236,12 +234,15 @@ fn create_shared_mode_player(device: &cpal::Device) -> (Sink, Option<PlatformPla
     println!("Starting in shared mode");
 
     // 从选定的设备创建音频输出流
-    let (_stream, stream_handle) =
-        OutputStream::try_from_device(device).expect("Failed to create output stream from device");
+    let stream = OutputStreamBuilder::from_device(device.clone())
+        .expect("Failed to create output stream builder")
+        .open_stream()
+        .expect("Failed to open output stream from device");
 
+    let sink = Sink::connect_new(stream.mixer());
+    
     // 保持流的存活（泄露是简单的方法，让它在应用程序的生命周期内保持存活）
-    Box::leak(Box::new(_stream));
+    Box::leak(Box::new(stream));
 
-    let sink = Sink::try_new(&stream_handle).expect("Failed to create sink");
     (sink, None)
 }

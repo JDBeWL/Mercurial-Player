@@ -1,4 +1,4 @@
-﻿import { ref, watch, watchEffect } from 'vue';
+﻿import { ref, watch } from 'vue';
 import { usePlayerStore } from '@/stores/player';
 import { useConfigStore } from '@/stores/config';
 import { FileUtils } from '@/utils/fileUtils';
@@ -12,6 +12,9 @@ const onlineLyricsCache = new Map(); // key: trackPath, value: { lrc: string, pa
 // 模块级别的共享状态，确保所有 useLyrics 实例共享同一个 lyricsSource
 const sharedLyricsSource = ref('local');
 
+// 让出主线程的辅助函数
+const yieldToMain = () => new Promise(resolve => setTimeout(resolve, 0));
+
 export function useLyrics() {
     const playerStore = usePlayerStore();
     const configStore = useConfigStore();
@@ -22,11 +25,20 @@ export function useLyrics() {
     const lyricsSource = sharedLyricsSource;
     const onlineLyricsError = ref(null);
 
-    const parseLRC = (lrcText) => {
+    // 异步 LRC 解析，分块处理避免阻塞主线程
+    const parseLRC = async (lrcText) => {
         const lines = lrcText.split("\n");
         const pattern = /\[(\d{2}):(\d{2}):(\d{2})\]|\[(\d{2}):(\d{2})\.(\d{2,3})\]/g;
         const resultMap = {};
-        for (const line of lines) {
+        const CHUNK_SIZE = 100; // 每 100 行让出一次主线程
+        
+        for (let i = 0; i < lines.length; i++) {
+            // 分块让出主线程
+            if (i > 0 && i % CHUNK_SIZE === 0) {
+                await yieldToMain();
+            }
+            
+            const line = lines[i];
             const timestamps = [];
             let match;
             while ((match = pattern.exec(line)) !== null) {
@@ -54,14 +66,22 @@ export function useLyrics() {
         return Object.values(resultMap).sort((a, b) => a.time - b.time);
     };
 
-    const parseASS = (assText) => {
+    // 异步 ASS 解析，分块处理避免阻塞主线程
+    const parseASS = async (assText) => {
         const lines = assText.split('\n');
         const dialogues = [];
         const toSeconds = (t) => {
             const [h, m, s] = t.split(':');
             return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s);
         };
-        for (const line of lines) {
+        const CHUNK_SIZE = 100;
+        
+        for (let i = 0; i < lines.length; i++) {
+            if (i > 0 && i % CHUNK_SIZE === 0) {
+                await yieldToMain();
+            }
+            
+            const line = lines[i];
             if (!line.startsWith('Dialogue:')) continue;
             const parts = line.split(',');
             if (parts.length < 10) continue;
@@ -175,8 +195,8 @@ export function useLyrics() {
             if (lyricsPath) {
                 const content = await FileUtils.readFile(lyricsPath);
                 const ext = FileUtils.getFileExtension(lyricsPath);
-                if (ext === 'lrc') lyrics.value = parseLRC(content);
-                else if (ext === 'ass') lyrics.value = parseASS(content);
+                if (ext === 'lrc') lyrics.value = await parseLRC(content);
+                else if (ext === 'ass') lyrics.value = await parseASS(content);
                 playerStore.lyrics = lyrics.value;  // 同步到 store
                 lyricsSource.value = 'local';
             } else if (configStore.lyrics?.enableOnlineFetch) {
@@ -184,7 +204,7 @@ export function useLyrics() {
                 const track = playerStore.currentTrack;
                 const onlineLrc = await fetchOnlineLyrics(track);
                 if (onlineLrc) {
-                    const parsed = parseLRC(onlineLrc);
+                    const parsed = await parseLRC(onlineLrc);
                     lyrics.value = parsed;
                     playerStore.lyrics = parsed;  // 同步到 store
                     lyricsSource.value = 'online';
@@ -222,7 +242,7 @@ export function useLyrics() {
         try {
             const onlineLrc = await fetchOnlineLyrics(track);
             if (onlineLrc) {
-                const parsed = parseLRC(onlineLrc);
+                const parsed = await parseLRC(onlineLrc);
                 lyrics.value = parsed;
                 playerStore.lyrics = parsed;  // 同步到 store
                 lyricsSource.value = 'online';
@@ -257,25 +277,50 @@ export function useLyrics() {
 
     const stopWatchTrack = watch(() => playerStore.currentTrack?.path, loadLyrics, { immediate: true });
 
-    const stopWatchEffect = watchEffect(() => {
-        // 应用歌词偏移：正值表示歌词提前（时间减小），负值表示歌词延后（时间增大）
-        const offset = playerStore.lyricsOffset || 0;
-        const currentTime = playerStore.currentTime + 0.05 - offset;
-        let l = 0, r = lyrics.value.length - 1, idx = -1;
-        while (l <= r) {
-            const mid = (l + r) >> 1;
-            if (lyrics.value[mid].time <= currentTime) {
-                idx = mid;
-                l = mid + 1;
-            } else {
-                r = mid - 1;
+    // activeIndex 更新逻辑 - 使用节流避免高频更新
+    // 这个值被 VisualizerPanel 等组件使用
+    let lastActiveIndexUpdate = 0;
+    const ACTIVE_INDEX_THROTTLE = 100; // 每 100ms 更新一次
+    
+    const stopWatchEffect = watch(
+        () => playerStore.currentTime,
+        (currentTime) => {
+            if (!lyrics.value.length) {
+                if (activeIndex.value !== -1) {
+                    activeIndex.value = -1;
+                    playerStore.currentLyricIndex = -1;
+                }
+                return;
             }
-        }
-        if (idx !== activeIndex.value) {
-            activeIndex.value = idx;
-            playerStore.currentLyricIndex = idx;  // 同步到 store
-        }
-    });
+            
+            // 节流：避免每次 currentTime 变化都计算
+            const now = Date.now();
+            if (now - lastActiveIndexUpdate < ACTIVE_INDEX_THROTTLE) return;
+            lastActiveIndexUpdate = now;
+            
+            // 应用歌词偏移
+            const offset = playerStore.lyricsOffset || 0;
+            const adjustedTime = currentTime + 0.05 - offset;
+            
+            // 二分查找当前歌词索引
+            let l = 0, r = lyrics.value.length - 1, idx = -1;
+            while (l <= r) {
+                const mid = (l + r) >> 1;
+                if (lyrics.value[mid].time <= adjustedTime) {
+                    idx = mid;
+                    l = mid + 1;
+                } else {
+                    r = mid - 1;
+                }
+            }
+            
+            if (idx !== activeIndex.value) {
+                activeIndex.value = idx;
+                playerStore.currentLyricIndex = idx;
+            }
+        },
+        { immediate: true }
+    );
 
     // 清理函数
     const cleanup = () => {

@@ -48,14 +48,22 @@ export class PlaylistManager {
   }
 
   /**
-   * 扫描目录树结构
+   * 扫描目录树结构 - 使用异步分块避免阻塞
    */
   static async scanDirectoryTree(basePath, config) {
     const { enableSubdirectoryScan, maxDepth, ignoreHiddenFolders, folderBlacklist } = config
+    let scannedCount = 0
+    const YIELD_INTERVAL = 10 // 每扫描 10 个目录让出一次主线程
 
     const scanDirectory = async (path, currentDepth = 0) => {
       if (currentDepth > maxDepth) {
         return null
+      }
+
+      // 定期让出主线程
+      scannedCount++
+      if (scannedCount % YIELD_INTERVAL === 0) {
+        await new Promise(resolve => setTimeout(resolve, 0))
       }
 
       try {

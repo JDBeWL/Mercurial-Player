@@ -345,7 +345,7 @@ impl<I: Source<Item = f32> + Send> Iterator for VisualizationSource<I> {
 }
 
 impl<I: Source<Item = f32> + Send> Source for VisualizationSource<I> {
-    fn current_frame_len(&self) -> Option<usize> { self.input.current_frame_len() }
+    fn current_span_len(&self) -> Option<usize> { self.input.current_span_len() }
     fn channels(&self) -> u16 { self.input.channels() }
     fn sample_rate(&self) -> u32 { self.input.sample_rate() }
     fn total_duration(&self) -> Option<Duration> { self.input.total_duration() }
@@ -386,7 +386,7 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
             println!("Symphonia解码失败，回退到rodio: {e}");
             let file = File::open(path).map_err(|e| e.to_string())?;
             Box::new(
-                VisualizationSource::new(rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?.convert_samples::<f32>(), waveform, spectrum, Some(app.clone()))
+                VisualizationSource::new(rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?, waveform, spectrum, Some(app.clone()))
                     .with_start_position(position.unwrap_or(0.0))
                     .with_eq_settings(eq_settings)
                     .fade_in(Duration::from_millis(80))
