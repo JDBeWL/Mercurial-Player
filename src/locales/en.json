@@ -166,7 +166,12 @@
     "viewTemplate": "View Template",
     "playStats": "Play Stats",
     "about": "About",
-    "appDescription": "A modern music player with fluid experience"
+    "appDescription": "A modern music player with fluid experience",
+    "links": "Links",
+    "techStack": "Tech Stack",
+    "techTauri": "Cross-platform desktop app framework",
+    "techVue": "Progressive frontend framework",
+    "techSymphonia": "Pure Rust audio decoding library"
   },
   "themeSelector": {
     "chooseThemeColor": "Choose Theme Color",

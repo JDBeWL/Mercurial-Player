@@ -16,6 +16,7 @@
       <EqualizerSettings v-if="activeTab === 'equalizer'" />
       <PlayStatsSettings v-if="activeTab === 'playStats'" />
       <PluginSettings v-if="activeTab === 'plugins'" />
+      <AboutSettings v-if="activeTab === 'about'" />
     </div>
   </div>
 </template>
@@ -30,7 +31,8 @@ import {
   GeneralSettings,
   TitleExtractionSettings,
   LyricsSettings,
-  PlaylistSettings
+  PlaylistSettings,
+  AboutSettings
 } from './settings'
 import AudioDeviceSettings from './AudioDeviceSettings.vue'
 import EqualizerSettings from './EqualizerSettings.vue'
@@ -62,6 +64,9 @@ const visibleTabs = computed(() => {
   if (playCountPlugin?.state === 'active') {
     tabs.push({ id: 'playStats', icon: 'bar_chart', label: 'config.playStats' })
   }
+  
+  // 关于页面始终显示在最后
+  tabs.push({ id: 'about', icon: 'info', label: 'config.about' })
   
   return tabs
 })

@@ -80,15 +80,7 @@
       </div>
     </div>
     
-    <div class="settings-section about-section">
-      <h4 class="section-title">{{ $t('config.about') || '关于' }}</h4>
-      
-      <div class="about-info">
-        <div class="app-name">Mercurial Player</div>
-        <div class="app-version">v{{ appVersion }}</div>
-        <div class="app-description">{{ $t('config.appDescription') || 'A modern music player with fluid experience' }}</div>
-      </div>
-    </div>
+
   </div>
 </template>
 
@@ -96,13 +88,11 @@
 import { ref, onMounted } from 'vue'
 import { useConfigStore } from '../../stores/config'
 import { invoke } from '@tauri-apps/api/core'
-import { getVersion } from '@tauri-apps/api/app'
 import { setLocale } from '../../i18n'
 import logger from '../../utils/logger'
 
 const configStore = useConfigStore()
 const systemFonts = ref(['system-ui', 'sans-serif', 'serif', 'monospace'])
-const appVersion = ref('0.0.0')
 
 const loadSystemFonts = async () => {
   try {
@@ -110,14 +100,6 @@ const loadSystemFonts = async () => {
     systemFonts.value = ['sans-serif', 'serif', 'monospace', ...fonts]
   } catch (error) {
     logger.error('Failed to load system fonts:', error)
-  }
-}
-
-const loadAppVersion = async () => {
-  try {
-    appVersion.value = await getVersion()
-  } catch (error) {
-    logger.error('Failed to get app version:', error)
   }
 }
 
@@ -145,7 +127,6 @@ const handleLanguageChange = async () => {
 
 onMounted(() => {
   loadSystemFonts()
-  loadAppVersion()
 })
 </script>
 
@@ -278,34 +259,5 @@ onMounted(() => {
 .md3-select:focus {
   outline: 1px solid var(--md-sys-color-primary);
   border-color: var(--md-sys-color-primary);
-}
-
-.about-section {
-  margin-top: 48px;
-  padding-top: 24px;
-  border-top: 1px solid var(--md-sys-color-outline-variant);
-}
-
-.about-info {
-  padding: 24px;
-  text-align: center;
-}
-
-.app-name {
-  font-size: 20px;
-  font-weight: 500;
-  color: var(--md-sys-color-on-surface);
-  margin-bottom: 4px;
-}
-
-.app-version {
-  font-size: 14px;
-  color: var(--md-sys-color-primary);
-  margin-bottom: 12px;
-}
-
-.app-description {
-  font-size: 14px;
-  color: var(--md-sys-color-on-surface-variant);
 }
 </style>

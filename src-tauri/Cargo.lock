@@ -2181,7 +2181,6 @@ dependencies = [
  "dirs",
  "lofty",
  "md5",
- "once_cell",
  "rayon",
  "reqwest",
  "rodio",

@@ -22,21 +22,22 @@ pub fn list_plugins() -> Result<Vec<String>, String> {
 
 /// 读取插件清单
 #[command]
-pub fn read_plugin_manifest(path: String) -> Result<PluginManifest, String> {
-    manager::read_manifest(&path)
+pub fn read_plugin_manifest(path: &str) -> Result<PluginManifest, String> {
+    manager::read_manifest(path)
 }
 
 /// 读取插件主文件
 #[command]
-pub fn read_plugin_main(path: String, main: String) -> Result<String, String> {
-    let main_file = if main.is_empty() { "index.js".to_string() } else { main };
-    manager::read_main_file(&path, &main_file)
+pub fn read_plugin_main(path: &str, main: &str) -> Result<String, String> {
+    let main_file = if main.is_empty() { "index.js" } else { main };
+    manager::read_main_file(path, main_file)
 }
 
 /// 安装插件
 #[command]
-pub fn install_plugin(source: String) -> InstallResult {
-    match manager::install_plugin_from_path(&source) {
+#[must_use]
+pub fn install_plugin(source: &str) -> InstallResult {
+    match manager::install_plugin_from_path(source) {
         Ok(plugin_id) => InstallResult {
             success: true,
             path: Some(plugin_id),
@@ -52,8 +53,8 @@ pub fn install_plugin(source: String) -> InstallResult {
 
 /// 卸载插件
 #[command]
-pub fn uninstall_plugin(plugin_id: String) -> Result<(), String> {
-    manager::uninstall_plugin(&plugin_id)
+pub fn uninstall_plugin(plugin_id: &str) -> Result<(), String> {
+    manager::uninstall_plugin(plugin_id)
 }
 
 /// 获取插件目录路径
@@ -73,7 +74,7 @@ pub fn open_plugins_directory() -> Result<(), String> {
         std::process::Command::new("explorer")
             .arg(&plugins_dir)
             .spawn()
-            .map_err(|e| format!("无法打开目录: {}", e))?;
+            .map_err(|e| format!("无法打开目录: {e}"))?;
     }
     
     #[cfg(target_os = "macos")]
@@ -81,7 +82,7 @@ pub fn open_plugins_directory() -> Result<(), String> {
         std::process::Command::new("open")
             .arg(&plugins_dir)
             .spawn()
-            .map_err(|e| format!("无法打开目录: {}", e))?;
+            .map_err(|e| format!("无法打开目录: {e}"))?;
     }
     
     #[cfg(target_os = "linux")]
@@ -89,7 +90,7 @@ pub fn open_plugins_directory() -> Result<(), String> {
         std::process::Command::new("xdg-open")
             .arg(&plugins_dir)
             .spawn()
-            .map_err(|e| format!("无法打开目录: {}", e))?;
+            .map_err(|e| format!("无法打开目录: {e}"))?;
     }
     
     Ok(())
@@ -97,9 +98,9 @@ pub fn open_plugins_directory() -> Result<(), String> {
 
 /// 保存截图到程序目录下的 screenshots 文件夹
 #[command]
-pub fn save_screenshot(filename: String, data: Vec<u8>) -> Result<String, String> {
+pub fn save_screenshot(filename: &str, data: &[u8]) -> Result<String, String> {
     let exe_path = std::env::current_exe()
-        .map_err(|e| format!("无法获取可执行文件路径: {}", e))?;
+        .map_err(|e| format!("无法获取可执行文件路径: {e}"))?;
     let exe_dir = exe_path.parent()
         .ok_or("无法获取可执行文件目录")?;
     
@@ -108,13 +109,13 @@ pub fn save_screenshot(filename: String, data: Vec<u8>) -> Result<String, String
     // 创建目录（如果不存在）
     if !screenshots_dir.exists() {
         std::fs::create_dir_all(&screenshots_dir)
-            .map_err(|e| format!("无法创建截图目录: {}", e))?;
+            .map_err(|e| format!("无法创建截图目录: {e}"))?;
     }
     
-    let file_path = screenshots_dir.join(&filename);
+    let file_path = screenshots_dir.join(filename);
     
-    std::fs::write(&file_path, &data)
-        .map_err(|e| format!("无法保存截图: {}", e))?;
+    std::fs::write(&file_path, data)
+        .map_err(|e| format!("无法保存截图: {e}"))?;
     
     Ok(file_path.to_string_lossy().to_string())
 }
@@ -123,7 +124,7 @@ pub fn save_screenshot(filename: String, data: Vec<u8>) -> Result<String, String
 #[command]
 pub fn open_screenshots_directory() -> Result<(), String> {
     let exe_path = std::env::current_exe()
-        .map_err(|e| format!("无法获取可执行文件路径: {}", e))?;
+        .map_err(|e| format!("无法获取可执行文件路径: {e}"))?;
     let exe_dir = exe_path.parent()
         .ok_or("无法获取可执行文件目录")?;
     
@@ -132,7 +133,7 @@ pub fn open_screenshots_directory() -> Result<(), String> {
     // 创建目录（如果不存在）
     if !screenshots_dir.exists() {
         std::fs::create_dir_all(&screenshots_dir)
-            .map_err(|e| format!("无法创建截图目录: {}", e))?;
+            .map_err(|e| format!("无法创建截图目录: {e}"))?;
     }
     
     #[cfg(target_os = "windows")]
@@ -140,7 +141,7 @@ pub fn open_screenshots_directory() -> Result<(), String> {
         std::process::Command::new("explorer")
             .arg(&screenshots_dir)
             .spawn()
-            .map_err(|e| format!("无法打开目录: {}", e))?;
+            .map_err(|e| format!("无法打开目录: {e}"))?;
     }
     
     #[cfg(target_os = "macos")]
@@ -148,7 +149,7 @@ pub fn open_screenshots_directory() -> Result<(), String> {
         std::process::Command::new("open")
             .arg(&screenshots_dir)
             .spawn()
-            .map_err(|e| format!("无法打开目录: {}", e))?;
+            .map_err(|e| format!("无法打开目录: {e}"))?;
     }
     
     #[cfg(target_os = "linux")]
@@ -156,7 +157,7 @@ pub fn open_screenshots_directory() -> Result<(), String> {
         std::process::Command::new("xdg-open")
             .arg(&screenshots_dir)
             .spawn()
-            .map_err(|e| format!("无法打开目录: {}", e))?;
+            .map_err(|e| format!("无法打开目录: {e}"))?;
     }
     
     Ok(())

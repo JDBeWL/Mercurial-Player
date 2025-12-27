@@ -166,7 +166,12 @@
     "viewTemplate": "查看模板",
     "playStats": "播放统计",
     "about": "关于",
-    "appDescription": "流畅体验的现代音乐播放器"
+    "appDescription": "流畅体验的现代音乐播放器",
+    "links": "链接",
+    "techStack": "技术栈",
+    "techTauri": "跨平台桌面应用框架",
+    "techVue": "渐进式前端框架",
+    "techSymphonia": "纯Rust音频解码库"
   },
   "themeSelector": {
     "chooseThemeColor": "选择主题颜色",

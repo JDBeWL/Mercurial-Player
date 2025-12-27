@@ -39,7 +39,7 @@ pub fn get_audio_files_from_dir(path: &str) -> Result<Playlist, String> {
     let audio_files: Vec<_> = WalkDir::new(dir)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|e| is_audio_file(e))
+        .filter(is_audio_file)
         .collect();
 
     let tracks: Vec<_> = audio_files
@@ -90,7 +90,7 @@ fn scan_with_folder_playlists(dir: &Path, max_depth: usize) -> Vec<Playlist> {
         .max_depth(max_depth)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|e| is_audio_file(e))
+        .filter(is_audio_file)
         .collect();
 
     let tracks_with_folders: Vec<_> = audio_files
@@ -133,7 +133,7 @@ fn scan_single_playlist(dir: &Path) -> Option<Playlist> {
     let audio_files: Vec<_> = WalkDir::new(dir)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|e| is_audio_file(e))
+        .filter(is_audio_file)
         .collect();
 
     let tracks: Vec<_> = audio_files
@@ -155,6 +155,7 @@ fn scan_single_playlist(dir: &Path) -> Option<Playlist> {
 }
 
 /// 检查文件是否存在
+#[must_use]
 pub fn check_file_exists_internal(path: &str) -> bool {
     if Path::new(path).exists() {
         return true;
@@ -178,13 +179,13 @@ pub fn read_lyrics_file_internal(path: &str) -> Result<String, String> {
 /// 写入歌词文件内容
 pub fn write_lyrics_file_internal(path: &str, content: &str) -> Result<(), String> {
     // 确保父目录存在
-    if let Some(parent) = Path::new(path).parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
-        }
+    if let Some(parent) = Path::new(path).parent()
+        && !parent.exists()
+    {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {e}"))?;
     }
     
-    fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))
+    fs::write(path, content).map_err(|e| format!("Failed to write file: {e}"))
 }
 
 /// 检查是否为音频文件
@@ -193,6 +194,5 @@ fn is_audio_file(entry: &DirEntry) -> bool {
         .path()
         .extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| AUDIO_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
-        .unwrap_or(false)
+        .is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
 }

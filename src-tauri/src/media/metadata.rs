@@ -34,22 +34,37 @@ impl TrackMetadata {
         Self { path, name, ..Default::default() }
     }
 
+    #[must_use]
     #[allow(dead_code)]
     pub fn with_title(mut self, title: Option<String>) -> Self { self.title = title; self }
+    
+    #[must_use]
     #[allow(dead_code)]
     pub fn with_artist(mut self, artist: Option<String>) -> Self { self.artist = artist; self }
+    
+    #[must_use]
     #[allow(dead_code)]
     pub fn with_album(mut self, album: Option<String>) -> Self { self.album = album; self }
+    
+    #[must_use]
     #[allow(dead_code)]
-    pub fn with_duration(mut self, duration: Option<f64>) -> Self { self.duration = duration; self }
+    pub const fn with_duration(mut self, duration: Option<f64>) -> Self { self.duration = duration; self }
+    
+    #[must_use]
     #[allow(dead_code)]
     pub fn with_cover(mut self, cover: Option<String>) -> Self { self.cover = cover; self }
+    
+    #[must_use]
     #[allow(dead_code)]
-    pub fn with_bitrate(mut self, bitrate: Option<u32>) -> Self { self.bitrate = bitrate; self }
+    pub const fn with_bitrate(mut self, bitrate: Option<u32>) -> Self { self.bitrate = bitrate; self }
+    
+    #[must_use]
     #[allow(dead_code)]
-    pub fn with_sample_rate(mut self, sample_rate: Option<u32>) -> Self { self.sample_rate = sample_rate; self }
+    pub const fn with_sample_rate(mut self, sample_rate: Option<u32>) -> Self { self.sample_rate = sample_rate; self }
+    
+    #[must_use]
     #[allow(dead_code)]
-    pub fn with_channels(mut self, channels: Option<u8>) -> Self { self.channels = channels; self }
+    pub const fn with_channels(mut self, channels: Option<u8>) -> Self { self.channels = channels; self }
 }
 
 /// 包含多个音轨的播放列表
@@ -62,7 +77,7 @@ pub struct Playlist {
 
 impl Playlist {
     #[must_use]
-    pub fn new(name: String) -> Self {
+    pub const fn new(name: String) -> Self {
         Self { name, files: Vec::new() }
     }
 
@@ -81,6 +96,7 @@ impl Playlist {
         self.files.is_empty()
     }
 
+    #[must_use]
     #[allow(dead_code)]
     pub fn get_track(&self, index: usize) -> Option<&TrackMetadata> {
         self.files.get(index)
@@ -118,7 +134,7 @@ pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> 
     let format = file_path
         .extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_uppercase());
+        .map(str::to_uppercase);
 
     let mut metadata = TrackMetadata {
         path: path.replace('/', "\\"),
@@ -138,7 +154,7 @@ pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> 
         metadata.album = tag.album().map(|s| s.to_string());
 
         if let Some(picture) = tag.pictures().first() {
-            let mime_type = picture.mime_type().map_or("image/jpeg", |m| m.as_str());
+            let mime_type = picture.mime_type().map_or("image/jpeg", lofty::picture::MimeType::as_str);
             let data = picture.data();
             metadata.cover = Some(format!("data:{mime_type};base64,{}", general_purpose::STANDARD.encode(data)));
         }
@@ -157,9 +173,9 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
     let file_path = Path::new(audio_path);
 
     let tagged_file = Probe::open(file_path)
-        .map_err(|e| format!("无法打开文件: {}", e))?
+        .map_err(|e| format!("无法打开文件: {e}"))?
         .read()
-        .map_err(|e| format!("无法读取文件: {}", e))?;
+        .map_err(|e| format!("无法读取文件: {e}"))?;
 
     let tag = tagged_file
         .primary_tag()
@@ -173,7 +189,7 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
     let data = picture.data();
     
     // 根据 MIME 类型确定文件扩展名
-    let extension = match picture.mime_type().map(|m| m.as_str()) {
+    let extension = match picture.mime_type().map(lofty::picture::MimeType::as_str) {
         Some("image/png") => "png",
         Some("image/gif") => "gif",
         Some("image/webp") => "webp",
@@ -193,12 +209,12 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
     // 确保父目录存在
     if let Some(parent) = final_path.parent() {
         fs::create_dir_all(parent)
-            .map_err(|e| format!("无法创建目录: {}", e))?;
+            .map_err(|e| format!("无法创建目录: {e}"))?;
     }
 
     // 写入文件
     fs::write(&final_path, data)
-        .map_err(|e| format!("无法写入文件: {}", e))?;
+        .map_err(|e| format!("无法写入文件: {e}"))?;
 
     Ok(final_path.to_string_lossy().to_string())
 }

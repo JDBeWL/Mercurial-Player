@@ -51,6 +51,29 @@ pub struct SearchSongResult {
     pub duration: i64,
 }
 
+/// CloudSearch API 响应结构
+#[derive(Debug, Deserialize)]
+struct CloudSearchResponse {
+    code: i32,
+    result: Option<CloudSearchResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CloudSearchResult {
+    songs: Option<Vec<CloudSearchSong>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CloudSearchSong {
+    id: i64,
+    name: String,
+    #[serde(default)]
+    ar: Vec<ArtistInfo>,
+    al: Option<AlbumInfo>,
+    #[serde(default)]
+    dt: i64,
+}
+
 /// 安全截取字符串前 N 个字符（避免在多字节字符中间截断）
 fn safe_truncate(s: &str, max_chars: usize) -> &str {
     match s.char_indices().nth(max_chars) {
@@ -97,40 +120,17 @@ pub async fn search_songs(keyword: &str, limit: u32, offset: u32) -> Result<Vec<
         .form(&params)
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| format!("Request failed: {e}"))?;
 
     let status = response.status();
-    let response_text = response.text().await.map_err(|e| format!("Read response failed: {}", e))?;
+    let response_text = response.text().await.map_err(|e| format!("Read response failed: {e}"))?;
     
     if !status.is_success() {
-        return Err(format!("HTTP error: {} - {}", status, response_text));
-    }
-
-    // 尝试解析为 cloudsearch 格式
-    #[derive(Debug, Deserialize)]
-    struct CloudSearchResponse {
-        code: i32,
-        result: Option<CloudSearchResult>,
-    }
-    
-    #[derive(Debug, Deserialize)]
-    struct CloudSearchResult {
-        songs: Option<Vec<CloudSearchSong>>,
-    }
-    
-    #[derive(Debug, Deserialize)]
-    struct CloudSearchSong {
-        id: i64,
-        name: String,
-        #[serde(default)]
-        ar: Vec<ArtistInfo>,
-        al: Option<AlbumInfo>,
-        #[serde(default)]
-        dt: i64,
+        return Err(format!("HTTP error: {status} - {response_text}"));
     }
 
     let data: CloudSearchResponse = serde_json::from_str(&response_text)
-        .map_err(|e| format!("Parse response failed: {} - Response: {}", e, safe_truncate(&response_text, 200)))?;
+        .map_err(|e| format!("Parse response failed: {e} - Response: {}", safe_truncate(&response_text, 200)))?;
 
     if data.code != 200 {
         return Err(format!("API error: code {}", data.code));
@@ -156,27 +156,24 @@ pub async fn search_songs(keyword: &str, limit: u32, offset: u32) -> Result<Vec<
 pub async fn get_lyrics(song_id: &str) -> Result<LyricsData, String> {
     let client = get_client();
     
-    let url = format!(
-        "https://music.163.com/api/song/lyric?id={}&lv=-1&tv=-1&rv=-1&kv=-1",
-        song_id
-    );
+    let url = format!("https://music.163.com/api/song/lyric?id={song_id}&lv=-1&tv=-1&rv=-1&kv=-1");
 
     let response = client
         .get(&url)
         .headers(build_headers())
         .send()
         .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .map_err(|e| format!("Request failed: {e}"))?;
 
     let status = response.status();
-    let response_text = response.text().await.map_err(|e| format!("Read response failed: {}", e))?;
+    let response_text = response.text().await.map_err(|e| format!("Read response failed: {e}"))?;
     
     if !status.is_success() {
-        return Err(format!("HTTP error: {} - {}", status, response_text));
+        return Err(format!("HTTP error: {status} - {response_text}"));
     }
 
     let data: LyricResponse = serde_json::from_str(&response_text)
-        .map_err(|e| format!("Parse response failed: {} - Response: {}", e, safe_truncate(&response_text, 200)))?;
+        .map_err(|e| format!("Parse response failed: {e} - Response: {}", safe_truncate(&response_text, 200)))?;
 
     if data.code != 200 {
         return Err(format!("API error: code {}", data.code));
