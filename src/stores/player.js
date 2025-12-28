@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import FileUtils from '../utils/fileUtils';
 import LyricsParser from '../utils/lyricsParser';
 import logger from '../utils/logger';
 import { ErrorType, ErrorSeverity, handlePromise } from '../utils/errorHandler';
+import { useConfigStore } from './config';
 
 /**
  * 简单的 LRU 缓存实现
@@ -214,7 +216,6 @@ export const usePlayerStore = defineStore('player', {
     // --- 初始化 ---
     async initAudio() {
       try {
-        const { useConfigStore } = await import('./config');
         const configStore = useConfigStore();
         const savedVolume = configStore.audio.volume;
         if (typeof savedVolume === 'number' && savedVolume >= 0 && savedVolume <= 1) {
@@ -242,7 +243,6 @@ export const usePlayerStore = defineStore('player', {
      */
     async _setupTrackEndedListener() {
       try {
-        const { listen } = await import('@tauri-apps/api/event');
         this._trackEndedUnlisten = await listen('track-ended', () => {
           if (this._isDestroyed) return;
           logger.debug('Received track-ended event');
@@ -258,7 +258,6 @@ export const usePlayerStore = defineStore('player', {
      */
     async _setupPositionListener() {
       try {
-        const { listen } = await import('@tauri-apps/api/event');
         this._positionUnlisten = await listen('playback-position', (event) => {
           if (this._isDestroyed || !this.isPlaying) return;
           const position = event.payload?.position;
@@ -617,8 +616,7 @@ export const usePlayerStore = defineStore('player', {
       this.volume = newVolume;
       
       invoke('set_volume', { volume: newVolume })
-        .then(async () => {
-          const { useConfigStore } = await import('./config');
+        .then(() => {
           const configStore = useConfigStore();
           configStore.audio.volume = newVolume;
           configStore.saveConfigNow();

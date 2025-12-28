@@ -83,7 +83,7 @@
 <script setup>
 import { computed, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { pluginManager, PluginState } from '../../plugins'
+import { pluginManager, PluginState, loadAllPlugins } from '../../plugins'
 import logger from '../../utils/logger'
 import { useErrorNotification } from '../../composables/useErrorNotification'
 
@@ -143,7 +143,6 @@ const openPluginsFolder = async () => {
 
 const refreshPlugins = async () => {
   try {
-    const { loadAllPlugins } = await import('../../plugins')
     await loadAllPlugins()
     showError('插件列表已刷新', 'info')
   } catch (error) {

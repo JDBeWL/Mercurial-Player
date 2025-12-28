@@ -189,6 +189,7 @@ import MiniPlayer from './components/MiniPlayer.vue'
 import { useTrackInfo } from './composables/useTrackInfo'
 import { useLyrics } from './composables/useLyrics'
 import { useI18n } from 'vue-i18n'
+import { setLocale } from './i18n'
 
 const playerStore = usePlayerStore()
 const themeStore = useThemeStore()
@@ -450,7 +451,6 @@ onMounted(async () => {
 
   // 设置语言
   try {
-    const { setLocale } = await import('./i18n')
     setLocale(configStore.general.language || 'zh')
   } catch (error) {
     logger.error('Failed to apply language from config:', error)

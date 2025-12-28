@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { useThemeStore } from './theme'
+import { useMusicLibraryStore } from './musicLibrary'
 import logger from '../utils/logger'
 import errorHandler, { ErrorType, ErrorSeverity, handlePromise } from '../utils/errorHandler'
 
@@ -178,7 +179,6 @@ export const useConfigStore = defineStore('config', {
 
       if (directoriesResult.success && directoriesResult.data) {
         this.musicDirectories = directoriesResult.data
-        const { useMusicLibraryStore } = await import('./musicLibrary')
         const musicLibraryStore = useMusicLibraryStore()
         musicLibraryStore.musicFolders = directoriesResult.data
         logger.info('Music directories loaded successfully')

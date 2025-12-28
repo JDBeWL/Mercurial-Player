@@ -28,12 +28,14 @@
 <script setup>
 import { computed } from 'vue'
 import { useConfigStore } from '../../stores/config'
+import { useMusicLibraryStore } from '../../stores/musicLibrary'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import logger from '../../utils/logger'
 import { useErrorNotification } from '../../composables/useErrorNotification'
 
 const configStore = useConfigStore()
+const musicLibraryStore = useMusicLibraryStore()
 const musicDirectories = computed(() => configStore.musicDirectories)
 const { showError } = useErrorNotification()
 
@@ -46,8 +48,6 @@ const addFolder = async () => {
     if (selected && !musicDirectories.value.includes(selected)) {
       const result = await invoke('add_music_directory', { path: selected })
       configStore.musicDirectories = result
-      const { useMusicLibraryStore } = await import('../../stores/musicLibrary')
-      const musicLibraryStore = useMusicLibraryStore()
       musicLibraryStore.musicFolders = result
       
       if (musicDirectories.value.length === 0) {
@@ -67,8 +67,6 @@ const removeFolder = async (index) => {
     const pathToRemove = musicDirectories.value[index]
     const result = await invoke('remove_music_directory', { path: pathToRemove })
     configStore.musicDirectories = result
-    const { useMusicLibraryStore } = await import('../../stores/musicLibrary')
-    const musicLibraryStore = useMusicLibraryStore()
     musicLibraryStore.musicFolders = result
   } catch (error) {
     logger.error('Failed to remove folder:', error)

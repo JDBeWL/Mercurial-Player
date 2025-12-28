@@ -83,8 +83,10 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { pluginManager } from '../../plugins'
 import { useErrorNotification } from '../../composables/useErrorNotification'
+import { usePlayerStore } from '../../stores/player'
 
 const { showError } = useErrorNotification()
+const playerStore = usePlayerStore()
 
 const playStats = ref(null)
 const mostPlayed = ref([])
@@ -100,7 +102,7 @@ const refreshStats = async () => {
     
     // 获取最常播放并补充曲目信息
     const mostPlayedRaw = instance.getMostPlayed(10)
-    mostPlayed.value = await enrichTrackInfo(mostPlayedRaw)
+    mostPlayed.value = enrichTrackInfo(mostPlayedRaw)
     
     // 获取最近播放
     recentPlayed.value = instance.getPlayHistory(20)
@@ -108,35 +110,24 @@ const refreshStats = async () => {
 }
 
 // 补充曲目信息（从 player store 获取）
-const enrichTrackInfo = async (tracks) => {
-  try {
-    const { usePlayerStore } = await import('../../stores/player')
-    const playerStore = usePlayerStore()
-    
-    return tracks.map(item => {
-      // 尝试从播放列表中找到对应的曲目信息
-      const track = playerStore.playlist.find(t => t.path === item.path)
-      if (track) {
-        return {
-          ...item,
-          title: track.title || track.displayTitle || track.name,
-          artist: track.artist || track.displayArtist || '',
-        }
-      }
-      // 如果找不到，从路径提取文件名
+const enrichTrackInfo = (tracks) => {
+  return tracks.map(item => {
+    // 尝试从播放列表中找到对应的曲目信息
+    const track = playerStore.playlist.find(t => t.path === item.path)
+    if (track) {
       return {
         ...item,
-        title: extractFileName(item.path),
-        artist: '',
+        title: track.title || track.displayTitle || track.name,
+        artist: track.artist || track.displayArtist || '',
       }
-    })
-  } catch {
-    return tracks.map(item => ({
+    }
+    // 如果找不到，从路径提取文件名
+    return {
       ...item,
       title: extractFileName(item.path),
       artist: '',
-    }))
-  }
+    }
+  })
 }
 
 // 从路径提取文件名

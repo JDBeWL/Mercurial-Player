@@ -98,7 +98,7 @@ pub fn open_plugins_directory() -> Result<(), String> {
 
 /// 保存截图到程序目录下的 screenshots 文件夹
 #[command]
-pub fn save_screenshot(filename: &str, data: &[u8]) -> Result<String, String> {
+pub fn save_screenshot(filename: &str, data: Vec<u8>) -> Result<String, String> {
     let exe_path = std::env::current_exe()
         .map_err(|e| format!("无法获取可执行文件路径: {e}"))?;
     let exe_dir = exe_path.parent()
@@ -114,7 +114,7 @@ pub fn save_screenshot(filename: &str, data: &[u8]) -> Result<String, String> {
     
     let file_path = screenshots_dir.join(filename);
     
-    std::fs::write(&file_path, data)
+    std::fs::write(&file_path, &data)
         .map_err(|e| format!("无法保存截图: {e}"))?;
     
     Ok(file_path.to_string_lossy().to_string())

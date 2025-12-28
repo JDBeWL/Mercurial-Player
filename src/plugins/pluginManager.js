@@ -3,10 +3,11 @@
  * 提供插件的加载、卸载、生命周期管理
  */
 
-import { ref, reactive, markRaw } from 'vue'
+import { ref, reactive, markRaw, watch } from 'vue'
 import logger from '../utils/logger'
 import { createPluginAPI } from './pluginAPI'
 import { createPluginSandbox } from './pluginSandbox'
+import { usePlayerStore } from '../stores/player'
 
 // 插件存储的 localStorage key 前缀
 const STORAGE_PREFIX = 'mercurial-plugin-storage-'
@@ -64,10 +65,6 @@ class PluginManager {
    * 设置播放器状态监听，向插件发送事件
    */
   async init() {
-    // 延迟导入避免循环依赖
-    const { watch } = await import('vue')
-    const { usePlayerStore } = await import('../stores/player')
-    
     const playerStore = usePlayerStore()
     
     // 只监听歌曲和播放状态变化，不监听 currentTime（避免频繁触发）

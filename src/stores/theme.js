@@ -9,6 +9,7 @@ import {
 } from '@material/material-color-utilities';
 import logger from '../utils/logger';
 import { validateThemeContrast } from '../utils/themeContrastValidator';
+import { useConfigStore } from './config';
 
 // 缓存已生成的主题样式
 const customStyleCache = new Map();
@@ -242,7 +243,6 @@ export const useThemeStore = defineStore('theme', {
     
     async saveThemeToConfig() {
       try {
-        const { useConfigStore } = await import('./config');
         const configStore = useConfigStore();
         configStore.general.theme = this.themePreference;
         await configStore.saveConfigNow();

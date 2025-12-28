@@ -9,6 +9,14 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
 import { PluginPermission } from './pluginManager'
 import logger from '../utils/logger'
+// 静态导入 stores 和工具类
+import { usePlayerStore } from '../stores/player'
+import { useConfigStore } from '../stores/config'
+import { useMusicLibraryStore } from '../stores/musicLibrary'
+import { useThemeStore } from '../stores/theme'
+import { useErrorNotification } from '../composables/useErrorNotification'
+import FileUtils from '../utils/fileUtils'
+import { LyricsParser } from '../utils/lyricsParser'
 
 /**
  * 创建插件 API
@@ -26,39 +34,35 @@ export function createPluginAPI(pluginId, permissions, manager) {
     }
   }
 
-  // 延迟加载 stores（避免循环依赖）
+  // 延迟初始化 stores（避免在 Pinia 未初始化时调用）
   let playerStore = null
   let configStore = null
   let musicLibraryStore = null
   let themeStore = null
 
-  const getPlayerStore = async () => {
+  const getPlayerStore = () => {
     if (!playerStore) {
-      const { usePlayerStore } = await import('../stores/player')
       playerStore = usePlayerStore()
     }
     return playerStore
   }
 
-  const getConfigStore = async () => {
+  const getConfigStore = () => {
     if (!configStore) {
-      const { useConfigStore } = await import('../stores/config')
       configStore = useConfigStore()
     }
     return configStore
   }
 
-  const getMusicLibraryStore = async () => {
+  const getMusicLibraryStore = () => {
     if (!musicLibraryStore) {
-      const { useMusicLibraryStore } = await import('../stores/musicLibrary')
       musicLibraryStore = useMusicLibraryStore()
     }
     return musicLibraryStore
   }
 
-  const getThemeStore = async () => {
+  const getThemeStore = () => {
     if (!themeStore) {
-      const { useThemeStore } = await import('../stores/theme')
       themeStore = useThemeStore()
     }
     return themeStore
@@ -80,9 +84,9 @@ export function createPluginAPI(pluginId, permissions, manager) {
     // ========== 播放器 API ==========
     player: {
       // 获取当前播放状态（只读）
-      async getState() {
+      getState() {
         requirePermission(PluginPermission.PLAYER_READ, 'player.getState')
-        const store = await getPlayerStore()
+        const store = getPlayerStore()
         return {
           currentTrack: store.currentTrack ? { ...store.currentTrack } : null,
           isPlaying: store.isPlaying,
@@ -97,29 +101,21 @@ export function createPluginAPI(pluginId, permissions, manager) {
       // 获取当前歌词
       async getLyrics() {
         requirePermission(PluginPermission.PLAYER_READ, 'player.getLyrics')
-        const store = await getPlayerStore()
+        const store = getPlayerStore()
         
         // 如果 store 里有歌词且格式正确（有 texts 数组），直接返回
         if (store.lyrics && store.lyrics.length > 0 && store.lyrics[0].texts) {
           return [...store.lyrics]
         }
         
-        // 否则使用 useLyrics 的解析逻辑重新解析
+        // 否则使用 LyricsParser 重新解析
         if (store.currentTrack?.path) {
           try {
-            const { default: FileUtils } = await import('../utils/fileUtils')
-            
             const lyricsPath = await FileUtils.findLyricsFile(store.currentTrack.path)
             if (lyricsPath) {
               const content = await FileUtils.readFile(lyricsPath)
               const ext = FileUtils.getFileExtension(lyricsPath)
-              
-              // 使用和 useLyrics 相同的解析逻辑（异步版本）
-              if (ext === 'lrc') {
-                return await this._parseLRC(content)
-              } else if (ext === 'ass') {
-                return await this._parseASS(content)
-              }
+              return await LyricsParser.parseAsync(content, ext)
             }
           } catch (e) {
             logger.debug(`[Plugin:${pluginId}] 加载歌词失败:`, e)
@@ -129,215 +125,95 @@ export function createPluginAPI(pluginId, permissions, manager) {
         return null
       },
 
-      // LRC 解析（异步版本，避免阻塞主线程）
-      async _parseLRC(lrcText) {
-        const lines = lrcText.split("\n")
-        const pattern = /\[(\d{2}):(\d{2}):(\d{2})\]|\[(\d{2}):(\d{2})\.(\d{2,3})\]/g
-        const resultMap = {}
-        
-        // 分块处理，每 100 行让出一次主线程
-        const CHUNK_SIZE = 100
-        for (let i = 0; i < lines.length; i++) {
-          if (i > 0 && i % CHUNK_SIZE === 0) {
-            await new Promise(resolve => setTimeout(resolve, 0))
-          }
-          
-          const line = lines[i]
-          const timestamps = []
-          let match
-          while ((match = pattern.exec(line)) !== null) {
-            let time
-            if (match[1] !== undefined) {
-              time = parseInt(match[1]) * 60 + parseInt(match[2]) + parseInt(match[3]) / 100
-            } else {
-              time = parseInt(match[4]) * 60 + parseInt(match[5]) + parseInt(match[6].padEnd(3, "0")) / 1000
-            }
-            timestamps.push({ time, index: match.index })
-          }
-          if (timestamps.length < 1) continue
-          const text = line.replace(pattern, "").trim()
-          if (!text) continue
-          const startTime = timestamps[0].time
-          resultMap[startTime] = resultMap[startTime] || { time: startTime, texts: [], karaoke: null }
-          if (timestamps.length > 1) {
-            resultMap[startTime].karaoke = {
-              fullText: text,
-              timings: timestamps.slice(1).map((s, i) => ({ time: s.time, position: i + 1 }))
-            }
-          }
-          resultMap[startTime].texts.push(text)
-        }
-        return Object.values(resultMap).sort((a, b) => a.time - b.time)
-      },
-
-      // ASS 解析（异步版本，避免阻塞主线程）
-      async _parseASS(assText) {
-        const lines = assText.split('\n')
-        const dialogues = []
-        const toSeconds = (t) => {
-          const [h, m, s] = t.split(':')
-          return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s)
-        }
-        
-        // 分块处理
-        const CHUNK_SIZE = 100
-        for (let i = 0; i < lines.length; i++) {
-          if (i > 0 && i % CHUNK_SIZE === 0) {
-            await new Promise(resolve => setTimeout(resolve, 0))
-          }
-          
-          const line = lines[i]
-          if (!line.startsWith('Dialogue:')) continue
-          const parts = line.split(',')
-          if (parts.length < 10) continue
-          const start = parts[1].trim()
-          const end = parts[2].trim()
-          const style = parts[3].trim()
-          const text = parts.slice(9).join(',').trim()
-          dialogues.push({ startTime: toSeconds(start), endTime: toSeconds(end), style, text })
-        }
-        
-        const groupedMap = new Map()
-        dialogues.forEach(d => {
-          const key = d.startTime.toFixed(3) + '-' + d.endTime.toFixed(3)
-          if (!groupedMap.has(key)) {
-            groupedMap.set(key, { startTime: d.startTime, endTime: d.endTime, texts: { orig: '', ts: '' }, karaoke: null })
-          }
-          const group = groupedMap.get(key)
-          if (d.style === 'orig') group.texts.orig = d.text
-          if (d.style === 'ts') group.texts.ts = d.text
-        })
-        const result = []
-        groupedMap.forEach(group => {
-          const parseKaraoke = (text) => {
-            const karaokeTag = /{\\k[f]?(\d+)}([^{}]*)/g
-            let words = []
-            let accTime = group.startTime
-            let match
-            while ((match = karaokeTag.exec(text)) !== null) {
-              const duration = parseInt(match[1]) * 0.01
-              words.push({ text: match[2], start: accTime, end: accTime + duration })
-              accTime += duration
-            }
-            return words
-          }
-          const enWords = parseKaraoke(group.texts.orig)
-          result.push({
-            time: group.startTime,
-            texts: [group.texts.orig.replace(/{.*?}/g, ''), group.texts.ts.replace(/{.*?}/g, '')],
-            words: enWords,
-            karaoke: enWords.length > 0
-          })
-        })
-        return result.sort((a, b) => a.time - b.time)
-      },
-
       // 获取当前歌词索引
-      async getCurrentLyricIndex() {
+      getCurrentLyricIndex() {
         requirePermission(PluginPermission.PLAYER_READ, 'player.getCurrentLyricIndex')
-        const store = await getPlayerStore()
+        const store = getPlayerStore()
         
         // 如果 store 里有索引，直接返回
         if (store.currentLyricIndex >= 0) {
           return store.currentLyricIndex
         }
         
-        // 否则根据当前时间计算
-        const lyrics = await this.getLyrics()
-        if (!lyrics || lyrics.length === 0) {
-          return -1
-        }
-        
-        const currentTime = store.currentTime + 0.05 - (store.lyricsOffset || 0)
-        let l = 0, r = lyrics.length - 1, idx = -1
-        while (l <= r) {
-          const mid = (l + r) >> 1
-          if (lyrics[mid].time <= currentTime) {
-            idx = mid
-            l = mid + 1
-          } else {
-            r = mid - 1
-          }
-        }
-        return idx
+        return -1
       },
 
       // 播放控制
-      async play() {
+      play() {
         requirePermission(PluginPermission.PLAYER_CONTROL, 'player.play')
-        const store = await getPlayerStore()
+        const store = getPlayerStore()
         store.play()
       },
 
-      async pause() {
+      pause() {
         requirePermission(PluginPermission.PLAYER_CONTROL, 'player.pause')
-        const store = await getPlayerStore()
+        const store = getPlayerStore()
         store.pause()
       },
 
-      async togglePlay() {
+      togglePlay() {
         requirePermission(PluginPermission.PLAYER_CONTROL, 'player.togglePlay')
-        const store = await getPlayerStore()
+        const store = getPlayerStore()
         store.togglePlay()
       },
 
       async next() {
         requirePermission(PluginPermission.PLAYER_CONTROL, 'player.next')
-        const store = await getPlayerStore()
+        const store = getPlayerStore()
         await store.nextTrack()
       },
 
       async previous() {
         requirePermission(PluginPermission.PLAYER_CONTROL, 'player.previous')
-        const store = await getPlayerStore()
+        const store = getPlayerStore()
         await store.previousTrack()
       },
 
-      async seek(time) {
+      seek(time) {
         requirePermission(PluginPermission.PLAYER_CONTROL, 'player.seek')
-        const store = await getPlayerStore()
+        const store = getPlayerStore()
         store.seek(time)
       },
 
-      async setVolume(volume) {
+      setVolume(volume) {
         requirePermission(PluginPermission.PLAYER_CONTROL, 'player.setVolume')
-        const store = await getPlayerStore()
+        const store = getPlayerStore()
         store.setVolume(volume)
       },
 
       // 设置歌词（供歌词源插件使用）
-      async setLyrics(lyrics) {
+      setLyrics(lyrics) {
         requirePermission(PluginPermission.LYRICS_PROVIDER, 'player.setLyrics')
-        const store = await getPlayerStore()
+        const store = getPlayerStore()
         store.lyrics = lyrics
       },
     },
 
     // ========== 音乐库 API ==========
     library: {
-      async getPlaylists() {
+      getPlaylists() {
         requirePermission(PluginPermission.LIBRARY_READ, 'library.getPlaylists')
-        const store = await getMusicLibraryStore()
+        const store = getMusicLibraryStore()
         return store.playlists ? [...store.playlists] : []
       },
 
-      async getCurrentPlaylist() {
+      getCurrentPlaylist() {
         requirePermission(PluginPermission.LIBRARY_READ, 'library.getCurrentPlaylist')
-        const store = await getMusicLibraryStore()
+        const store = getMusicLibraryStore()
         return store.currentPlaylist ? { ...store.currentPlaylist } : null
       },
 
-      async getTracks() {
+      getTracks() {
         requirePermission(PluginPermission.LIBRARY_READ, 'library.getTracks')
-        const store = await getPlayerStore()
+        const store = getPlayerStore()
         return store.playlist ? [...store.playlist] : []
       },
     },
 
     // ========== 主题 API ==========
     theme: {
-      async getCurrent() {
-        const store = await getThemeStore()
+      getCurrent() {
+        const store = getThemeStore()
         return {
           preference: store.themePreference,
           isDark: store.isDark,
@@ -478,8 +354,7 @@ export function createPluginAPI(pluginId, permissions, manager) {
       },
 
       // 显示通知
-      async showNotification(message, type = 'info') {
-        const { useErrorNotification } = await import('../composables/useErrorNotification')
+      showNotification(message, type = 'info') {
         const { showError } = useErrorNotification()
         showError(message, type)
       },
