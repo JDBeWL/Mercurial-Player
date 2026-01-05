@@ -173,6 +173,7 @@ const colorPresets = [
   { hex: '#26A69A', name: '薄荷绿', category: 'green' },
   
   // 中性色 - 稳重、专业、简约
+  { hex: '#2C2C2C', name: '鬼方佳代子', category: 'neutral' },
   { hex: '#78909C', name: '蓝灰', category: 'neutral' },
   { hex: '#607D8B', name: '深蓝灰', category: 'neutral' },
   { hex: '#546E7A', name: '暗蓝灰', category: 'neutral' },

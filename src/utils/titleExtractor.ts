@@ -1,5 +1,33 @@
 import { invoke } from '@tauri-apps/api/core'
 import logger from './logger'
+import type { TitleExtractionConfig } from '@/types'
+
+interface TitleInfo {
+  fileName: string
+  title: string
+  artist: string
+  album: string
+  duration?: number
+  bitrate?: number | null
+  sampleRate?: number | null
+  channels?: number | null
+  bitDepth?: number | null
+  format?: string | null
+  isFromMetadata: boolean
+}
+
+interface TrackMetadata {
+  path: string
+  title?: string
+  artist?: string
+  album?: string
+  duration?: number
+  bitrate?: number | null
+  sampleRate?: number | null
+  channels?: number | null
+  bitDepth?: number | null
+  format?: string | null
+}
 
 /**
  * 歌曲标题提取工具类
@@ -7,23 +35,23 @@ import logger from './logger'
 export class TitleExtractor {
   /**
    * 批量提取歌曲标题（减少 IPC 调用）
-   * @param {string[]} filePaths - 音频文件路径数组
-   * @param {Object} config - 标题提取配置
-   * @returns {Promise<Map<string, Object>>} 路径到标题信息的映射
    */
-  static async extractTitlesBatch(filePaths, config = {}) {
+  static async extractTitlesBatch(
+    filePaths: string[],
+    config: Partial<TitleExtractionConfig> = {}
+  ): Promise<Map<string, TitleInfo>> {
     const { preferMetadata = true } = config
-    const result = new Map()
+    const result = new Map<string, TitleInfo>()
 
     if (!filePaths || filePaths.length === 0) {
       return result
     }
 
     // 使用批量 API 获取所有元数据
-    let metadataMap = new Map()
+    const metadataMap = new Map<string, TrackMetadata>()
     if (preferMetadata) {
       try {
-        const metadataList = await invoke('get_tracks_metadata_batch', { paths: filePaths })
+        const metadataList = await invoke<TrackMetadata[]>('get_tracks_metadata_batch', { paths: filePaths })
         // 将结果转换为 Map 以便快速查找
         for (const metadata of metadataList) {
           if (metadata && metadata.path) {
@@ -76,18 +104,18 @@ export class TitleExtractor {
 
   /**
    * 提取歌曲标题（单个文件，保持向后兼容）
-   * @param {string} filePath - 音频文件路径
-   * @param {Object} config - 标题提取配置
-   * @returns {Promise<Object>} 包含标题信息的对象
    */
-  static async extractTitle(filePath, config = {}) {
+  static async extractTitle(
+    filePath: string,
+    config: Partial<TitleExtractionConfig> = {}
+  ): Promise<TitleInfo> {
     try {
       const { preferMetadata = true } = config
 
       // 优先从元数据获取信息
       if (preferMetadata) {
         try {
-          const metadata = await invoke('get_track_metadata', { path: filePath })
+          const metadata = await invoke<TrackMetadata>('get_track_metadata', { path: filePath })
           if (metadata && metadata.title) {
             // 获取到元数据，清理后返回
             return {
@@ -113,7 +141,7 @@ export class TitleExtractor {
       const fileName = this.getFileName(filePath, config.hideFileExtension)
       return {
         fileName: fileName,
-        title: this.cleanTitle(fileName), // 清理回退的标题
+        title: this.cleanTitle(fileName),
         artist: '',
         album: '',
         isFromMetadata: false
@@ -123,11 +151,11 @@ export class TitleExtractor {
 
   /**
    * 从文件名解析标题信息
-   * @param {string} filePath - 音频文件路径
-   * @param {Object} config - 标题提取配置
-   * @returns {Object} 包含标题信息的对象
    */
-  static parseFromFileName(filePath, config = {}) {
+  static parseFromFileName(
+    filePath: string,
+    config: Partial<TitleExtractionConfig> = {}
+  ): TitleInfo {
     const {
       separator = '-',
       customSeparators = ['-', '_', '.', ' '],
@@ -145,23 +173,23 @@ export class TitleExtractor {
       const prioritizedSeparators = [
         ' - ', // ' - ' 是最高优先级的
         ...new Set([separator, ...customSeparators])
-      ].filter(s => s && s.length > 0);
+      ].filter(s => s && s.length > 0)
 
       for (const sep of prioritizedSeparators) {
         // 使用 lastIndexOf 来处理 "艺术家 - 歌曲 - 专辑" 这类情况
-        const lastIndex = fileName.lastIndexOf(sep);
+        const lastIndex = fileName.lastIndexOf(sep)
 
         // 确保分隔符不在字符串的开头或结尾
         if (lastIndex > 0 && lastIndex < fileName.length - sep.length) {
-          const potentialArtist = fileName.substring(0, lastIndex);
-          const potentialTitle = fileName.substring(lastIndex + sep.length);
+          const potentialArtist = fileName.substring(0, lastIndex)
+          const potentialTitle = fileName.substring(lastIndex + sep.length)
 
           // 如果分割后两部分都不为空，则认为解析成功
           if (potentialArtist && potentialTitle) {
-            artist = this.cleanTitle(potentialArtist);
-            title = this.cleanTitle(potentialTitle);
+            artist = this.cleanTitle(potentialArtist)
+            title = this.cleanTitle(potentialTitle)
             // 解析成功，跳出循环
-            break;
+            break
           }
         }
       }
@@ -169,7 +197,7 @@ export class TitleExtractor {
 
     // 如果一轮循环后没有解析出艺术家，确保标题是干净的
     if (artist === '' && title === fileName) {
-      title = this.cleanTitle(fileName);
+      title = this.cleanTitle(fileName)
     }
 
     return {
@@ -183,11 +211,8 @@ export class TitleExtractor {
 
   /**
    * 获取文件名（可选择是否包含扩展名）
-   * @param {string} filePath - 文件路径
-   * @param {boolean} hideExtension - 是否隐藏扩展名
-   * @returns {string} 文件名
    */
-  static getFileName(filePath, hideExtension = true) {
+  static getFileName(filePath: string, hideExtension: boolean = true): string {
     const parts = filePath.split(/[/\\]/)
     let fileName = parts[parts.length - 1] || filePath
 
@@ -203,10 +228,8 @@ export class TitleExtractor {
 
   /**
    * 清理标题中的多余空格和特殊字符
-   * @param {string} title - 原始标题
-   * @returns {string} 清理后的标题
    */
-  static cleanTitle(title) {
+  static cleanTitle(title: string): string {
     if (!title) return ''
 
     return title
@@ -217,11 +240,8 @@ export class TitleExtractor {
 
   /**
    * 格式化播放列表名称
-   * @param {string} folderPath - 文件夹路径
-   * @param {string} format - 格式化字符串，支持 {folderName}
-   * @returns {string} 格式化后的播放列表名称
    */
-  static formatPlaylistName(folderPath, format = '{folderName}') {
+  static formatPlaylistName(folderPath: string, format: string = '{folderName}'): string {
     const parts = folderPath.split(/[/\\]/)
     const folderName = parts[parts.length - 1] || folderPath
 
@@ -230,29 +250,22 @@ export class TitleExtractor {
 
   /**
    * 判断字符串是否为有效的分隔符
-   * @param {string} separator - 分隔符
-   * @returns {boolean} 是否为有效分隔符
    */
-  static isValidSeparator(separator) {
+  static isValidSeparator(separator: string): boolean {
     return typeof separator === 'string' && separator.trim() !== ''
   }
 
   /**
    * 获取所有有效的分隔符
-   * @param {Array} separators - 分隔符数组
-   * @returns {Array} 有效的分隔符数组
    */
-  static getValidSeparators(separators) {
+  static getValidSeparators(separators: string[]): string[] {
     return separators.filter(sep => this.isValidSeparator(sep))
   }
 
   /**
    * 测试文件名解析效果
-   * @param {string} fileName - 测试文件名
-   * @param {Object} config - 标题提取配置
-   * @returns {Object} 解析结果
    */
-  static testParse(fileName, config = {}) {
+  static testParse(fileName: string, config: Partial<TitleExtractionConfig> = {}): TitleInfo {
     const testPath = `/test/${fileName}.mp3`
     return this.parseFromFileName(testPath, config)
   }

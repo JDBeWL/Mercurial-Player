@@ -6,16 +6,25 @@
 import { pluginManager } from './pluginManager'
 import logger from '../utils/logger'
 
+interface ShortcutExtension {
+  id: string
+  name: string
+  key: string
+  action: () => void | Promise<void>
+  pluginId: string
+}
+
 class ShortcutManager {
+  private isListening: boolean = false
+
   constructor() {
-    this.isListening = false
     this.handleKeyDown = this.handleKeyDown.bind(this)
   }
 
   /**
    * 启动快捷键监听
    */
-  start() {
+  start(): void {
     if (this.isListening) return
     
     window.addEventListener('keydown', this.handleKeyDown)
@@ -26,7 +35,7 @@ class ShortcutManager {
   /**
    * 停止快捷键监听
    */
-  stop() {
+  stop(): void {
     if (!this.isListening) return
     
     window.removeEventListener('keydown', this.handleKeyDown)
@@ -37,15 +46,15 @@ class ShortcutManager {
   /**
    * 处理键盘事件
    */
-  handleKeyDown(event) {
+  private handleKeyDown(event: KeyboardEvent): void {
     // 如果焦点在输入框中，不处理快捷键
-    const target = event.target
+    const target = event.target as HTMLElement
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
       return
     }
 
     // 构建当前按下的快捷键组合
-    const keys = []
+    const keys: string[] = []
     if (event.ctrlKey) keys.push('ctrl')
     if (event.altKey) keys.push('alt')
     if (event.shiftKey) keys.push('shift')
@@ -68,12 +77,12 @@ class ShortcutManager {
     }
 
     const pressedKey = keys.sort((a, b) => {
-      const order = { ctrl: 0, alt: 1, shift: 2, meta: 3 }
+      const order: Record<string, number> = { ctrl: 0, alt: 1, shift: 2, meta: 3 }
       return (order[a] ?? 4) - (order[b] ?? 4)
     }).join('+')
 
     // 查找匹配的快捷键
-    const shortcuts = pluginManager.getExtensions('shortcuts')
+    const shortcuts = pluginManager.getExtensions('shortcuts') as ShortcutExtension[]
     const matched = shortcuts.find(s => s.key === pressedKey)
 
     if (matched) {
@@ -99,8 +108,8 @@ class ShortcutManager {
   /**
    * 获取所有已注册的快捷键
    */
-  getAllShortcuts() {
-    return pluginManager.getExtensions('shortcuts')
+  getAllShortcuts(): ShortcutExtension[] {
+    return pluginManager.getExtensions('shortcuts') as ShortcutExtension[]
   }
 }
 

@@ -1,10 +1,34 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
-import { useConfigStore } from './config.js'
+import { useConfigStore } from './config'
 import logger from '../utils/logger'
+import type { Track, Playlist, LibraryStats } from '@/types'
+
+interface PlayHistoryItem extends Track {
+  timestamp: string
+}
+
+interface SearchResult extends Track {
+  folderPath?: string
+  folderName?: string
+}
+
+interface MusicLibraryState {
+  musicFolders: string[]
+  playlists: Playlist[]
+  currentPlaylist: Playlist | null
+  currentFile: Track | null
+  searchResults: SearchResult[]
+  searchTerm: string
+  playHistory: PlayHistoryItem[]
+  isLoading: boolean
+  error: string | null
+  directoryTree: unknown | null
+  stats: LibraryStats
+}
 
 export const useMusicLibraryStore = defineStore('musicLibrary', {
-  state: () => ({
+  state: (): MusicLibraryState => ({
     // 音乐文件夹管理
     musicFolders: [],
     
@@ -42,8 +66,8 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 获取所有音轨的列表
      */
-    allTracks: (state) => {
-      const tracks = []
+    allTracks: (state): Track[] => {
+      const tracks: Track[] = []
       for (const playlist of state.playlists) {
         tracks.push(...playlist.files)
       }
@@ -53,27 +77,27 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 获取当前播放列表的文件列表
      */
-    currentFiles: (state) => {
+    currentFiles: (state): Track[] => {
       return state.currentPlaylist?.files || []
     },
 
     /**
      * 获取当前播放文件的索引
      */
-    currentIndex: (state) => {
+    currentIndex: (state): number => {
       if (!state.currentPlaylist || !state.currentFile) return -1
       return state.currentPlaylist.files.findIndex(file => 
-        file.path === state.currentFile.path
+        file.path === state.currentFile!.path
       )
     },
 
     /**
      * 获取上一首文件
      */
-    previousFile: (state) => {
-      const index = state.currentIndex
-      if (index > 0) {
-        return state.currentPlaylist.files[index - 1]
+    previousFile(): Track | null {
+      const index = this.currentIndex
+      if (index > 0 && this.currentPlaylist) {
+        return this.currentPlaylist.files[index - 1]
       }
       return null
     },
@@ -81,10 +105,10 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 获取下一首文件
      */
-    nextFile: (state) => {
-      const index = state.currentIndex
-      if (index >= 0 && index < state.currentPlaylist.files.length - 1) {
-        return state.currentPlaylist.files[index + 1]
+    nextFile(): Track | null {
+      const index = this.currentIndex
+      if (this.currentPlaylist && index >= 0 && index < this.currentPlaylist.files.length - 1) {
+        return this.currentPlaylist.files[index + 1]
       }
       return null
     },
@@ -92,25 +116,25 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 检查是否在当前播放列表的开头
      */
-    isAtStart: (state) => {
-      return state.currentIndex <= 0
+    isAtStart(): boolean {
+      return this.currentIndex <= 0
     },
 
     /**
      * 检查是否在当前播放列表的结尾
      */
-    isAtEnd: (state) => {
-      const index = state.currentIndex
-      return index >= state.currentPlaylist?.files.length - 1
+    isAtEnd(): boolean {
+      const index = this.currentIndex
+      return this.currentPlaylist ? index >= this.currentPlaylist.files.length - 1 : true
     },
 
     /**
      * 获取总播放进度
      */
-    totalProgress: (state) => {
-      if (!state.currentPlaylist) return 0
-      const total = state.currentPlaylist.files.length
-      const current = state.currentIndex + 1
+    totalProgress(): number {
+      if (!this.currentPlaylist) return 0
+      const total = this.currentPlaylist.files.length
+      const current = this.currentIndex + 1
       return total > 0 ? (current / total) * 100 : 0
     }
   },
@@ -121,22 +145,22 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 加载音乐文件夹
      */
-    async loadMusicFolders() {
+    async loadMusicFolders(): Promise<{ success: boolean; message: string }> {
       try {
-        this.musicFolders = await invoke('get_music_directories')
+        this.musicFolders = await invoke<string[]>('get_music_directories')
         return { success: true, message: 'Music directories loaded successfully' }
       } catch (error) {
         logger.error('Error loading music directories:', error)
-        return { success: false, message: error.toString() }
+        return { success: false, message: String(error) }
       }
     },
 
     /**
      * 添加音乐文件夹
      */
-    async addMusicFolder(folderPath) {
+    async addMusicFolder(folderPath: string): Promise<{ success: boolean; message: string }> {
       try {
-        const updatedFolders = await invoke('add_music_directory', { path: folderPath })
+        const updatedFolders = await invoke<string[]>('add_music_directory', { path: folderPath })
         this.musicFolders = updatedFolders
         // 同时更新配置存储中的音乐文件夹列表
         const configStore = useConfigStore()
@@ -144,16 +168,16 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         return { success: true, message: 'Folder added successfully' }
       } catch (error) {
         logger.error('Error adding music folder:', error)
-        return { success: false, message: error.toString() }
+        return { success: false, message: String(error) }
       }
     },
 
     /**
      * 移除音乐文件夹
      */
-    async removeMusicFolder(folderPath) {
+    async removeMusicFolder(folderPath: string): Promise<{ success: boolean; message: string }> {
       try {
-        const updatedFolders = await invoke('remove_music_directory', { path: folderPath })
+        const updatedFolders = await invoke<string[]>('remove_music_directory', { path: folderPath })
         this.musicFolders = updatedFolders
         // 同时更新配置存储中的音乐文件夹列表
         const configStore = useConfigStore()
@@ -167,16 +191,16 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         return { success: true, message: 'Folder removed successfully' }
       } catch (error) {
         logger.error('Error removing music folder:', error)
-        return { success: false, message: error.toString() }
+        return { success: false, message: String(error) }
       }
     },
 
     /**
      * 设置音乐文件夹
      */
-    async setMusicFolders(folders) {
+    async setMusicFolders(folders: string[]): Promise<{ success: boolean; message: string }> {
       try {
-        const updatedFolders = await invoke('set_music_directories', { paths: folders })
+        const updatedFolders = await invoke<string[]>('set_music_directories', { paths: folders })
         this.musicFolders = updatedFolders
         // 同时更新配置存储中的音乐文件夹列表
         const configStore = useConfigStore()
@@ -184,16 +208,16 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         return { success: true, message: 'Music directories updated successfully' }
       } catch (error) {
         logger.error('Error setting music directories:', error)
-        return { success: false, message: error.toString() }
+        return { success: false, message: String(error) }
       }
     },
 
     /**
      * 刷新音乐文件夹
      */
-    async refreshMusicFolders() {
+    async refreshMusicFolders(): Promise<{ success: boolean; message: string }> {
       try {
-        this.playlists = await invoke('get_all_audio_files', { paths: this.musicFolders })
+        this.playlists = await invoke<Playlist[]>('get_all_audio_files', { paths: this.musicFolders })
         
         // 获取配置中的排序顺序
         const configStore = useConfigStore()
@@ -207,11 +231,9 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
               const titleB = (b.title || b.name || '').toLowerCase()
               
               if (isAscOrder) {
-                // A-Z order
                 if (titleA < titleB) return -1
                 if (titleA > titleB) return 1
               } else {
-                // Z-A order
                 if (titleA > titleB) return -1
                 if (titleA < titleB) return 1
               }
@@ -224,7 +246,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         return { success: true, message: 'Library refreshed successfully' }
       } catch (error) {
         logger.error('Error refreshing music folders:', error)
-        return { success: false, message: error.toString() }
+        return { success: false, message: String(error) }
       }
     },
 
@@ -233,16 +255,16 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 选择播放列表
      */
-    selectPlaylist(playlist) {
+    selectPlaylist(playlist: Playlist): void {
       this.currentPlaylist = playlist
-      this.currentFile = null // 重置当前播放文件
-      this.addToPlayHistory(playlist)
+      this.currentFile = null
+      this.addToPlayHistory(playlist as unknown as Track)
     },
 
     /**
      * 设置当前播放文件
      */
-    setCurrentFile(file) {
+    setCurrentFile(file: Track): void {
       this.currentFile = file
       this.addToPlayHistory(file)
     },
@@ -250,7 +272,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 播放上一首
      */
-    playPrevious() {
+    playPrevious(): Track | null {
       if (this.isAtStart) return null
       
       const previousFile = this.previousFile
@@ -265,7 +287,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 播放下一首
      */
-    playNext() {
+    playNext(): Track | null {
       if (this.isAtEnd) return null
       
       const nextFile = this.nextFile
@@ -280,7 +302,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 随机播放
      */
-    playRandom() {
+    playRandom(): Track | null {
       if (!this.currentPlaylist || this.currentPlaylist.files.length === 0) return null
       
       const files = this.currentPlaylist.files
@@ -294,7 +316,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 清空当前播放列表
      */
-    clearCurrentPlaylist() {
+    clearCurrentPlaylist(): void {
       this.currentPlaylist = null
       this.currentFile = null
     },
@@ -304,7 +326,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 搜索音频文件
      */
-    async searchFiles(searchTerm) {
+    async searchFiles(searchTerm: string): Promise<void> {
       this.isLoading = true
       this.searchTerm = searchTerm
       
@@ -331,7 +353,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         
       } catch (error) {
         logger.error('Error searching files:', error)
-        this.error = error.message
+        this.error = (error as Error).message
         throw error
       } finally {
         this.isLoading = false
@@ -341,7 +363,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 清空搜索
      */
-    clearSearch() {
+    clearSearch(): void {
       this.searchResults = []
       this.searchTerm = ''
     },
@@ -351,7 +373,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 添加到播放历史
      */
-    addToPlayHistory(item) {
+    addToPlayHistory(item: Track): void {
       // 限制历史记录长度
       if (this.playHistory.length >= 100) {
         this.playHistory.shift()
@@ -366,7 +388,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 获取播放历史
      */
-    getPlayHistory(limit = 20) {
+    getPlayHistory(limit: number = 20): PlayHistoryItem[] {
       return this.playHistory.slice(-limit).reverse()
     },
 
@@ -375,13 +397,15 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 从播放列表中移除文件
      */
-    removeFileFromPlaylist(filePath) {
+    removeFileFromPlaylist(filePath: string): void {
       if (!this.currentPlaylist) return
       
       const index = this.currentPlaylist.files.findIndex(file => file.path === filePath)
       if (index > -1) {
         this.currentPlaylist.files.splice(index, 1)
-        this.currentPlaylist.totalFiles--
+        if (this.currentPlaylist.totalFiles) {
+          this.currentPlaylist.totalFiles--
+        }
         
         // 如果移除的是当前播放的文件，需要更新当前文件
         if (this.currentFile && this.currentFile.path === filePath) {
@@ -393,14 +417,14 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     /**
      * 刷新播放列表
      */
-    async refreshPlaylist() {
+    async refreshPlaylist(): Promise<void> {
       await this.refreshMusicFolders()
     },
 
     /**
      * 重置播放列表状态
      */
-    reset() {
+    reset(): void {
       this.currentPlaylist = null
       this.currentFile = null
       this.playlists = []

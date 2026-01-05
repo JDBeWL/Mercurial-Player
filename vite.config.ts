@@ -23,7 +23,8 @@ export default defineConfig({
         // 手动分包，优化缓存和加载
         manualChunks: {
           'vendor': ['vue', 'pinia', 'vue-i18n'],
-          'tauri': ['@tauri-apps/api', '@tauri-apps/plugin-dialog', '@tauri-apps/plugin-fs', '@tauri-apps/plugin-shell'],
+          'tauri-core': ['@tauri-apps/api'],
+          'tauri-plugins': ['@tauri-apps/plugin-dialog', '@tauri-apps/plugin-fs', '@tauri-apps/plugin-shell'],
         },
         // 优化 chunk 文件名
         chunkFileNames: 'assets/[name]-[hash].js',

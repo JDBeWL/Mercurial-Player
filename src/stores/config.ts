@@ -3,44 +3,73 @@ import { invoke } from '@tauri-apps/api/core'
 import { useThemeStore } from './theme'
 import { useMusicLibraryStore } from './musicLibrary'
 import logger from '../utils/logger'
-import errorHandler, { ErrorType, ErrorSeverity, handlePromise } from '../utils/errorHandler'
+import { ErrorType, ErrorSeverity, handlePromise } from '../utils/errorHandler'
+import type {
+  DirectoryScanConfig,
+  TitleExtractionConfig,
+  PlaylistConfig,
+  GeneralConfig,
+  LyricsConfig,
+  UIConfig,
+  AudioConfig,
+  AppConfig
+} from '@/types'
 
 // 防抖函数（带取消功能）
-function debounce(func, wait) {
-  let timeout
-  const debounced = function (...args) {
-    const context = this
+interface DebouncedFunction<T extends (...args: unknown[]) => unknown> {
+  (...args: Parameters<T>): void
+  cancel: () => void
+}
+
+function debounce<T extends (...args: unknown[]) => unknown>(func: T, wait: number): DebouncedFunction<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  const debounced = function(this: unknown, ...args: Parameters<T>) {
     clearTimeout(timeout)
-    timeout = setTimeout(() => func.apply(context, args), wait)
-  }
+    timeout = setTimeout(() => func.apply(this, args), wait)
+  } as DebouncedFunction<T>
   debounced.cancel = () => clearTimeout(timeout)
   return debounced
 }
 
 // 深度比较两个对象是否相等
-function deepEqual(obj1, obj2) {
+function deepEqual(obj1: unknown, obj2: unknown): boolean {
   if (obj1 === obj2) return true
   if (typeof obj1 !== 'object' || typeof obj2 !== 'object') return false
   if (obj1 === null || obj2 === null) return false
   
-  const keys1 = Object.keys(obj1)
-  const keys2 = Object.keys(obj2)
+  const keys1 = Object.keys(obj1 as object)
+  const keys2 = Object.keys(obj2 as object)
   
   if (keys1.length !== keys2.length) return false
   
   for (const key of keys1) {
     if (!keys2.includes(key)) return false
-    if (!deepEqual(obj1[key], obj2[key])) return false
+    if (!deepEqual((obj1 as Record<string, unknown>)[key], (obj2 as Record<string, unknown>)[key])) return false
   }
   
   return true
+}
+
+interface ConfigState {
+  musicDirectories: string[]
+  directoryScan: DirectoryScanConfig
+  titleExtraction: TitleExtractionConfig
+  playlist: PlaylistConfig
+  general: GeneralConfig
+  lyrics: LyricsConfig
+  ui: UIConfig
+  audio: AudioConfig
+  _isInitializing: boolean
+  _isDirty: boolean
+  _lastSavedConfig: Partial<AppConfig> | null
+  _savePromise: Promise<unknown> | null
 }
 
 /**
  * 配置系统存储（包含UI设置）
  */
 export const useConfigStore = defineStore('config', {
-  state: () => ({
+  state: (): ConfigState => ({
     // 音乐文件夹列表
     musicDirectories: [],
 
@@ -110,41 +139,41 @@ export const useConfigStore = defineStore('config', {
   }),
 
   getters: {
-    availableSeparators: (state) => {
+    availableSeparators: (state): string[] => {
       return [...new Set([state.titleExtraction.separator, ...state.titleExtraction.customSeparators])]
     },
-    validSeparators: (state) => {
-      return state.availableSeparators.filter(sep => sep && sep.trim() !== '')
+    validSeparators(): string[] {
+      return this.availableSeparators.filter((sep: string) => sep && sep.trim() !== '')
     },
-    hasUnsavedChanges: (state) => state._isDirty
+    hasUnsavedChanges: (state): boolean => state._isDirty
   },
 
   actions: {
     // 获取可保存的配置（排除内部状态）
-    _getSaveableConfig() {
+    _getSaveableConfig(): Partial<AppConfig> {
       const { _isInitializing, _isDirty, _lastSavedConfig, _savePromise, ...config } = this.$state
       return config
     },
 
     // 标记配置已更改
-    _markDirty() {
+    _markDirty(): void {
       if (!this._isInitializing) {
         this._isDirty = true
       }
     },
 
     // 检查配置是否真的有变化
-    _hasRealChanges() {
+    _hasRealChanges(): boolean {
       if (!this._lastSavedConfig) return true
       const currentConfig = this._getSaveableConfig()
       return !deepEqual(currentConfig, this._lastSavedConfig)
     },
 
-    async loadConfig() {
+    async loadConfig(): Promise<void> {
       this._isInitializing = true
 
       const configResult = await handlePromise(
-        invoke('load_config'),
+        invoke<Partial<AppConfig>>('load_config'),
         {
           type: ErrorType.CONFIG_LOAD_ERROR,
           severity: ErrorSeverity.MEDIUM,
@@ -152,7 +181,7 @@ export const useConfigStore = defineStore('config', {
           showToUser: false,
           throw: false
         }
-      );
+      )
 
       if (configResult.success && configResult.data) {
         this.$patch(configResult.data)
@@ -167,7 +196,7 @@ export const useConfigStore = defineStore('config', {
       }
 
       const directoriesResult = await handlePromise(
-        invoke('get_music_directories'),
+        invoke<string[]>('get_music_directories'),
         {
           type: ErrorType.CONFIG_LOAD_ERROR,
           severity: ErrorSeverity.LOW,
@@ -175,7 +204,7 @@ export const useConfigStore = defineStore('config', {
           showToUser: false,
           throw: false
         }
-      );
+      )
 
       if (directoriesResult.success && directoriesResult.data) {
         this.musicDirectories = directoriesResult.data
@@ -191,7 +220,7 @@ export const useConfigStore = defineStore('config', {
       }, 1000)
     },
 
-    async saveConfigNow() {
+    async saveConfigNow(): Promise<void> {
       // 检查是否真的有变化
       if (!this._hasRealChanges()) {
         logger.debug('No config changes to save')
@@ -216,12 +245,12 @@ export const useConfigStore = defineStore('config', {
           showToUser: false,
           throw: false
         }
-      );
+      )
 
       const result = await this._savePromise
       this._savePromise = null
 
-      if (result.success) {
+      if ((result as { success: boolean }).success) {
         this._lastSavedConfig = configToSave
         this._isDirty = false
         logger.debug('Configuration saved successfully')
@@ -229,21 +258,21 @@ export const useConfigStore = defineStore('config', {
     },
 
     // 防抖保存（2秒延迟）
-    saveConfig: debounce(function () {
+    saveConfig: debounce(function(this: any) {
       return this.saveConfigNow()
-    }, 2000),
+    }, 2000) as DebouncedFunction<() => void>,
 
     // 强制立即保存（取消防抖，用于应用关闭前）
-    async flushPendingSave() {
+    async flushPendingSave(): Promise<void> {
       // 取消待执行的防抖保存
-      if (this.saveConfig.cancel) {
-        this.saveConfig.cancel()
+      if ((this.saveConfig as DebouncedFunction<() => void>).cancel) {
+        (this.saveConfig as DebouncedFunction<() => void>).cancel()
       }
       // 立即保存
       await this.saveConfigNow()
     },
 
-    async exportConfig(filePath) {
+    async exportConfig(filePath: string): Promise<void> {
       try {
         const configToExport = JSON.parse(JSON.stringify(this._getSaveableConfig()))
         await invoke('export_config', { config: configToExport, filePath })
@@ -254,9 +283,9 @@ export const useConfigStore = defineStore('config', {
       }
     },
 
-    async importConfig(filePath) {
+    async importConfig(filePath: string): Promise<void> {
       try {
-        const config = await invoke('import_config', { filePath })
+        const config = await invoke<Partial<AppConfig>>('import_config', { filePath })
         if (config) {
           this.$patch(config)
           this._markDirty()
@@ -268,12 +297,12 @@ export const useConfigStore = defineStore('config', {
       }
     },
 
-    resetToDefaults() {
+    resetToDefaults(): void {
       this.$reset()
       this._markDirty()
     },
 
-    setDirectoryScanConfig(config) {
+    setDirectoryScanConfig(config: Partial<DirectoryScanConfig>): void {
       this.directoryScan = { ...this.directoryScan, ...config }
       this._markDirty()
       if (this.general.autoSaveConfig && !this._isInitializing) {
@@ -281,7 +310,7 @@ export const useConfigStore = defineStore('config', {
       }
     },
 
-    setTitleExtractionConfig(config) {
+    setTitleExtractionConfig(config: Partial<TitleExtractionConfig>): void {
       this.titleExtraction = { ...this.titleExtraction, ...config }
       this._markDirty()
       if (this.general.autoSaveConfig && !this._isInitializing) {
@@ -289,7 +318,7 @@ export const useConfigStore = defineStore('config', {
       }
     },
 
-    setPlaylistConfig(config) {
+    setPlaylistConfig(config: Partial<PlaylistConfig>): void {
       this.playlist = { ...this.playlist, ...config }
       this._markDirty()
       if (this.general.autoSaveConfig && !this._isInitializing) {
@@ -297,7 +326,7 @@ export const useConfigStore = defineStore('config', {
       }
     },
 
-    toggleSortOrder() {
+    toggleSortOrder(): void {
       this.playlist.sortOrder = this.playlist.sortOrder === 'asc' ? 'desc' : 'asc'
       this._markDirty()
       if (this.general.autoSaveConfig && !this._isInitializing) {
@@ -305,7 +334,7 @@ export const useConfigStore = defineStore('config', {
       }
     },
 
-    setGeneralConfig(config) {
+    setGeneralConfig(config: Partial<GeneralConfig>): void {
       this.general = { ...this.general, ...config }
       this._markDirty()
       if (this.general.autoSaveConfig && !this._isInitializing) {
@@ -313,7 +342,7 @@ export const useConfigStore = defineStore('config', {
       }
     },
 
-    setAudioConfig(config) {
+    setAudioConfig(config: Partial<AudioConfig>): void {
       this.audio = { ...this.audio, ...config }
       this._markDirty()
       if (this.general.autoSaveConfig && !this._isInitializing) {
@@ -321,7 +350,7 @@ export const useConfigStore = defineStore('config', {
       }
     },
 
-    setLyricsConfig(config) {
+    setLyricsConfig(config: Partial<LyricsConfig>): void {
       this.lyrics = { ...this.lyrics, ...config }
       this._markDirty()
       if (this.general.autoSaveConfig && !this._isInitializing) {
@@ -329,7 +358,7 @@ export const useConfigStore = defineStore('config', {
       }
     },
 
-    addCustomSeparator(separator) {
+    addCustomSeparator(separator: string): void {
       if (separator && !this.titleExtraction.customSeparators.includes(separator)) {
         this.titleExtraction.customSeparators.push(separator)
         this._markDirty()
@@ -339,7 +368,7 @@ export const useConfigStore = defineStore('config', {
       }
     },
 
-    removeCustomSeparator(separator) {
+    removeCustomSeparator(separator: string): void {
       const index = this.titleExtraction.customSeparators.indexOf(separator)
       if (index > -1) {
         this.titleExtraction.customSeparators.splice(index, 1)
@@ -350,20 +379,20 @@ export const useConfigStore = defineStore('config', {
       }
     },
 
-    markInitializationComplete() {
+    markInitializationComplete(): void {
       this._isInitializing = false
       this._isDirty = false
     },
 
     // UI 相关
-    openSettings() { this.ui.showSettings = true },
-    closeSettings() { this.ui.showSettings = false },
-    toggleSettings() { this.ui.showSettings = !this.ui.showSettings },
-    openConfigPanel() { this.ui.showConfigPanel = true },
-    closeConfigPanel() { this.ui.showConfigPanel = false },
-    toggleConfigPanel() { this.ui.showConfigPanel = !this.ui.showConfigPanel },
+    openSettings(): void { this.ui.showSettings = true },
+    closeSettings(): void { this.ui.showSettings = false },
+    toggleSettings(): void { this.ui.showSettings = !this.ui.showSettings },
+    openConfigPanel(): void { this.ui.showConfigPanel = true },
+    closeConfigPanel(): void { this.ui.showConfigPanel = false },
+    toggleConfigPanel(): void { this.ui.showConfigPanel = !this.ui.showConfigPanel },
 
-    async toggleMiniMode() {
+    async toggleMiniMode(): Promise<void> {
       try {
         const newMode = !this.ui.miniMode
         await invoke('set_mini_mode', { enable: newMode })

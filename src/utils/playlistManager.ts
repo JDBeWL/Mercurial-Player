@@ -1,6 +1,41 @@
 import { invoke } from '@tauri-apps/api/core'
-import { TitleExtractor } from './titleExtractor.js'
+import { TitleExtractor } from './titleExtractor'
 import logger from './logger'
+import type { Track, Playlist, DirectoryScanConfig, PlaylistConfig, TitleExtractionConfig, LibraryStats } from '@/types'
+
+interface DirectoryNode {
+  path: string
+  name: string
+  depth: number
+  subdirectories: DirectoryNode[]
+  audioFiles: Track[]
+}
+
+interface FileTreeResult {
+  basePath: string
+  directoryTree: DirectoryNode | null
+  playlists: ExtendedPlaylist[]
+  totalFiles: number
+}
+
+interface ExtendedPlaylist extends Playlist {
+  path: string
+  subdirectoryCount: number
+  isAllSongsPlaylist?: boolean
+}
+
+interface ProcessedTrack extends Track {
+  displayTitle: string
+  displayArtist: string
+  fileName: string
+  isFromMetadata: boolean
+}
+
+interface ScanConfig {
+  directoryScan?: Partial<DirectoryScanConfig>
+  playlist?: Partial<PlaylistConfig>
+  titleExtraction?: Partial<TitleExtractionConfig>
+}
 
 /**
  * 播放列表管理器
@@ -10,11 +45,8 @@ export class PlaylistManager {
 
   /**
    * 获取音频文件树结构
-   * @param {string} basePath - 基础路径
-   * @param {Object} config - 配置对象
-   * @returns {Promise<Object>} 文件树结构
    */
-  static async getAudioFileTree(basePath, config = {}) {
+  static async getAudioFileTree(basePath: string, config: ScanConfig = {}): Promise<FileTreeResult> {
     try {
       const {
         enableSubdirectoryScan = true,
@@ -50,12 +82,20 @@ export class PlaylistManager {
   /**
    * 扫描目录树结构 - 使用异步分块避免阻塞
    */
-  static async scanDirectoryTree(basePath, config) {
+  static async scanDirectoryTree(
+    basePath: string,
+    config: {
+      enableSubdirectoryScan: boolean
+      maxDepth: number
+      ignoreHiddenFolders: boolean
+      folderBlacklist: string[]
+    }
+  ): Promise<DirectoryNode | null> {
     const { enableSubdirectoryScan, maxDepth, ignoreHiddenFolders, folderBlacklist } = config
     let scannedCount = 0
     const YIELD_INTERVAL = 10 // 每扫描 10 个目录让出一次主线程
 
-    const scanDirectory = async (path, currentDepth = 0) => {
+    const scanDirectory = async (path: string, currentDepth: number = 0): Promise<DirectoryNode | null> => {
       if (currentDepth > maxDepth) {
         return null
       }
@@ -68,9 +108,9 @@ export class PlaylistManager {
 
       try {
         // 获取目录下的子目录
-        const subdirectories = await invoke('read_directory', { path })
+        const subdirectories = await invoke<string[]>('read_directory', { path })
 
-        const node = {
+        const node: DirectoryNode = {
           path,
           name: this.getFolderName(path),
           depth: currentDepth,
@@ -81,7 +121,7 @@ export class PlaylistManager {
         // 扫描当前目录的音频文件
         if (enableSubdirectoryScan || currentDepth === 0) {
           try {
-            const playlist = await invoke('get_audio_files', { path })
+            const playlist = await invoke<Playlist>('get_audio_files', { path })
             node.audioFiles = playlist.files
           } catch (error) {
             logger.warn(`Failed to get audio files from ${path}:`, error)
@@ -117,10 +157,13 @@ export class PlaylistManager {
   /**
    * 从目录树生成播放列表
    */
-  static async generatePlaylistsFromTree(directoryTree, config) {
-    const playlists = []
+  static async generatePlaylistsFromTree(
+    directoryTree: DirectoryNode | null,
+    config: ScanConfig
+  ): Promise<ExtendedPlaylist[]> {
+    const playlists: ExtendedPlaylist[] = []
 
-    const generatePlaylists = async (node) => {
+    const generatePlaylists = async (node: DirectoryNode | null): Promise<void> => {
       if (!node) return
 
       // 检查是否是最终音频目录（不包含有音频文件的子目录）
@@ -128,7 +171,7 @@ export class PlaylistManager {
 
       // 只有最终音频目录才创建播放列表
       if (node.audioFiles.length > 0 && isFinalAudioDirectory) {
-        const playlist = {
+        const playlist: ExtendedPlaylist = {
           name: TitleExtractor.formatPlaylistName(node.path, config.playlist?.playlistNameFormat || '{folderName}'),
           path: node.path,
           files: await this.processAudioFiles(node.audioFiles, config),
@@ -147,7 +190,7 @@ export class PlaylistManager {
     await generatePlaylists(directoryTree)
 
     // 如果启用了"全部歌曲"播放列表，生成一个包含所有文件的播放列表
-    if (config.playlist?.generateAllSongsPlaylist) {
+    if (config.playlist?.generateAllSongsPlaylist && directoryTree) {
       const allFiles = this.collectAllAudioFiles(directoryTree)
       if (allFiles.length > 0) {
         playlists.unshift({
@@ -167,7 +210,7 @@ export class PlaylistManager {
   /**
    * 处理音频文件，应用标题提取规则（使用批量API）
    */
-  static async processAudioFiles(files, config) {
+  static async processAudioFiles(files: Track[], config: ScanConfig): Promise<ProcessedTrack[]> {
     if (!files || files.length === 0) {
       return []
     }
@@ -179,7 +222,7 @@ export class PlaylistManager {
     const titleInfoMap = await TitleExtractor.extractTitlesBatch(filePaths, config.titleExtraction)
 
     // 处理每个文件
-    const processedFiles = []
+    const processedFiles: ProcessedTrack[] = []
     for (const file of files) {
       const titleInfo = titleInfoMap.get(file.path)
 
@@ -202,7 +245,7 @@ export class PlaylistManager {
         // 回退方案：如果批量获取失败
         processedFiles.push({
           ...file,
-          displayTitle: file.name,
+          displayTitle: file.name || '',
           displayArtist: '',
           fileName: TitleExtractor.getFileName(file.path, config.titleExtraction?.hideFileExtension),
           isFromMetadata: false
@@ -216,7 +259,7 @@ export class PlaylistManager {
   /**
    * 获取文件夹名称
    */
-  static getFolderName(path) {
+  static getFolderName(path: string): string {
     const parts = path.split(/[/\\]/)
     return parts[parts.length - 1] || path
   }
@@ -224,7 +267,7 @@ export class PlaylistManager {
   /**
    * 检查是否应该忽略文件夹
    */
-  static shouldIgnoreFolder(folderPath, blacklist, ignoreHiddenFolders) {
+  static shouldIgnoreFolder(folderPath: string, blacklist: string[], ignoreHiddenFolders: boolean): boolean {
     const folderName = this.getFolderName(folderPath)
 
     // 检查隐藏文件夹
@@ -243,7 +286,7 @@ export class PlaylistManager {
   /**
    * 统计音频文件总数
    */
-  static countAudioFiles(node) {
+  static countAudioFiles(node: DirectoryNode | null): number {
     if (!node) return 0
 
     let count = node.audioFiles.length
@@ -258,7 +301,7 @@ export class PlaylistManager {
   /**
    * 统计子目录数量
    */
-  static countSubdirectories(node) {
+  static countSubdirectories(node: DirectoryNode | null): number {
     if (!node) return 0
 
     let count = node.subdirectories.length
@@ -273,7 +316,7 @@ export class PlaylistManager {
   /**
    * 收集所有音频文件
    */
-  static collectAllAudioFiles(node) {
+  static collectAllAudioFiles(node: DirectoryNode | null): Track[] {
     if (!node) return []
 
     let files = [...node.audioFiles]
@@ -288,12 +331,16 @@ export class PlaylistManager {
   /**
    * 搜索音频文件
    */
-  static async searchAudioFiles(basePath, searchTerm, config) {
+  static async searchAudioFiles(
+    basePath: string,
+    searchTerm: string,
+    config: ScanConfig
+  ): Promise<(Track & { folderPath: string; folderName: string })[]> {
     try {
       const fileTree = await this.getAudioFileTree(basePath, config)
-      const results = []
+      const results: (Track & { folderPath: string; folderName: string })[] = []
 
-      const searchInNode = (node) => {
+      const searchInNode = (node: DirectoryNode | null): void => {
         if (!node) return
 
         // 搜索当前节点的文件
@@ -335,11 +382,15 @@ export class PlaylistManager {
   /**
    * 根据路径获取播放列表
    */
-  static async getPlaylistByPath(basePath, targetPath, config) {
+  static async getPlaylistByPath(
+    basePath: string,
+    targetPath: string,
+    config: ScanConfig
+  ): Promise<ExtendedPlaylist | null> {
     try {
       const fileTree = await this.getAudioFileTree(basePath, config)
 
-      const findPlaylist = (node) => {
+      const findPlaylist = (node: DirectoryNode | null): ExtendedPlaylist | null => {
         if (!node) return null
 
         if (node.path === targetPath) {
@@ -371,11 +422,11 @@ export class PlaylistManager {
   /**
    * 获取目录统计信息
    */
-  static async getDirectoryStats(basePath, config) {
+  static async getDirectoryStats(basePath: string, config: ScanConfig): Promise<LibraryStats> {
     try {
       const fileTree = await this.getAudioFileTree(basePath, config)
 
-      const stats = {
+      const stats: LibraryStats = {
         totalDirectories: this.countDirectories(fileTree.directoryTree),
         totalAudioFiles: fileTree.totalFiles,
         totalPlaylists: fileTree.playlists.length,
@@ -393,7 +444,7 @@ export class PlaylistManager {
   /**
    * 统计目录总数
    */
-  static countDirectories(node) {
+  static countDirectories(node: DirectoryNode | null): number {
     if (!node) return 0
 
     let count = 1 // 当前节点
@@ -408,7 +459,7 @@ export class PlaylistManager {
   /**
    * 获取最大深度
    */
-  static getMaxDepth(node) {
+  static getMaxDepth(node: DirectoryNode | null): number {
     if (!node || node.subdirectories.length === 0) {
       return node ? node.depth : 0
     }
@@ -425,7 +476,7 @@ export class PlaylistManager {
   /**
    * 检查是否是最终音频目录（不包含有音频文件的子目录）
    */
-  static isFinalAudioDirectory(node) {
+  static isFinalAudioDirectory(node: DirectoryNode | null): boolean {
     if (!node) return true
 
     // 如果一个目录没有任何子目录，那么它肯定是最终音频目录
@@ -452,7 +503,7 @@ export class PlaylistManager {
   /**
    * 检查目录子树中是否有音频文件
    */
-  static hasAudioFilesInSubtree(node) {
+  static hasAudioFilesInSubtree(node: DirectoryNode | null): boolean {
     if (!node) return false
 
     // 检查当前目录是否有音频文件

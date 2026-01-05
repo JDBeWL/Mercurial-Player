@@ -55,6 +55,7 @@ export default {
     let smoothedAudioData = [];
     let lastUpdateTime = 0;
     let spectrumListener = null;
+    let isAnimating = false; // 追踪动画状态
 
     // 平滑插值函数
     const smoothData = (currentData, targetData, smoothingFactor = 0.7) => {
@@ -83,7 +84,6 @@ export default {
     // --- 视觉时间 (用于卡拉OK) ---
     const visualTime = ref(0);
     let lastFrameTime = 0;
-    let wasPlaying = false; // 追踪上一帧的播放状态
 
     // 监听时间跳变（seek 操作）
     watch(() => playerStore.currentTime, (newTime, oldTime) => {
@@ -112,9 +112,36 @@ export default {
         };
     };
 
+    // 绘制静态状态（暂停时的直线）
+    const drawStaticState = () => {
+      if (!canvasRef.value || !visualizerContainer.value) return;
+      
+      const canvas = canvasRef.value;
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
+      
+      ctx.clearRect(0, 0, width, height);
+      ctx.beginPath();
+      ctx.moveTo(0, height - 2);
+      ctx.lineTo(width, height - 2);
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--md-sys-color-primary').trim() || '#6750a4';
+      ctx.stroke();
+      
+      visualTime.value = playerStore.currentTime;
+    };
+
     // --- 可视化绘制 ---
     const drawVisualizer = (timestamp) => {
       if (!canvasRef.value || !visualizerContainer.value) return;
+      
+      // 暂停时停止动画循环
+      if (!playerStore.isPlaying) {
+        drawStaticState();
+        isAnimating = false;
+        animationId = null;
+        return;
+      }
       
       const canvas = canvasRef.value;
       const ctx = canvas.getContext('2d');
@@ -123,8 +150,6 @@ export default {
       
       // 清空画布
       ctx.clearRect(0, 0, width, height);
-      
-      // 频谱数据现在通过事件监听获取，不再需要频繁请求
 
       // 应用平滑处理
       if (audioData.length > 0) {
@@ -134,17 +159,13 @@ export default {
       // 绘制频谱条
       const drawData = smoothedAudioData.length > 0 ? smoothedAudioData : audioData;
 
-      // 如果没有数据或暂停，显示直线在底部
-      if (!playerStore.isPlaying || drawData.length === 0) {
+      // 如果没有数据，显示直线在底部
+      if (drawData.length === 0) {
           ctx.beginPath();
           ctx.moveTo(0, height - 2);
           ctx.lineTo(width, height - 2);
           ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--md-sys-color-primary').trim() || '#6750a4';
           ctx.stroke();
-          
-          // 暂停时同步视觉时间
-          visualTime.value = playerStore.currentTime;
-          wasPlaying = false;
           
           animationId = requestAnimationFrame(drawVisualizer);
           return;
@@ -205,41 +226,61 @@ export default {
       lastFrameTime = timestamp;
       
       const realTime = playerStore.currentTime;
-      const isPlaying = playerStore.isPlaying;
       
-      // 检测暂停后恢复
-      if (isPlaying && !wasPlaying) {
-          lastFrameTime = timestamp;
-      }
-      wasPlaying = isPlaying;
-      
-      if (isPlaying) {
-          // 播放中：基于帧间隔累加时间，并动态调整速度以消除漂移 (P控制器)
-          const diff = visualTime.value - realTime;
+      // 播放中：基于帧间隔累加时间，并动态调整速度以消除漂移 (P控制器)
+      const diff = visualTime.value - realTime;
 
-          if (Math.abs(diff) > 0.5) {
-              // 误差超过 0.5s，硬同步
-              visualTime.value = realTime;
-          } else if (Math.abs(diff) > 0.05) {
-              // 误差在 0.05s ~ 0.5s 之间，平滑追赶
-              const speed = 1.0 - diff * 2.0;
-              const clampedSpeed = Math.max(0.7, Math.min(1.3, speed));
-              visualTime.value += deltaTime * clampedSpeed;
-          } else {
-              // 误差很小，正常累加
-              visualTime.value += deltaTime;
-          }
-      } else {
-          // 暂停中：直接同步
+      if (Math.abs(diff) > 0.5) {
+          // 误差超过 0.5s，硬同步
           visualTime.value = realTime;
+      } else if (Math.abs(diff) > 0.05) {
+          // 误差在 0.05s ~ 0.5s 之间，平滑追赶
+          const speed = 1.0 - diff * 2.0;
+          const clampedSpeed = Math.max(0.7, Math.min(1.3, speed));
+          visualTime.value += deltaTime * clampedSpeed;
+      } else {
+          // 误差很小，正常累加
+          visualTime.value += deltaTime;
       }
+
       animationId = requestAnimationFrame(drawVisualizer);
     };
+
+    // 启动动画
+    const startAnimation = () => {
+      if (isAnimating) return;
+      isAnimating = true;
+      lastFrameTime = 0;
+      animationId = requestAnimationFrame(drawVisualizer);
+    };
+
+    // 停止动画
+    const stopAnimation = () => {
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+      isAnimating = false;
+      drawStaticState();
+    };
+
+    // 监听播放状态变化
+    watch(() => playerStore.isPlaying, (playing) => {
+      if (playing) {
+        startAnimation();
+      } else {
+        stopAnimation();
+      }
+    });
 
     const resizeCanvas = () => {
         if (canvasRef.value && visualizerContainer.value) {
             canvasRef.value.width = visualizerContainer.value.clientWidth;
             canvasRef.value.height = visualizerContainer.value.clientHeight;
+            // 重绘当前状态
+            if (!playerStore.isPlaying) {
+              drawStaticState();
+            }
         }
     };
 
@@ -263,7 +304,12 @@ export default {
         logger.error('Failed to setup spectrum listener:', error);
       }
       
-      animationId = requestAnimationFrame(drawVisualizer);
+      // 根据当前播放状态决定是否启动动画
+      if (playerStore.isPlaying) {
+        startAnimation();
+      } else {
+        drawStaticState();
+      }
     });
 
     onUnmounted(async () => {
