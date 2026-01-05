@@ -53,9 +53,12 @@ export default {
     let animationId = null;
     let audioData = [];
     let smoothedAudioData = [];
-    let lastUpdateTime = 0;
     let spectrumListener = null;
     let isAnimating = false; // 追踪动画状态
+    
+    // 使用requestAnimationFrame同步屏幕刷新率
+    // 后端以 60fps 发送数据，前端按屏幕刷新率消费
+    let pendingSpectrumData = null;
 
     // 平滑插值函数
     const smoothData = (currentData, targetData, smoothingFactor = 0.7) => {
@@ -156,6 +159,11 @@ export default {
         isAnimating = false;
         animationId = null;
         return;
+      }
+      
+      if (pendingSpectrumData) {
+        audioData = pendingSpectrumData;
+        pendingSpectrumData = null;
       }
       
       const canvas = canvasRef.value;
@@ -303,16 +311,12 @@ export default {
       window.addEventListener('resize', resizeCanvas);
       resizeCanvas();
       
-      // 监听频谱更新事件
+      // 监听频谱更新事件（后端以60fps发送）
+      // 数据先缓存，由requestAnimationFrame按屏幕刷新率消费
       try {
         spectrumListener = await listen('spectrum-update', (event) => {
           if (event.payload && event.payload.data) {
-            const now = Date.now();
-            // 限制更新频率为60fps
-            if (now - lastUpdateTime >= 16) {
-              audioData = event.payload.data;
-              lastUpdateTime = now;
-            }
+            pendingSpectrumData = event.payload.data;
           }
         });
       } catch (error) {

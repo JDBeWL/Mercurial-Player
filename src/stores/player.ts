@@ -445,42 +445,12 @@ export const usePlayerStore = defineStore('player', {
     // --- 进度控制 ---
 
     startStatusPolling(): void {
-      this.stopStatusPolling()
-      
-      const checkInterval = 500
-      
-      const poll = async (): Promise<void> => {
-        if (this._isDestroyed) return
-        
-        if (!this.isPlaying) {
-          this.stopStatusPolling()
-          return
-        }
-
-        try {
-          const timeToEnd = this.duration > 0 ? this.duration - this.currentTime : Infinity
-          
-          if (timeToEnd < 1.0 && !this._isDestroyed) {
-            const isFinished = await invoke<boolean>('is_track_finished')
-            if (this._isDestroyed) return
-            if (isFinished) {
-              this._onEnded()
-              return
-            }
-          }
-          
-          this._statusPollId = setTimeout(poll, checkInterval)
-        } catch (error) {
-          if (this._isDestroyed) return
-          logger.error("Error checking track status:", error)
-          this._statusPollId = setTimeout(poll, checkInterval)
-        }
-      }
-      
-      this._statusPollId = setTimeout(poll, checkInterval)
+      // 不再需要轮询 - 使用 track-ended 事件代替
+      // 保留方法以保持 API 兼容性
     },
 
     stopStatusPolling(): void {
+      // 保留方法以保持 API 兼容性
       if (this._statusPollId) {
         clearTimeout(this._statusPollId)
         this._statusPollId = null

@@ -11,6 +11,8 @@ my-plugin/
 └── README.md        # 插件说明（可选）
 ```
 
+> **注意**：外部插件使用 JavaScript 编写，内置插件使用 TypeScript。插件系统核心已迁移到 TypeScript，提供完整的类型定义。
+
 ### manifest.json 示例
 
 ```json
@@ -47,8 +49,8 @@ const plugin = {
   },
 
   // 自定义方法
-  async doSomething() {
-    const state = await api.player.getState()
+  doSomething() {
+    const state = api.player.getState()
     api.log.info('当前播放:', state.currentTrack?.title)
   }
 }
@@ -122,34 +124,35 @@ api.log.debug('调试')
 #### 读取状态 (需要 `player:read`)
 
 ```javascript
-// 获取播放状态
-const state = await api.player.getState()
+// 获取播放状态（同步方法）
+const state = api.player.getState()
 // state: { currentTrack, isPlaying, currentTime, duration, volume, repeatMode, isShuffle }
 
-// 获取歌词（已解析）
+// 获取歌词（异步方法，已解析）
 const lyrics = await api.player.getLyrics()
-// lyrics: [{ time, texts: [原文, 翻译], karaoke, words }, ...]
+// lyrics: [{ time, texts: [{ text, translation? }] }, ...]
 
-// 获取当前歌词索引
-const index = await api.player.getCurrentLyricIndex()
+// 获取当前歌词索引（同步方法）
+const index = api.player.getCurrentLyricIndex()
 ```
 
 #### 播放控制 (需要 `player:control`)
 
 ```javascript
-await api.player.play()
-await api.player.pause()
-await api.player.togglePlay()
+api.player.play()
+api.player.pause()
+api.player.togglePlay()
 await api.player.next()
 await api.player.previous()
-await api.player.seek(30)        // 跳转到 30 秒
-await api.player.setVolume(0.8)  // 设置音量 0-1
+api.player.seek(30)        // 跳转到 30 秒
+api.player.setVolume(0.8)  // 设置音量 0-1
 ```
 
 #### 设置歌词 (需要 `lyrics:provider`)
 
 ```javascript
-await api.player.setLyrics(parsedLyrics)
+// 歌词格式: [{ time: number, texts: [{ text: string, translation?: string }] }, ...]
+api.player.setLyrics(parsedLyrics)
 ```
 
 ### 音乐库 (api.library)
@@ -158,13 +161,16 @@ await api.player.setLyrics(parsedLyrics)
 
 ```javascript
 // 获取所有播放列表
-const playlists = await api.library.getPlaylists()
+const playlists = api.library.getPlaylists()
+// playlists: [{ id, name, tracks }, ...]
 
 // 获取当前播放列表信息
-const current = await api.library.getCurrentPlaylist()
+const current = api.library.getCurrentPlaylist()
+// current: { id, name, tracks } | null
 
 // 获取当前播放列表的歌曲
-const tracks = await api.library.getTracks()
+const tracks = api.library.getTracks()
+// tracks: [{ path, title, artist, album, duration, ... }, ...]
 ```
 
 ### 存储 (api.storage)
@@ -318,8 +324,8 @@ const data = await response.json()
 #### 读取 (无需权限)
 
 ```javascript
-// 获取当前主题信息
-const theme = await api.theme.getCurrent()
+// 获取当前主题信息（同步方法）
+const theme = api.theme.getCurrent()
 // theme: { preference, isDark, primaryColor }
 
 // 获取单个 CSS 变量
@@ -489,15 +495,15 @@ const plugin = {
   },
 
   async copyImage() {
-    const state = await api.player.getState()
+    const state = api.player.getState()
     if (!state.currentTrack) {
       api.ui.showNotification('没有正在播放的歌曲', 'warning')
       return
     }
 
     const lyrics = await api.player.getLyrics()
-    const lyricIndex = await api.player.getCurrentLyricIndex()
-    const theme = await api.theme.getCurrent()
+    const lyricIndex = api.player.getCurrentLyricIndex()
+    const theme = api.theme.getCurrent()
 
     // 创建画布
     const { canvas, ctx } = api.utils.createCanvas(800, 400)
@@ -512,12 +518,13 @@ const plugin = {
     ctx.textAlign = 'center'
 
     if (lyrics && lyricIndex >= 0 && lyrics[lyricIndex]) {
-      ctx.fillText(lyrics[lyricIndex].texts[0] || '', 400, 180)
+      const line = lyrics[lyricIndex]
+      ctx.fillText(line.texts[0]?.text || '', 400, 180)
       
-      if (lyrics[lyricIndex].texts[1]) {
+      if (line.texts[0]?.translation) {
         ctx.globalAlpha = 0.7
         ctx.font = '24px system-ui'
-        ctx.fillText(lyrics[lyricIndex].texts[1], 400, 220)
+        ctx.fillText(line.texts[0].translation, 400, 220)
         ctx.globalAlpha = 1
       }
     }
@@ -604,6 +611,66 @@ const plugin = {
   }
 }
 ```
+
+## 类型定义
+
+插件系统使用 TypeScript 编写，提供完整的类型定义。如果你想在开发时获得类型提示，可以参考以下类型：
+
+```typescript
+// 插件 API 类型（简化版）
+interface PluginAPI {
+  pluginId: string
+  permissions: readonly string[]
+  
+  log: {
+    info: (...args: unknown[]) => void
+    warn: (...args: unknown[]) => void
+    error: (...args: unknown[]) => void
+    debug: (...args: unknown[]) => void
+  }
+  
+  player: {
+    getState: () => PlayerState
+    getLyrics: () => Promise<LyricLine[] | null>
+    getCurrentLyricIndex: () => number
+    play: () => void
+    pause: () => void
+    togglePlay: () => void
+    next: () => Promise<void>
+    previous: () => Promise<void>
+    seek: (time: number) => void
+    setVolume: (volume: number) => void
+    setLyrics: (lyrics: LyricLine[]) => void
+  }
+  
+  // ... 其他 API
+}
+
+interface PlayerState {
+  currentTrack: Track | null
+  isPlaying: boolean
+  currentTime: number
+  duration: number
+  volume: number
+  repeatMode: string
+  isShuffle: boolean
+}
+
+interface Track {
+  path: string
+  title?: string
+  artist?: string
+  album?: string
+  duration?: number
+}
+
+interface LyricLine {
+  time: number
+  texts: { text: string; translation?: string }[]
+}
+```
+
+完整类型定义请参考 `src/plugins/pluginManager.ts`。
 
 ## 安装插件
 

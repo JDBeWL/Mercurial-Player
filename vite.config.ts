@@ -11,6 +11,10 @@ export default defineConfig({
     strictPort: true,
   },
   envPrefix: ['VITE_', 'TAURI_'],
+  // 生产构建时移除 console 和 debugger
+  esbuild: {
+    drop: process.env.TAURI_DEBUG ? [] : ['console', 'debugger'],
+  },
   build: {
     target: process.env.TAURI_PLATFORM == 'windows' ? 'chrome120' : 'safari17',
     minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,

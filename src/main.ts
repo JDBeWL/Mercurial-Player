@@ -7,7 +7,7 @@ import './assets/css/lyrics-classic.css'
 import i18n from './i18n'
 import logger from './utils/logger'
 import { setupThemeContrastValidation } from './utils/themeContrastValidator'
-import type { Plugin } from '@/types'
+import type { BuiltinPluginDefinition } from './plugins/pluginManager'
 
 // 初始化日志系统
 logger.info('应用程序启动中...')
@@ -34,7 +34,7 @@ const loadBuiltinPlugins = async (): Promise<void> => {
   // 先初始化插件管理器（设置播放器状态监听）
   await pluginManager.init()
   
-  for (const plugin of builtinPlugins as Plugin[]) {
+  for (const plugin of builtinPlugins as BuiltinPluginDefinition[]) {
     try {
       if (!pluginManager.plugins.has(plugin.id)) {
         await pluginManager.register(plugin)

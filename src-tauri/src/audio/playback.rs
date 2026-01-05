@@ -106,31 +106,26 @@ impl PlaybackStatus {
     }
 }
 
+/// 频谱更新事件 - 简化结构减少序列化开销
 #[derive(Debug, serde::Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
 pub struct SpectrumUpdateEvent {
     pub data: Vec<f32>,
-    pub timestamp: u64,
 }
 
+/// 音轨结束事件
 #[derive(Debug, serde::Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct TrackEndedEvent {
-    pub timestamp: u64,
-}
+pub struct TrackEndedEvent {}
 
+#[inline]
 fn emit_spectrum_update(app: &AppHandle, data: &[f32]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    app.emit("spectrum-update", SpectrumUpdateEvent {
-        data: data.to_vec(),
-        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64,
-    })?;
+    // 直接发送数据数组，减少 JSON 包装开销
+    app.emit("spectrum-update", SpectrumUpdateEvent { data: data.to_vec() })?;
     Ok(())
 }
 
+#[inline]
 fn emit_track_ended(app: &AppHandle) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    app.emit("track-ended", TrackEndedEvent {
-        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64,
-    })?;
+    app.emit("track-ended", TrackEndedEvent {})?;
     Ok(())
 }
 
@@ -225,7 +220,6 @@ pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     buffer: Vec<f32>,
     prev_spectrum: Vec<f32>,
     app_handle: Option<AppHandle>,
-    last_emit_time: AtomicU64,
     last_fft_time: AtomicU64,
     last_position_emit_time: AtomicU64,
     eq_settings: Arc<RwLock<EqSettings>>,
@@ -237,10 +231,12 @@ pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     sample_rate: u32,
     channels: u16,
     fft_size: usize,
-    // 新增：批量处理缓冲区
+    // 批量处理缓冲区
     pending_samples: Vec<f32>,
     pending_processed: Vec<f32>,
     pending_index: usize,
+    // EOF 标志 - 用于发送 track-ended 事件
+    eof_sent: bool,
 }
 
 /// 根据采样率计算最佳 FFT 缓冲区大小
@@ -269,7 +265,6 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             buffer: Vec::with_capacity(fft_size),
             prev_spectrum: vec![0.0; 128],
             app_handle,
-            last_emit_time: AtomicU64::new(0),
             last_fft_time: AtomicU64::new(0),
             last_position_emit_time: AtomicU64::new(0),
             eq_settings: Arc::new(RwLock::new(EqSettings::default())),
@@ -284,6 +279,7 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             pending_samples: Vec::with_capacity(BATCH_SIZE),
             pending_processed: Vec::with_capacity(BATCH_SIZE),
             pending_index: 0,
+            eof_sent: false,
         }
     }
     
@@ -346,6 +342,13 @@ impl<I: Source<Item = f32> + Send> Iterator for VisualizationSource<I> {
         // 从批量处理缓冲区获取采样
         if self.pending_index >= self.pending_processed.len() {
             if !self.refill_batch() {
+                // EOF - 发送 track-ended 事件（只发送一次）
+                if !self.eof_sent {
+                    self.eof_sent = true;
+                    if let Some(ref app) = self.app_handle {
+                        let _ = emit_track_ended(app);
+                    }
+                }
                 return None;
             }
         }
@@ -387,10 +390,10 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         
         let last_fft = self.last_fft_time.load(Ordering::Relaxed);
         
-        // 限制 FFT 计算频率为约 60fps (16ms)
+        // 限制 FFT 计算和发送频率为约 60fps (16ms)
         if now - last_fft >= 16 {
             self.last_fft_time.store(now, Ordering::Relaxed);
-            self.compute_spectrum(now);
+            self.compute_spectrum();
         }
         
         // 保留后半部分数据用于重叠分析
@@ -400,7 +403,7 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
     
     /// 计算频谱数据
     #[inline(never)]
-    fn compute_spectrum(&mut self, now: u64) {
+    fn compute_spectrum(&mut self) {
         if let Ok(mut spec) = self.spectrum_data.try_lock() {
             // 复用预分配的缓冲区
             self.fft_buffer[..self.fft_size].copy_from_slice(&self.buffer[..self.fft_size]);
@@ -423,7 +426,7 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
                 
                 for (freq, value) in spectrum.data() {
                     let f = freq.val();
-                    if f < FREQ_MIN || f > FREQ_MAX { continue; }
+                    if !(FREQ_MIN..=FREQ_MAX).contains(&f) { continue; }
                     
                     let bin = ((f - FREQ_MIN) / FREQ_STEP).floor() as usize;
                     let bin = bin.min(NUM_BINS - 1);
@@ -451,13 +454,9 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             }
         }
         
-        // 发送事件
+        // 发送事件 - 与 FFT 计算同步，不再单独节流
         if let Some(ref app) = self.app_handle {
-            let last_emit = self.last_emit_time.load(Ordering::Relaxed);
-            if now - last_emit >= 16 {
-                let _ = emit_spectrum_update(app, &self.prev_spectrum);
-                self.last_emit_time.store(now, Ordering::Relaxed);
-            }
+            let _ = emit_spectrum_update(app, &self.prev_spectrum);
         }
     }
 }
@@ -794,7 +793,7 @@ fn decode_and_push_to_wasapi(
                 if stop_flag.load(Ordering::SeqCst) || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
                 let buf_size = wasapi.lock().unwrap().as_ref().map_or(0, |p| p.get_buffer_size());
                 // 缓冲区容量约为 target_sr * target_ch * 4秒，保持在2秒以下
-                let max_buffer = (target_sr as usize * target_ch as usize * 2) as usize;
+                let max_buffer = target_sr as usize * target_ch as usize * 2;
                 if buf_size < max_buffer { break; }
                 // 等待时继续发送播放位置
                 emit_position(&mut last_position_emit_time);

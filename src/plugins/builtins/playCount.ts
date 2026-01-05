@@ -3,9 +3,39 @@
  * 记录每首歌曲的播放次数和播放历史
  */
 
-import { PluginPermission } from '../pluginManager'
+import { PluginPermission, type PluginAPI, type BuiltinPluginDefinition, type Track } from '../pluginManager'
 
-export const playCountPlugin = {
+interface PlayCountData {
+  playCounts: Record<string, number>
+  playHistory: HistoryEntry[]
+  totalPlayTime: number
+}
+
+interface HistoryEntry {
+  path: string
+  title: string
+  artist: string
+  timestamp: number
+}
+
+interface PlayCountStats {
+  totalTracks: number
+  totalPlays: number
+  totalPlayTime: number
+  totalPlayTimeFormatted: string
+}
+
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  
+  if (hours > 0) {
+    return `${hours}小时${minutes}分钟`
+  }
+  return `${minutes}分钟`
+}
+
+export const playCountPlugin: BuiltinPluginDefinition = {
   id: 'builtin-play-count',
   name: '播放统计',
   version: '1.0.0',
@@ -16,43 +46,38 @@ export const playCountPlugin = {
     PluginPermission.STORAGE,
   ],
 
-  main: (api) => {
-    let lastTrackPath = null
-    let playStartTime = null
+  main: (api: PluginAPI) => {
+    let lastTrackPath: string | null = null
+    let playStartTime: number | null = null
     let hasRecordedCurrentTrack = false
-    let pollingInterval = null
+    let pollingInterval: ReturnType<typeof setInterval> | null = null
 
-    // 加载或初始化存储
-    const loadData = () => {
+    const loadData = (): PlayCountData => {
       return {
-        playCounts: api.storage.get('playCounts', {}),
-        playHistory: api.storage.get('playHistory', []),
-        totalPlayTime: api.storage.get('totalPlayTime', 0),
+        playCounts: api.storage.get<Record<string, number>>('playCounts', {}),
+        playHistory: api.storage.get<HistoryEntry[]>('playHistory', []),
+        totalPlayTime: api.storage.get<number>('totalPlayTime', 0),
       }
     }
 
-    // 保存数据
-    const saveData = (data) => {
+    const saveData = (data: PlayCountData): void => {
       api.storage.set('playCounts', data.playCounts)
       api.storage.set('playHistory', data.playHistory)
       api.storage.set('totalPlayTime', data.totalPlayTime)
     }
 
-    // 记录播放次数（切歌时调用）
-    const recordPlayCount = (track) => {
+    const recordPlayCount = (track: Track): void => {
       if (!track || !track.path) return
 
       const data = loadData()
       const trackPath = track.path
 
-      // 增加播放次数
       data.playCounts[trackPath] = (data.playCounts[trackPath] || 0) + 1
 
-      // 添加到播放历史（保留最近100条）
-      const historyEntry = {
+      const historyEntry: HistoryEntry = {
         path: trackPath,
-        title: track.title || track.name || '',
-        artist: track.artist || '',
+        title: (track.title as string) || '',
+        artist: (track.artist as string) || '',
         timestamp: Date.now(),
       }
       data.playHistory.unshift(historyEntry)
@@ -64,8 +89,7 @@ export const playCountPlugin = {
       api.log.debug(`播放记录: ${track.title} - 第 ${data.playCounts[trackPath]} 次`)
     }
 
-    // 累计播放时长
-    const addPlayTime = (seconds) => {
+    const addPlayTime = (seconds: number): void => {
       if (seconds <= 0) return
       
       const data = loadData()
@@ -74,8 +98,7 @@ export const playCountPlugin = {
       api.log.debug(`累计播放时长: +${Math.round(seconds)}秒`)
     }
 
-    // 结算上一首歌的播放时长
-    const settleLastTrack = () => {
+    const settleLastTrack = (): void => {
       if (playStartTime) {
         const playDuration = (Date.now() - playStartTime) / 1000
         addPlayTime(playDuration)
@@ -83,29 +106,21 @@ export const playCountPlugin = {
       }
     }
 
-    // 处理歌曲切换
-    const handleTrackChange = (newTrack, isPlaying) => {
+    const handleTrackChange = (newTrack: Track | null, isPlaying: boolean): void => {
       const newPath = newTrack?.path || null
 
-      // 歌曲切换了
       if (newPath !== lastTrackPath) {
-        // 结算上一首歌的播放时长
         settleLastTrack()
-
-        // 更新当前歌曲
         lastTrackPath = newPath
         hasRecordedCurrentTrack = false
 
-        // 如果新歌曲正在播放，记录播放次数并开始计时
         if (newTrack && isPlaying) {
           recordPlayCount(newTrack)
           hasRecordedCurrentTrack = true
           playStartTime = Date.now()
         }
       } else {
-        // 同一首歌，但播放状态变化
         if (isPlaying && newTrack) {
-          // 开始播放
           if (!hasRecordedCurrentTrack) {
             recordPlayCount(newTrack)
             hasRecordedCurrentTrack = true
@@ -114,49 +129,42 @@ export const playCountPlugin = {
             playStartTime = Date.now()
           }
         } else {
-          // 暂停播放，结算时长
           settleLastTrack()
         }
       }
     }
 
-    // 通过 API 轮询播放状态
-    const pollPlayerState = async () => {
+    const pollPlayerState = async (): Promise<void> => {
       try {
-        const state = await api.player.getState()
+        const state = api.player.getState()
         handleTrackChange(state.currentTrack, state.isPlaying)
-      } catch (e) {
-        // 忽略错误，下次轮询重试
+      } catch {
+        // 忽略错误
       }
     }
 
     return {
-      async activate() {
+      async activate(): Promise<void> {
         api.log.info('播放统计插件已激活')
 
-        // 通过事件 API 监听播放状态变化
         api.events.on('player:trackChanged', (data) => {
-          handleTrackChange(data.track, data.isPlaying)
+          const { track, isPlaying } = data as { track: Track | null; isPlaying: boolean }
+          handleTrackChange(track, isPlaying)
         })
         
         api.events.on('player:stateChanged', (data) => {
-          handleTrackChange(data.track, data.isPlaying)
+          const { track, isPlaying } = data as { track: Track | null; isPlaying: boolean }
+          handleTrackChange(track, isPlaying)
         })
 
-        // 初始获取一次状态
         await pollPlayerState()
-        
-        // 备用：定期轮询（每 5 秒），以防事件丢失
         pollingInterval = setInterval(pollPlayerState, 5000)
       },
 
-      deactivate() {
-        // 结算当前播放时长
+      deactivate(): void {
         settleLastTrack()
-        
-        // 取消事件监听
-        api.events.off('player:trackChanged')
-        api.events.off('player:stateChanged')
+        api.events.off('player:trackChanged', () => {})
+        api.events.off('player:stateChanged', () => {})
         
         if (pollingInterval) {
           clearInterval(pollingInterval)
@@ -169,19 +177,16 @@ export const playCountPlugin = {
         api.log.info('播放统计插件已停用')
       },
 
-      // 获取播放次数
-      getPlayCount(trackPath) {
+      getPlayCount(trackPath: string): number {
         const data = loadData()
         return data.playCounts[trackPath] || 0
       },
 
-      // 获取所有播放次数
-      getAllPlayCounts() {
+      getAllPlayCounts(): Record<string, number> {
         return loadData().playCounts
       },
 
-      // 获取最常播放的歌曲
-      getMostPlayed(limit = 10) {
+      getMostPlayed(limit = 10): { path: string; count: number }[] {
         const data = loadData()
         return Object.entries(data.playCounts)
           .sort((a, b) => b[1] - a[1])
@@ -189,15 +194,12 @@ export const playCountPlugin = {
           .map(([path, count]) => ({ path, count }))
       },
 
-      // 获取播放历史
-      getPlayHistory(limit = 50) {
+      getPlayHistory(limit = 50): HistoryEntry[] {
         const data = loadData()
         return data.playHistory.slice(0, limit)
       },
 
-      // 获取总播放时间（秒）
-      getTotalPlayTime() {
-        // 包含当前正在播放的时长
+      getTotalPlayTime(): number {
         let total = loadData().totalPlayTime
         if (playStartTime) {
           total += (Date.now() - playStartTime) / 1000
@@ -205,13 +207,11 @@ export const playCountPlugin = {
         return total
       },
 
-      // 获取统计信息
-      getStats() {
+      getStats(): PlayCountStats {
         const data = loadData()
         const totalTracks = Object.keys(data.playCounts).length
         const totalPlays = Object.values(data.playCounts).reduce((a, b) => a + b, 0)
         
-        // 包含当前正在播放的时长
         let totalPlayTime = data.totalPlayTime
         if (playStartTime) {
           totalPlayTime += (Date.now() - playStartTime) / 1000
@@ -225,8 +225,7 @@ export const playCountPlugin = {
         }
       },
 
-      // 清除所有数据
-      clearAllData() {
+      clearAllData(): void {
         api.storage.set('playCounts', {})
         api.storage.set('playHistory', [])
         api.storage.set('totalPlayTime', 0)
@@ -236,15 +235,4 @@ export const playCountPlugin = {
       },
     }
   },
-}
-
-// 格式化时长
-function formatDuration(seconds) {
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  
-  if (hours > 0) {
-    return `${hours}小时${minutes}分钟`
-  }
-  return `${minutes}分钟`
 }

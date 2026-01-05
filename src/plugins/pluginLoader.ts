@@ -5,19 +5,34 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import logger from '../utils/logger'
-import pluginManager from './pluginManager'
+import pluginManager, { type PluginAPI, type PluginPermissionType } from './pluginManager'
 import { validatePluginCode } from './pluginSandbox'
 
-// 插件目录
-const PLUGINS_DIR = 'plugins'
+// 插件清单类型
+interface PluginManifest {
+  id: string
+  name: string
+  version?: string
+  author?: string
+  description?: string
+  permissions?: PluginPermissionType[]
+  main?: string
+  autoActivate?: boolean
+}
+
+// 安装结果类型
+interface InstallResult {
+  success: boolean
+  path?: string
+  error?: string
+}
 
 /**
  * 加载所有插件
  */
-export async function loadAllPlugins() {
+export async function loadAllPlugins(): Promise<void> {
   try {
-    // 获取插件目录列表
-    const pluginDirs = await invoke('list_plugins')
+    const pluginDirs = await invoke<string[]>('list_plugins')
     
     logger.info(`发现 ${pluginDirs.length} 个插件`)
 
@@ -35,35 +50,29 @@ export async function loadAllPlugins() {
 
 /**
  * 加载单个插件
- * @param {string} pluginPath 插件路径
  */
-export async function loadPlugin(pluginPath) {
+export async function loadPlugin(pluginPath: string): Promise<void> {
   try {
-    // 读取插件清单
-    const manifest = await invoke('read_plugin_manifest', { path: pluginPath })
+    const manifest = await invoke<PluginManifest | null>('read_plugin_manifest', { path: pluginPath })
     
     if (!manifest) {
       throw new Error('无法读取插件清单')
     }
 
-    // 读取插件主文件
-    const mainCode = await invoke('read_plugin_main', { 
+    const mainCode = await invoke<string>('read_plugin_main', { 
       path: pluginPath, 
       main: manifest.main || 'index.js' 
     })
 
-    // 验证插件代码安全性
     try {
       validatePluginCode(mainCode)
     } catch (error) {
       logger.error(`插件代码安全检查失败: ${manifest.id}`, error)
-      throw new Error(`插件安全检查失败: ${error.message}`)
+      throw new Error(`插件安全检查失败: ${(error as Error).message}`)
     }
 
-    // 创建插件主函数
     const mainFn = createPluginFunction(mainCode, manifest.id)
 
-    // 注册插件
     await pluginManager.register({
       id: manifest.id,
       name: manifest.name,
@@ -74,7 +83,6 @@ export async function loadPlugin(pluginPath) {
       main: mainFn,
     })
 
-    // 如果插件配置为自动激活
     if (manifest.autoActivate !== false) {
       await pluginManager.activate(manifest.id)
     }
@@ -86,17 +94,29 @@ export async function loadPlugin(pluginPath) {
   }
 }
 
+// 安全参数类型
+interface SafeParams {
+  [key: string]: unknown
+  console: {
+    log: (...args: unknown[]) => void
+    info: (...args: unknown[]) => void
+    warn: (...args: unknown[]) => void
+    error: (...args: unknown[]) => void
+    debug: (...args: unknown[]) => void
+  }
+  setTimeout: (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => number
+  clearTimeout: (id: number) => void
+  setInterval: (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => number
+  clearInterval: (id: number) => void
+  api: PluginAPI
+}
+
 /**
  * 创建插件函数
- * 插件代码在受限的沙箱环境中执行
- * @param {string} code 插件代码
- * @param {string} pluginId 插件 ID
  */
-function createPluginFunction(code, pluginId) {
-  // 返回一个接收 api 参数的函数
-  return async (api) => {
+function createPluginFunction(code: string, pluginId: string) {
+  return async (api: PluginAPI) => {
     try {
-      // 创建安全的 console
       const safeConsole = {
         log: api.log.info,
         info: api.log.info,
@@ -105,42 +125,38 @@ function createPluginFunction(code, pluginId) {
         debug: api.log.debug,
       }
 
-      // 创建安全的定时器
-      const timers = new Set()
-      const intervals = new Set()
+      const timers = new Set<number>()
+      const intervals = new Set<number>()
 
-      const safeSetTimeout = (fn, delay, ...args) => {
+      const safeSetTimeout = (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]): number => {
         const id = setTimeout(() => {
-          timers.delete(id)
+          timers.delete(id as unknown as number)
           try { fn(...args) } catch (e) { api.log.error('定时器错误:', e) }
-        }, Math.min(delay || 0, 60000))
+        }, Math.min(delay || 0, 60000)) as unknown as number
         timers.add(id)
         return id
       }
 
-      const safeClearTimeout = (id) => {
+      const safeClearTimeout = (id: number): void => {
         timers.delete(id)
         clearTimeout(id)
       }
 
-      const safeSetInterval = (fn, delay, ...args) => {
+      const safeSetInterval = (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]): number => {
         const safeDelay = Math.max(delay || 100, 100)
         const id = setInterval(() => {
           try { fn(...args) } catch (e) { api.log.error('定时器错误:', e) }
-        }, safeDelay)
+        }, safeDelay) as unknown as number
         intervals.add(id)
         return id
       }
 
-      const safeClearInterval = (id) => {
+      const safeClearInterval = (id: number): void => {
         intervals.delete(id)
         clearInterval(id)
       }
 
-      // 构建参数名和值列表
-      // 通过显式传递参数来覆盖全局变量
-      const safeParams = {
-        // 安全的全局对象
+      const safeParams: SafeParams = {
         Object, Array, String, Number, Boolean, Date, RegExp,
         Error, TypeError, RangeError, SyntaxError,
         Map, Set, WeakMap, WeakSet,
@@ -151,15 +167,12 @@ function createPluginFunction(code, pluginId) {
         btoa, atob,
         isNaN, isFinite, parseInt, parseFloat,
         NaN, Infinity,
-        // 安全的定时器
         console: safeConsole,
         setTimeout: safeSetTimeout,
         clearTimeout: safeClearTimeout,
         setInterval: safeSetInterval,
         clearInterval: safeClearInterval,
-        // 插件 API
         api,
-        // 阻止危险的全局对象（设为 undefined）
         window: undefined,
         document: undefined,
         globalThis: undefined,
@@ -199,17 +212,15 @@ function createPluginFunction(code, pluginId) {
       const paramNames = Object.keys(safeParams)
       const paramValues = Object.values(safeParams)
 
-      // 包装插件代码
       const wrappedCode = `
         ${code}
         return typeof plugin !== 'undefined' ? plugin : {};
       `
 
-      // 使用 Function 构造函数，通过参数传递安全的全局对象
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const fn = new Function(...paramNames, wrappedCode)
       const result = fn(...paramValues)
 
-      // 如果返回的是 Promise，等待它
       if (result && typeof result.then === 'function') {
         return await result
       }
@@ -222,13 +233,12 @@ function createPluginFunction(code, pluginId) {
 }
 
 /**
- * 安装插件（从 URL 或本地文件）
- * @param {string} source 插件源
+ * 安装插件
  */
-export async function installPlugin(source) {
+export async function installPlugin(source: string): Promise<InstallResult> {
   try {
-    const result = await invoke('install_plugin', { source })
-    if (result.success) {
+    const result = await invoke<InstallResult>('install_plugin', { source })
+    if (result.success && result.path) {
       await loadPlugin(result.path)
       return result
     }
@@ -241,9 +251,8 @@ export async function installPlugin(source) {
 
 /**
  * 卸载插件
- * @param {string} pluginId 插件 ID
  */
-export async function uninstallPlugin(pluginId) {
+export async function uninstallPlugin(pluginId: string): Promise<void> {
   try {
     await pluginManager.uninstall(pluginId)
     await invoke('uninstall_plugin', { pluginId })
