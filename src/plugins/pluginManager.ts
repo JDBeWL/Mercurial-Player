@@ -516,18 +516,36 @@ class PluginManager {
             await instanceData.instance.deactivate()
           }
         }
-        
-        if (instanceData.sandbox && typeof instanceData.sandbox.cleanup === 'function') {
-          instanceData.sandbox.cleanup()
-        }
       } catch (error) {
         logger.error(`插件停用出错: ${plugin.name}`, error)
+      } finally {
+        // 确保沙箱清理总是被执行，即使 deactivate 抛出错误
+        if (instanceData.sandbox && typeof instanceData.sandbox.cleanup === 'function') {
+          try {
+            instanceData.sandbox.cleanup()
+          } catch (cleanupError) {
+            logger.error(`插件沙箱清理出错: ${plugin.name}`, cleanupError)
+          }
+        }
       }
 
       this.instances.delete(pluginId)
     }
 
     this.cleanupPluginExtensions(pluginId)
+
+    // 确保插件存储立即保存（清除 debounce 并立即保存）
+    if (this.storage.has(pluginId)) {
+      try {
+        const storage = this.storage.get(pluginId)
+        const flushMethod = (storage as Record<string, unknown>)._flush
+        if (typeof flushMethod === 'function') {
+          flushMethod()
+        }
+      } catch (e) {
+        logger.warn(`插件停用时保存存储失败: ${pluginId}`, e)
+      }
+    }
 
     plugin.state = PluginState.INACTIVE
     logger.info(`插件已停用: ${plugin.name}`)
@@ -560,15 +578,14 @@ class PluginManager {
    */
   cleanupPluginExtensions(pluginId: string): void {
     for (const key of Object.keys(this.extensions) as (keyof Extensions)[]) {
-      (this.extensions[key] as { pluginId: string }[]) = 
-        this.extensions[key].filter(ext => ext.pluginId !== pluginId)
+      const filtered = this.extensions[key].filter(ext => ext.pluginId !== pluginId)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(this.extensions as any)[key] = filtered
     }
     
     for (const [event, listeners] of this.eventListeners) {
-      this.eventListeners.set(
-        event,
-        listeners.filter(l => l.pluginId !== pluginId)
-      )
+      const filtered = listeners.filter(l => l.pluginId !== pluginId)
+      this.eventListeners.set(event, filtered)
     }
   }
 

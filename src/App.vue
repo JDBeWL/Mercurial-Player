@@ -190,6 +190,7 @@ import { useTrackInfo } from './composables/useTrackInfo'
 import { useLyrics } from './composables/useLyrics'
 import { useI18n } from 'vue-i18n'
 import { setLocale } from './i18n'
+import { pluginManager } from './plugins'
 
 const playerStore = usePlayerStore()
 const themeStore = useThemeStore()
@@ -436,6 +437,8 @@ watch(currentTrackIndex, (newIndex, oldIndex) => {
 // 应用关闭前强制保存配置
 const handleBeforeUnload = async () => {
   await configStore.flushPendingSave()
+  // 清理插件管理器（保存所有插件存储）
+  pluginManager.cleanup()
 }
 
 onMounted(async () => {
