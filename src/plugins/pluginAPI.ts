@@ -7,9 +7,9 @@ import { readonly } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
-import { 
-  PluginPermission, 
-  type PluginAPI, 
+import {
+  PluginPermission,
+  type PluginAPI,
   type PluginPermissionType,
   type PlayerState,
   type LyricLine,
@@ -41,13 +41,13 @@ import { LyricsParser } from '../utils/lyricsParser'
  * 创建插件 API
  */
 export function createPluginAPI(
-  pluginId: string, 
-  permissions: PluginPermissionType[], 
+  pluginId: string,
+  permissions: PluginPermissionType[],
   manager: PluginManager
 ): PluginAPI {
-  const hasPermission = (permission: PluginPermissionType): boolean => 
+  const hasPermission = (permission: PluginPermissionType): boolean =>
     permissions.includes(permission)
-  
+
   const requirePermission = (permission: PluginPermissionType, action: string): void => {
     if (!hasPermission(permission)) {
       throw new Error(`插件 ${pluginId} 没有 ${permission} 权限，无法执行 ${action}`)
@@ -98,7 +98,7 @@ export function createPluginAPI(
         requirePermission(PluginPermission.PLAYER_READ, 'player.getState')
         const store = getPlayerStore()
         return {
-          currentTrack: store.currentTrack ? { ...store.currentTrack } : null,
+          currentTrack: store.currentTrack ? JSON.parse(JSON.stringify(store.currentTrack)) : null,
           isPlaying: store.isPlaying,
           currentTime: store.currentTime,
           duration: store.duration,
@@ -111,39 +111,124 @@ export function createPluginAPI(
       async getLyrics(): Promise<LyricLine[] | null> {
         requirePermission(PluginPermission.PLAYER_READ, 'player.getLyrics')
         const store = getPlayerStore()
-        
+
+        logger.debug(`[Plugin:${pluginId}] getLyrics 开始 - 当前歌曲:`, store.currentTrack?.path)
+        logger.debug(`[Plugin:${pluginId}] getLyrics - store.lyrics 长度:`, store.lyrics?.length || 0)
+
+        // 如果 store 中已有歌词，直接返回
         if (store.lyrics && store.lyrics.length > 0) {
-          // 转换为插件 API 的 LyricLine 格式
-          return store.lyrics.map(line => ({
-            time: line.time,
-            texts: line.texts?.map(t => typeof t === 'string' ? { text: t } : { text: t }) || [],
-          })) as LyricLine[]
+          logger.debug(`[Plugin:${pluginId}] 使用 store 中的歌词`)
+          return store.lyrics.map(line => {
+            // 处理两种格式的歌词数据：
+            // 1. 异步解析: { time, texts: string[] }
+            // 2. 同步解析: { time, text: string }
+            let textArray: { text: string }[] = []
+
+            if (line.texts && Array.isArray(line.texts) && line.texts.length > 0) {
+              // 异步解析的格式，texts 是字符串数组
+              textArray = line.texts.map(t => ({ text: typeof t === 'string' ? t : String(t) }))
+            } else if (line.text) {
+              // 同步解析的格式，text 是单个字符串
+              textArray = [{ text: line.text }]
+            }
+
+            return {
+              time: line.time,
+              texts: textArray,
+              // 保留原始属性供插件使用
+              text: line.text,
+              karaoke: line.karaoke,
+              words: line.words,
+            }
+          }) as LyricLine[]
         }
-        
+
+        // 如果没有歌词但有当前歌曲，尝试加载歌词
         if (store.currentTrack?.path) {
+          logger.debug(`[Plugin:${pluginId}] 尝试加载歌词:`, store.currentTrack.path)
+
+          // 先检查歌词文件是否存在
           try {
             const lyricsPath = await FileUtils.findLyricsFile(store.currentTrack.path)
-            if (lyricsPath) {
-              const content = await FileUtils.readFile(lyricsPath)
-              const ext = FileUtils.getFileExtension(lyricsPath) as 'lrc' | 'ass' | 'srt' | 'vtt' | 'txt'
-              const parsed = await LyricsParser.parseAsync(content, ext as 'lrc' | 'ass' | 'srt' | 'auto')
-              return parsed.map(line => ({
-                time: line.time,
-                texts: line.texts?.map(t => typeof t === 'string' ? { text: t } : { text: t }) || [],
-              })) as LyricLine[]
+            logger.debug(`[Plugin:${pluginId}] 歌词文件路径:`, lyricsPath)
+
+            if (!lyricsPath) {
+              logger.debug(`[Plugin:${pluginId}] 没有找到歌词文件`)
+              return null
             }
           } catch (e) {
-            logger.debug(`[Plugin:${pluginId}] 加载歌词失败:`, e)
+            logger.error(`[Plugin:${pluginId}] 检查歌词文件失败:`, e)
+            return null
           }
+
+          try {
+            // 先尝试触发 store 的歌词加载
+            await store.loadLyrics(store.currentTrack.path)
+            logger.debug(`[Plugin:${pluginId}] loadLyrics 调用完成`)
+
+            // 重试机制：最多等待 1 秒，每 100ms 检查一次
+            for (let i = 0; i < 10; i++) {
+              logger.debug(`[Plugin:${pluginId}] 检查歌词 (${i + 1}/10) - 长度:`, store.lyrics?.length || 0)
+              if (store.lyrics && store.lyrics.length > 0) {
+                logger.debug(`[Plugin:${pluginId}] 歌词加载成功`)
+                return store.lyrics.map(line => {
+                  let textArray: { text: string }[] = []
+
+                  if (line.texts && Array.isArray(line.texts) && line.texts.length > 0) {
+                    textArray = line.texts.map(t => ({ text: typeof t === 'string' ? t : String(t) }))
+                  } else if (line.text) {
+                    textArray = [{ text: line.text }]
+                  }
+
+                  return {
+                    time: line.time,
+                    texts: textArray,
+                    text: line.text,
+                    karaoke: line.karaoke,
+                    words: line.words,
+                  }
+                }) as LyricLine[]
+              }
+              await new Promise(resolve => setTimeout(resolve, 100))
+            }
+
+            logger.debug(`[Plugin:${pluginId}] 歌词加载超时或无歌词文件`)
+          } catch (e) {
+            logger.error(`[Plugin:${pluginId}] 加载歌词失败:`, e)
+          }
+        } else {
+          logger.debug(`[Plugin:${pluginId}] 没有当前歌曲`)
         }
-        
+
         return null
       },
 
       getCurrentLyricIndex(): number {
         requirePermission(PluginPermission.PLAYER_READ, 'player.getCurrentLyricIndex')
         const store = getPlayerStore()
-        return store.currentLyricIndex >= 0 ? store.currentLyricIndex : -1
+
+        // 如果没有歌词，返回 -1
+        if (!store.lyrics || store.lyrics.length === 0) {
+          return -1
+        }
+
+        // 应用歌词偏移
+        const offset = store.lyricsOffset || 0
+        const adjustedTime = store.currentTime + 0.05 - offset
+
+        // 二分查找当前歌词索引（与 useLyrics.ts 中的逻辑一致）
+        let l = 0, r = store.lyrics.length - 1, idx = -1
+        while (l <= r) {
+          const mid = (l + r) >> 1
+          if (store.lyrics[mid].time <= adjustedTime) {
+            idx = mid
+            l = mid + 1
+          } else {
+            r = mid - 1
+          }
+        }
+
+        return idx
       },
 
       play(): void {
@@ -253,7 +338,7 @@ export function createPluginAPI(
       getAllColors(): Record<string, string> {
         const root = document.documentElement
         const style = getComputedStyle(root)
-        
+
         const colorVars = [
           'md-sys-color-primary',
           'md-sys-color-on-primary',
@@ -394,7 +479,7 @@ export function createPluginAPI(
         if (!shortcut.id || !shortcut.name || !shortcut.key || !shortcut.action) {
           throw new Error('快捷键必须包含 id, name, key 和 action')
         }
-        
+
         const normalizedKey = shortcut.key
           .toLowerCase()
           .split('+')
@@ -404,7 +489,7 @@ export function createPluginAPI(
             return (order[a] ?? 4) - (order[b] ?? 4)
           })
           .join('+')
-        
+
         manager.registerExtension('shortcuts', pluginId, {
           ...shortcut,
           key: normalizedKey,
@@ -467,7 +552,7 @@ export function createPluginAPI(
     network: {
       async fetch(url: string, options: RequestInit = {}): Promise<Response> {
         requirePermission(PluginPermission.NETWORK, 'network.fetch')
-        
+
         if (!url.startsWith('https://')) {
           throw new Error('只允许 HTTPS 请求')
         }
@@ -477,9 +562,16 @@ export function createPluginAPI(
             ...options,
             headers: {
               ...options.headers,
-              'X-Plugin-Id': pluginId,
+              'X-Plugin-Request': 'true', // 不暴露具体插件ID
             },
+            redirect: 'manual', // 防止重定向绕过HTTPS检查
           })
+
+          // 检查最终URL是否仍为HTTPS
+          if (response.url && !response.url.startsWith('https://')) {
+            throw new Error('请求被重定向到非HTTPS地址')
+          }
+
           return response
         } catch (error) {
           logger.error(`[Plugin:${pluginId}] 网络请求失败:`, error)
@@ -562,7 +654,7 @@ export function createPluginAPI(
     file: {
       async saveAs(data: Blob | Uint8Array | string, options: SaveAsOptions = {}): Promise<string | null> {
         requirePermission(PluginPermission.STORAGE, 'file.saveAs')
-        
+
         try {
           const filePath = await save({
             defaultPath: options.defaultName,
@@ -594,8 +686,8 @@ export function createPluginAPI(
       },
 
       async saveImage(
-        image: HTMLCanvasElement | Blob | string, 
-        defaultName = 'image.png', 
+        image: HTMLCanvasElement | Blob | string,
+        defaultName = 'image.png',
         format = 'png'
       ): Promise<string | null> {
         requirePermission(PluginPermission.STORAGE, 'file.saveImage')
@@ -627,7 +719,7 @@ export function createPluginAPI(
 
         const arrayBuffer = await blob.arrayBuffer()
         const data = Array.from(new Uint8Array(arrayBuffer))
-        
+
         const filePath = await invoke<string>('save_screenshot', { filename: defaultName, data })
         logger.info(`[Plugin:${pluginId}] 图片已保存: ${filePath}`)
         return filePath

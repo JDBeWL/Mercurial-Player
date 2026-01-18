@@ -103,10 +103,10 @@ const colorPresets = [
   // 蓝色系 - 清新、专业、信任
   { hex: '#64B5F6', name: '天空蓝', category: 'blue' },
   { hex: '#42A5F5', name: '晴空蓝', category: 'blue' },
+  { hex: '#0288D1', name: '月村手毬', category: 'blue' },
   { hex: '#2196F3', name: '经典蓝', category: 'blue' },
   { hex: '#1E88E5', name: '海洋蓝', category: 'blue' },
   { hex: '#1976D2', name: '深海蓝', category: 'blue' },
-  { hex: '#0288D1', name: '湖水蓝', category: 'blue' },
   { hex: '#0097A7', name: '青绿蓝', category: 'blue' },
   { hex: '#00ACC1', name: '水鸭蓝', category: 'blue' },
   { hex: '#00BCD4', name: '青色', category: 'blue' },

@@ -14,8 +14,12 @@ const STORAGE_PREFIX = 'mercurial-plugin-storage-'
 
 // 插件状态
 export const PluginState = {
-  INACTIVE: 'inactive',
+  UNREGISTERED: 'unregistered',
+  REGISTERED: 'registered', 
+  LOADING: 'loading',
   ACTIVE: 'active',
+  UNLOADING: 'unloading',
+  INACTIVE: 'inactive',
   ERROR: 'error',
   DISABLED: 'disabled'
 } as const
@@ -396,6 +400,18 @@ class PluginManager {
       this._playerWatcherStop()
       this._playerWatcherStop = null
     }
+    
+    // 强制保存所有插件存储
+    for (const [pluginId, storage] of this.storage) {
+      try {
+        const flushMethod = (storage as Record<string, unknown>)._flush
+        if (typeof flushMethod === 'function') {
+          flushMethod()
+        }
+      } catch (e) {
+        logger.warn(`强制保存插件 ${pluginId} 存储失败:`, e)
+      }
+    }
   }
 
   /**
@@ -443,6 +459,12 @@ class PluginManager {
       return
     }
 
+    if (plugin.state === PluginState.LOADING || plugin.state === PluginState.UNLOADING) {
+      throw new Error(`插件 ${pluginId} 正在处理中，请稍后再试`)
+    }
+
+    plugin.state = PluginState.LOADING
+    
     try {
       const api = createPluginAPI(pluginId, plugin.permissions, this)
       const sandbox = createPluginSandbox(api)
@@ -473,6 +495,16 @@ class PluginManager {
   async deactivate(pluginId: string): Promise<void> {
     const plugin = this.plugins.get(pluginId)
     if (!plugin) return
+
+    if (plugin.state === PluginState.LOADING || plugin.state === PluginState.UNLOADING) {
+      throw new Error(`插件 ${pluginId} 正在处理中，请稍后再试`)
+    }
+
+    if (plugin.state !== PluginState.ACTIVE) {
+      return
+    }
+
+    plugin.state = PluginState.UNLOADING
 
     const instanceData = this.instances.get(pluginId)
     if (instanceData) {
@@ -615,12 +647,18 @@ class PluginManager {
       
       const storage = reactive(savedData)
       const maxStorageSize = 1024 * 1024
+      let saveTimeout: ReturnType<typeof setTimeout> | null = null
+      let isSaving = false
 
-      const safeSave = (target: Record<string, unknown>) => {
+      const safeSave = async (target: Record<string, unknown>) => {
+        if (isSaving) return // 防止并发保存
+        isSaving = true
+        
         try {
           const json = JSON.stringify(target)
           if (json.length > maxStorageSize) {
             logger.warn(`插件 ${pluginId} 存储超过限制`)
+            // 清理大型数组数据
             for (const key of Object.keys(target)) {
               if (Array.isArray(target[key]) && (target[key] as unknown[]).length > 10) {
                 target[key] = (target[key] as unknown[]).slice(-Math.floor((target[key] as unknown[]).length / 2))
@@ -631,6 +669,7 @@ class PluginManager {
         } catch (e) {
           if ((e as Error).name === 'QuotaExceededError') {
             logger.error(`插件 ${pluginId} 存储空间不足`)
+            // 紧急清理策略
             for (const key of Object.keys(target)) {
               if (Array.isArray(target[key])) {
                 target[key] = (target[key] as unknown[]).slice(-10)
@@ -644,13 +683,14 @@ class PluginManager {
           } else {
             logger.warn(`保存插件 ${pluginId} 存储失败:`, e)
           }
+        } finally {
+          isSaving = false
         }
       }
       
-      let saveTimeout: ReturnType<typeof setTimeout> | null = null
       const debouncedSave = (target: Record<string, unknown>) => {
         if (saveTimeout) clearTimeout(saveTimeout)
-        saveTimeout = setTimeout(() => safeSave(target), 500)
+        saveTimeout = setTimeout(() => safeSave(target), 300) // 减少延迟
       }
       
       const persistentStorage = new Proxy(storage, {
@@ -665,6 +705,15 @@ class PluginManager {
           return true
         }
       })
+      
+      // 添加强制保存方法（用于应用关闭时）
+      ;(persistentStorage as Record<string, unknown>)._flush = () => {
+        if (saveTimeout) {
+          clearTimeout(saveTimeout)
+          saveTimeout = null
+        }
+        return safeSave(storage)
+      }
       
       this.storage.set(pluginId, persistentStorage)
     }

@@ -215,12 +215,18 @@ interface ForbiddenPattern {
  * 验证插件代码安全性
  */
 export function validatePluginCode(code: string): boolean {
-  // 移除注释
-  const codeWithoutComments = code
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '')
+  // 基本长度检查
+  if (code.length > 1024 * 1024) { // 1MB限制
+    throw new Error('插件代码过大，超过1MB限制')
+  }
 
-  // 移除字符串内容
+  // 移除注释（更严格的注释移除）
+  const codeWithoutComments = code
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/.*$/gm, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+
+  // 移除字符串内容（更严格的字符串移除）
   const codeWithoutStrings = codeWithoutComments
     .replace(/"(?:[^"\\]|\\.)*"/g, '""')
     .replace(/'(?:[^'\\]|\\.)*'/g, "''")
@@ -263,6 +269,14 @@ export function validatePluginCode(code: string): boolean {
     { pattern: /fromCharCode/, msg: 'fromCharCode' },
     { pattern: /fromCodePoint/, msg: 'fromCodePoint' },
     { pattern: /\bnew\s+Proxy\b/, msg: 'Proxy' },
+    // 新增的安全检查
+    { pattern: /String\s*\.\s*fromCharCode/, msg: 'String.fromCharCode' },
+    { pattern: /Array\s*\.\s*from/, msg: 'Array.from (可能用于绕过检查)' },
+    { pattern: /Object\s*\.\s*keys\s*\(\s*this\s*\)/, msg: '遍历this对象' },
+    { pattern: /Object\s*\.\s*getOwnPropertyNames/, msg: 'getOwnPropertyNames' },
+    { pattern: /Object\s*\.\s*getOwnPropertyDescriptor/, msg: 'getOwnPropertyDescriptor' },
+    { pattern: /\[\s*['"`]constructor['"`]\s*\]/, msg: '字符串形式的constructor访问' },
+    { pattern: /\+\s*['"`]\s*['"`]\s*\+/, msg: '可疑的字符串拼接' },
   ]
 
   for (const { pattern, msg } of forbidden) {
@@ -274,8 +288,14 @@ export function validatePluginCode(code: string): boolean {
   // 检查可疑的属性访问模式
   const bracketAccessPattern = /\[\s*[^0-9\]]/g
   const bracketMatches = codeWithoutStrings.match(bracketAccessPattern)
-  if (bracketMatches && bracketMatches.length > 20) {
+  if (bracketMatches && bracketMatches.length > 15) { // 降低阈值
     throw new Error('插件代码包含过多动态属性访问，可能存在安全风险')
+  }
+
+  // 检查嵌套函数调用深度
+  const nestedCallPattern = /\(\s*[^)]*\(\s*[^)]*\(\s*[^)]*\(/g
+  if (nestedCallPattern.test(codeWithoutStrings)) {
+    throw new Error('插件代码包含过深的嵌套调用，可能存在安全风险')
   }
 
   return true

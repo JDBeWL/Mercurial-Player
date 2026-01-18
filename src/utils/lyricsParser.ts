@@ -76,12 +76,12 @@ export class LyricsParser {
     const pattern = /\[(\d{2}):(\d{2}):(\d{2})\]|\[(\d{2}):(\d{2})\.(\d{2,3})\]/g
     const resultMap: Record<number, LyricLine> = {}
     const CHUNK_SIZE = 100
-    
+
     for (let i = 0; i < lines.length; i++) {
       if (i > 0 && i % CHUNK_SIZE === 0) {
         await yieldToMain()
       }
-      
+
       const line = lines[i]
       const timestamps: Array<{ time: number; index: number }> = []
       let match: RegExpExecArray | null
@@ -121,12 +121,12 @@ export class LyricsParser {
       return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s)
     }
     const CHUNK_SIZE = 100
-    
+
     for (let i = 0; i < lines.length; i++) {
       if (i > 0 && i % CHUNK_SIZE === 0) {
         await yieldToMain()
       }
-      
+
       const line = lines[i]
       if (!line.startsWith('Dialogue:')) continue
       const parts = line.split(',')
@@ -137,18 +137,51 @@ export class LyricsParser {
       const text = parts.slice(9).join(',').trim()
       dialogues.push({ startTime: toSeconds(start), endTime: toSeconds(end), style, text })
     }
-    
-    const groupedMap = new Map<string, { startTime: number; endTime: number; texts: { orig: string; ts: string }; karaoke: null }>()
+
+    // 智能识别 style 名称
+    const isTranslationStyle = (style: string): boolean => {
+      const lowerStyle = style.toLowerCase()
+      // 翻译相关的 style 关键词
+      const translationKeywords = ['ts', 'translation', 'trans', 'cn', 'zh', 'chs', 'cht', 'chinese', 'romaji', 'roma', 'chn', '翻译', '中文']
+      return translationKeywords.some(keyword => lowerStyle.includes(keyword))
+    }
+
+    const isOriginalStyle = (style: string): boolean => {
+      const lowerStyle = style.toLowerCase()
+      // 原歌词相关的 style 关键词（优先级低于翻译判断）
+      const originalKeywords = ['orig', 'original', 'en', 'english', 'jp', 'ja', 'japanese', 'main', 'default', 'lyric', '原文', '日文', '英文']
+      return originalKeywords.some(keyword => lowerStyle.includes(keyword))
+    }
+
+    const groupedMap = new Map<string, { startTime: number; endTime: number; texts: { orig: string; ts: string }; styles: Set<string>; karaoke: null }>()
     dialogues.forEach(d => {
       const key = d.startTime.toFixed(3) + '-' + d.endTime.toFixed(3)
       if (!groupedMap.has(key)) {
-        groupedMap.set(key, { startTime: d.startTime, endTime: d.endTime, texts: { orig: '', ts: '' }, karaoke: null })
+        groupedMap.set(key, { startTime: d.startTime, endTime: d.endTime, texts: { orig: '', ts: '' }, styles: new Set(), karaoke: null })
       }
       const group = groupedMap.get(key)!
-      if (d.style === 'orig') group.texts.orig = d.text
-      if (d.style === 'ts') group.texts.ts = d.text
+      group.styles.add(d.style)
+
+      // 智能判断是原歌词还是翻译
+      if (isTranslationStyle(d.style)) {
+        // 明确是翻译的 style
+        group.texts.ts = d.text
+      } else if (isOriginalStyle(d.style) || group.texts.orig === '') {
+        // 明确是原歌词的 style，或者原歌词还是空的（第一个遇到的作为原歌词）
+        if (group.texts.orig === '') {
+          group.texts.orig = d.text
+        } else if (!isTranslationStyle(d.style) && group.texts.ts === '') {
+          // 如果原歌词已有内容，且当前不是翻译 style，且翻译为空，则作为翻译
+          group.texts.ts = d.text
+        }
+      } else {
+        // 其他情况：如果翻译为空，则作为翻译
+        if (group.texts.ts === '') {
+          group.texts.ts = d.text
+        }
+      }
     })
-    
+
     const result: LyricLine[] = []
     groupedMap.forEach(group => {
       const parseKaraoke = (text: string): KaraokeWord[] => {
@@ -181,14 +214,14 @@ export class LyricsParser {
     const lines = content.split('\n')
     const lyrics: LyricLine[] = []
     const timeRegex = /^\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\](.*)$/
-    
+
     for (const line of lines) {
       const trimmedLine = line.trim()
       if (!trimmedLine) continue
-      
+
       const timeMatches = [...trimmedLine.matchAll(/\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/g)]
       const textPart = trimmedLine.replace(/\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/g, '').trim()
-      
+
       if (timeMatches.length > 0 && textPart) {
         for (const match of timeMatches) {
           const minutes = parseInt(match[1])
@@ -211,7 +244,7 @@ export class LyricsParser {
         }
       }
     }
-    
+
     lyrics.sort((a, b) => a.time - b.time)
     return lyrics
   }
@@ -224,36 +257,36 @@ export class LyricsParser {
     const lyrics: LyricLine[] = []
     let inEvents = false
     let formatFields: string[] = []
-    
+
     for (const line of lines) {
       const trimmedLine = line.trim()
-      
+
       if (trimmedLine === '[Events]') {
         inEvents = true
         continue
       }
-      
+
       if (inEvents && trimmedLine.startsWith('[')) {
         inEvents = false
         continue
       }
-      
+
       if (inEvents && trimmedLine.startsWith('Format:')) {
         formatFields = trimmedLine.substring(7).split(',').map(field => field.trim())
         continue
       }
-      
+
       if (inEvents && trimmedLine.startsWith('Dialogue:')) {
         const parts = trimmedLine.substring(9).split(',')
-        
+
         if (parts.length >= formatFields.length) {
           const startIndex = formatFields.indexOf('Start')
           const textIndex = formatFields.indexOf('Text')
-          
+
           if (startIndex !== -1 && textIndex !== -1) {
             const startTime = this.parseASSTime(parts[startIndex])
             const text = parts.slice(textIndex).join(',').replace(/{[^}]*}/g, '').trim()
-            
+
             if (text && startTime !== null) {
               lyrics.push({ time: startTime, text })
             }
@@ -261,7 +294,7 @@ export class LyricsParser {
         }
       }
     }
-    
+
     lyrics.sort((a, b) => a.time - b.time)
     return lyrics
   }
@@ -273,23 +306,23 @@ export class LyricsParser {
     const blocks = content.trim().split(/\n\s*\n/)
     const lyrics: LyricLine[] = []
     const timeRegex = /(\d{1,2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2}),(\d{3})/
-    
+
     for (const block of blocks) {
       const lines = block.trim().split('\n')
       if (lines.length < 2) continue
-      
+
       const timeMatch = lines[1].match(timeRegex)
       if (!timeMatch) continue
-      
-      const startTime = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + 
-                        parseInt(timeMatch[3]) + parseInt(timeMatch[4]) / 1000
+
+      const startTime = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 +
+        parseInt(timeMatch[3]) + parseInt(timeMatch[4]) / 1000
       const text = lines.slice(2).join('\n').trim()
-      
+
       if (text) {
         lyrics.push({ time: startTime, text })
       }
     }
-    
+
     lyrics.sort((a, b) => a.time - b.time)
     return lyrics
   }
@@ -300,8 +333,8 @@ export class LyricsParser {
   static parseASSTime(timeStr: string): number | null {
     const match = timeStr.match(/^(\d+):(\d{2}):(\d{2})\.(\d{2})$/)
     if (match) {
-      return parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + 
-             parseInt(match[3]) + parseInt(match[4]) / 100
+      return parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 +
+        parseInt(match[3]) + parseInt(match[4]) / 100
     }
     return null
   }

@@ -24,6 +24,15 @@ logger.info('应用程序已启动')
 // 设置主题对比度验证
 setupThemeContrastValidation()
 
+// 生产环境禁用右键菜单
+if (import.meta.env.PROD) {
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+    return false
+  })
+  logger.info('生产环境：已禁用右键菜单')
+}
+
 // 加载内置插件
 import { pluginManager } from './plugins'
 import builtinPlugins from './plugins/builtins'

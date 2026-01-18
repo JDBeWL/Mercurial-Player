@@ -25,13 +25,13 @@ class LRUCache<T> {
   get(key: string): T | null {
     const item = this.cache.get(key)
     if (!item) return null
-    
+
     // 检查是否过期
     if (Date.now() - item.timestamp > this.ttl) {
       this.cache.delete(key)
       return null
     }
-    
+
     // 移到末尾（最近使用）
     this.cache.delete(key)
     this.cache.set(key, item)
@@ -43,13 +43,13 @@ class LRUCache<T> {
     if (this.cache.has(key)) {
       this.cache.delete(key)
     }
-    
+
     // 如果超过最大大小，删除最旧的
     while (this.cache.size >= this.maxSize) {
       const firstKey = this.cache.keys().next().value
       if (firstKey) this.cache.delete(firstKey)
     }
-    
+
     this.cache.set(key, {
       value,
       timestamp: Date.now()
@@ -149,13 +149,13 @@ export const usePlayerStore = defineStore('player', {
     // 缓存 - 使用 LRU 缓存，限制大小
     _fileExistsCache: null,
     _metadataCache: null,
-    
+
     // 清理定时器
     _cleanupTimerId: null,
-    
+
     // 销毁标志
     _isDestroyed: false,
-    
+
     // 事件监听器
     _trackEndedUnlisten: null,
     _positionUnlisten: null,
@@ -184,7 +184,7 @@ export const usePlayerStore = defineStore('player', {
 
   actions: {
     // --- 缓存管理 ---
-    
+
     _getFileExistsCache(): LRUCache<boolean> {
       if (!this._fileExistsCache) {
         this._fileExistsCache = new LRUCache<boolean>(200, 30000) as any
@@ -201,7 +201,7 @@ export const usePlayerStore = defineStore('player', {
 
     _startCleanupTask(): void {
       if (this._cleanupTimerId) return
-      
+
       this._cleanupTimerId = setInterval(() => {
         this._cleanupCaches()
       }, 300000)
@@ -216,7 +216,7 @@ export const usePlayerStore = defineStore('player', {
 
     async _cleanupCaches(): Promise<void> {
       const CHUNK_SIZE = 50
-      
+
       if (this._fileExistsCache) {
         const keys = Array.from(this._fileExistsCache.keys())
         for (let i = 0; i < keys.length; i++) {
@@ -250,14 +250,14 @@ export const usePlayerStore = defineStore('player', {
       } catch (err) {
         logger.error('Failed to load volume from config:', err)
       }
-      
+
       this._setupTrackEndedListener()
       this._setupPositionListener()
       this._startCleanupTask()
-      
+
       logger.info('Player store initialized.')
     },
-    
+
     async _setupTrackEndedListener(): Promise<void> {
       try {
         this._trackEndedUnlisten = await listen('track-ended', () => {
@@ -269,7 +269,7 @@ export const usePlayerStore = defineStore('player', {
         logger.error('Failed to setup track-ended listener:', err)
       }
     },
-    
+
     async _setupPositionListener(): Promise<void> {
       try {
         this._positionUnlisten = await listen<{ position: number }>('playback-position', (event) => {
@@ -362,7 +362,7 @@ export const usePlayerStore = defineStore('player', {
 
       try {
         logger.info('Playing track:', track.path)
-        
+
         const playPromise = invoke('play_track', { path: track.path })
         const timeoutPromise = new Promise((_, reject) => {
           setTimeout(() => reject(new Error('播放超时')), 5000)
@@ -382,7 +382,7 @@ export const usePlayerStore = defineStore('player', {
           logger.error('Failed to play track:', result.error)
           this.isPlaying = false
           this._isLoading = false
-          
+
           const currentIdx = this.playlist.findIndex(t => t.path === track.path)
           if (this.playlist.length > 1 && currentIdx < this.playlist.length - 1) {
             setTimeout(() => this.nextTrack(), 100)
@@ -392,14 +392,14 @@ export const usePlayerStore = defineStore('player', {
 
         this.isPlaying = true
         this.startStatusPolling()
-        
+
         this.loadLyrics(track.path).catch(err => {
           logger.debug('Lyrics load error:', err)
         })
       } catch (error) {
         logger.error('Playback error:', error)
         this.isPlaying = false
-        
+
         const currentIdx = this.playlist.findIndex(t => t.path === track.path)
         if (this.playlist.length > 1 && currentIdx < this.playlist.length - 1) {
           setTimeout(() => this.nextTrack(), 100)
@@ -461,7 +461,7 @@ export const usePlayerStore = defineStore('player', {
 
     async _onEnded(): Promise<void> {
       if (this._isDestroyed) return
-      
+
       invoke('pause_track').catch(err => logger.debug("pause on ended:", err))
 
       if (this.repeatMode === 'track') {
@@ -590,7 +590,7 @@ export const usePlayerStore = defineStore('player', {
     setVolume(volume: number): void {
       const newVolume = Math.max(0, Math.min(1, volume))
       this.volume = newVolume
-      
+
       invoke('set_volume', { volume: newVolume })
         .then(() => {
           const configStore = useConfigStore()
@@ -619,7 +619,7 @@ export const usePlayerStore = defineStore('player', {
     },
 
     // --- 歌词偏移 ---
-    
+
     setLyricsOffset(offset: number): void {
       this.lyricsOffset = offset
     },
@@ -681,7 +681,7 @@ export const usePlayerStore = defineStore('player', {
           format: track.format || null,
         })
         cached++
-        
+
         if (cached > 0 && cached % CHUNK_SIZE === 0) {
           await new Promise(resolve => setTimeout(resolve, 0))
         }
@@ -696,7 +696,8 @@ export const usePlayerStore = defineStore('player', {
         if (lyricsPath) {
           const lyricsContent = await FileUtils.readFile(lyricsPath)
           const format = FileUtils.getFileExtension(lyricsPath) as 'lrc' | 'ass' | 'srt'
-          this.lyrics = LyricsParser.parse(lyricsContent, format)
+          // 使用异步解析方法以支持翻译和卡拉OK效果
+          this.lyrics = await LyricsParser.parseAsync(lyricsContent, format)
         } else {
           this.lyrics = null
         }
@@ -709,22 +710,22 @@ export const usePlayerStore = defineStore('player', {
     // --- 清理 ---
     cleanup(): void {
       this._isDestroyed = true
-      
+
       this.stopStatusPolling()
       this._stopCleanupTask()
-      
+
       if (this._trackEndedUnlisten) {
         this._trackEndedUnlisten()
         this._trackEndedUnlisten = null
       }
-      
+
       if (this._positionUnlisten) {
         this._positionUnlisten()
         this._positionUnlisten = null
       }
-      
+
       try {
-        invoke('pause_track').catch(() => {})
+        invoke('pause_track').catch(() => { })
       } catch {
         // 忽略错误
       }
@@ -737,7 +738,7 @@ export const usePlayerStore = defineStore('player', {
         this._metadataCache.clear()
         this._metadataCache = null
       }
-      
+
       logger.info('Player store cleaned up')
     }
   }

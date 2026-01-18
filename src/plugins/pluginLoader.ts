@@ -5,7 +5,7 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import logger from '../utils/logger'
-import pluginManager, { type PluginAPI, type PluginPermissionType } from './pluginManager'
+import pluginManager, { type PluginAPI, type PluginPermissionType, PluginPermission } from './pluginManager'
 import { validatePluginCode } from './pluginSandbox'
 
 // 插件清单类型
@@ -49,6 +49,39 @@ export async function loadAllPlugins(): Promise<void> {
 }
 
 /**
+ * 验证插件清单
+ */
+function validateManifest(manifest: PluginManifest): void {
+  if (!manifest.id || typeof manifest.id !== 'string') {
+    throw new Error('插件清单缺少有效的 id 字段')
+  }
+  
+  if (!manifest.name || typeof manifest.name !== 'string') {
+    throw new Error('插件清单缺少有效的 name 字段')
+  }
+  
+  // 验证ID格式（只允许字母、数字、连字符、下划线）
+  if (!/^[a-zA-Z0-9_-]+$/.test(manifest.id)) {
+    throw new Error('插件ID只能包含字母、数字、连字符和下划线')
+  }
+  
+  // 验证权限
+  if (manifest.permissions) {
+    const validPermissions = Object.values(PluginPermission)
+    for (const permission of manifest.permissions) {
+      if (!validPermissions.includes(permission as PluginPermissionType)) {
+        throw new Error(`无效的权限: ${permission}`)
+      }
+    }
+  }
+  
+  // 验证版本格式（如果提供）
+  if (manifest.version && !/^\d+\.\d+\.\d+/.test(manifest.version)) {
+    throw new Error('版本号格式无效，应为 x.y.z 格式')
+  }
+}
+
+/**
  * 加载单个插件
  */
 export async function loadPlugin(pluginPath: string): Promise<void> {
@@ -57,6 +90,20 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
     
     if (!manifest) {
       throw new Error('无法读取插件清单')
+    }
+
+    // 验证清单
+    validateManifest(manifest)
+
+    // 如果插件已存在，先卸载它
+    if (pluginManager.plugins.has(manifest.id)) {
+      logger.info(`插件 ${manifest.id} 已存在，正在重新加载`)
+      try {
+        await pluginManager.deactivate(manifest.id)
+        await pluginManager.uninstall(manifest.id, false) // 不清除存储
+      } catch (error) {
+        logger.warn(`卸载现有插件失败: ${manifest.id}`, error)
+      }
     }
 
     const mainCode = await invoke<string>('read_plugin_main', { 

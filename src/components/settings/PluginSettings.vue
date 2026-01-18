@@ -143,10 +143,25 @@ const openPluginsFolder = async () => {
 
 const refreshPlugins = async () => {
   try {
+    // 先停用所有非内置插件
+    const currentPlugins = pluginManager.getAllPlugins()
+    for (const plugin of currentPlugins) {
+      if (!plugin.id.startsWith('builtin-')) {
+        try {
+          await pluginManager.deactivate(plugin.id)
+          await pluginManager.uninstall(plugin.id, false) // 不清除存储
+        } catch (error) {
+          logger.warn(`卸载插件失败: ${plugin.id}`, error)
+        }
+      }
+    }
+    
+    // 重新加载所有插件
     await loadAllPlugins()
     showError('插件列表已刷新', 'info')
   } catch (error) {
     logger.error('刷新插件失败:', error)
+    showError(`刷新失败: ${error.message}`, 'error')
   }
 }
 

@@ -51,6 +51,10 @@ export const playCountPlugin: BuiltinPluginDefinition = {
     let playStartTime: number | null = null
     let hasRecordedCurrentTrack = false
     let pollingInterval: ReturnType<typeof setInterval> | null = null
+    
+    // 保存事件回调引用以便正确清理
+    let trackChangedCallback: (data: unknown) => void
+    let stateChangedCallback: (data: unknown) => void
 
     const loadData = (): PlayCountData => {
       return {
@@ -147,15 +151,20 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       async activate(): Promise<void> {
         api.log.info('播放统计插件已激活')
 
-        api.events.on('player:trackChanged', (data) => {
+        // 定义回调函数
+        trackChangedCallback = (data) => {
           const { track, isPlaying } = data as { track: Track | null; isPlaying: boolean }
           handleTrackChange(track, isPlaying)
-        })
+        }
         
-        api.events.on('player:stateChanged', (data) => {
+        stateChangedCallback = (data) => {
           const { track, isPlaying } = data as { track: Track | null; isPlaying: boolean }
           handleTrackChange(track, isPlaying)
-        })
+        }
+
+        // 注册事件监听器
+        api.events.on('player:trackChanged', trackChangedCallback)
+        api.events.on('player:stateChanged', stateChangedCallback)
 
         await pollPlayerState()
         pollingInterval = setInterval(pollPlayerState, 5000)
@@ -163,8 +172,14 @@ export const playCountPlugin: BuiltinPluginDefinition = {
 
       deactivate(): void {
         settleLastTrack()
-        api.events.off('player:trackChanged', () => {})
-        api.events.off('player:stateChanged', () => {})
+        
+        // 正确清理事件监听器
+        if (trackChangedCallback) {
+          api.events.off('player:trackChanged', trackChangedCallback)
+        }
+        if (stateChangedCallback) {
+          api.events.off('player:stateChanged', stateChangedCallback)
+        }
         
         if (pollingInterval) {
           clearInterval(pollingInterval)
