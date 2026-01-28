@@ -111,6 +111,9 @@ interface PlayerState {
   _isDestroyed: boolean
   _trackEndedUnlisten: UnlistenFn | null
   _positionUnlisten: UnlistenFn | null
+  _taskbarPreviousUnlisten: UnlistenFn | null
+  _taskbarPlayPauseUnlisten: UnlistenFn | null
+  _taskbarNextUnlisten: UnlistenFn | null
 }
 
 export const usePlayerStore = defineStore('player', {
@@ -159,6 +162,9 @@ export const usePlayerStore = defineStore('player', {
     // 事件监听器
     _trackEndedUnlisten: null,
     _positionUnlisten: null,
+    _taskbarPreviousUnlisten: null,
+    _taskbarPlayPauseUnlisten: null,
+    _taskbarNextUnlisten: null,
   }),
 
   getters: {
@@ -253,6 +259,7 @@ export const usePlayerStore = defineStore('player', {
 
       this._setupTrackEndedListener()
       this._setupPositionListener()
+      this._setupTaskbarListeners()
       this._startCleanupTask()
 
       logger.info('Player store initialized.')
@@ -282,6 +289,42 @@ export const usePlayerStore = defineStore('player', {
       } catch (err) {
         logger.error('Failed to setup position listener:', err)
       }
+    },
+
+    async _setupTaskbarListeners(): Promise<void> {
+      try {
+        // 监听任务栏上一首按钮
+        this._taskbarPreviousUnlisten = await listen('taskbar-previous', () => {
+          if (this._isDestroyed) return
+          logger.debug('Taskbar: Previous button clicked')
+          this.previousTrack()
+        })
+
+        // 监听任务栏播放/暂停按钮
+        this._taskbarPlayPauseUnlisten = await listen('taskbar-play-pause', () => {
+          if (this._isDestroyed) return
+          logger.debug('Taskbar: Play/Pause button clicked')
+          this.togglePlay()
+        })
+
+        // 监听任务栏下一首按钮
+        this._taskbarNextUnlisten = await listen('taskbar-next', () => {
+          if (this._isDestroyed) return
+          logger.debug('Taskbar: Next button clicked')
+          this.nextTrack()
+        })
+
+        logger.info('Taskbar listeners setup complete')
+      } catch (err) {
+        logger.error('Failed to setup taskbar listeners:', err)
+      }
+    },
+
+    _updateTaskbarState(): void {
+      // 更新 Windows 任务栏按钮状态
+      invoke('update_taskbar_state', { isPlaying: this.isPlaying }).catch(() => {
+        // 忽略非 Windows 平台的错误
+      })
     },
 
     // --- 核心行为 ---
@@ -392,6 +435,7 @@ export const usePlayerStore = defineStore('player', {
 
         this.isPlaying = true
         this.startStatusPolling()
+        this._updateTaskbarState()
 
         this.loadLyrics(track.path).catch(err => {
           logger.debug('Lyrics load error:', err)
@@ -415,6 +459,7 @@ export const usePlayerStore = defineStore('player', {
         .then(() => {
           this.isPlaying = false
           this.stopStatusPolling()
+          this._updateTaskbarState()
         })
         .catch(err => logger.error("Failed to pause:", err))
     },
@@ -425,6 +470,7 @@ export const usePlayerStore = defineStore('player', {
         .then(() => {
           this.isPlaying = true
           this.startStatusPolling()
+          this._updateTaskbarState()
         })
         .catch(err => logger.error("Failed to resume:", err))
     },
@@ -724,8 +770,24 @@ export const usePlayerStore = defineStore('player', {
         this._positionUnlisten = null
       }
 
+      // 清理任务栏事件监听
+      if (this._taskbarPreviousUnlisten) {
+        this._taskbarPreviousUnlisten()
+        this._taskbarPreviousUnlisten = null
+      }
+      if (this._taskbarPlayPauseUnlisten) {
+        this._taskbarPlayPauseUnlisten()
+        this._taskbarPlayPauseUnlisten = null
+      }
+      if (this._taskbarNextUnlisten) {
+        this._taskbarNextUnlisten()
+        this._taskbarNextUnlisten = null
+      }
+
       try {
         invoke('pause_track').catch(() => { })
+        // 设置任务栏为停止状态
+        invoke('set_taskbar_stopped').catch(() => { })
       } catch {
         // 忽略错误
       }

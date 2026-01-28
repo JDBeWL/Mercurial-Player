@@ -491,7 +491,7 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
             let start_pos = position.unwrap_or(0.0);
             if let Some(t) = position { let _ = dec.seek(Duration::from_secs_f32(t)); }
             let _ = dec.prefill_buffer();
-            println!("使用Symphonia解码器: {path}");
+            println!("Symphonia decoder: {path}");
             Box::new(
                 VisualizationSource::new(LockFreeSymphoniaSource::new(dec), waveform, spectrum, Some(app.clone()))
                     .with_start_position(start_pos)
@@ -500,7 +500,7 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
             )
         }
         Err(e) => {
-            println!("Symphonia解码失败，回退到rodio: {e}");
+            println!("Symphonia decoder failed, fallback to rodio: {e}");
             let file = File::open(path).map_err(|e| e.to_string())?;
             Box::new(
                 VisualizationSource::new(rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?, waveform, spectrum, Some(app.clone()))

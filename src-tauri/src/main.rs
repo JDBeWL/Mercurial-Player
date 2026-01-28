@@ -17,6 +17,9 @@ use mercurial_player::{
 #[cfg(windows)]
 use mercurial_player::audio::WasapiExclusivePlayback;
 
+#[cfg(windows)]
+use mercurial_player::taskbar;
+
 use cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{OutputStreamBuilder, Sink};
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -106,13 +109,54 @@ fn main() {
 
     tauri::Builder::default()
         .manage(app_state)
-        .setup(|_app| {
+        .setup(|app| {
+            use tauri::Manager;
+
             #[cfg(debug_assertions)]
             {
-                use tauri::Manager;
-                let window = _app.get_webview_window("main").unwrap();
+                let window = app.get_webview_window("main").unwrap();
                 window.open_devtools();
             }
+
+            // 初始化Windows任务栏缩略图工具栏
+            #[cfg(windows)]
+            {
+                let window = app.get_webview_window("main").unwrap();
+                let app_handle = app.handle().clone();
+
+                // 延迟初始化任务栏，确保窗口已完全创建
+                std::thread::spawn(move || {
+                    // 等待窗口完全初始化
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+
+                    // 初始化COM库
+                    #[allow(unsafe_code)]
+                    {
+                        unsafe {
+                            let _ = windows::Win32::System::Com::CoInitializeEx(
+                                None,
+                                windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
+                            );
+                        }
+                    }
+
+                    // 获取窗口句柄
+                    if let Ok(hwnd) = window.hwnd() {
+                        let hwnd_value = hwnd.0 as isize;
+
+                        // 初始化任务栏
+                        if let Err(e) = taskbar::init_taskbar(hwnd_value) {
+                            eprintln!("Failed to initialize taskbar: {e}");
+                        } else {
+                            println!("Taskbar initialized successfully");
+
+                            // 设置窗口消息钩子来处理按钮点击
+                            setup_taskbar_hook(hwnd_value, app_handle);
+                        }
+                    }
+                });
+            }
+
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
@@ -187,6 +231,11 @@ fn main() {
             plugins::commands::open_plugins_directory,
             plugins::commands::save_screenshot,
             plugins::commands::open_screenshots_directory,
+            // 任务栏命令（Windows Only）
+            #[cfg(windows)]
+            taskbar::commands::update_taskbar_state,
+            #[cfg(windows)]
+            taskbar::commands::set_taskbar_stopped,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -197,7 +246,7 @@ fn main() {
 fn create_exclusive_mode_player(device_name: &str) -> (Sink, Option<PlatformPlayer>) {
     println!("Starting in WASAPI exclusive mode");
 
-    // 创建一个空的 rodio sink（使用默认设备，但不会实际使用）
+    // 创建一个空的rodio sink
     let stream = OutputStreamBuilder::open_default_stream().expect("Failed to create default output stream");
     let sink = Sink::connect_new(stream.mixer());
     Box::leak(Box::new(stream));
@@ -219,7 +268,7 @@ fn create_exclusive_mode_player(device_name: &str) -> (Sink, Option<PlatformPlay
     }
 }
 
-/// 创建独占模式播放器（非 Windows 平台回退到共享模式）
+/// 创建独占模式播放器（非Windows平台回退到共享模式）
 #[cfg(not(windows))]
 fn create_exclusive_mode_player(_device_name: &str) -> (Sink, Option<PlatformPlayer>) {
     println!("Exclusive mode is only supported on Windows, falling back to shared mode");
@@ -227,6 +276,82 @@ fn create_exclusive_mode_player(_device_name: &str) -> (Sink, Option<PlatformPla
     let sink = Sink::connect_new(stream.mixer());
     Box::leak(Box::new(stream));
     (sink, None)
+}
+
+/// 设置任务栏按钮点击钩子
+#[cfg(windows)]
+#[allow(unsafe_code)] // Windows API交互需要unsafe
+fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
+    use std::sync::OnceLock;
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallWindowProcW, SetWindowLongPtrW, GWLP_WNDPROC, WM_COMMAND, WNDPROC,
+    };
+
+    // 存储原始窗口过程和app handle
+    static ORIGINAL_WNDPROC: OnceLock<isize> = OnceLock::new();
+    static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+    let _ = APP_HANDLE.set(app_handle);
+
+    // 自定义窗口过程
+    unsafe extern "system" fn custom_wndproc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        // 检查是否是任务栏按钮点击消息
+        if msg == WM_COMMAND {
+            let cmd_id = (wparam.0 & 0xFFFF) as u32;
+            let notify_code = ((wparam.0 >> 16) & 0xFFFF) as u32;
+
+            // THBN_CLICKED = 0x1800
+            if notify_code == 0x1800 {
+                if let Some(app) = APP_HANDLE.get() {
+                    use tauri::Emitter;
+
+                    match cmd_id {
+                        0 => {
+                            // BTN_PREVIOUS
+                            println!("Taskbar: Previous button clicked");
+                            let _ = app.emit("taskbar-previous", ());
+                        }
+                        1 => {
+                            // BTN_PLAY_PAUSE
+                            println!("Taskbar: Play/Pause button clicked");
+                            let _ = app.emit("taskbar-play-pause", ());
+                        }
+                        2 => {
+                            // BTN_NEXT
+                            println!("Taskbar: Next button clicked");
+                            let _ = app.emit("taskbar-next", ());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // 调用原始窗口过程
+        if let Some(&original) = ORIGINAL_WNDPROC.get() {
+            // 将存储的原始窗口过程指针转换回WNDPROC类型
+            unsafe {
+                let original_proc: WNDPROC = std::mem::transmute(original);
+                CallWindowProcW(original_proc, hwnd, msg, wparam, lparam)
+            }
+        } else {
+            LRESULT(0)
+        }
+    }
+
+    // 替换窗口过程
+    unsafe {
+        let hwnd = HWND(hwnd as *mut std::ffi::c_void);
+        let original = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, custom_wndproc as isize);
+        let _ = ORIGINAL_WNDPROC.set(original);
+        println!("Taskbar hook installed");
+    }
 }
 
 /// 创建共享模式播放器
@@ -241,7 +366,7 @@ fn create_shared_mode_player(device: &cpal::Device) -> (Sink, Option<PlatformPla
 
     let sink = Sink::connect_new(stream.mixer());
     
-    // 保持流的存活（泄露是简单的方法，让它在应用程序的生命周期内保持存活）
+    // 保持流的存活
     Box::leak(Box::new(stream));
 
     (sink, None)

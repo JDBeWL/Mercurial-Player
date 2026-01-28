@@ -10,6 +10,9 @@ pub mod media;
 pub mod plugins;
 pub mod system;
 
+#[cfg(windows)]
+pub mod taskbar;
+
 use audio::SymphoniaSource;
 
 #[cfg(windows)]
