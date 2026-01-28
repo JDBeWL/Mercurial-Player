@@ -40,8 +40,8 @@
     "copyright": "© 2025 JDBeWL",
     "publisher": "JDBeWL",
     "category": "Music",
-    "shortDescription": "A modern music player with fluid experience",
-    "longDescription": "Mercurial Player - A modern music player with advanced audio features and plugin support"
+    "shortDescription": "A music player by JDBeWL",
+    "longDescription": "A Material Design 3 flavor music player by JDBeWL"
   },
   "plugins": {
     "fs": {

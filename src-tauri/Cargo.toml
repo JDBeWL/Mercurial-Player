@@ -1,10 +1,10 @@
 [package]
 name = "mercurial-player"
 version = "0.2.2"
-description = "Mercurial Player - A modern music player with fluid experience"
+description = "A music player by JDBeWL"
 authors = ["jdbEwl"]
-license = ""
-repository = ""
+license = "GPL-3.0 Lincense"
+repository = "https://github.com/JDBeWL/Mercurial-Player"
 edition = "2024"
 rust-version = "1.92"
 default-run = "mercurial-player"
@@ -54,27 +54,27 @@ unsafe_op_in_unsafe_fn = "warn"
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
-# 允许的例外 - Tauri框架限制
+# Tauri框架限制
 module_name_repetitions = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 needless_pass_by_value = "allow"  # Tauri命令需要owned类型
 must_use_candidate = "allow"      # Tauri命令返回值由框架处理
-# 允许的例外 - 音频处理常见模式
+# 音频处理常见模式
 cast_precision_loss = "allow"     # u32 -> f32在音频处理中常见
 cast_possible_truncation = "allow" # 频率显示截断是预期行为
 cast_sign_loss = "allow"          # 频率值总是正数
 cast_lossless = "allow"           # 音频代码中类型转换很常见
 suboptimal_flops = "allow"        # 保持代码可读性
 inline_always = "allow"           # 音频热路径需要内联
-# 允许的例外 - 启动代码
+# 启动代码
 expect_used = "allow"             # 启动时panic是合理的
 unwrap_used = "allow"             # RwLock在单线程场景下安全
-# 允许的例外 - 框架生成代码
+# 框架生成代码
 large_stack_frames = "allow"      # Tauri宏生成
 too_many_lines = "allow"          # main函数需要初始化很多东西
 used_underscore_binding = "allow" # Tauri setup回调
-# 允许的例外 - 代码风格偏好
+# 代码风格偏好
 collapsible_if = "allow"          # 有时分开写更清晰
 collapsible_else_if = "allow"     # 有时分开写更清晰
 too_many_arguments = "allow"      # 音频处理函数需要多参数
