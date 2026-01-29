@@ -80,7 +80,7 @@ impl Drop for TaskbarIcons {
     }
 }
 
-// SAFETY: TaskbarManager 只在主线程创建和使用，且通过 Mutex 保护
+// SAFETY: TaskbarManager只在主线程创建和使用，且通过Mutex保护
 unsafe impl Send for TaskbarManager {}
 unsafe impl Sync for TaskbarManager {}
 
@@ -274,16 +274,16 @@ fn create_prev_icon() -> Result<HICON, String> {
         let dy = (y as f32 - cy).abs();
 
         // 左边竖线
-        let bar_left = (2.0 * scale) as i32;
-        let bar_right = (3.0 * scale) as i32;
+        let bar_left = 3.0 * scale;
+        let bar_right = 4.0 * scale;
         let bar_height = 5.0 * scale;
-        let in_bar = x >= bar_left && x <= bar_right && dy < bar_height;
+        let in_bar = x as f32 >= bar_left && x as f32 <= bar_right && dy < bar_height;
 
-        // 向左的三角形 ◀
-        let tri_right = 11.0 * scale;
+        // ◀
+        let tri_right = 12.0 * scale;
         let tri_width = 6.0 * scale;
         let dx = tri_right - x as f32;
-        let in_triangle = dx > 0.0 && dx < tri_width && dy < (tri_width - dx) * 0.85;
+        let in_triangle = dx >= 0.0 && dx < tri_width && dy < (tri_width - dx) * 0.9;
 
         in_bar || in_triangle
     })
@@ -299,10 +299,9 @@ fn create_play_icon() -> Result<HICON, String> {
         let cy = h as f32 / 2.0;
         let dx = x as f32 - cx;
         let dy = (y as f32 - cy).abs();
-
-        // 向右的三角形
+        // ▶
         let tri_width = 8.0 * scale;
-        dx >= 0.0 && dx < tri_width && dy < (tri_width - dx) * 0.7
+        dx >= 0.0 && dx < tri_width && dy < (tri_width - dx) * 0.8
     })
 }
 
@@ -316,14 +315,15 @@ fn create_pause_icon() -> Result<HICON, String> {
         let dy = (y as f32 - cy).abs();
 
         // 两个竖条
-        let bar1_left = (4.0 * scale) as i32;
-        let bar1_right = (5.0 * scale) as i32;
-        let bar2_left = (10.0 * scale) as i32;
-        let bar2_right = (11.0 * scale) as i32;
+        let bar1_left = 4.0 * scale;
+        let bar1_right = 5.0 * scale;
+        let bar2_left = 10.0 * scale;
+        let bar2_right = 11.0 * scale;
         let bar_height = 5.0 * scale;
-        
-        let in_bar1 = x >= bar1_left && x <= bar1_right && dy < bar_height;
-        let in_bar2 = x >= bar2_left && x <= bar2_right && dy < bar_height;
+
+        // ❚❚
+        let in_bar1 = x as f32 >= bar1_left && x as f32 <= bar1_right && dy < bar_height;
+        let in_bar2 = x as f32 >= bar2_left && x as f32 <= bar2_right && dy < bar_height;
 
         in_bar1 || in_bar2
     })
@@ -338,17 +338,17 @@ fn create_next_icon() -> Result<HICON, String> {
         let cy = h as f32 / 2.0;
         let dy = (y as f32 - cy).abs();
 
-        // 向右的三角形 ▶
+        // ▶
         let tri_left = 4.0 * scale;
         let tri_width = 6.0 * scale;
         let dx = x as f32 - tri_left;
-        let in_triangle = dx > 0.0 && dx < tri_width && dy < (tri_width - dx) * 0.85;
+        let in_triangle = dx >= 0.0 && dx < tri_width && dy < (tri_width - dx) * 0.9;
 
         // 右边竖线
-        let bar_left = (12.0 * scale) as i32;
-        let bar_right = (13.0 * scale) as i32;
+        let bar_left = 12.0 * scale;
+        let bar_right = 13.0 * scale;
         let bar_height = 5.0 * scale;
-        let in_bar = x >= bar_left && x <= bar_right && dy < bar_height;
+        let in_bar = x as f32 >= bar_left && x as f32 <= bar_right && dy < bar_height;
 
         in_triangle || in_bar
     })
