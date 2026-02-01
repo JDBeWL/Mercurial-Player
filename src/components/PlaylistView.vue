@@ -163,7 +163,12 @@ const stopWatchPlaylist = watch(playlist, () => {
 }, { deep: false })
 
 const playTrack = (track) => {
-  playerStore.playTrack(track)
+  // 如果点击的是当前曲目且已暂停，则恢复播放
+  if (playerStore.currentTrack?.path === track.path && !playerStore.isPlaying) {
+    playerStore.resume()
+  } else {
+    playerStore.playTrack(track)
+  }
 }
 
 const pauseTrack = () => {

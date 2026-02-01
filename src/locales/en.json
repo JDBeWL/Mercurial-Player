@@ -168,11 +168,21 @@
     "playStats": "Play Stats",
     "about": "About",
     "appDescription": "A modern music player with fluid experience",
-    "links": "Links",
+    "links": "Repository Links",
     "techStack": "Tech Stack",
+    "techCategoryCore": "Core Framework",
+    "techCategoryAudio": "Audio Engine",
+    "techCategorySystem": "System Integration",
+    "techCategorySystemNote": "This section shows Windows-specific system integration APIs.",
     "techTauri": "Cross-platform desktop app framework",
     "techVue": "Progressive frontend framework",
-    "techSymphonia": "Pure Rust audio decoding library"
+    "techSymphonia": "Pure Rust audio decoding library",
+    "techRodio": "Rust audio playback engine",
+    "techCPAL": "Cross-platform audio abstraction layer",
+    "techWASAPI": "Windows exclusive mode audio API",
+    "techWin32": "Windows system API bindings (taskbar integration)",
+    "openDocs": "Open Documentation",
+    "openRepo": "Open Repository"
   },
   "themeSelector": {
     "chooseThemeColor": "Choose Theme Color",

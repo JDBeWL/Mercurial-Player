@@ -77,7 +77,7 @@
               v-for="(playlist, index) in enhancedPlaylists" 
               :key="`playlist-${index}`"
               class="list-item"
-              @click="playPlaylist(playlist)"
+              @click="loadPlaylist(playlist)"
             >
               <div class="list-item-leading">
                 <span class="material-symbols-rounded">
@@ -486,6 +486,18 @@ const playAll = async () => {
   }
 }
 
+// 点击列表项时加载播放列表并解码但不播放
+const loadPlaylist = async (playlist) => {
+  await playerStore.loadPlaylist(playlist.files)
+  // 解码第一首音频但不播放
+  if (playlist.files && playlist.files.length > 0) {
+    await playerStore.playTrack(playlist.files[0])
+    playerStore.pause()
+  }
+  handleClose()
+}
+
+// 点击播放按钮时加载播放列表并立即播放第一首
 const playPlaylist = async (playlist) => {
   await playerStore.loadPlaylist(playlist.files)
   playerStore.play()

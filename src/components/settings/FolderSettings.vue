@@ -161,6 +161,10 @@ const removeFolder = async (index) => {
   transition: all 0.2s ease;
 }
 
+.filled-tonal-button .material-symbols-rounded {
+  font-size: 20px;
+}
+
 .filled-tonal-button:hover {
   background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-secondary-container));
 }

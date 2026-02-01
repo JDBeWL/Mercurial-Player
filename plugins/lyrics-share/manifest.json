@@ -1,9 +1,9 @@
 {
   "id": "lyrics-share",
   "name": "歌词截图分享",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "JDBeWL",
-  "description": "生成精美的歌词分享图片，支持保存到本地或复制到剪贴板",
+  "description": "生成歌词分享图片，支持保存到本地或复制到剪贴板",
   "main": "index.js",
   "permissions": [
     "player:read",

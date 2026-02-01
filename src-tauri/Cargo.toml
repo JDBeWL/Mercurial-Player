@@ -1,6 +1,6 @@
 [package]
 name = "mercurial-player"
-version = "0.2.3"
+version = "0.3.1"
 description = "A music player by JDBeWL"
 authors = ["jdbEwl"]
 license = "GPL-3.0 Lincense"

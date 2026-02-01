@@ -50,7 +50,12 @@
                 <div class="album-art-container">
                   <Transition :name="transitionDirection === 'next' ? 'album-art-slide-next' : 'album-art-slide-prev'"
                     mode="out-in">
-                    <div :key="currentTrack ? currentTrack.path : 'no-track'" class="album-art-wrapper">
+                    <div 
+                      :key="currentTrack ? currentTrack.path : 'no-track'" 
+                      class="album-art-wrapper"
+                      @mousemove="handleAlbumArtMouseMove"
+                      @mouseleave="handleAlbumArtMouseLeave"
+                    >
                       <div class="album-art" :style="{ backgroundImage: currentTrackCover }">
                         <div v-if="!currentTrack || !currentTrack.cover" class="album-art-placeholder">
                           <span class="material-symbols-rounded">album</span>
@@ -60,6 +65,7 @@
                       <button 
                         v-if="currentTrack && currentTrack.cover" 
                         class="extract-cover-btn"
+                        :class="{ 'show': showExtractButton }"
                         @click="extractCover"
                         :title="$t('player.extractCover')"
                       >
@@ -216,9 +222,36 @@ const showPlaylist = ref(false)
 const isFullscreen = ref(false)
 const isMaximized = ref(false)
 const viewMode = ref('lyrics') // 'lyrics' or 'visualizer'
+const showExtractButton = ref(false)
 
 const toggleViewMode = () => {
   viewMode.value = viewMode.value === 'lyrics' ? 'visualizer' : 'lyrics'
+}
+
+// 处理专辑封面鼠标移动事件，检测是否在右下角区域
+const handleAlbumArtMouseMove = (event) => {
+  if (!currentTrack.value || !currentTrack.value.cover) {
+    showExtractButton.value = false
+    return
+  }
+  
+  const wrapper = event.currentTarget
+  const rect = wrapper.getBoundingClientRect()
+  const x = event.clientX - rect.left
+  const y = event.clientY - rect.top
+  const width = rect.width
+  const height = rect.height
+  
+  // 定义右下角区域（右下角80x80像素区域）
+  const cornerSize = 80
+  const isInBottomRight = x >= width - cornerSize && y >= height - cornerSize
+  
+  showExtractButton.value = isInBottomRight
+}
+
+// 鼠标离开封面区域时隐藏按钮
+const handleAlbumArtMouseLeave = () => {
+  showExtractButton.value = false
 }
 
 // 提取封面功能
@@ -750,8 +783,8 @@ onUnmounted(async () => {
   height: 40px;
   border: none;
   border-radius: 50%;
-  background-color: var(--md-sys-color-surface-container);
-  color: var(--md-sys-color-on-surface);
+  background-color: color-mix(in srgb, var(--md-sys-color-primary) 75%, transparent);
+  color: var(--md-sys-color-on-primary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -759,10 +792,13 @@ onUnmounted(async () => {
   opacity: 0;
   transition: all 0.2s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
 }
 
-.album-art-wrapper:hover .extract-cover-btn {
+/* 当鼠标在右下角区域时显示按钮 */
+.extract-cover-btn.show {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .extract-cover-btn:hover {
