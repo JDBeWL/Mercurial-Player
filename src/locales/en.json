@@ -29,6 +29,7 @@
     "next": "Next",
     "volume": "Volume",
     "mute": "Mute",
+    "unmute": "Unmute",
     "shuffle": "Shuffle",
     "repeat": "Repeat",
     "repeatList": "List Repeat",
@@ -182,7 +183,16 @@
     "techWASAPI": "Windows exclusive mode audio API",
     "techWin32": "Windows system API bindings (taskbar integration)",
     "openDocs": "Open Documentation",
-    "openRepo": "Open Repository"
+    "openRepo": "Open Repository",
+    "license": "License",
+    "licenseTitle": "GNU GPLv3",
+    "licenseSubtitle": "Open Source License",
+    "licenseInfo": "This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.",
+    "licenseWarranty": "This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+    "licenseDetails": "View Full License",
+    "viewDetails": "View Details",
+    "hideDetails": "Hide Details",
+    "copyright": "Copyright © 2026 JDBeWL"
   },
   "themeSelector": {
     "chooseThemeColor": "Choose Theme Color",

@@ -45,7 +45,8 @@
       <div class="volume-control-container" @mouseenter="showVolume = true" @mouseleave="showVolume = false">
         <button 
           class="icon-button volume-button" 
-          :title="$t('controls.volume')"
+          :title="playerStore.isMuted ? $t('controls.unmute') : $t('controls.mute')"
+          @click="playerStore.toggleMute"
         >
           <span class="material-symbols-rounded">{{ getVolumeIcon() }}</span>
         </button>
@@ -147,6 +148,11 @@ const getRepeatTitle = () => {
 
 // 音量图标相关函数
 const getVolumeIcon = () => {
+  // 如果静音，显示静音图标
+  if (playerStore.isMuted) {
+    return 'volume_off'
+  }
+  
   const volume = playerStore.volume
   if (volume === 0 || volume < 0.01) {
     return 'volume_off'
@@ -215,7 +221,7 @@ onUnmounted(() => {
 .volume-slider-popup {
   position: absolute;
   bottom: calc(100% + 8px);
-  right: 0px;
+  right: 2px;
   background-color: var(--md-sys-color-surface-variant);
   border-radius: var(--md-sys-shape-corner-medium);
   padding: 8px;
@@ -223,29 +229,18 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 24px;
-  height: 110px;
-  transform-origin: bottom right;
+  width: 20px;
+  height: 120px;
   z-index: 10;
 }
 
 .volume-slider-popup .slider {
   width: 8px;
-  height: 90px;
+  height: 100px;
   position: relative;
-  background-color: var(--md-sys-color-surface-variant);
-  border-radius: 3px;
+  border-radius: 4px;
   cursor: pointer;
-  transition: background-color 0.2s ease;
-  margin: 0 auto;
-}
-
-.volume-slider-popup .slider:hover {
-  background-color: var(--md-sys-color-on-surface-variant);
-}
-
-.volume-slider-popup .slider.dragging {
-  background-color: var(--md-sys-color-primary);
+  margin: 8px auto;
 }
 
 .volume-slider-popup .slider-track {
@@ -254,7 +249,16 @@ onUnmounted(() => {
   left: 0;
   width: 100%;
   height: 100%;
-  border-radius: 3px;
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+
+.volume-slider-popup .slider:hover .slider-track {
+  background-color: rgba(0, 0, 0, 0.15);
+}
+
+.volume-slider-popup .slider.dragging .slider-track {
+  background-color: rgba(0, 0, 0, 0.2);
 }
 
 .volume-slider-popup .slider-fill {
@@ -263,8 +267,7 @@ onUnmounted(() => {
   left: 0;
   width: 100%;
   background-color: var(--md-sys-color-primary);
-  border-radius: 3px;
-  /* 移除过渡动画，让音量立即变化 */
+  border-radius: 4px;
 }
 
 .volume-slider-popup .slider-thumb {
@@ -278,7 +281,6 @@ onUnmounted(() => {
   border-radius: 50%;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   cursor: grab;
-  /* 用 margin-bottom 补偿滑柄高度的一半，让滑柄中心对齐填充条顶部 */
   margin-bottom: -7px;
 }
 
@@ -295,7 +297,6 @@ onUnmounted(() => {
   font-size: 10px;
   color: var(--md-sys-color-on-surface);
   font-weight: 500;
-  margin-top: 2px;
   text-align: center;
 }
 
@@ -308,6 +309,6 @@ onUnmounted(() => {
 .volume-fade-enter-from,
 .volume-fade-leave-to {
   opacity: 0;
-  transform: translateY(10px) scale(0.95);
+  transform: translateY(10px);
 }
 </style>

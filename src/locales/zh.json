@@ -29,6 +29,7 @@
     "next": "下一曲",
     "volume": "音量",
     "mute": "静音",
+    "unmute": "取消静音",
     "shuffle": "随机播放",
     "repeat": "循环播放",
     "repeatList": "列表循环",
@@ -182,7 +183,16 @@
     "techWASAPI": "Windows独占模式音频API",
     "techWin32": "Windows系统API绑定（任务栏集成）",
     "openDocs": "打开文档",
-    "openRepo": "打开仓库"
+    "openRepo": "打开仓库",
+    "license": "许可证",
+    "licenseTitle": "GNU GPLv3",
+    "licenseSubtitle": "开源许可证",
+    "licenseInfo": "本程序是自由软件：您可以根据自由软件基金会发布的GNU GPLv3或更高版本的条款重新分发和/或修改它。",
+    "licenseWarranty": "本程序不提供任何担保；甚至没有对适销性或特定用途适用性的隐含担保。",
+    "licenseDetails": "查看完整许可证",
+    "viewDetails": "查看详情",
+    "hideDetails": "隐藏详情",
+    "copyright": "Copyright © 2026 JDBeWL"
   },
   "themeSelector": {
     "chooseThemeColor": "选择主题颜色",

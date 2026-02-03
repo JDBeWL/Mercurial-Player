@@ -317,8 +317,8 @@ fn create_pause_icon() -> Result<HICON, String> {
         // 两个竖条
         let bar1_left = 4.0 * scale;
         let bar1_right = 5.0 * scale;
-        let bar2_left = 10.0 * scale;
-        let bar2_right = 11.0 * scale;
+        let bar2_left = 11.0 * scale;
+        let bar2_right = 12.0 * scale;
         let bar_height = 5.0 * scale;
 
         // ❚❚

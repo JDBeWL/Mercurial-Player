@@ -74,6 +74,40 @@
           </div>
         </div>
       </div>
+      <div class="settings-section">
+        <h4 class="section-title">{{ $t('config.license') }}</h4>
+        
+        <div class="license-card">
+          <button class="license-external-link" @click="openLicense" :title="$t('config.licenseDetails')">
+            <span class="material-symbols-rounded">open_in_new</span>
+          </button>
+          
+          <div class="license-content">
+            <div class="license-icon">
+              <span class="material-symbols-rounded">code</span>
+            </div>
+            
+            <div class="license-main">
+              <h3 class="license-title">{{ $t('config.licenseTitle') }}</h3>
+              <p class="license-subtitle">{{ $t('config.licenseSubtitle') }}</p>
+              <p class="license-copyright">{{ $t('config.copyright') }}</p>
+              
+              <div v-if="showLicenseDetails" class="license-legal-text">
+                <p class="license-paragraph">{{ $t('config.licenseInfo') }}</p>
+                <p class="license-paragraph">{{ $t('config.licenseWarranty') }}</p>
+              </div>
+              
+              <button 
+                class="license-details-toggle" 
+                @click="showLicenseDetails = !showLicenseDetails"
+              >
+                <span class="material-symbols-rounded">{{ showLicenseDetails ? 'expand_less' : 'expand_more' }}</span>
+                <span>{{ showLicenseDetails ? $t('config.hideDetails') : $t('config.viewDetails') }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -89,6 +123,7 @@ const { t } = useI18n()
 
 const appVersion = ref('0.0.0')
 const githubUrl = 'https://github.com/JDBeWL/Mercurial-Player'
+const showLicenseDetails = ref(false)
 
 // 技术栈分类数据
 const techCategories = computed(() => [
@@ -157,6 +192,15 @@ const openLink = async (url) => {
     await open(url)
   } catch (error) {
     logger.error('Failed to open link:', error)
+  }
+}
+
+const openLicense = async () => {
+  try {
+    // 打开 LICENSE 文件或 GitHub 上的许可证页面
+    await open('https://www.gnu.org/licenses/gpl-3.0.html')
+  } catch (error) {
+    logger.error('Failed to open license:', error)
   }
 }
 
@@ -396,6 +440,135 @@ onMounted(() => {
 }
 
 .tech-link-btn .material-symbols-rounded {
+  font-size: 18px;
+}
+
+.license-card {
+  padding: 24px;
+  background-color: var(--md-sys-color-surface-container);
+  border-radius: 16px;
+  position: relative;
+}
+
+.license-external-link {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: var(--md-sys-color-on-surface-variant);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 1;
+}
+
+.license-external-link:hover {
+  background-color: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-primary);
+}
+
+.license-external-link .material-symbols-rounded {
+  font-size: 20px;
+}
+
+.license-content {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.license-icon {
+  flex-shrink: 0;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  border-radius: 16px;
+}
+
+.license-icon .material-symbols-rounded {
+  font-size: 48px;
+}
+
+.license-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.license-title {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.license-subtitle {
+  font-size: 14px;
+  color: var(--md-sys-color-primary);
+  margin: 0;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.license-copyright {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  margin: 4px 0 0 0;
+  font-weight: 400;
+}
+
+.license-legal-text {
+  margin-top: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.license-paragraph {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--md-sys-color-on-surface-variant);
+  margin: 0;
+  opacity: 0.7;
+}
+
+.license-details-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--md-sys-color-primary);
+  transition: all 0.2s ease;
+  align-self: flex-start;
+}
+
+.license-details-toggle:hover {
+  background-color: var(--md-sys-color-surface-container-high);
+}
+
+.license-details-toggle .material-symbols-rounded {
   font-size: 18px;
 }
 </style>

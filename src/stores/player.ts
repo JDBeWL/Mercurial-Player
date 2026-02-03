@@ -96,6 +96,8 @@ interface PlayerState {
   currentTime: number
   duration: number
   volume: number
+  isMuted: boolean
+  previousVolume: number
   repeatMode: RepeatMode
   isShuffle: boolean
   lyrics: LyricLine[] | null
@@ -125,6 +127,8 @@ export const usePlayerStore = defineStore('player', {
     currentTime: 0,
     duration: 0,
     volume: 1,
+    isMuted: false,
+    previousVolume: 1,
 
     // 重复模式设置
     repeatMode: 'none',
@@ -636,14 +640,46 @@ export const usePlayerStore = defineStore('player', {
     setVolume(volume: number): void {
       const newVolume = Math.max(0, Math.min(1, volume))
       this.volume = newVolume
+      
+      // 如果设置音量大于0，取消静音状态
+      if (newVolume > 0 && this.isMuted) {
+        this.isMuted = false
+      }
+      
+      // 如果音量大于0，更新 previousVolume
+      if (newVolume > 0) {
+        this.previousVolume = newVolume
+      }
 
-      invoke('set_volume', { volume: newVolume })
+      invoke('set_volume', { volume: this.isMuted ? 0 : newVolume })
         .then(() => {
           const configStore = useConfigStore()
           configStore.audio.volume = newVolume
           configStore.saveConfigNow()
         })
         .catch(err => logger.error("Failed to set volume:", err))
+    },
+
+    toggleMute(): void {
+      if (this.isMuted) {
+        // 取消静音，恢复之前的音量
+        this.isMuted = false
+        const volumeToRestore = this.previousVolume > 0 ? this.previousVolume : 0.5
+        this.volume = volumeToRestore
+        invoke('set_volume', { volume: volumeToRestore })
+          .then(() => {
+            const configStore = useConfigStore()
+            configStore.audio.volume = volumeToRestore
+            configStore.saveConfigNow()
+          })
+          .catch(err => logger.error("Failed to unmute:", err))
+      } else {
+        // 静音，保存当前音量
+        this.previousVolume = this.volume > 0 ? this.volume : this.previousVolume
+        this.isMuted = true
+        invoke('set_volume', { volume: 0 })
+          .catch(err => logger.error("Failed to mute:", err))
+      }
     },
 
     toggleRepeat(): void {
