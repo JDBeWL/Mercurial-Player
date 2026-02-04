@@ -1,5 +1,5 @@
 <template>
-    <div class="lyrics-wrapper" :class="`lyrics-style-${configStore.general.lyricsStyle}`">
+    <div class="lyrics-wrapper" :class="`lyrics-style-${configStore.lyrics?.lyricsStyle || 'modern'}`">
         <div class="lyrics-display" ref="containerRef" @scroll="handleScroll" @mouseenter="isHovering = true" @mouseleave="isHovering = false">
             <div v-if="loading" class="loading">{{ $t('lyrics.loading') }}</div>
             
@@ -23,12 +23,12 @@
                 <div class="lyrics" v-for="(line, index) in lyrics" :key="index" :class="{ active: isActive(index) }"
                     :style="{
                         // 根据配置的对齐方式，动态调整缩放锚点 (左/中/右)，防止放大时位移
-                        '--align-origin': configStore.general.lyricsAlignment === 'right' ? 'right center' :
-                            configStore.general.lyricsAlignment === 'center' ? 'center center' :
+                        '--align-origin': (configStore.lyrics?.lyricsAlignment || 'center') === 'right' ? 'right center' :
+                            (configStore.lyrics?.lyricsAlignment || 'center') === 'center' ? 'center center' :
                                 'left center',
                         // 应用用户配置的字体和对齐
-                        textAlign: configStore.general.lyricsAlignment,
-                        fontFamily: configStore.general.lyricsFontFamily
+                        textAlign: configStore.lyrics?.lyricsAlignment || 'center',
+                        fontFamily: configStore.lyrics?.lyricsFontFamily || 'Roboto'
                     }" @click="handleLyricClick(line.time, index)">
                     <template v-if="line.karaoke && isActive(index)">
                         <div class="first-line karaoke-line"><span v-for="(word, idx) in line.words" :key="idx" class="karaoke-text"

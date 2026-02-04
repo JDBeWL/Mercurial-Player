@@ -107,6 +107,7 @@
     "general": "通用",
     "generalSettings": "通用设置",
     "language": "语言",
+    "configSettings": "配置设置",
     "startupLoadLastConfig": "启动时加载上次配置",
     "autoSaveConfig": "自动保存配置",
     "showAudioInfo": "显示音频信息",

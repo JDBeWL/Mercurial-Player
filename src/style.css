@@ -549,6 +549,52 @@ ThemeSelector { -webkit-app-region: no-drag; }
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--md-sys-color-outline); }
 
+/* Material Design 3 Select Dropdown Styles */
+select.md3-select option {
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 400;
+  font-family: 'Roboto', sans-serif;
+  color: var(--md-sys-color-on-surface);
+  background-color: var(--md-sys-color-surface-container);
+  border: none;
+  min-height: 48px;
+  line-height: 24px;
+  transition: background-color 0.15s cubic-bezier(0.2, 0, 0, 1);
+}
+
+select.md3-select option:hover,
+select.md3-select option:checked {
+  background-color: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+select.md3-select option:focus {
+  background-color: var(--md-sys-color-surface-container-highest);
+}
+
+/* 针对不同浏览器的下拉菜单样式优化 */
+select.md3-select {
+  background-color: var(--md-sys-color-surface-container-low);
+}
+
+select.md3-select:focus {
+  background-color: var(--md-sys-color-surface-container-low);
+}
+
+/* 改进下拉箭头图标，使其能够根据主题变化 */
+select.md3-select {
+  --dropdown-icon-color: var(--md-sys-color-on-surface-variant);
+}
+
+select.md3-select:hover {
+  --dropdown-icon-color: var(--md-sys-color-on-surface);
+}
+
+select.md3-select:focus {
+  --dropdown-icon-color: var(--md-sys-color-primary);
+}
+
 /* 玻璃态工具类 */
 .glass {
   background: rgba(var(--md-sys-color-surface-rgb, 255, 255, 255), var(--glass-opacity));

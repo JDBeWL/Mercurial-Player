@@ -4,7 +4,10 @@
       <h3>{{ $t('config.generalSettings') }}</h3>
     </div>
     
+    <!-- 配置设置 -->
     <div class="settings-section">
+      <h4 class="section-title">{{ $t('config.configSettings') }}</h4>
+      
       <div class="setting-item" @click="toggleSetting('startupLoadLastConfig')">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.startupLoadLastConfig') }}</span>
@@ -20,16 +23,6 @@
           <span class="setting-label">{{ $t('config.autoSaveConfig') }}</span>
         </div>
         <div class="switch" :class="{ active: configStore.general.autoSaveConfig }">
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
-      </div>
-      
-      <div class="setting-item" @click="toggleSetting('showAudioInfo')">
-        <div class="setting-info">
-          <span class="setting-label">{{ $t('config.showAudioInfo') }}</span>
-        </div>
-        <div class="switch" :class="{ active: configStore.general.showAudioInfo }">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
@@ -79,44 +72,25 @@
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.display') || '显示' }}</h4>
       
+      <div class="setting-item" @click="toggleSetting('showAudioInfo')">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.showAudioInfo') }}</span>
+        </div>
+        <div class="switch" :class="{ active: configStore.general.showAudioInfo }">
+          <div class="switch-track"></div>
+          <div class="switch-handle"></div>
+        </div>
+      </div>
+      
       <div class="setting-item select">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.language') }}</span>
         </div>
-        <select v-model="configStore.general.language" @change="handleLanguageChange" class="md3-select">
-          <option value="zh">中文</option>
-          <option value="en">English</option>
-        </select>
-      </div>
-      
-      <div class="setting-item select">
-        <div class="setting-info">
-          <span class="setting-label">{{ $t('config.lyricsAlignment') }}</span>
-        </div>
-        <select v-model="configStore.general.lyricsAlignment" @change="saveConfig" class="md3-select">
-          <option value="left">{{ $t('config.alignLeft') }}</option>
-          <option value="center">{{ $t('config.alignCenter') }}</option>
-          <option value="right">{{ $t('config.alignRight') }}</option>
-        </select>
-      </div>
-      
-      <div class="setting-item select">
-        <div class="setting-info">
-          <span class="setting-label">{{ $t('config.lyricsFontFamily') }}</span>
-        </div>
-        <select v-model="configStore.general.lyricsFontFamily" @change="saveConfig" class="md3-select">
-          <option v-for="font in systemFonts" :key="font" :value="font">{{ font }}</option>
-        </select>
-      </div>
-      
-      <div class="setting-item select">
-        <div class="setting-info">
-          <span class="setting-label">{{ $t('config.lyricsStyle') }}</span>
-        </div>
-        <select v-model="configStore.general.lyricsStyle" @change="saveConfig" class="md3-select">
-          <option value="modern">{{ $t('config.lyricsStyleModern') }}</option>
-          <option value="classic">{{ $t('config.lyricsStyleClassic') }}</option>
-        </select>
+        <MD3Select
+          v-model="configStore.general.language"
+          :options="languageOptions"
+          @change="handleLanguageChange"
+        />
       </div>
     </div>
     
@@ -125,23 +99,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useConfigStore } from '../../stores/config'
-import { invoke } from '@tauri-apps/api/core'
 import { setLocale } from '../../i18n'
 import logger from '../../utils/logger'
+import MD3Select from '../MD3Select.vue'
 
 const configStore = useConfigStore()
-const systemFonts = ref(['system-ui', 'sans-serif', 'serif', 'monospace'])
 
-const loadSystemFonts = async () => {
-  try {
-    const fonts = await invoke('get_system_fonts')
-    systemFonts.value = ['sans-serif', 'serif', 'monospace', ...fonts]
-  } catch (error) {
-    logger.error('Failed to load system fonts:', error)
-  }
-}
+const languageOptions = computed(() => [
+  { value: 'zh', label: '中文' },
+  { value: 'en', label: 'English' }
+])
 
 const saveConfig = async () => {
   try {
@@ -184,9 +153,6 @@ const handleLanguageChange = async () => {
   }
 }
 
-onMounted(() => {
-  loadSystemFonts()
-})
 </script>
 
 <style scoped>
@@ -292,33 +258,6 @@ onMounted(() => {
   background-color: var(--md-sys-color-on-primary);
 }
 
-.md3-select {
-  min-width: 160px;
-  padding: 12px 16px;
-  padding-right: 40px;
-  border: 1px solid var(--md-sys-color-outline);
-  border-radius: 8px;
-  background-color: transparent;
-  color: var(--md-sys-color-on-surface);
-  font-size: 14px;
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath fill='%23666' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  transition: border-color 0.2s ease, outline 0.2s ease;
-  outline: 1px solid transparent;
-  outline-offset: -1px;
-}
-
-.md3-select:hover {
-  border-color: var(--md-sys-color-on-surface);
-}
-
-.md3-select:focus {
-  outline: 1px solid var(--md-sys-color-primary);
-  border-color: var(--md-sys-color-primary);
-}
 
 /* 设置描述文字 */
 .setting-desc {

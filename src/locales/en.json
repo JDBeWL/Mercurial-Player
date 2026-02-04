@@ -107,6 +107,7 @@
     "general": "General",
     "generalSettings": "General Settings",
     "language": "Language",
+    "configSettings": "Configuration Settings",
     "startupLoadLastConfig": "Load last configuration on startup",
     "autoSaveConfig": "Auto save configuration",
     "showAudioInfo": "Show Audio Info",

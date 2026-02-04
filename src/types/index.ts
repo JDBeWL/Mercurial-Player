@@ -88,9 +88,6 @@ export interface GeneralConfig {
   startupLoadLastConfig: boolean
   autoSaveConfig: boolean
   showAudioInfo: boolean
-  lyricsAlignment: string
-  lyricsFontFamily: string
-  lyricsStyle: string
 }
 
 export interface LyricsConfig {
@@ -98,6 +95,9 @@ export interface LyricsConfig {
   autoSaveOnlineLyrics: boolean
   preferTranslation: boolean
   onlineSource: string
+  lyricsAlignment: string
+  lyricsFontFamily: string
+  lyricsStyle: string
 }
 
 export interface UIConfig {

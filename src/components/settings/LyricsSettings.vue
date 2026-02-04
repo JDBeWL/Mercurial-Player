@@ -40,14 +40,101 @@
         </div>
       </div>
     </div>
+    
+    <div class="settings-section">
+      <h4 class="section-title">{{ $t('config.display') || '显示' }}</h4>
+      
+      <div class="setting-item select">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.lyricsAlignment') }}</span>
+        </div>
+        <MD3Select
+          v-model="lyricsConfig.lyricsAlignment"
+          :options="alignmentOptions"
+          @change="saveConfig"
+        />
+      </div>
+      
+      <div class="setting-item select">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.lyricsFontFamily') }}</span>
+        </div>
+        <MD3Select
+          v-model="lyricsConfig.lyricsFontFamily"
+          :options="fontOptions"
+          @change="saveConfig"
+        />
+      </div>
+      
+      <div class="setting-item select">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.lyricsStyle') }}</span>
+        </div>
+        <MD3Select
+          v-model="lyricsConfig.lyricsStyle"
+          :options="styleOptions"
+          @change="saveConfig"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
+import { ref, computed, onMounted } from 'vue'
 import { useConfigStore } from '../../stores/config'
+import { invoke } from '@tauri-apps/api/core'
+import { useI18n } from 'vue-i18n'
 import logger from '../../utils/logger'
+import MD3Select from '../MD3Select.vue'
 
 const configStore = useConfigStore()
+const { t } = useI18n()
+const systemFonts = ref(['system-ui', 'sans-serif', 'serif', 'monospace'])
+
+const alignmentOptions = computed(() => [
+  { value: 'left', label: t('config.alignLeft') },
+  { value: 'center', label: t('config.alignCenter') },
+  { value: 'right', label: t('config.alignRight') }
+])
+
+const fontOptions = computed(() => 
+  systemFonts.value.map(font => ({ value: font, label: font }))
+)
+
+const styleOptions = computed(() => [
+  { value: 'modern', label: t('config.lyricsStyleModern') },
+  { value: 'classic', label: t('config.lyricsStyleClassic') }
+])
+
+const lyricsConfig = computed({
+  get: () => {
+    if (!configStore.lyrics) {
+      configStore.lyrics = {
+        enableOnlineFetch: false,
+        autoSaveOnlineLyrics: true,
+        preferTranslation: true,
+        onlineSource: 'netease',
+        lyricsAlignment: 'center',
+        lyricsFontFamily: 'Roboto',
+        lyricsStyle: 'modern'
+      }
+    }
+    return configStore.lyrics
+  },
+  set: (value) => {
+    configStore.lyrics = value
+  }
+})
+
+const loadSystemFonts = async () => {
+  try {
+    const fonts = await invoke('get_system_fonts')
+    systemFonts.value = ['sans-serif', 'serif', 'monospace', ...fonts]
+  } catch (error) {
+    logger.error('Failed to load system fonts:', error)
+  }
+}
 
 const saveConfig = async () => {
   try {
@@ -63,12 +150,19 @@ const toggleSetting = async (key) => {
       enableOnlineFetch: false,
       autoSaveOnlineLyrics: true,
       preferTranslation: true,
-      onlineSource: 'netease'
+      onlineSource: 'netease',
+      lyricsAlignment: 'center',
+      lyricsFontFamily: 'Roboto',
+      lyricsStyle: 'modern'
     }
   }
   configStore.lyrics[key] = !configStore.lyrics[key]
   await saveConfig()
 }
+
+onMounted(() => {
+  loadSystemFonts()
+})
 </script>
 
 <style scoped>
@@ -116,6 +210,10 @@ const toggleSetting = async (key) => {
 
 .setting-item:hover {
   background-color: var(--md-sys-color-surface-container);
+}
+
+.setting-item.select {
+  cursor: default;
 }
 
 .setting-info {
@@ -176,4 +274,5 @@ const toggleSetting = async (key) => {
   height: 24px;
   background-color: var(--md-sys-color-on-primary);
 }
+
 </style>

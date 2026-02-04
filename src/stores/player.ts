@@ -4,7 +4,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import FileUtils from '../utils/fileUtils'
 import LyricsParser from '../utils/lyricsParser'
 import logger from '../utils/logger'
-import { ErrorType, ErrorSeverity, handlePromise } from '../utils/errorHandler'
+import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
+import { classifyAudioInvokeError } from '../utils/audioErrorClassifier'
 import { useConfigStore } from './config'
 import type { Track, AudioInfo, LyricLine, RepeatMode, CacheItem } from '@/types'
 
@@ -415,27 +416,7 @@ export const usePlayerStore = defineStore('player', {
           setTimeout(() => reject(new Error('播放超时')), 5000)
         })
 
-        const result = await handlePromise(
-          Promise.race([playPromise, timeoutPromise]),
-          {
-            type: ErrorType.AUDIO_PLAYBACK_ERROR,
-            severity: ErrorSeverity.HIGH,
-            context: { trackPath: track.path, trackName: track.name },
-            showToUser: true
-          }
-        )
-
-        if (!result.success) {
-          logger.error('Failed to play track:', result.error)
-          this.isPlaying = false
-          this._isLoading = false
-
-          const currentIdx = this.playlist.findIndex(t => t.path === track.path)
-          if (this.playlist.length > 1 && currentIdx < this.playlist.length - 1) {
-            setTimeout(() => this.nextTrack(), 100)
-          }
-          return
-        }
+        await Promise.race([playPromise, timeoutPromise])
 
         this.isPlaying = true
         this.startStatusPolling()
@@ -444,8 +425,19 @@ export const usePlayerStore = defineStore('player', {
         this.loadLyrics(track.path).catch(err => {
           logger.debug('Lyrics load error:', err)
         })
-      } catch (error) {
-        logger.error('Playback error:', error)
+      } catch (err) {
+        const type = classifyAudioInvokeError(err)
+        const handled = errorHandler.handle(
+          err instanceof Error ? err : new Error(String(err)),
+          {
+            type,
+            severity: ErrorSeverity.HIGH,
+            context: { trackPath: track.path, trackName: track.name },
+            showToUser: true,
+          }
+        )
+
+        logger.error('Failed to play track:', handled)
         this.isPlaying = false
 
         const currentIdx = this.playlist.findIndex(t => t.path === track.path)

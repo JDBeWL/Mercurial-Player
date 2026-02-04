@@ -39,19 +39,27 @@
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.separator') }}</span>
         </div>
-        <select v-model="configStore.titleExtraction.separator" @change="saveConfig" class="md3-select">
-          <option v-for="sep in configStore.validSeparators" :key="sep" :value="sep">{{ sep }}</option>
-        </select>
+        <MD3Select
+          v-model="configStore.titleExtraction.separator"
+          :options="separatorOptions"
+          @change="saveConfig"
+        />
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useConfigStore } from '../../stores/config'
 import logger from '../../utils/logger'
+import MD3Select from '../MD3Select.vue'
 
 const configStore = useConfigStore()
+
+const separatorOptions = computed(() => 
+  configStore.validSeparators.map(sep => ({ value: sep, label: sep }))
+)
 
 const saveConfig = async () => {
   try {
@@ -161,31 +169,4 @@ const toggleSetting = async (key) => {
   background-color: var(--md-sys-color-on-primary);
 }
 
-.md3-select {
-  min-width: 160px;
-  padding: 12px 16px;
-  padding-right: 40px;
-  border: 1px solid var(--md-sys-color-outline);
-  border-radius: 8px;
-  background-color: transparent;
-  color: var(--md-sys-color-on-surface);
-  font-size: 14px;
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath fill='%23666' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  transition: border-color 0.2s ease, outline 0.2s ease;
-  outline: 1px solid transparent;
-  outline-offset: -1px;
-}
-
-.md3-select:hover {
-  border-color: var(--md-sys-color-on-surface);
-}
-
-.md3-select:focus {
-  outline: 1px solid var(--md-sys-color-primary);
-  border-color: var(--md-sys-color-primary);
-}
 </style>

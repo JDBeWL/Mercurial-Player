@@ -105,9 +105,6 @@ export const useConfigStore = defineStore('config', {
       startupLoadLastConfig: true,
       autoSaveConfig: true,
       showAudioInfo: true,
-      lyricsAlignment: 'center',
-      lyricsFontFamily: 'Roboto',
-      lyricsStyle: 'modern',
     },
 
     // 歌词设置
@@ -116,6 +113,9 @@ export const useConfigStore = defineStore('config', {
       autoSaveOnlineLyrics: true,
       preferTranslation: true,
       onlineSource: 'netease',
+      lyricsAlignment: 'center',
+      lyricsFontFamily: 'Roboto',
+      lyricsStyle: 'modern',
     },
 
     // UI设置
@@ -184,6 +184,54 @@ export const useConfigStore = defineStore('config', {
       )
 
       if (configResult.success && configResult.data) {
+        // 迁移旧的歌词设置从 general 到 lyrics
+        if (configResult.data.general) {
+          const general = configResult.data.general as any
+          if (general.lyricsAlignment || general.lyricsFontFamily || general.lyricsStyle) {
+            // 如果 lyrics 配置不存在，创建它
+            if (!configResult.data.lyrics) {
+              configResult.data.lyrics = {
+                enableOnlineFetch: false,
+                autoSaveOnlineLyrics: true,
+                preferTranslation: true,
+                onlineSource: 'netease',
+                lyricsAlignment: 'center',
+                lyricsFontFamily: 'Roboto',
+                lyricsStyle: 'modern'
+              }
+            }
+            
+            // 迁移歌词设置
+            if (general.lyricsAlignment) {
+              configResult.data.lyrics.lyricsAlignment = general.lyricsAlignment
+              delete general.lyricsAlignment
+            }
+            if (general.lyricsFontFamily) {
+              configResult.data.lyrics.lyricsFontFamily = general.lyricsFontFamily
+              delete general.lyricsFontFamily
+            }
+            if (general.lyricsStyle) {
+              configResult.data.lyrics.lyricsStyle = general.lyricsStyle
+              delete general.lyricsStyle
+            }
+            
+            // 确保迁移后的配置有默认值
+            if (!configResult.data.lyrics.lyricsAlignment) {
+              configResult.data.lyrics.lyricsAlignment = 'center'
+            }
+            if (!configResult.data.lyrics.lyricsFontFamily) {
+              configResult.data.lyrics.lyricsFontFamily = 'Roboto'
+            }
+            if (!configResult.data.lyrics.lyricsStyle) {
+              configResult.data.lyrics.lyricsStyle = 'modern'
+            }
+            
+            logger.info('Migrated lyrics settings from general to lyrics config')
+            // 标记为需要保存，以便保存迁移后的配置
+            this._markDirty()
+          }
+        }
+        
         this.$patch(configResult.data)
         this._lastSavedConfig = JSON.parse(JSON.stringify(this._getSaveableConfig()))
 

@@ -29,10 +29,11 @@
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.sortOrder') }}</span>
         </div>
-        <select v-model="configStore.playlist.sortOrder" @change="saveConfig" class="md3-select">
-          <option value="asc">A-Z (升序)</option>
-          <option value="desc">Z-A (降序)</option>
-        </select>
+        <MD3Select
+          v-model="configStore.playlist.sortOrder"
+          :options="sortOrderOptions"
+          @change="saveConfig"
+        />
       </div>
       
       <div class="setting-item input">
@@ -52,10 +53,17 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useConfigStore } from '../../stores/config'
 import logger from '../../utils/logger'
+import MD3Select from '../MD3Select.vue'
 
 const configStore = useConfigStore()
+
+const sortOrderOptions = computed(() => [
+  { value: 'asc', label: 'A-Z (升序)' },
+  { value: 'desc', label: 'Z-A (降序)' }
+])
 
 const saveConfig = async () => {
   try {
@@ -166,54 +174,33 @@ const toggleSetting = async (key) => {
   background-color: var(--md-sys-color-on-primary);
 }
 
-.md3-select {
-  min-width: 160px;
-  padding: 12px 16px;
-  padding-right: 40px;
-  border: 1px solid var(--md-sys-color-outline);
-  border-radius: 8px;
-  background-color: transparent;
-  color: var(--md-sys-color-on-surface);
-  font-size: 14px;
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath fill='%23666' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  transition: border-color 0.2s ease, outline 0.2s ease;
-  outline: 1px solid transparent;
-  outline-offset: -1px;
-}
-
-.md3-select:hover {
-  border-color: var(--md-sys-color-on-surface);
-}
-
-.md3-select:focus {
-  outline: 1px solid var(--md-sys-color-primary);
-  border-color: var(--md-sys-color-primary);
-}
 
 .md3-input {
   min-width: 200px;
   padding: 12px 16px;
   border: 1px solid var(--md-sys-color-outline);
-  border-radius: 8px;
-  background-color: transparent;
+  border-radius: var(--md-sys-shape-corner-small);
+  background-color: var(--md-sys-color-surface-container-low);
   color: var(--md-sys-color-on-surface);
   font-size: 14px;
-  transition: border-color 0.2s ease, outline 0.2s ease;
-  outline: 1px solid transparent;
-  outline-offset: -1px;
+  font-weight: 400;
+  font-family: 'Roboto', sans-serif;
+  min-height: 48px;
+  box-sizing: border-box;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  outline: none;
+  box-shadow: none;
 }
 
 .md3-input:hover {
   border-color: var(--md-sys-color-on-surface);
+  background-color: var(--md-sys-color-surface-container);
 }
 
 .md3-input:focus {
-  outline: 1px solid var(--md-sys-color-primary);
   border-color: var(--md-sys-color-primary);
+  background-color: var(--md-sys-color-surface-container);
+  box-shadow: 0 0 0 1px var(--md-sys-color-primary);
 }
 
 .md3-input::placeholder {
