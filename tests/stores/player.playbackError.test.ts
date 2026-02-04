@@ -101,7 +101,9 @@ describe('usePlayerStore playTrack error classification', () => {
     await store.playTrack(track)
 
     expect(handleSpy).toHaveBeenCalled()
-    const [handledError, options] = handleSpy.mock.calls.at(-1) || []
+    const lastCall = handleSpy.mock.calls[handleSpy.mock.calls.length - 1] || []
+    const handledError = lastCall[0]
+    const options = lastCall[1]
     expect((handledError as Error).message).toBe(err instanceof Error ? err.message : String(err))
     expect(options?.type).toBe(expectedType)
   }
