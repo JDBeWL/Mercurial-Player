@@ -131,7 +131,7 @@
     "audioDeviceSettings": "音频设备",
     "defaultDevice": "默认",
     "exclusiveMode": "独占模式",
-    "exclusiveModeDesc": "使用WASAPI独占模式直接访问音频设备，获得最佳音质",
+    "exclusiveModeDesc": "使用WASAPI独占模式直接访问音频设备",
     "exclusiveModePlatformNotSupported": "独占模式仅在 Windows 平台支持，当前平台不支持此功能",
     "exclusiveModeWarning": "启用此模式时其他应用程序将无法使用该音频设备",
     "exclusiveModeStatus": {

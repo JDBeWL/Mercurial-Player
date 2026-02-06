@@ -31,23 +31,46 @@ pub fn get_system_info() -> Result<HashMap<String, String>, String> {
 /// 获取系统可用的字体列表
 #[command]
 pub fn get_system_fonts() -> Result<Vec<String>, String> {
-    let mut fonts = vec![
-        "system-ui".to_string(),
-        "Roboto".to_string(),
-        "Arial".to_string(),
-        "Helvetica".to_string(),
-        "Times New Roman".to_string(),
-        "Noto Sans".to_string(),
-        "Segoe UI".to_string(),
-        "PingFang SC".to_string(),
-        "Microsoft YaHei".to_string(),
-        "Consolas".to_string(),
-    ];
-
-    fonts.sort();
-    fonts.dedup();
-
-    Ok(fonts)
+    // 尝试获取真实的系统字体
+    match super::fonts::get_system_fonts() {
+        Ok(mut fonts) => {
+            // 添加一些通用的 Web 字体作为后备
+            let fallback_fonts = vec![
+                "system-ui".to_string(),
+                "sans-serif".to_string(),
+                "serif".to_string(),
+                "monospace".to_string(),
+            ];
+            
+            // 合并并去重
+            fonts.extend(fallback_fonts);
+            fonts.sort();
+            fonts.dedup();
+            
+            Ok(fonts)
+        }
+        Err(e) => {
+            // 如果获取系统字体失败，返回一些常见字体作为后备
+            eprintln!("Failed to get system fonts: {e}");
+            Ok(vec![
+                "system-ui".to_string(),
+                "sans-serif".to_string(),
+                "serif".to_string(),
+                "monospace".to_string(),
+                "Arial".to_string(),
+                "Helvetica".to_string(),
+                "Times New Roman".to_string(),
+                "Courier New".to_string(),
+                "Verdana".to_string(),
+                "Georgia".to_string(),
+                "Palatino".to_string(),
+                "Garamond".to_string(),
+                "Comic Sans MS".to_string(),
+                "Trebuchet MS".to_string(),
+                "Impact".to_string(),
+            ])
+        }
+    }
 }
 
 /// 设置迷你模式

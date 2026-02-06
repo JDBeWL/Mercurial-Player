@@ -5,31 +5,31 @@
     </div>
     
     <div class="settings-section">
-      <div class="setting-item" @click="toggleSetting('preferMetadata')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.preferMetadata') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.titleExtraction.preferMetadata }">
+        <div class="switch" :class="{ active: configStore.titleExtraction.preferMetadata }" @click="toggleSetting('preferMetadata')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
       
-      <div class="setting-item" @click="toggleSetting('hideFileExtension')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.hideFileExtension') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.titleExtraction.hideFileExtension }">
+        <div class="switch" :class="{ active: configStore.titleExtraction.hideFileExtension }" @click="toggleSetting('hideFileExtension')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
       
-      <div class="setting-item" @click="toggleSetting('parseArtistTitle')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.parseArtistTitle') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.titleExtraction.parseArtistTitle }">
+        <div class="switch" :class="{ active: configStore.titleExtraction.parseArtistTitle }" @click="toggleSetting('parseArtistTitle')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
@@ -105,16 +105,11 @@ const toggleSetting = async (key) => {
   padding: 12px 16px;
   margin-bottom: 2px;
   border-radius: 12px;
-  cursor: pointer;
   transition: background-color 0.2s ease;
 }
 
 .setting-item:hover {
   background-color: var(--md-sys-color-surface-container);
-}
-
-.setting-item.select {
-  cursor: default;
 }
 
 .setting-info {
@@ -132,6 +127,7 @@ const toggleSetting = async (key) => {
   width: 52px;
   height: 32px;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .switch-track {

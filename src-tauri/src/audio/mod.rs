@@ -5,6 +5,7 @@
 pub mod commands;
 pub mod decoder;
 pub mod device;
+pub mod device_monitor;
 pub mod playback;
 
 #[cfg(windows)]
@@ -13,6 +14,7 @@ pub mod wasapi;
 // 重新导出常用类型
 pub use decoder::{LockFreeSymphoniaSource, SymphoniaDecoder, SymphoniaSource};
 pub use device::AudioDeviceInfo;
+pub use device_monitor::{DeviceChangeEvent, DeviceMonitor};
 pub use playback::{PlaybackStatus, VisualizationSource};
 
 #[cfg(windows)]

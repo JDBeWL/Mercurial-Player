@@ -7,34 +7,34 @@
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.onlineLyrics') || '在线歌词' }}</h4>
       
-      <div class="setting-item" @click="toggleSetting('enableOnlineFetch')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.enableOnlineFetch') }}</span>
           <span class="setting-description">{{ $t('config.enableOnlineFetchDesc') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.lyrics?.enableOnlineFetch }">
+        <div class="switch" :class="{ active: configStore.lyrics?.enableOnlineFetch }" @click="toggleSetting('enableOnlineFetch')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
       
-      <div class="setting-item" @click="toggleSetting('autoSaveOnlineLyrics')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.autoSaveOnlineLyrics') }}</span>
           <span class="setting-description">{{ $t('config.autoSaveOnlineLyricsDesc') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.lyrics?.autoSaveOnlineLyrics }">
+        <div class="switch" :class="{ active: configStore.lyrics?.autoSaveOnlineLyrics }" @click="toggleSetting('autoSaveOnlineLyrics')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
       
-      <div class="setting-item" @click="toggleSetting('preferTranslation')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.preferTranslation') }}</span>
           <span class="setting-description">{{ $t('config.preferTranslationDesc') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.lyrics?.preferTranslation }">
+        <div class="switch" :class="{ active: configStore.lyrics?.preferTranslation }" @click="toggleSetting('preferTranslation')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
@@ -90,7 +90,7 @@ import MD3Select from '../MD3Select.vue'
 
 const configStore = useConfigStore()
 const { t } = useI18n()
-const systemFonts = ref(['system-ui', 'sans-serif', 'serif', 'monospace'])
+const systemFonts = ref([])
 
 const alignmentOptions = computed(() => [
   { value: 'left', label: t('config.alignLeft') },
@@ -98,9 +98,13 @@ const alignmentOptions = computed(() => [
   { value: 'right', label: t('config.alignRight') }
 ])
 
-const fontOptions = computed(() => 
-  systemFonts.value.map(font => ({ value: font, label: font }))
-)
+const fontOptions = computed(() => {
+  // 始终包含 Roboto 作为默认选项
+  const fonts = ['Roboto', 'sans-serif', 'serif', 'monospace', ...systemFonts.value]
+  // 去重
+  const uniqueFonts = [...new Set(fonts)]
+  return uniqueFonts.map(font => ({ value: font, label: font }))
+})
 
 const styleOptions = computed(() => [
   { value: 'modern', label: t('config.lyricsStyleModern') },
@@ -109,6 +113,7 @@ const styleOptions = computed(() => [
 
 const lyricsConfig = computed({
   get: () => {
+    // 确保 lyrics 配置存在且包含所有必需字段
     if (!configStore.lyrics) {
       configStore.lyrics = {
         enableOnlineFetch: false,
@@ -118,6 +123,17 @@ const lyricsConfig = computed({
         lyricsAlignment: 'center',
         lyricsFontFamily: 'Roboto',
         lyricsStyle: 'modern'
+      }
+    } else {
+      // 确保所有字段都存在
+      if (!configStore.lyrics.lyricsAlignment) {
+        configStore.lyrics.lyricsAlignment = 'center'
+      }
+      if (!configStore.lyrics.lyricsFontFamily) {
+        configStore.lyrics.lyricsFontFamily = 'Roboto'
+      }
+      if (!configStore.lyrics.lyricsStyle) {
+        configStore.lyrics.lyricsStyle = 'modern'
       }
     }
     return configStore.lyrics
@@ -130,9 +146,14 @@ const lyricsConfig = computed({
 const loadSystemFonts = async () => {
   try {
     const fonts = await invoke('get_system_fonts')
-    systemFonts.value = ['sans-serif', 'serif', 'monospace', ...fonts]
+    // 过滤掉已经在默认列表中的字体
+    const defaultFonts = ['Roboto', 'sans-serif', 'serif', 'monospace']
+    systemFonts.value = fonts.filter(font => !defaultFonts.includes(font))
+    logger.info(`Loaded ${systemFonts.value.length} system fonts`)
   } catch (error) {
     logger.error('Failed to load system fonts:', error)
+    // 失败时使用空数组，仍然可以使用默认字体
+    systemFonts.value = []
   }
 }
 
@@ -145,6 +166,7 @@ const saveConfig = async () => {
 }
 
 const toggleSetting = async (key) => {
+  // 确保 lyrics 配置存在
   if (!configStore.lyrics) {
     configStore.lyrics = {
       enableOnlineFetch: false,
@@ -204,16 +226,11 @@ onMounted(() => {
   padding: 12px 16px;
   margin-bottom: 2px;
   border-radius: 12px;
-  cursor: pointer;
   transition: background-color 0.2s ease;
 }
 
 .setting-item:hover {
   background-color: var(--md-sys-color-surface-container);
-}
-
-.setting-item.select {
-  cursor: default;
 }
 
 .setting-info {
@@ -238,6 +255,7 @@ onMounted(() => {
   width: 52px;
   height: 32px;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .switch-track {

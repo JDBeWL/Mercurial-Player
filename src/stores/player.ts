@@ -10,7 +10,7 @@ import { useConfigStore } from './config'
 import type { Track, AudioInfo, LyricLine, RepeatMode, CacheItem } from '@/types'
 
 /**
- * 简单的 LRU 缓存实现
+ * 简单的LRU缓存实现
  */
 class LRUCache<T> {
   private maxSize: number
@@ -117,6 +117,10 @@ interface PlayerState {
   _taskbarPreviousUnlisten: UnlistenFn | null
   _taskbarPlayPauseUnlisten: UnlistenFn | null
   _taskbarNextUnlisten: UnlistenFn | null
+  _deviceRemovedUnlisten: UnlistenFn | null
+  _deviceSwitchRequiredUnlisten: UnlistenFn | null
+  _noDeviceAvailableUnlisten: UnlistenFn | null
+  _deviceDefaultChangedUnlisten: UnlistenFn | null
 }
 
 export const usePlayerStore = defineStore('player', {
@@ -170,6 +174,10 @@ export const usePlayerStore = defineStore('player', {
     _taskbarPreviousUnlisten: null,
     _taskbarPlayPauseUnlisten: null,
     _taskbarNextUnlisten: null,
+    _deviceRemovedUnlisten: null,
+    _deviceSwitchRequiredUnlisten: null,
+    _noDeviceAvailableUnlisten: null,
+    _deviceDefaultChangedUnlisten: null,
   }),
 
   getters: {
@@ -265,6 +273,7 @@ export const usePlayerStore = defineStore('player', {
       this._setupTrackEndedListener()
       this._setupPositionListener()
       this._setupTaskbarListeners()
+      this._setupDeviceListeners()
       this._startCleanupTask()
 
       logger.info('Player store initialized.')
@@ -322,6 +331,125 @@ export const usePlayerStore = defineStore('player', {
         logger.info('Taskbar listeners setup complete')
       } catch (err) {
         logger.error('Failed to setup taskbar listeners:', err)
+      }
+    },
+
+    async _setupDeviceListeners(): Promise<void> {
+      try {
+        // 监听设备移除事件
+        this._deviceRemovedUnlisten = await listen<{ eventType: string; deviceName: string | null }>('device-removed', (event) => {
+          if (this._isDestroyed) return
+          const deviceName = event.payload?.deviceName
+          logger.warn(`Audio device removed: ${deviceName}`)
+        })
+
+        // 监听设备切换请求事件
+        this._deviceSwitchRequiredUnlisten = await listen<{ eventType: string; deviceName: string | null }>('device-switch-required', async (event) => {
+          if (this._isDestroyed) return
+          const deviceName = event.payload?.deviceName
+          if (!deviceName) return
+
+          logger.info(`Switching to fallback device: ${deviceName}`)
+          
+          try {
+            const currentTime = this.currentTime
+            await invoke('set_audio_device', { 
+              deviceName, 
+              currentTime: this.isPlaying ? currentTime : null 
+            })
+            
+            logger.info(`Successfully switched to fallback device: ${deviceName}`)
+            
+            // 显示成功通知
+            errorHandler.handle(
+              new Error(`Device switched to ${deviceName}`),
+              {
+                type: ErrorType.AUDIO_DEVICE_ERROR,
+                severity: ErrorSeverity.LOW,
+                context: { deviceName, action: 'switch-fallback-success' },
+                showToUser: true,
+                userMessage: `音频设备已断开，已自动切换到: ${deviceName}`
+              }
+            )
+          } catch (err) {
+            errorHandler.handle(
+              err instanceof Error ? err : new Error(String(err)),
+              {
+                type: ErrorType.AUDIO_DEVICE_ERROR,
+                severity: ErrorSeverity.HIGH,
+                context: { deviceName, action: 'switch-fallback' },
+                showToUser: true,
+                userMessage: `音频设备已断开，切换到备用设备失败: ${deviceName}`
+              }
+            )
+          }
+        })
+
+        // 监听无可用设备事件
+        this._noDeviceAvailableUnlisten = await listen('no-device-available', () => {
+          if (this._isDestroyed) return
+          logger.error('No audio device available')
+          
+          // 暂停播放
+          this.pause()
+          
+          errorHandler.handle(
+            new Error('No audio device available'),
+            {
+              type: ErrorType.AUDIO_DEVICE_ERROR,
+              severity: ErrorSeverity.CRITICAL,
+              context: { action: 'no-device' },
+              showToUser: true,
+              userMessage: '没有可用的音频设备，请连接音频设备后重试'
+            }
+          )
+        })
+
+        // 监听默认设备变更事件（新设备添加且为系统默认）
+        this._deviceDefaultChangedUnlisten = await listen<{ eventType: string; deviceName: string | null }>('device-default-changed', async (event) => {
+          if (this._isDestroyed) return
+          const deviceName = event.payload?.deviceName
+          if (!deviceName) return
+
+          logger.info(`System default device changed to: ${deviceName}`)
+          
+          try {
+            const currentTime = this.currentTime
+            await invoke('set_audio_device', { 
+              deviceName, 
+              currentTime: this.isPlaying ? currentTime : null 
+            })
+            
+            logger.info(`Successfully switched to new default device: ${deviceName}`)
+            
+            // 显示成功通知
+            errorHandler.handle(
+              new Error(`Device switched to ${deviceName}`),
+              {
+                type: ErrorType.AUDIO_DEVICE_ERROR,
+                severity: ErrorSeverity.LOW,
+                context: { deviceName, action: 'switch-default-success' },
+                showToUser: true,
+                userMessage: `已自动切换到新设备: ${deviceName}`
+              }
+            )
+          } catch (err) {
+            errorHandler.handle(
+              err instanceof Error ? err : new Error(String(err)),
+              {
+                type: ErrorType.AUDIO_DEVICE_ERROR,
+                severity: ErrorSeverity.MEDIUM,
+                context: { deviceName, action: 'switch-default' },
+                showToUser: true,
+                userMessage: `切换到新设备失败: ${deviceName}`
+              }
+            )
+          }
+        })
+
+        logger.info('Device listeners setup complete')
+      } catch (err) {
+        logger.error('Failed to setup device listeners:', err)
       }
     },
 
@@ -810,6 +938,24 @@ export const usePlayerStore = defineStore('player', {
       if (this._taskbarNextUnlisten) {
         this._taskbarNextUnlisten()
         this._taskbarNextUnlisten = null
+      }
+
+      // 清理设备事件监听
+      if (this._deviceRemovedUnlisten) {
+        this._deviceRemovedUnlisten()
+        this._deviceRemovedUnlisten = null
+      }
+      if (this._deviceSwitchRequiredUnlisten) {
+        this._deviceSwitchRequiredUnlisten()
+        this._deviceSwitchRequiredUnlisten = null
+      }
+      if (this._noDeviceAvailableUnlisten) {
+        this._noDeviceAvailableUnlisten()
+        this._noDeviceAvailableUnlisten = null
+      }
+      if (this._deviceDefaultChangedUnlisten) {
+        this._deviceDefaultChangedUnlisten()
+        this._deviceDefaultChangedUnlisten = null
       }
 
       try {

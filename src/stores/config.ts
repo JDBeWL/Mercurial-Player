@@ -284,6 +284,33 @@ export const useConfigStore = defineStore('config', {
       const themeStore = useThemeStore()
       configToSave.general.theme = themeStore.themePreference
 
+      // 确保 lyrics 配置包含所有必需字段
+      if (!configToSave.lyrics) {
+        configToSave.lyrics = {
+          enableOnlineFetch: false,
+          autoSaveOnlineLyrics: true,
+          preferTranslation: true,
+          onlineSource: 'netease',
+          lyricsAlignment: 'center',
+          lyricsFontFamily: 'Roboto',
+          lyricsStyle: 'modern'
+        }
+      } else {
+        // 确保所有必需字段都存在
+        if (!configToSave.lyrics.lyricsAlignment) {
+          configToSave.lyrics.lyricsAlignment = 'center'
+        }
+        if (!configToSave.lyrics.lyricsFontFamily) {
+          configToSave.lyrics.lyricsFontFamily = 'Roboto'
+        }
+        if (!configToSave.lyrics.lyricsStyle) {
+          configToSave.lyrics.lyricsStyle = 'modern'
+        }
+        if (configToSave.lyrics.onlineSource === undefined) {
+          configToSave.lyrics.onlineSource = 'netease'
+        }
+      }
+
       this._savePromise = handlePromise(
         invoke('save_config', { config: configToSave }),
         {

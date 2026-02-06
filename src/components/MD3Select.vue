@@ -212,8 +212,7 @@ const handleOtherSelectOpen = (event) => {
   left: 0;
   right: 0;
   z-index: 1000;
-  background-color: var(--md-sys-color-surface, #fff);
-  background-color: rgb(var(--md-sys-color-surface-rgb, 255, 255, 255));
+  background-color: var(--md-sys-color-surface);
   border: 1px solid var(--md-sys-color-outline);
   border-top: none;
   border-radius: 0 0 var(--md-sys-shape-corner-small) var(--md-sys-shape-corner-small);
@@ -226,6 +225,7 @@ const handleOtherSelectOpen = (event) => {
 .md3-select-dropdown-scroll {
   max-height: 240px;
   overflow-y: auto;
+  background-color: var(--md-sys-color-surface-container-low);
 }
 
 .md3-select-option {

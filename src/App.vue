@@ -999,8 +999,8 @@ onUnmounted(async () => {
 }
 
 .error-notification--info {
-  border-left: 4px solid var(--md-sys-color-primary);
-  background-color: var(--md-sys-color-primary-container);
+  border-left: 4px solid var(--md-sys-color-on-primary-container);
+  background-color: var(--md-sys-color-secondary-container);
   color: var(--md-sys-color-on-primary-container);
 }
 

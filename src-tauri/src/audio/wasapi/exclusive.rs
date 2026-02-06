@@ -110,7 +110,8 @@ impl WasapiExclusivePlayback {
             .send(AudioCommand::Initialize { device_name: device_name.map(String::from) })
             .map_err(|e| format!("Failed to send initialize command: {e}"))?;
 
-        match self.response_rx.recv() {
+        // 使用超时接收响应，防止无限等待
+        match self.response_rx.recv_timeout(Duration::from_secs(5)) {
             Ok(AudioResponse::Initialized { sample_rate, channels, device_name }) => {
                 self.sample_rate.store(sample_rate, Ordering::SeqCst);
                 self.channels.store(u32::from(channels), Ordering::SeqCst);
@@ -131,6 +132,9 @@ impl WasapiExclusivePlayback {
             }
             Ok(AudioResponse::InitFailed(e)) => Err(e),
             Ok(other) => Err(format!("Unexpected response: {other:?}")),
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                Err("Device initialization timeout - device may be in use or unavailable".to_string())
+            }
             Err(e) => Err(format!("Failed to receive response: {e}")),
         }
     }
@@ -470,11 +474,31 @@ fn initialize_exclusive_device(device_name: Option<&str>) -> Result<(wasapi::Aud
 
     let stream_mode = StreamMode::EventsExclusive { period_hns: min_period };
 
-    audio_client.initialize_client(&wave_format, &Direction::Render, &stream_mode).map_err(|e| format!("Failed to initialize exclusive mode: {e:?}"))?;
+    // 尝试初始化独占模式，添加重试机制
+    let mut last_error = None;
+    for attempt in 1..=3 {
+        match audio_client.initialize_client(&wave_format, &Direction::Render, &stream_mode) {
+            Ok(_) => {
+                println!("WASAPI Exclusive Mode initialized: {device_name} @ {sample_rate}Hz, {channels} channels, {bits} bits, float: {is_float}");
+                return Ok((audio_client, (sample_rate, channels, device_name, bits, is_float)));
+            }
+            Err(e) => {
+                last_error = Some(e);
+                if attempt < 3 {
+                    println!("Exclusive mode initialization attempt {attempt} failed, retrying...");
+                    thread::sleep(Duration::from_millis(100 * attempt as u64));
+                    
+                    // 重新获取 audio client
+                    audio_client = device.get_iaudioclient().map_err(|e| format!("Failed to get audio client on retry: {e:?}"))?;
+                }
+            }
+        }
+    }
 
-    println!("WASAPI Exclusive Mode initialized: {device_name} @ {sample_rate}Hz, {channels} channels, {bits} bits, float: {is_float}");
-
-    Ok((audio_client, (sample_rate, channels, device_name, bits, is_float)))
+    Err(format!(
+        "Failed to initialize exclusive mode after 3 attempts: {:?}. The device may be in use by another application or does not support exclusive mode.",
+        last_error
+    ))
 }
 
 fn convert_samples_to_bytes(samples: &[f32], bits: u16, is_float: bool) -> Vec<u8> {

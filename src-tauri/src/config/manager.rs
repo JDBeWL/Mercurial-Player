@@ -65,9 +65,6 @@ pub struct GeneralConfig {
     pub startup_load_last_config: bool,
     pub auto_save_config: bool,
     pub show_audio_info: bool,
-    pub lyrics_alignment: String,
-    #[serde(default = "default_lyrics_font_family")]
-    pub lyrics_font_family: String,
 }
 
 /// 音频设置
@@ -91,6 +88,12 @@ pub struct LyricsConfig {
     pub prefer_translation: bool,
     #[serde(default = "default_online_source")]
     pub online_source: String,
+    #[serde(default = "default_lyrics_alignment")]
+    pub lyrics_alignment: String,
+    #[serde(default = "default_lyrics_font_family")]
+    pub lyrics_font_family: String,
+    #[serde(default = "default_lyrics_style")]
+    pub lyrics_style: String,
 }
 
 const fn default_true() -> bool {
@@ -101,12 +104,20 @@ fn default_online_source() -> String {
     "netease".to_string()
 }
 
-const fn default_volume() -> f32 {
-    0.5
+fn default_lyrics_alignment() -> String {
+    "center".to_string()
 }
 
 fn default_lyrics_font_family() -> String {
     "Roboto".to_string()
+}
+
+fn default_lyrics_style() -> String {
+    "modern".to_string()
+}
+
+const fn default_volume() -> f32 {
+    0.5
 }
 
 impl Default for AppConfig {
@@ -169,8 +180,6 @@ impl Default for GeneralConfig {
             startup_load_last_config: true,
             auto_save_config: true,
             show_audio_info: true,
-            lyrics_alignment: "center".to_string(),
-            lyrics_font_family: "Roboto".to_string(),
         }
     }
 }
@@ -191,6 +200,9 @@ impl Default for LyricsConfig {
             auto_save_online_lyrics: true,
             prefer_translation: true,
             online_source: "netease".to_string(),
+            lyrics_alignment: "center".to_string(),
+            lyrics_font_family: "Roboto".to_string(),
+            lyrics_style: "modern".to_string(),
         }
     }
 }

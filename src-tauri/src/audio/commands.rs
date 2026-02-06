@@ -167,11 +167,18 @@ pub fn set_audio_device(
 
     let exclusive_mode = *state.player.exclusive_mode.lock().unwrap();
 
-    if exclusive_mode {
+    let result = if exclusive_mode {
         switch_to_wasapi_exclusive(&app, &state, &device_name, current_time)
     } else {
         switch_to_shared_mode(&app, &state, &device_name, current_time)
+    };
+
+    // 如果切换成功，更新设备监听器
+    if result.is_ok() {
+        state.player.device_monitor.lock().unwrap().update_current_device(device_name);
     }
+
+    result
 }
 
 #[cfg(windows)]

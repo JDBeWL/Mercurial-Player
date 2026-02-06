@@ -5,21 +5,21 @@
     </div>
     
     <div class="settings-section">
-      <div class="setting-item" @click="toggleSetting('generateAllSongsPlaylist')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.generateAllSongsPlaylist') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.playlist.generateAllSongsPlaylist }">
+        <div class="switch" :class="{ active: configStore.playlist.generateAllSongsPlaylist }" @click="toggleSetting('generateAllSongsPlaylist')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
       
-      <div class="setting-item" @click="toggleSetting('folderBasedPlaylists')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.folderBasedPlaylists') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.playlist.folderBasedPlaylists }">
+        <div class="switch" :class="{ active: configStore.playlist.folderBasedPlaylists }" @click="toggleSetting('folderBasedPlaylists')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
@@ -109,17 +109,11 @@ const toggleSetting = async (key) => {
   padding: 12px 16px;
   margin-bottom: 2px;
   border-radius: 12px;
-  cursor: pointer;
   transition: background-color 0.2s ease;
 }
 
 .setting-item:hover {
   background-color: var(--md-sys-color-surface-container);
-}
-
-.setting-item.select,
-.setting-item.input {
-  cursor: default;
 }
 
 .setting-info {
@@ -137,6 +131,7 @@ const toggleSetting = async (key) => {
   width: 52px;
   height: 32px;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .switch-track {

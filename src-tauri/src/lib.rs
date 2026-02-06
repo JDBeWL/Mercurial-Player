@@ -18,6 +18,7 @@ use audio::SymphoniaSource;
 #[cfg(windows)]
 use audio::WasapiExclusivePlayback;
 
+use audio::DeviceMonitor;
 use config::ConfigManager;
 use equalizer::{Equalizer, GlobalEqualizer};
 
@@ -61,6 +62,8 @@ pub struct PlayerState {
     pub decode_thread_id: Arc<AtomicU64>,
     /// EQ 均衡器
     pub equalizer: Arc<Mutex<Equalizer>>,
+    /// 设备监听器
+    pub device_monitor: Arc<Mutex<DeviceMonitor>>,
 }
 
 /// 应用程序状态

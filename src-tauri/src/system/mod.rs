@@ -3,6 +3,7 @@
 //! 提供系统信息获取和窗口管理功能。
 
 pub mod commands;
+pub mod fonts;
 
 // 重新导出命令
 pub use commands::{

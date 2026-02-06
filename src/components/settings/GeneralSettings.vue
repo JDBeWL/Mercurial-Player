@@ -8,21 +8,21 @@
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.configSettings') }}</h4>
       
-      <div class="setting-item" @click="toggleSetting('startupLoadLastConfig')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.startupLoadLastConfig') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.general.startupLoadLastConfig }">
+        <div class="switch" :class="{ active: configStore.general.startupLoadLastConfig }" @click="toggleSetting('startupLoadLastConfig')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
       
-      <div class="setting-item" @click="toggleSetting('autoSaveConfig')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.autoSaveConfig') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.general.autoSaveConfig }">
+        <div class="switch" :class="{ active: configStore.general.autoSaveConfig }" @click="toggleSetting('autoSaveConfig')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
@@ -33,11 +33,11 @@
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.directoryScan') }}</h4>
       
-      <div class="setting-item" @click="toggleDirectoryScan('enableSubdirectoryScan')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.enableSubdirectoryScan') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.directoryScan.enableSubdirectoryScan }">
+        <div class="switch" :class="{ active: configStore.directoryScan.enableSubdirectoryScan }" @click="toggleDirectoryScan('enableSubdirectoryScan')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
@@ -58,11 +58,11 @@
         </div>
       </div>
       
-      <div class="setting-item" @click="toggleDirectoryScan('ignoreHiddenFolders')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.ignoreHiddenFolders') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.directoryScan.ignoreHiddenFolders }">
+        <div class="switch" :class="{ active: configStore.directoryScan.ignoreHiddenFolders }" @click="toggleDirectoryScan('ignoreHiddenFolders')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
@@ -72,11 +72,11 @@
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.display') || '显示' }}</h4>
       
-      <div class="setting-item" @click="toggleSetting('showAudioInfo')">
+      <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.showAudioInfo') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.general.showAudioInfo }">
+        <div class="switch" :class="{ active: configStore.general.showAudioInfo }" @click="toggleSetting('showAudioInfo')">
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
@@ -194,16 +194,11 @@ const handleLanguageChange = async () => {
   padding: 12px 16px;
   margin-bottom: 2px;
   border-radius: 12px;
-  cursor: pointer;
   transition: background-color 0.2s ease;
 }
 
 .setting-item:hover {
   background-color: var(--md-sys-color-surface-container);
-}
-
-.setting-item.select {
-  cursor: default;
 }
 
 .setting-info {
@@ -221,6 +216,7 @@ const handleLanguageChange = async () => {
   width: 52px;
   height: 32px;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .switch-track {

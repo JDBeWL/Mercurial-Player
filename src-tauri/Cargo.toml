@@ -1,6 +1,6 @@
 [package]
 name = "mercurial-player"
-version = "1.0.0-0"
+version = "1.0.0-1"
 description = "A music player by JDBeWL"
 authors = ["jdbEwl"]
 license = "GPL-3.0"
@@ -39,6 +39,7 @@ md5 = "0.7"
 
 [target.'cfg(windows)'.dependencies]
 wasapi = "0.22"
+winreg = "0.52"
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_UI_Shell",

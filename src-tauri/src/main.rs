@@ -30,7 +30,10 @@ use mercurial_player::{
 };
 
 #[cfg(windows)]
-use mercurial_player::audio::WasapiExclusivePlayback;
+use mercurial_player::audio::{WasapiExclusivePlayback, DeviceMonitor};
+
+#[cfg(not(windows))]
+use mercurial_player::audio::DeviceMonitor;
 
 #[cfg(windows)]
 use mercurial_player::taskbar;
@@ -93,7 +96,7 @@ fn main() {
             current_source: Arc::new(Mutex::new(None)),
             current_path: Arc::new(Mutex::new(None)),
             target_volume: Arc::new(Mutex::new(1.0)),
-            current_device_name: Arc::new(Mutex::new(device_name)),
+            current_device_name: Arc::new(Mutex::new(device_name.clone())),
             exclusive_mode: Arc::new(Mutex::new(
                 exclusive_mode_enabled && {
                     #[cfg(windows)]
@@ -117,6 +120,7 @@ fn main() {
             decode_thread_stop: Arc::new(AtomicBool::new(false)),
             decode_thread_id: Arc::new(AtomicU64::new(0)),
             equalizer: Arc::new(Mutex::new(Equalizer::new(48000, 2))),
+            device_monitor: Arc::new(Mutex::new(DeviceMonitor::new(device_name))),
         },
         config_manager,
         equalizer: GlobalEqualizer::new(),
@@ -131,6 +135,14 @@ fn main() {
             {
                 let window = app.get_webview_window("main").unwrap();
                 window.open_devtools();
+            }
+
+            // 启动设备监听器
+            {
+                let state: tauri::State<AppState> = app.state();
+                let mut monitor = state.player.device_monitor.lock().unwrap();
+                monitor.start(app.handle().clone());
+                println!("Device monitor started");
             }
 
             // 初始化Windows任务栏缩略图工具栏
