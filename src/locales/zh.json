@@ -56,7 +56,9 @@
     "emptyDescription": "选择包含音乐文件的目录来开始使用",
     "selectFirstDirectory": "选择第一个目录",
     "loading": "加载中...",
-    "toggleSortOrder": "切换排序顺序"
+    "toggleSortOrder": "切换排序顺序",
+    "playNext": "播放下一首",
+    "addedToPlayNext": "已添加到播放列表下一首"
   },
   "playlist": {
     "title": "播放列表",

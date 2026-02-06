@@ -2172,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "mercurial-player"
-version = "1.0.0-1"
+version = "1.0.0-2"
 dependencies = [
  "aes",
  "base64 0.22.1",

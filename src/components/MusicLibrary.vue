@@ -51,6 +51,11 @@
                 {{ file.folderName }}
               </div>
             </div>
+            <div class="list-item-trailing">
+              <button class="icon-button" @click.stop="addFileNext(file)" :title="$t('library.playNext') || '播放下一首'">
+                <span class="material-symbols-rounded">playlist_add</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -143,11 +148,14 @@ import { storeToRefs } from 'pinia'
 import { useMusicLibraryStore } from '../stores/musicLibrary'
 import { usePlayerStore } from '../stores/player'
 import { useConfigStore } from '../stores/config'
+import { useI18n } from 'vue-i18n'
 
 import FileUtils from '../utils/fileUtils'
 import logger from '../utils/logger'
+import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
 
 const emit = defineEmits(['close'])
+const { t } = useI18n()
 
 const musicLibraryStore = useMusicLibraryStore()
 const playerStore = usePlayerStore()
@@ -516,6 +524,23 @@ const playFile = (file) => {
     files: [file]
   }
   playPlaylist(playlist)
+}
+
+const addFileNext = (file) => {
+  playerStore.addTrackNext(file)
+  logger.info('Added track to play next:', file.displayTitle || file.name)
+  
+  // 显示成功通知
+  errorHandler.handle(
+    new Error('Track added to play next'),
+    {
+      type: ErrorType.PLAYBACK_ERROR,
+      severity: ErrorSeverity.LOW,
+      context: { trackName: file.displayTitle || file.name },
+      showToUser: true,
+      userMessage: t('library.addedToPlayNext')
+    }
+  )
 }
 </script>
 

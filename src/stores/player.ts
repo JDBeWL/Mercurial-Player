@@ -351,12 +351,23 @@ export const usePlayerStore = defineStore('player', {
 
           logger.info(`Switching to fallback device: ${deviceName}`)
           
+          // 保存当前播放状态和位置
+          const wasPlaying = this.isPlaying
+          const currentTime = this.currentTime
+          
           try {
-            const currentTime = this.currentTime
+            // 始终传递当前时间位置以保持进度
             await invoke('set_audio_device', { 
               deviceName, 
-              currentTime: this.isPlaying ? currentTime : null 
+              currentTime: currentTime 
             })
+            
+            // 如果之前是暂停状态，切换后立即暂停
+            if (!wasPlaying && this.currentTrack) {
+              await invoke('pause_track')
+              this.isPlaying = false
+              this.stopStatusPolling()
+            }
             
             logger.info(`Successfully switched to fallback device: ${deviceName}`)
             
@@ -413,12 +424,23 @@ export const usePlayerStore = defineStore('player', {
 
           logger.info(`System default device changed to: ${deviceName}`)
           
+          // 保存当前播放状态和位置
+          const wasPlaying = this.isPlaying
+          const currentTime = this.currentTime
+          
           try {
-            const currentTime = this.currentTime
+            // 始终传递当前时间位置以保持进度
             await invoke('set_audio_device', { 
               deviceName, 
-              currentTime: this.isPlaying ? currentTime : null 
+              currentTime: currentTime 
             })
+            
+            // 如果之前是暂停状态，切换后立即暂停
+            if (!wasPlaying && this.currentTrack) {
+              await invoke('pause_track')
+              this.isPlaying = false
+              this.stopStatusPolling()
+            }
             
             logger.info(`Successfully switched to new default device: ${deviceName}`)
             
@@ -832,6 +854,65 @@ export const usePlayerStore = defineStore('player', {
 
     resetLyricsOffset(): void {
       this.lyricsOffset = 0
+    },
+
+    // --- 播放列表管理 ---
+
+    /**
+     * 将曲目添加到当前播放列表的下一首位置
+     */
+    addTrackNext(track: Track): void {
+      if (!track) return
+
+      const currentIndex = this.currentTrackIndex
+      
+      // 如果没有当前曲目或播放列表为空，直接添加到开头
+      if (currentIndex === -1 || this.playlist.length === 0) {
+        this.playlist.unshift(track)
+        logger.info('Added track to beginning of playlist:', track.path)
+        return
+      }
+
+      // 检查曲目是否已经在播放列表中
+      const existingIndex = this.playlist.findIndex(t => t.path === track.path)
+      
+      if (existingIndex !== -1) {
+        // 如果曲目已存在，先移除它
+        this.playlist.splice(existingIndex, 1)
+        
+        // 如果移除的位置在当前曲目之前，需要调整插入位置
+        const adjustedIndex = existingIndex < currentIndex ? currentIndex : currentIndex + 1
+        this.playlist.splice(adjustedIndex, 0, track)
+        logger.info('Moved existing track to next position:', track.path)
+      } else {
+        // 如果曲目不存在，直接插入到当前曲目后面
+        this.playlist.splice(currentIndex + 1, 0, track)
+        logger.info('Added new track to next position:', track.path)
+      }
+    },
+
+    /**
+     * 将多个曲目添加到当前播放列表的下一首位置
+     */
+    addTracksNext(tracks: Track[]): void {
+      if (!tracks || tracks.length === 0) return
+
+      const currentIndex = this.currentTrackIndex
+      
+      // 如果没有当前曲目或播放列表为空，直接添加到开头
+      if (currentIndex === -1 || this.playlist.length === 0) {
+        this.playlist.unshift(...tracks)
+        logger.info(`Added ${tracks.length} tracks to beginning of playlist`)
+        return
+      }
+
+      // 过滤掉已存在的曲目并记录它们的位置
+      const existingPaths = new Set(this.playlist.map(t => t.path))
+      const newTracks = tracks.filter(t => !existingPaths.has(t.path))
+      
+      // 插入到当前曲目后面
+      this.playlist.splice(currentIndex + 1, 0, ...newTracks)
+      logger.info(`Added ${newTracks.length} new tracks to next position`)
     },
 
     // --- 数据加载 ---

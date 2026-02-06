@@ -56,7 +56,9 @@
     "emptyDescription": "Select a directory containing your music files to get started.",
     "selectFirstDirectory": "Select First Directory",
     "loading": "Loading...",
-    "toggleSortOrder": "Toggle sort order"
+    "toggleSortOrder": "Toggle sort order",
+    "playNext": "Play Next",
+    "addedToPlayNext": "Added to play next"
   },
   "playlist": {
     "title": "Playlist",
