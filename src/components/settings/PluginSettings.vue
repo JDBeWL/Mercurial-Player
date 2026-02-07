@@ -260,8 +260,8 @@ onMounted(async () => {
 }
 
 .state-active {
-  background-color: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
+  background-color: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
 }
 
 .state-inactive {

@@ -350,8 +350,8 @@ watch(useExclusiveMode, (newValue) => {
 }
 
 .device-badge.exclusive {
-  background-color: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
+  background-color: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-surface);
 }
 
 .device-item.active .device-badge {

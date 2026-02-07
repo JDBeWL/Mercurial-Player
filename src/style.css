@@ -180,10 +180,10 @@ body {
   color: var(--md-sys-color-on-primary-container);
 }
 
-/* FAB - 增强浮动按钮效果 */
+/* FAB */
 .fab {
-  background-color: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
+  background-color: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
   border-radius: var(--md-sys-shape-corner-large);
   width: 56px;
   height: 56px;
@@ -197,7 +197,7 @@ body {
 }
 
 .fab:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-primary-container));
+  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-secondary-container));
   box-shadow: var(--md-sys-elevation-level4);
 }
 

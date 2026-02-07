@@ -194,14 +194,14 @@ onUnmounted(() => {
 .play-button {
   width: 56px;
   height: 56px;
-  background-color: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
+  background-color: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
   border-radius: 50%;
   transition: all 0.2s ease;
 }
 
 .play-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-primary-container));
+  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-secondary-container));
 }
 
 .play-button .material-symbols-rounded {

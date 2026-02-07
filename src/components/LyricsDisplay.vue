@@ -473,8 +473,8 @@ export default {
     align-items: center;
     gap: 8px;
     padding: 10px 24px;
-    background-color: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
+    background-color: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
     border: none;
     border-radius: 20px;
     cursor: pointer;
@@ -484,7 +484,7 @@ export default {
 }
 
 .fetch-lyrics-btn:hover:not(:disabled) {
-    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-primary-container));
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-secondary-container));
 }
 
 .fetch-lyrics-btn:disabled {
