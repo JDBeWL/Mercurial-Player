@@ -116,6 +116,7 @@ const onDismiss = () => {
 </script>
 
 <style scoped>
+/* ======== 遮罩层 ======== */
 .update-dialog-overlay {
   position: fixed;
   top: 0;
@@ -132,16 +133,14 @@ const onDismiss = () => {
 }
 
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-  .update-dialog {
-  background-color: var(--md-sys-color-surface-container, #ffffff);
+/* ======== 对话框主体 ======== */
+.update-dialog {
+  background-color: var(--md-sys-color-surface-container, var(--md-sys-color-surface));
+  color: var(--md-sys-color-on-surface);
   border-radius: var(--md-sys-shape-corner-large);
   box-shadow: var(--shadow-strong);
   max-width: 500px;
@@ -149,24 +148,15 @@ const onDismiss = () => {
   display: flex;
   flex-direction: column;
   animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-  border: 1px solid var(--md-sys-color-outline, rgba(0,0,0,0.08));
+  border: 1px solid var(--md-sys-color-outline-variant, var(--md-sys-color-outline));
 }
-
-  .update-dialog-overlay {
-    background-color: rgba(0, 0, 0, 0.7);
-  }
 
 @keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
+/* ======== Header ======== */
 .dialog-header {
   display: flex;
   align-items: flex-start;
@@ -178,6 +168,7 @@ const onDismiss = () => {
 .dialog-header h2 {
   margin: 0 0 8px 0;
   font-weight: 500;
+  color: var(--md-sys-color-on-surface);
 }
 
 .dialog-header p {
@@ -191,6 +182,7 @@ const onDismiss = () => {
   margin-left: 16px;
 }
 
+/* ======== Content ======== */
 .dialog-content {
   flex: 1;
   padding: 24px;
@@ -198,6 +190,7 @@ const onDismiss = () => {
   overflow-y: auto;
 }
 
+/* 错误消息 */
 .error-message {
   display: flex;
   align-items: center;
@@ -215,6 +208,7 @@ const onDismiss = () => {
   flex-shrink: 0;
 }
 
+/* 下载进度 */
 .download-section {
   display: flex;
   flex-direction: column;
@@ -233,6 +227,7 @@ const onDismiss = () => {
   color: var(--md-sys-color-primary);
 }
 
+/* 更新日志区域 */
 .release-notes {
   display: flex;
   flex-direction: column;
@@ -243,6 +238,7 @@ const onDismiss = () => {
   margin: 0;
   font-size: 16px;
   font-weight: 500;
+  color: var(--md-sys-color-on-surface);
 }
 
 .notes-content {
@@ -296,7 +292,7 @@ const onDismiss = () => {
   font-size: 0.9em;
   padding: 2px 6px;
   border-radius: 4px;
-  background-color: var(--md-sys-color-surface-container-highest, rgba(0, 0, 0, 0.08));
+  background-color: var(--md-sys-color-surface-container-highest, var(--md-sys-color-surface-variant));
   color: var(--md-sys-color-primary);
 }
 
@@ -304,7 +300,7 @@ const onDismiss = () => {
   margin: 8px 0;
   padding: 12px;
   border-radius: 8px;
-  background-color: var(--md-sys-color-surface-container-highest, rgba(0, 0, 0, 0.08));
+  background-color: var(--md-sys-color-surface-container-highest, var(--md-sys-color-surface-variant));
   overflow-x: auto;
 }
 
@@ -319,7 +315,7 @@ const onDismiss = () => {
   margin: 8px 0;
   padding: 4px 12px;
   border-left: 3px solid var(--md-sys-color-primary);
-  background-color: var(--md-sys-color-surface-container, rgba(0, 0, 0, 0.03));
+  background-color: var(--md-sys-color-surface-container-low, var(--md-sys-color-surface));
   border-radius: 0 4px 4px 0;
   color: var(--md-sys-color-on-surface-variant);
 }
@@ -358,6 +354,7 @@ const onDismiss = () => {
   margin: 8px 0;
 }
 
+/* ======== Footer ======== */
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
@@ -378,12 +375,8 @@ const onDismiss = () => {
 }
 
 @keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* 禁用状态 */
@@ -393,21 +386,25 @@ const onDismiss = () => {
   cursor: not-allowed;
 }
 
-/* Scrollbar 美化 */
-::-webkit-scrollbar {
+/* Scrollbar */
+.dialog-content::-webkit-scrollbar,
+.notes-content::-webkit-scrollbar {
   width: 6px;
 }
 
-::-webkit-scrollbar-track {
+.dialog-content::-webkit-scrollbar-track,
+.notes-content::-webkit-scrollbar-track {
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
+.dialog-content::-webkit-scrollbar-thumb,
+.notes-content::-webkit-scrollbar-thumb {
   background: var(--md-sys-color-outline-variant);
   border-radius: 3px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+.dialog-content::-webkit-scrollbar-thumb:hover,
+.notes-content::-webkit-scrollbar-thumb:hover {
   background: var(--md-sys-color-outline);
 }
 </style>
