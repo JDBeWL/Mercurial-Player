@@ -88,6 +88,8 @@ export interface GeneralConfig {
   startupLoadLastConfig: boolean
   autoSaveConfig: boolean
   showAudioInfo: boolean
+  // Whether automatic update checks are enabled (default: false)
+  enableAutoUpdate?: boolean
 }
 
 export interface LyricsConfig {

@@ -8,6 +8,26 @@
       <div class="app-header">
         <div class="app-name">Mercurial Player</div>
         <div class="app-version">v{{ appVersion }}</div>
+        <div style="margin-left: auto; display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+          <div>
+            <button class="filled-button" @click="checkForUpdates" :disabled="isChecking">
+              <span class="material-symbols-rounded" v-if="!isChecking">download</span>
+              <span class="material-symbols-rounded spin" v-else>hourglass_empty</span>
+              {{ isChecking ? t('config.checkingUpdates') : t('config.checkUpdates') }}
+            </button>
+          </div>
+          <div v-if="lastCheckTime" class="text-caption" style="color:var(--md-sys-color-on-surface-variant);">
+            {{ t('config.lastChecked') }}: {{ lastCheckTime }}
+          </div>
+
+          <div v-if="error" class="text-caption" style="color:var(--md-sys-color-error); margin-top:6px;">
+            {{ error }}
+          </div>
+          <div v-if="updateLog && !isDownloadFinishedLog(updateLog)" class="text-caption" style="margin-top:6px; color:var(--md-sys-color-on-surface-variant); word-break:break-all;">
+            {{ updateLog }}
+          </div>
+
+        </div>
       </div>
     </div>
     
@@ -110,6 +130,7 @@
       </div>
     </div>
   </div>
+  <UpdateDialog />
 </template>
 
 <script setup>
@@ -117,6 +138,8 @@ import { ref, onMounted, computed } from 'vue'
 import { getVersion } from '@tauri-apps/api/app'
 import { open } from '@tauri-apps/plugin-shell'
 import { useI18n } from 'vue-i18n'
+import UpdateDialog from '@/components/UpdateDialog.vue'
+import { useAutoUpdate } from '@/composables/useAutoUpdate'
 import logger from '../../utils/logger'
 
 const { t } = useI18n()
@@ -124,6 +147,9 @@ const { t } = useI18n()
 const appVersion = ref('0.0.0')
 const githubUrl = 'https://github.com/JDBeWL/Mercurial-Player'
 const showLicenseDetails = ref(false)
+
+// 自动更新
+const { isChecking, updateAvailable, newVersion, checkForUpdates, error, lastCheckTime, updateLog } = useAutoUpdate()
 
 // 技术栈分类数据
 const techCategories = computed(() => [
@@ -202,6 +228,10 @@ const openLicense = async () => {
   } catch (error) {
     logger.error('Failed to open license:', error)
   }
+}
+
+const isDownloadFinishedLog = (s) => {
+  return typeof s === 'string' && s.startsWith('Download finished:')
 }
 
 onMounted(() => {

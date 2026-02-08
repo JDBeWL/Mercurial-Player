@@ -9,6 +9,7 @@ pub mod error;
 pub mod media;
 pub mod plugins;
 pub mod system;
+pub mod update;
 
 #[cfg(windows)]
 pub mod taskbar;

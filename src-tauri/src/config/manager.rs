@@ -65,6 +65,9 @@ pub struct GeneralConfig {
     pub startup_load_last_config: bool,
     pub auto_save_config: bool,
     pub show_audio_info: bool,
+    /// 是否启用自动更新（默认关闭）
+    #[serde(default)]
+    pub enable_auto_update: bool,
 }
 
 /// 音频设置
@@ -180,6 +183,7 @@ impl Default for GeneralConfig {
             startup_load_last_config: true,
             auto_save_config: true,
             show_audio_info: true,
+            enable_auto_update: false,
         }
     }
 }

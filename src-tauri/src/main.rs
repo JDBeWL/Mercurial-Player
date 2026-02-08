@@ -26,7 +26,7 @@ use mercurial_player::{
     config::ConfigManager,
     equalizer,
     equalizer::{Equalizer, GlobalEqualizer},
-    media, plugins, system,
+    media, plugins, system, update,
 };
 
 #[cfg(windows)]
@@ -263,6 +263,10 @@ fn main() {
             taskbar::commands::update_taskbar_state,
             #[cfg(windows)]
             taskbar::commands::set_taskbar_stopped,
+            // 自动更新命令
+            update::commands::get_app_version,
+            update::commands::download_and_install_update,
+            update::commands::run_installer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

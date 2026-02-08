@@ -105,6 +105,7 @@ export const useConfigStore = defineStore('config', {
       startupLoadLastConfig: true,
       autoSaveConfig: true,
       showAudioInfo: true,
+      enableAutoUpdate: false,
     },
 
     // 歌词设置

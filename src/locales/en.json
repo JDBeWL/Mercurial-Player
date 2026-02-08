@@ -1,6 +1,7 @@
 {
   "common": {
-    "close": "Close"
+    "close": "Close",
+    "later": "Later"
   },
   "nav": {
     "title": "Music Player",
@@ -149,6 +150,8 @@
     "loadingDevices": "Loading audio devices...",
     "deviceLoadError": "Failed to load audio devices",
     "noAudioDevices": "No audio devices found",
+    "enableAutoUpdate": "Enable Automatic Updates",
+    "enableAutoUpdateDesc": "Allow automatic update checks and prompt when updates are available (disabled by default to avoid accidental upgrades)",
     "retry": "Retry",
     "refresh": "Refresh",
     "refreshDevices": "Refresh Device List",
@@ -195,7 +198,34 @@
     "licenseDetails": "View Full License",
     "viewDetails": "View Details",
     "hideDetails": "Hide Details",
-    "copyright": "Copyright © 2026 JDBeWL"
+    "copyright": "Copyright © 2026 JDBeWL",
+    "appVersion": "App Version",
+    "checkUpdates": "Check for Updates",
+    "checkingUpdates": "Checking...",
+    "lastChecked": "Last Checked",
+    "updateAvailable": "New version available:",
+    "usingLatest": "You are using the latest version",
+    "updateCheckFailed": "Failed to check for updates. Please try again later",
+    "releaseNotes": "Release Notes",
+    "noReleaseNotes": "No release notes available",
+    "downloading": "Downloading...",
+    "installing": "Installing...",
+    "installNow": "Install Now",
+    "aboutApp": "About This App",
+    "update": {
+      "available": "Update available",
+      "newVersionAvailable": "New version {version} available",
+      "downloadNow": "Download",
+      "installNow": "Install Now",
+      "releaseNotes": "Release Notes",
+      "noReleaseNotes": "No release notes available",
+      "downloading": "Downloading...",
+      "installing": "Installing...",
+      "downloadFinished": "Download finished",
+      "installerPath": "Installer path: {path}",
+      "noInstallerPath": "Installer path not available"
+    },
+    "unknown": "Unknown"
   },
   "themeSelector": {
     "chooseThemeColor": "Choose Theme Color",

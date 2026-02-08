@@ -194,6 +194,7 @@ import Settings from './components/Settings.vue'
 import MiniPlayer from './components/MiniPlayer.vue'
 import { useTrackInfo } from './composables/useTrackInfo'
 import { useLyrics } from './composables/useLyrics'
+import { useAutoUpdate } from './composables/useAutoUpdate'
 import { useI18n } from 'vue-i18n'
 import { setLocale } from './i18n'
 import { pluginManager } from './plugins'
@@ -204,7 +205,7 @@ const configStore = useConfigStore()
 const { t } = useI18n()
 
 // 初始化错误通知
-const { errorNotifications, removeError, unsubscribe: unsubscribeErrorNotification } = useErrorNotification()
+const { errorNotifications, showError, removeError, unsubscribe: unsubscribeErrorNotification } = useErrorNotification()
 
 // 获取当前窗口实例
 const appWindow = getCurrentWindow()
@@ -507,6 +508,20 @@ onMounted(async () => {
 
   // 初始化音频播放器
   playerStore.initAudio()
+
+  // 如果用户启用了自动检查更新，则在启动时执行一次检查（仅检查，不自动安装）
+  try {
+    const { checkForUpdates, updateAvailable, newVersion } = useAutoUpdate()
+    if (configStore.general.enableAutoUpdate) {
+      await checkForUpdates()
+      if (updateAvailable.value) {
+        // 通知用户有新版本可用（非阻塞信息通知）
+        showError(`${t('config.updateAvailable')} v${newVersion.value}`, 'info', 10000)
+      }
+    }
+  } catch (err) {
+    logger.warn('Auto update check failed:', err)
+  }
 
   // 检查当前窗口是否处于全屏状态
   try {

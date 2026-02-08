@@ -1,6 +1,7 @@
 {
   "common": {
-    "close": "关闭"
+    "close": "关闭",
+    "later": "稍后"
   },
   "nav": {
     "title": "Music Player",
@@ -114,6 +115,8 @@
     "autoSaveConfig": "自动保存配置",
     "showAudioInfo": "显示音频信息",
     "display": "显示设置",
+    "enableAutoUpdate": "启用自动更新",
+    "enableAutoUpdateDesc": "允许自动检查更新并在可用时提示（默认关闭以防止意外升级）",
     "lyricsAlignment": "歌词对齐",
     "alignLeft": "左对齐",
     "alignCenter": "居中",
@@ -195,7 +198,29 @@
     "licenseDetails": "查看完整许可证",
     "viewDetails": "查看详情",
     "hideDetails": "隐藏详情",
-    "copyright": "Copyright © 2026 JDBeWL"
+    "copyright": "Copyright © 2026 JDBeWL",
+    "appVersion": "应用版本",
+    "checkUpdates": "检查更新",
+    "checkingUpdates": "检查中...",
+    "lastChecked": "上次检查",
+    "updateAvailable": "发现新版本：",
+    "usingLatest": "已是最新版本",
+    "updateCheckFailed": "检查更新失败，请稍后重试",
+    "update": {
+      "available": "发现新版本",
+      "newVersionAvailable": "发现新版本 v{version}",
+      "downloadNow": "下载",
+      "installNow": "立即安装",
+      "releaseNotes": "更新说明",
+      "noReleaseNotes": "暂无更新说明",
+      "downloading": "下载中...",
+      "installing": "安装中...",
+      "downloadFinished": "下载完成",
+      "installerPath": "安装程序路径：{path}",
+      "noInstallerPath": "未提供安装程序路径"
+    },
+    "aboutApp": "关于本应用", 
+    "unknown": "未知"
   },
   "themeSelector": {
     "chooseThemeColor": "选择主题颜色",
