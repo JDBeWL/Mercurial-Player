@@ -478,7 +478,7 @@ fn initialize_exclusive_device(device_name: Option<&str>) -> Result<(wasapi::Aud
     let mut last_error = None;
     for attempt in 1..=3 {
         match audio_client.initialize_client(&wave_format, &Direction::Render, &stream_mode) {
-            Ok(_) => {
+            Ok(()) => {
                 println!("WASAPI Exclusive Mode initialized: {device_name} @ {sample_rate}Hz, {channels} channels, {bits} bits, float: {is_float}");
                 return Ok((audio_client, (sample_rate, channels, device_name, bits, is_float)));
             }
@@ -496,8 +496,7 @@ fn initialize_exclusive_device(device_name: Option<&str>) -> Result<(wasapi::Aud
     }
 
     Err(format!(
-        "Failed to initialize exclusive mode after 3 attempts: {:?}. The device may be in use by another application or does not support exclusive mode.",
-        last_error
+        "Failed to initialize exclusive mode after 3 attempts: {last_error:?}. The device may be in use by another application or does not support exclusive mode."
     ))
 }
 

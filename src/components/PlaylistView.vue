@@ -66,7 +66,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, shallowRef, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, shallowRef, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
 import FileUtils from '../utils/fileUtils'
@@ -74,10 +74,7 @@ import FileUtils from '../utils/fileUtils'
 const emit = defineEmits(['close'])
 
 const playerStore = usePlayerStore()
-const { playlist, currentTrack, isPlaying } = storeToRefs(playerStore)
-
-// 播放列表内容容器的引用
-const playlistContentRef = ref(null)
+const { playlist, currentTrack } = storeToRefs(playerStore)
 
 // 控制动画状态
 const isClosing = ref(false)

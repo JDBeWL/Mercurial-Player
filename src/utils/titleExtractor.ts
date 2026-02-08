@@ -139,13 +139,13 @@ export class TitleExtractor {
       logger.error('Error extracting title:', error)
       // 出现意外错误时的最终回退方案
       const fileName = this.getFileName(filePath, config.hideFileExtension)
-      return {
-        fileName: fileName,
-        title: this.cleanTitle(fileName),
-        artist: '',
-        album: '',
-        isFromMetadata: false
-      }
+    return {
+      fileName,
+      title: this.cleanTitle(fileName),
+      artist: '',
+      album: '',
+      isFromMetadata: false
+    }
     }
   }
 
@@ -201,9 +201,9 @@ export class TitleExtractor {
     }
 
     return {
-      fileName: fileName,
-      title: title,
-      artist: artist,
+      fileName,
+      title,
+      artist,
       album: '',
       isFromMetadata: false
     }

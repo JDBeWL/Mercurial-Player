@@ -5,11 +5,11 @@ function toMessage(err: unknown): string {
   if (typeof err === 'string') return err
   if (err instanceof Error) return err.message || String(err)
   try {
-    // tauri invoke errors sometimes come as objects
-    const anyErr = err as any
-    if (typeof anyErr?.message === 'string') return anyErr.message
-    if (typeof anyErr?.error === 'string') return anyErr.error
-    if (typeof anyErr?.toString === 'function') return anyErr.toString()
+    // tauri invoke errors sometimes come as objects with message/error fields
+    const record = err as Record<string, unknown>
+    if (typeof record.message === 'string') return record.message
+    if (typeof record.error === 'string') return record.error
+    if (typeof record.toString === 'function') return record.toString()
     return JSON.stringify(err)
   } catch {
     return String(err)
@@ -60,5 +60,3 @@ export function classifyAudioInvokeError(err: unknown): ErrorType {
 
   return ErrorType.AUDIO_PLAYBACK_ERROR
 }
-
-

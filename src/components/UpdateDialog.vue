@@ -1,7 +1,6 @@
 <template>
   <div v-if="updateAvailable" class="update-dialog-overlay">
     <div class="update-dialog">
-      <!-- Header -->
       <div class="dialog-header">
         <div class="flex-1">
           <h2 class="text-title">{{ t('config.update.available') }}</h2>
@@ -12,15 +11,12 @@
         </button>
       </div>
 
-      <!-- Content -->
       <div class="dialog-content">
-        <!-- Error Message -->
         <div v-if="error" class="error-message">
           <span class="material-symbols-rounded">error</span>
           <span>{{ error }}</span>
         </div>
 
-        <!-- Download Progress -->
         <div v-if="isDownloading" class="download-section">
           <div class="progress-info">
             <span>{{ t('config.update.downloading') }}</span>
@@ -31,17 +27,15 @@
           </div>
         </div>
 
-        <!-- Release Notes Preview -->
         <div v-else class="release-notes">
           <h3>{{ t('config.update.releaseNotes') }}</h3>
           <div class="notes-content">
-            <p v-if="releaseNotes" class="notes-text">{{ releaseNotes }}</p>
+            <div v-if="releaseNotes" class="markdown-body" v-html="renderedNotes"></div>
             <p v-else class="text-secondary">{{ t('config.update.noReleaseNotes') }}</p>
           </div>
         </div>
       </div>
 
-      <!-- Footer -->
       <div class="dialog-footer">
         <button
           class="text-button"
@@ -67,25 +61,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-
-interface Props {
-  visible?: boolean
-}
+import { useAutoUpdate } from '@/composables/useAutoUpdate'
+import { renderMarkdown } from '@/utils/markdownRenderer'
+import logger from '@/utils/logger'
 
 interface Emits {
   (e: 'update'): void
   (e: 'dismiss'): void
 }
 
-defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 const { t } = useI18n()
-
-// 导入 composable
-import { useAutoUpdate } from '@/composables/useAutoUpdate'
 
 const {
   updateAvailable,
@@ -94,14 +83,18 @@ const {
   isDownloading,
   error,
   releaseNotes,
-  installerPath,
   downloadFinished,
-  updateLog,
   hasError,
   downloadAndInstall,
   runInstaller,
   resetUpdateState,
 } = useAutoUpdate()
+
+/** 将release notes渲染为HTML */
+const renderedNotes = computed(() => {
+  if (!releaseNotes.value) return ''
+  return renderMarkdown(releaseNotes.value)
+})
 
 const onUpdate = async () => {
   try {
@@ -112,7 +105,7 @@ const onUpdate = async () => {
     }
     emit('update')
   } catch (err) {
-    console.error('Update failed:', err)
+    logger.error('Update failed:', err)
   }
 }
 
@@ -257,12 +250,112 @@ const onDismiss = () => {
   overflow-y: auto;
 }
 
-.notes-text {
-  margin: 0;
+/* ======== Markdown 渲染样式 ======== */
+.markdown-body {
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.7;
   color: var(--md-sys-color-on-surface);
-  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  margin: 12px 0 8px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--md-sys-color-on-surface);
+}
+
+.markdown-body :deep(h1) { font-size: 1.3em; }
+.markdown-body :deep(h2) { font-size: 1.15em; }
+.markdown-body :deep(h3) { font-size: 1.05em; }
+.markdown-body :deep(h4) { font-size: 1em; }
+
+.markdown-body :deep(p) {
+  margin: 6px 0;
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.markdown-body :deep(li) {
+  margin: 3px 0;
+}
+
+.markdown-body :deep(li)::marker {
+  color: var(--md-sys-color-primary);
+}
+
+.markdown-body :deep(code) {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.9em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: var(--md-sys-color-surface-container-highest, rgba(0, 0, 0, 0.08));
+  color: var(--md-sys-color-primary);
+}
+
+.markdown-body :deep(pre) {
+  margin: 8px 0;
+  padding: 12px;
+  border-radius: 8px;
+  background-color: var(--md-sys-color-surface-container-highest, rgba(0, 0, 0, 0.08));
+  overflow-x: auto;
+}
+
+.markdown-body :deep(pre code) {
+  padding: 0;
+  background: none;
+  color: var(--md-sys-color-on-surface);
+  font-size: 13px;
+}
+
+.markdown-body :deep(blockquote) {
+  margin: 8px 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--md-sys-color-primary);
+  background-color: var(--md-sys-color-surface-container, rgba(0, 0, 0, 0.03));
+  border-radius: 0 4px 4px 0;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.markdown-body :deep(blockquote p) {
+  margin: 4px 0;
+}
+
+.markdown-body :deep(hr) {
+  margin: 12px 0;
+  border: none;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.markdown-body :deep(a) {
+  color: var(--md-sys-color-primary);
+  text-decoration: none;
+}
+
+.markdown-body :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.markdown-body :deep(strong) {
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+}
+
+.markdown-body :deep(del) {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.markdown-body :deep(img) {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 8px 0;
 }
 
 .dialog-footer {

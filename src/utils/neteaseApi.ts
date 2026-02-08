@@ -129,7 +129,7 @@ export class NeteaseAPI {
 
     const normalizeStr = (str: string): string => {
       return str.toLowerCase()
-        .replace(/[\s\-_\.]/g, '')
+        .replace(/[\s\-_.]/g, '')
         .replace(/[（(][^）)]*[）)]/g, '')
         .trim()
     }

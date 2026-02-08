@@ -18,8 +18,8 @@ pub async fn download_and_install_update(
         if let Err(e) = download_update(&app, &download_url).await {
             let _ = app.emit("update-error", &e);
             // 也打印和发出日志，方便排查
-            println!("Update download failed: {}", e);
-            let _ = app.emit("update-log", format!("Download failed: {}", e));
+            println!("Update download failed: {e}");
+            let _ = app.emit("update-log", format!("Download failed: {e}"));
         }
     });
 
@@ -41,27 +41,23 @@ async fn download_update(app: &tauri::AppHandle, download_url: &str) -> Result<(
                 if fs::create_dir_all(&candidate).is_ok() {
                     // 检测写入权限
                     let test_file = candidate.join(".write_test");
-                    match fs::File::create(&test_file) {
-                        Ok(_) => {
-                            let _ = fs::remove_file(&test_file);
-                            return Ok(candidate);
-                        }
-                        Err(_) => {
-                            // 无写权限，回退到 temp
-                        }
+                    if fs::File::create(&test_file).is_ok() {
+                        let _ = fs::remove_file(&test_file);
+                        return Ok(candidate);
                     }
+                    // 无写权限，回退到 temp
                 }
             }
         }
         // 回退到 Temp 目录
         let tmp = std::env::temp_dir().join("Mercurial Player").join("updates");
-        fs::create_dir_all(&tmp).map_err(|e| format!("Failed to create updates dir: {}", e))?;
+        fs::create_dir_all(&tmp).map_err(|e| format!("Failed to create updates dir: {e}"))?;
         Ok(tmp)
     })()?;
 
     // 通知最终使用的目录
     let dir_msg = format!("Using updates directory: {}", cache_dir.to_string_lossy());
-    println!("{}", dir_msg);
+    println!("{dir_msg}");
     let _ = app.emit("update-log", &dir_msg);
 
     // 下载文件
@@ -70,15 +66,15 @@ async fn download_update(app: &tauri::AppHandle, download_url: &str) -> Result<(
         .get(download_url)
         .send()
         .await
-        .map_err(|e| format!("Download failed: {}", e))?;
+        .map_err(|e| format!("Download failed: {e}"))?;
 
     let total_size = response
         .content_length()
         .ok_or("Failed to get content length")?;
 
     // 记录并发出开始下载的日志
-    let start_msg = format!("Starting download from: {}", download_url);
-    println!("{}", start_msg);
+    let start_msg = format!("Starting download from: {download_url}");
+    println!("{start_msg}");
     let _ = app.emit("update-log", &start_msg);
 
     // 发送 'started' 事件，方便前端开启进度条
@@ -87,20 +83,20 @@ async fn download_update(app: &tauri::AppHandle, download_url: &str) -> Result<(
     // 获取文件名
     let filename = download_url
         .split('/')
-        .last()
+        .next_back()
         .unwrap_or("installer.exe");
 
     let installer_path = cache_dir.join(filename);
 
     // 告知保存路径
     let save_msg = format!("Saving installer to: {}", installer_path.to_string_lossy());
-    println!("{}", save_msg);
+    println!("{save_msg}");
     let _ = app.emit("update-log", &save_msg);
 
     // 下载并保存文件
     let mut file = fs::File::create(&installer_path)
         .map_err(|e| {
-            let msg = format!("Failed to create file: {}", e);
+            let msg = format!("Failed to create file: {e}");
             let _ = app.emit("update-log", &msg);
             msg
         })?;
@@ -111,13 +107,13 @@ async fn download_update(app: &tauri::AppHandle, download_url: &str) -> Result<(
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| {
-            let msg = format!("Download error: {}", e);
+            let msg = format!("Download error: {e}");
             let _ = app.emit("update-log", &msg);
             msg
         })?;
         file.write_all(&chunk)
             .map_err(|e| {
-                let msg = format!("Write error: {}", e);
+                let msg = format!("Write error: {e}");
                 let _ = app.emit("update-log", &msg);
                 msg
             })?;
@@ -137,7 +133,7 @@ async fn download_update(app: &tauri::AppHandle, download_url: &str) -> Result<(
 
         // 通知前端下载完成，并返回安装程序路径
         let _ = app.emit("update-finished", installer_path.to_string_lossy().to_string());
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(windows))]
@@ -159,12 +155,12 @@ pub fn run_installer(app: tauri::AppHandle, installer_path: String) -> Result<()
 
         Command::new(&installer_path)
             .spawn()
-            .map_err(|e| format!("Failed to execute installer: {}", e))?;
+            .map_err(|e| format!("Failed to execute installer: {e}"))?;
 
         // 通知前端安装已启动
         let _ = app.emit("installer-started", &installer_path);
-        let _ = app.emit("update-log", format!("Installer started: {}", installer_path));
-        println!("Installer started: {}", installer_path);
+        let _ = app.emit("update-log", format!("Installer started: {installer_path}"));
+        println!("Installer started: {installer_path}");
 
         // 异步退出应用（给安装程序启动时间）
         std::thread::spawn(|| {

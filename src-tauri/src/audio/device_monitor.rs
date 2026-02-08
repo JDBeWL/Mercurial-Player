@@ -93,7 +93,7 @@ fn monitor_device_changes(
 
         // 检查设备是否被移除
         if !current_devices.contains(&current_device_name) && previous_devices.contains(&current_device_name) {
-            println!("Device removed: {}", current_device_name);
+            println!("Device removed: {current_device_name}");
             
             // 发送设备移除事件
             let _ = app.emit("device-removed", DeviceChangeEvent {
@@ -103,7 +103,7 @@ fn monitor_device_changes(
 
             // 尝试切换到其他可用设备
             if let Some(fallback_device) = find_fallback_device(&host, &current_device_name) {
-                println!("Switching to fallback device: {}", fallback_device);
+                println!("Switching to fallback device: {fallback_device}");
                 
                 // 发送设备切换请求
                 let _ = app.emit("device-switch-required", DeviceChangeEvent {
@@ -124,7 +124,7 @@ fn monitor_device_changes(
         // 检查新设备添加
         for device_name in &current_devices {
             if !previous_devices.contains(device_name) {
-                println!("Device added: {}", device_name);
+                println!("Device added: {device_name}");
                 
                 let _ = app.emit("device-added", DeviceChangeEvent {
                     event_type: "device-added".to_string(),
@@ -135,7 +135,7 @@ fn monitor_device_changes(
                 if let Some(default_device) = host.default_output_device() {
                     if let Ok(default_name) = default_device.name() {
                         if default_name == *device_name {
-                            println!("New device is system default, switching to: {}", device_name);
+                            println!("New device is system default, switching to: {device_name}");
                             
                             // 发送自动切换到默认设备的事件
                             let _ = app.emit("device-default-changed", DeviceChangeEvent {

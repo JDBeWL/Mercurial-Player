@@ -94,8 +94,6 @@ export default {
 
         // 使用 composable
         const lyricsComposable = useLyrics();
-        logger.debug('lyricsComposable:', lyricsComposable);
-        logger.debug('fetchAndSaveLyrics:', lyricsComposable.fetchAndSaveLyrics);
         const { lyrics, loading, lyricsSource } = lyricsComposable;
         
         // 本地高频 activeIndex，基于 visualTime 计算，避免滚动延迟
@@ -123,13 +121,12 @@ export default {
         const fetchingLyrics = ref(false);
         
         const handleFetchLyrics = async () => {
-            logger.debug('handleFetchLyrics called, composable:', lyricsComposable);
             fetchingLyrics.value = true;
             try {
                 if (typeof lyricsComposable.fetchAndSaveLyrics === 'function') {
                     await lyricsComposable.fetchAndSaveLyrics();
                 } else {
-                    logger.error('fetchAndSaveLyrics is not a function:', lyricsComposable);
+                    logger.error('fetchAndSaveLyrics is not a function');
                 }
             } finally {
                 fetchingLyrics.value = false;

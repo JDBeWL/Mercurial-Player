@@ -59,6 +59,7 @@ pub struct PlaylistConfig {
 /// 通用设置
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)] // 配置结构体中多个布尔字段是合理的
 pub struct GeneralConfig {
     pub language: String,
     pub theme: String,

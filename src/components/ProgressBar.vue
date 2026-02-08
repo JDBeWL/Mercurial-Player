@@ -18,13 +18,13 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref, onUnmounted, watch } from 'vue'
 import { usePlayerStore } from '../stores/player'
 
 const playerStore = usePlayerStore()
-const progressBar = ref(null)
-const progressBarWrapper = ref(null)
+const progressBar = ref<HTMLElement | null>(null)
+const progressBarWrapper = ref<HTMLElement | null>(null)
 const isDragging = ref(false)
 const isHovering = ref(false)
 const dragPercent = ref(0)
@@ -61,14 +61,14 @@ watch(() => playerStore.currentTime, (newTime) => {
   }
 })
 
-const updateDragPosition = (event) => {
+const updateDragPosition = (event: MouseEvent) => {
   if (!progressBarWrapper.value) return
   const rect = progressBarWrapper.value.getBoundingClientRect()
   const percent = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100))
   dragPercent.value = percent
 }
 
-const handleMouseDown = (event) => {
+const handleMouseDown = (event: MouseEvent) => {
   if (playerStore.duration === 0) return
   isDragging.value = true
   pendingSeek.value = false // 重置
@@ -78,7 +78,7 @@ const handleMouseDown = (event) => {
   document.addEventListener('mouseup', handleMouseUp)
 }
 
-const handleMouseMove = (event) => {
+const handleMouseMove = (event: MouseEvent) => {
   if (isDragging.value) {
     updateDragPosition(event)
   }
@@ -111,7 +111,7 @@ const handleMouseLeave = () => {
   }
 }
 
-const formatTime = (seconds) => {
+const formatTime = (seconds: number): string => {
   if (isNaN(seconds) || !isFinite(seconds)) return '0:00'
   
   const minutes = Math.floor(seconds / 60)

@@ -172,7 +172,7 @@
 
 
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from './stores/player'
@@ -230,24 +230,20 @@ const toggleViewMode = () => {
 }
 
 // 处理专辑封面鼠标移动事件，检测是否在右下角区域
-const handleAlbumArtMouseMove = (event) => {
+const handleAlbumArtMouseMove = (event: MouseEvent) => {
   if (!currentTrack.value || !currentTrack.value.cover) {
     showExtractButton.value = false
     return
   }
   
-  const wrapper = event.currentTarget
+  const wrapper = event.currentTarget as HTMLElement
   const rect = wrapper.getBoundingClientRect()
   const x = event.clientX - rect.left
   const y = event.clientY - rect.top
-  const width = rect.width
-  const height = rect.height
   
   // 定义右下角区域（右下角80x80像素区域）
   const cornerSize = 80
-  const isInBottomRight = x >= width - cornerSize && y >= height - cornerSize
-  
-  showExtractButton.value = isInBottomRight
+  showExtractButton.value = x >= rect.width - cornerSize && y >= rect.height - cornerSize
 }
 
 // 鼠标离开封面区域时隐藏按钮
@@ -345,48 +341,49 @@ const isTrackFileExists = computed(() => {
 });
 
 // 全局键盘事件处理
-const handleKeyDown = (event) => {
+const handleKeyDown = (event: KeyboardEvent) => {
   // 只在用户没有在输入框等元素中编辑时响应键盘事件
-  const isInputFocused = document.activeElement.tagName === 'INPUT' ||
-    document.activeElement.tagName === 'TEXTAREA' ||
-    document.activeElement.isContentEditable;
+  const activeEl = document.activeElement
+  if (!activeEl) return
 
-  if (isInputFocused) return;
+  const isInputFocused = activeEl.tagName === 'INPUT' ||
+    activeEl.tagName === 'TEXTAREA' ||
+    (activeEl as HTMLElement).isContentEditable
+
+  if (isInputFocused) return
 
   // 空格键暂停/恢复播放
   if (event.code === 'Space') {
-    event.preventDefault(); // 防止页面滚动
-    playerStore.togglePlay();
+    event.preventDefault()
+    playerStore.togglePlay()
   }
 
   // 方向键控制
   switch (event.code) {
     case 'ArrowLeft':
-      // 左方向键：上一首
-      event.preventDefault();
+      event.preventDefault()
       if (playerStore.hasPreviousTrack) {
-        playerStore.previousTrack();
+        playerStore.previousTrack()
       }
-      break;
+      break
     case 'ArrowRight':
-      // 右方向键：下一首
-      event.preventDefault();
+      event.preventDefault()
       if (playerStore.hasNextTrack) {
-        playerStore.nextTrack();
+        playerStore.nextTrack()
       }
-      break;
-    case 'ArrowUp':
-      // 上方向键：音量增加
-      event.preventDefault();
-      const newVolumeUp = Math.min(1, playerStore.volume + 0.05);
-      playerStore.setVolume(newVolumeUp);
-      break;
-    case 'ArrowDown':
-      // 下方向键：音量减少
-      event.preventDefault();
-      const newVolumeDown = Math.max(0, playerStore.volume - 0.05);
-      playerStore.setVolume(newVolumeDown);
-      break;
+      break
+    case 'ArrowUp': {
+      event.preventDefault()
+      const newVolume = Math.min(1, playerStore.volume + 0.05)
+      playerStore.setVolume(newVolume)
+      break
+    }
+    case 'ArrowDown': {
+      event.preventDefault()
+      const newVolume = Math.max(0, playerStore.volume - 0.05)
+      playerStore.setVolume(newVolume)
+      break
+    }
   }
 }
 
@@ -418,8 +415,8 @@ const toggleFullscreen = async () => {
       isFullscreen.value = false
     } else {
       // 进入全屏前先检查并取消最大化状态
-      const isMaximized = await appWindow.isMaximized()
-      if (isMaximized) {
+      const currentlyMaximized = await appWindow.isMaximized()
+      if (currentlyMaximized) {
         await appWindow.unmaximize()
       }
       await appWindow.setFullscreen(true)
@@ -443,7 +440,7 @@ const closeWindow = async () => {
 // 监听当前音轨变化，自动处理标题信息
 const stopWatchTrack = watchTrack(() => currentTrack.value)
 
-const transitionDirection = ref(null)
+const transitionDirection = ref<string | null>(null)
 
 // 监听当前音轨索引变化，自动处理标题信息
 watch(currentTrackIndex, (newIndex, oldIndex) => {

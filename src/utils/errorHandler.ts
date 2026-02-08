@@ -75,9 +75,10 @@ export class AppError extends Error {
     this.context = context
     this.timestamp = new Date().toISOString()
     
-    // 保持堆栈跟踪
-    if ((Error as any).captureStackTrace) {
-      (Error as any).captureStackTrace(this, AppError)
+    // 保持堆栈跟踪（V8引擎特有API）
+    const ErrorWithCapture = Error as { captureStackTrace?: (target: object, constructor: Function) => void }
+    if (ErrorWithCapture.captureStackTrace) {
+      ErrorWithCapture.captureStackTrace(this, AppError)
     }
   }
 

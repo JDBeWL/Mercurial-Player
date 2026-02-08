@@ -379,7 +379,7 @@ fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
     // 替换窗口过程
     unsafe {
         let hwnd = HWND(hwnd as *mut std::ffi::c_void);
-        let original = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, custom_wndproc as isize);
+        let original = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (custom_wndproc as usize).cast_signed());
         let _ = ORIGINAL_WNDPROC.set(original);
         println!("Taskbar hook installed");
     }

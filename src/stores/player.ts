@@ -206,6 +206,7 @@ export const usePlayerStore = defineStore('player', {
 
     _getFileExistsCache(): LRUCache<boolean> {
       if (!this._fileExistsCache) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this._fileExistsCache = new LRUCache<boolean>(200, 30000) as any
       }
       return this._fileExistsCache as LRUCache<boolean>
@@ -213,6 +214,7 @@ export const usePlayerStore = defineStore('player', {
 
     _getMetadataCache(): LRUCache<TrackMetadata> {
       if (!this._metadataCache) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this._metadataCache = new LRUCache<TrackMetadata>(500, 300000) as any
       }
       return this._metadataCache as LRUCache<TrackMetadata>
@@ -953,8 +955,8 @@ export const usePlayerStore = defineStore('player', {
         if (!track.path || cache.has(track.path)) continue
 
         cache.set(track.path, {
-          title: (track as any).displayTitle || track.title || track.name || FileUtils.getFileName(track.path),
-          artist: (track as any).displayArtist || track.artist || '',
+          title: track.displayTitle || track.title || track.name || FileUtils.getFileName(track.path),
+          artist: track.displayArtist || track.artist || '',
           album: track.album || '',
           duration: track.duration || 0,
           bitrate: track.bitrate || null,

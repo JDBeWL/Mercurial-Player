@@ -1,6 +1,21 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
+import logger from '@/utils/logger'
+
+/** GitHub Release 资源类型 */
+interface GitHubAsset {
+  name: string
+  browser_download_url: string
+}
+
+/** GitHub Release 类型 */
+interface GitHubRelease {
+  draft: boolean
+  tag_name: string
+  body: string | null
+  assets: GitHubAsset[]
+}
 
 /**
  * 自动更新 Composable（模块级单例，避免多个组件重复监听事件）
@@ -35,7 +50,7 @@ async function startListeners() {
 
   // 更新开始事件（可带 total size）
   const un0 = await listen<number>('update-started', event => {
-    console.info('[auto-update] started, total size', event.payload)
+    logger.info('[auto-update] started, total size', event.payload)
     downloadProgress.value = 0
     isDownloading.value = true
   })
@@ -43,7 +58,7 @@ async function startListeners() {
 
   // 进度事件
   const un1 = await listen<number>('update-progress', event => {
-    console.debug('[auto-update] progress', event.payload)
+    logger.debug('[auto-update] progress', event.payload)
     downloadProgress.value = event.payload as number
     isDownloading.value = true
   })
@@ -51,22 +66,22 @@ async function startListeners() {
 
   // 错误事件
   const un2 = await listen<string>('update-error', event => {
-    console.warn('[auto-update] error', event.payload)
+    logger.warn('[auto-update] error', event.payload)
     error.value = event.payload as string
     isDownloading.value = false
   })
   unlistenFns.push(un2)
 
   // 日志事件（后端会发送下载路径、开始/完成/失败消息）
-  const un_log = await listen<string>('update-log', event => {
-    console.info('[auto-update] log', event.payload)
+  const unLog = await listen<string>('update-log', event => {
+    logger.info('[auto-update] log', event.payload)
     updateLog.value = event.payload as string
   })
-  unlistenFns.push(un_log)
+  unlistenFns.push(unLog)
 
   // 完成事件
   const un3 = await listen<string>('update-finished', event => {
-    console.info('[auto-update] finished', event.payload)
+    logger.info('[auto-update] finished', event.payload)
     downloadProgress.value = 100
     isDownloading.value = false
     downloadFinished.value = true
@@ -79,7 +94,7 @@ async function startListeners() {
 /** 清理监听器 */
 export async function stopListeners() {
   for (const u of unlistenFns) {
-    try { await u() } catch (_) {}
+    try { await u() } catch { /* ignore cleanup errors */ }
   }
   unlistenFns = []
   listenersStarted = false
@@ -92,7 +107,7 @@ const getCurrentVersion = async (): Promise<string> => {
   try {
     return await invoke('get_app_version')
   } catch (err) {
-    console.error('Failed to get app version:', err)
+    logger.error('Failed to get app version:', err)
     throw err
   }
 }
@@ -104,7 +119,7 @@ const getCurrentVersion = async (): Promise<string> => {
  *   - 稳定版本（无 prerelease）优先于任何 prerelease；
  *   - 若双方均为数字型 prerelease，则取数字更大的那个（例如 1.0.0-2 > 1.0.0-1）。
  */
-const getLatestRelease = async (): Promise<any> => {
+const getLatestRelease = async (): Promise<GitHubRelease> => {
   try {
     const response = await fetch(`${GITHUB_API}/releases?per_page=50`)
     if (!response.ok) {
@@ -151,9 +166,9 @@ const getLatestRelease = async (): Promise<any> => {
       return (a.prereleaseNum! - b.prereleaseNum!)
     }
 
-    let best: { release: any; parsed: Parsed } | null = null
+    let best: { release: GitHubRelease; parsed: Parsed } | null = null
 
-    for (const r of releases) {
+    for (const r of releases as GitHubRelease[]) {
       if (r.draft) continue
       const { valid, parsed } = parseTag(r.tag_name || '')
       if (!valid || !parsed) continue
@@ -171,7 +186,7 @@ const getLatestRelease = async (): Promise<any> => {
     if (!best) throw new Error('No suitable release found')
     return best.release
   } catch (err) {
-    console.error('Failed to get latest release:', err)
+    logger.error('Failed to get latest release:', err)
     throw err
   }
 }
@@ -240,8 +255,6 @@ const checkForUpdates = async () => {
   lastCheckTime.value = 'Checking...'
 
   try {
-
-
     const currentVersion = await getCurrentVersion()
     const release = await getLatestRelease()
 
@@ -255,11 +268,11 @@ const checkForUpdates = async () => {
       releaseNotes.value = release.body || ''
 
       // 查找 Windows 的安装包：优先选择 .exe，其次 .msi
-      const windowsAssets = release.assets.filter((asset: any) =>
+      const windowsAssets = release.assets.filter(asset =>
         asset.name.endsWith('.exe') || asset.name.endsWith('.msi')
       )
-      const windowsAsset = windowsAssets.find((asset: any) => asset.name.endsWith('.exe'))
-        || windowsAssets.find((asset: any) => asset.name.endsWith('.msi')) || null
+      const windowsAsset = windowsAssets.find(asset => asset.name.endsWith('.exe'))
+        ?? windowsAssets.find(asset => asset.name.endsWith('.msi')) ?? null
 
       if (windowsAsset) {
         downloadUrl.value = windowsAsset.browser_download_url
@@ -273,7 +286,7 @@ const checkForUpdates = async () => {
     error.value = err instanceof Error ? err.message : 'Unknown error occurred'
     // 也记录检查时间，方便用户知道检查已完成但失败
     lastCheckTime.value = new Date().toLocaleString()
-    console.error('Update check failed:', err)
+    logger.error('Update check failed:', err)
   } finally {
     isChecking.value = false
   }
@@ -302,7 +315,7 @@ const downloadAndInstall = async () => {
     })
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Download failed'
-    console.error('Download failed:', err)
+    logger.error('Download failed:', err)
     isDownloading.value = false
   }
 }

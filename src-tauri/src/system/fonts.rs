@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 #[cfg(target_os = "windows")]
-use winreg::enums::*;
+use winreg::enums::HKEY_LOCAL_MACHINE;
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
 

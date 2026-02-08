@@ -66,19 +66,19 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { usePlayerStore } from '../stores/player'
 
 const playerStore = usePlayerStore()
-const volumeSlider = ref(null)
+const volumeSlider = ref<HTMLElement | null>(null)
 const isDragging = ref(false)
 const showVolume = ref(false)
 
 // 保存事件处理函数引用，以便正确清理
-let sliderMousedownHandler = null
+let sliderMousedownHandler: ((event: MouseEvent) => void) | null = null
 
-const handleVolumeChange = (event) => {
+const handleVolumeChange = (event: MouseEvent) => {
   if (!volumeSlider.value) return
   
   const rect = volumeSlider.value.getBoundingClientRect()
@@ -87,9 +87,9 @@ const handleVolumeChange = (event) => {
   playerStore.setVolume(percent)
 }
 
-const startDrag = (event) => {
+const startDrag = (event: MouseEvent) => {
   // 如果点击的是滑柄本身，不立即更新音量值，避免跳动
-  const isThumb = event.target.classList.contains('slider-thumb')
+  const isThumb = (event.target as HTMLElement)?.classList?.contains('slider-thumb')
   
   isDragging.value = true
   
@@ -106,7 +106,7 @@ const startDrag = (event) => {
   event.preventDefault()
 }
 
-const handleDrag = (event) => {
+const handleDrag = (event: MouseEvent) => {
   if (isDragging.value) {
     handleVolumeChange(event)
   }

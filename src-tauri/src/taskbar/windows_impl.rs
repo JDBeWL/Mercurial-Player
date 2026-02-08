@@ -43,6 +43,7 @@ pub struct TaskbarManager {
 }
 
 /// 任务栏按钮图标
+#[allow(clippy::struct_field_names)] // 图标字段使用 _icon 后缀是合理的命名
 struct TaskbarIcons {
     prev_icon: Option<HICON>,
     play_icon: Option<HICON>,
@@ -81,6 +82,8 @@ impl Drop for TaskbarIcons {
 }
 
 // SAFETY: TaskbarManager只在主线程创建和使用，且通过Mutex保护
+// ITaskbarList3和HICON是Windows COM对象，实际上通过Mutex序列化访问是安全的
+#[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl Send for TaskbarManager {}
 unsafe impl Sync for TaskbarManager {}
 
@@ -383,7 +386,7 @@ where
         };
 
         let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-        let hbm = CreateDIBSection(Some(hdc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0)
+        let hbm = CreateDIBSection(Some(hdc), &raw const bmi, DIB_RGB_COLORS, &raw mut bits, None, 0)
             .map_err(|e| format!("Failed to create DIB section: {e}"))?;
 
         if bits.is_null() {
@@ -392,7 +395,7 @@ where
         }
 
         // 填充像素数据
-        let pixels = std::slice::from_raw_parts_mut(bits as *mut u32, (width * height) as usize);
+        let pixels = std::slice::from_raw_parts_mut(bits.cast::<u32>(), (width * height) as usize);
 
         // 先绘制内容
         for y in 0..height {
@@ -461,12 +464,12 @@ where
         };
 
         let mut mask_bits: *mut std::ffi::c_void = std::ptr::null_mut();
-        let mask_hbm = CreateDIBSection(Some(hdc), &mask_bmi, DIB_RGB_COLORS, &mut mask_bits, None, 0)
+        let mask_hbm = CreateDIBSection(Some(hdc), &raw const mask_bmi, DIB_RGB_COLORS, &raw mut mask_bits, None, 0)
             .map_err(|e| format!("Failed to create mask DIB section: {e}"))?;
 
         if !mask_bits.is_null() {
             let mask_pixels =
-                std::slice::from_raw_parts_mut(mask_bits as *mut u32, (width * height) as usize);
+                std::slice::from_raw_parts_mut(mask_bits.cast::<u32>(), (width * height) as usize);
             for y in 0..height {
                 for x in 0..width {
                     let idx = (y * width + x) as usize;
@@ -489,7 +492,7 @@ where
             hbmColor: hbm,
         };
 
-        let hicon = windows::Win32::UI::WindowsAndMessaging::CreateIconIndirect(&iconinfo)
+        let hicon = windows::Win32::UI::WindowsAndMessaging::CreateIconIndirect(&raw const iconinfo)
             .map_err(|e| format!("Failed to create icon: {e}"))?;
 
         // 清理
@@ -503,9 +506,7 @@ where
 
 /// 获取全局任务栏管理器
 pub fn get_taskbar_manager() -> Arc<Mutex<TaskbarManager>> {
-    TASKBAR_MANAGER
-        .get_or_init(|| Arc::new(Mutex::new(TaskbarManager::new())))
-        .clone()
+    Arc::clone(TASKBAR_MANAGER.get_or_init(|| Arc::new(Mutex::new(TaskbarManager::new()))))
 }
 
 /// 初始化任务栏（在主窗口创建后调用）

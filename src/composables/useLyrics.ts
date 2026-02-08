@@ -147,7 +147,7 @@ export function useLyrics() {
           // 缓存在线歌词
           onlineLyricsCache.set(trackPath, {
             lrc: onlineLrc,
-            parsed: parsed,
+            parsed,
             source: 'online'
           })
           
@@ -185,7 +185,7 @@ export function useLyrics() {
         // 缓存在线歌词
         onlineLyricsCache.set(track.path, {
           lrc: onlineLrc,
-          parsed: parsed,
+          parsed,
           source: 'online'
         })
         

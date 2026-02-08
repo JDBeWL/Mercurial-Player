@@ -54,6 +54,23 @@ export function createPluginAPI(
     }
   }
 
+  // 歌词行格式转换辅助函数
+  const convertLyricLine = (line: { time: number; texts?: string[]; text?: string; karaoke?: unknown; words?: unknown[] }): LyricLine => {
+    let textArray: { text: string }[] = []
+    if (line.texts && Array.isArray(line.texts) && line.texts.length > 0) {
+      textArray = line.texts.map(t => ({ text: typeof t === 'string' ? t : String(t) }))
+    } else if (line.text) {
+      textArray = [{ text: line.text }]
+    }
+    return {
+      time: line.time,
+      texts: textArray,
+      text: line.text,
+      karaoke: line.karaoke,
+      words: line.words,
+    } as LyricLine
+  }
+
   // 延迟初始化 stores
   let playerStore: ReturnType<typeof usePlayerStore> | null = null
   let configStore: ReturnType<typeof useConfigStore> | null = null
@@ -112,48 +129,18 @@ export function createPluginAPI(
         requirePermission(PluginPermission.PLAYER_READ, 'player.getLyrics')
         const store = getPlayerStore()
 
-        logger.debug(`[Plugin:${pluginId}] getLyrics 开始 - 当前歌曲:`, store.currentTrack?.path)
-        logger.debug(`[Plugin:${pluginId}] getLyrics - store.lyrics 长度:`, store.lyrics?.length || 0)
-
         // 如果 store 中已有歌词，直接返回
         if (store.lyrics && store.lyrics.length > 0) {
-          logger.debug(`[Plugin:${pluginId}] 使用 store 中的歌词`)
-          return store.lyrics.map(line => {
-            // 处理两种格式的歌词数据：
-            // 1. 异步解析: { time, texts: string[] }
-            // 2. 同步解析: { time, text: string }
-            let textArray: { text: string }[] = []
-
-            if (line.texts && Array.isArray(line.texts) && line.texts.length > 0) {
-              // 异步解析的格式，texts 是字符串数组
-              textArray = line.texts.map(t => ({ text: typeof t === 'string' ? t : String(t) }))
-            } else if (line.text) {
-              // 同步解析的格式，text 是单个字符串
-              textArray = [{ text: line.text }]
-            }
-
-            return {
-              time: line.time,
-              texts: textArray,
-              // 保留原始属性供插件使用
-              text: line.text,
-              karaoke: line.karaoke,
-              words: line.words,
-            }
-          }) as LyricLine[]
+          return store.lyrics.map(convertLyricLine)
         }
 
         // 如果没有歌词但有当前歌曲，尝试加载歌词
         if (store.currentTrack?.path) {
-          logger.debug(`[Plugin:${pluginId}] 尝试加载歌词:`, store.currentTrack.path)
-
           // 先检查歌词文件是否存在
           try {
             const lyricsPath = await FileUtils.findLyricsFile(store.currentTrack.path)
-            logger.debug(`[Plugin:${pluginId}] 歌词文件路径:`, lyricsPath)
 
             if (!lyricsPath) {
-              logger.debug(`[Plugin:${pluginId}] 没有找到歌词文件`)
               return null
             }
           } catch (e) {
@@ -164,40 +151,18 @@ export function createPluginAPI(
           try {
             // 先尝试触发 store 的歌词加载
             await store.loadLyrics(store.currentTrack.path)
-            logger.debug(`[Plugin:${pluginId}] loadLyrics 调用完成`)
 
             // 重试机制：最多等待 1 秒，每 100ms 检查一次
             for (let i = 0; i < 10; i++) {
-              logger.debug(`[Plugin:${pluginId}] 检查歌词 (${i + 1}/10) - 长度:`, store.lyrics?.length || 0)
               if (store.lyrics && store.lyrics.length > 0) {
-                logger.debug(`[Plugin:${pluginId}] 歌词加载成功`)
-                return store.lyrics.map(line => {
-                  let textArray: { text: string }[] = []
-
-                  if (line.texts && Array.isArray(line.texts) && line.texts.length > 0) {
-                    textArray = line.texts.map(t => ({ text: typeof t === 'string' ? t : String(t) }))
-                  } else if (line.text) {
-                    textArray = [{ text: line.text }]
-                  }
-
-                  return {
-                    time: line.time,
-                    texts: textArray,
-                    text: line.text,
-                    karaoke: line.karaoke,
-                    words: line.words,
-                  }
-                }) as LyricLine[]
+                return store.lyrics.map(convertLyricLine)
               }
               await new Promise(resolve => setTimeout(resolve, 100))
             }
 
-            logger.debug(`[Plugin:${pluginId}] 歌词加载超时或无歌词文件`)
           } catch (e) {
             logger.error(`[Plugin:${pluginId}] 加载歌词失败:`, e)
           }
-        } else {
-          logger.debug(`[Plugin:${pluginId}] 没有当前歌曲`)
         }
 
         return null
@@ -646,7 +611,7 @@ export function createPluginAPI(
       },
 
       generateId(): string {
-        return `${pluginId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+        return `${pluginId}-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
       },
     },
 

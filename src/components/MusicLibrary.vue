@@ -474,9 +474,6 @@ const openFolderDialog = async () => {
   }
 }
 
-// 当前选中的播放列表
-const selectedPlaylist = ref(null)
-
 // 播放全部（当前显示的全部歌曲播放列表）
 const playAll = async () => {
   // 找到全部歌曲播放列表
