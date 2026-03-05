@@ -37,6 +37,7 @@ futures = "0.3"
 urlencoding = "2"
 aes = "0.8"
 md5 = "0.7"
+display-info = "0.5"
 
 [target.'cfg(windows)'.dependencies]
 wasapi = "0.22"

@@ -192,6 +192,27 @@ import PlaylistView from './components/PlaylistView.vue'
 import ThemeSelector from './components/ThemeSelector.vue'
 import Settings from './components/Settings.vue'
 import MiniPlayer from './components/MiniPlayer.vue'
+
+// 获取屏幕刷新率
+const getScreenRefreshRate = (): Promise<number> => {
+  return new Promise((resolve) => {
+    let frames = 0
+    let lastTime = performance.now()
+    const duration = 1000 // 测量1秒
+
+    const countFrame = () => {
+      frames++
+      const currentTime = performance.now()
+      if (currentTime - lastTime < duration) {
+        requestAnimationFrame(countFrame)
+      } else {
+        // 返回测得的刷新率，至少是1
+        resolve(Math.max(1, frames))
+      }
+    }
+    requestAnimationFrame(countFrame)
+  })
+}
 import { useTrackInfo } from './composables/useTrackInfo'
 import { useLyrics } from './composables/useLyrics'
 import { useAutoUpdate } from './composables/useAutoUpdate'
@@ -505,6 +526,15 @@ onMounted(async () => {
 
   // 初始化音频播放器
   playerStore.initAudio()
+
+  // 获取屏幕刷新率并设置到后端，用于动态调整FFT计算频率
+  try {
+    const refreshRate = await getScreenRefreshRate()
+    await invoke('set_target_fps', { fps: refreshRate })
+    logger.info(`Screen refresh rate set to ${refreshRate}Hz`)
+  } catch (error) {
+    logger.warn('Failed to set target FPS:', error)
+  }
 
   // 如果用户启用了自动检查更新，则在启动时执行一次检查（仅检查，不自动安装）
   try {

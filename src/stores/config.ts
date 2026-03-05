@@ -12,6 +12,7 @@ import type {
   LyricsConfig,
   UIConfig,
   AudioConfig,
+  VisualizerConfig,
   AppConfig
 } from '@/types'
 
@@ -59,6 +60,7 @@ interface ConfigState {
   lyrics: LyricsConfig
   ui: UIConfig
   audio: AudioConfig
+  visualizer: VisualizerConfig
   _isInitializing: boolean
   _isDirty: boolean
   _lastSavedConfig: Partial<AppConfig> | null
@@ -130,6 +132,12 @@ export const useConfigStore = defineStore('config', {
     audio: {
       exclusiveMode: false,
       volume: 0.5
+    },
+
+    // 可视化设置
+    visualizer: {
+      targetFps: 60,
+      enableVerticalSync: false
     },
 
     // 内部状态（不保存到文件）

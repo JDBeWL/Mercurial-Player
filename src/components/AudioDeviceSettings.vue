@@ -431,18 +431,21 @@ watch(useExclusiveMode, (newValue) => {
 .option-control .switch {
   position: relative;
   width: 52px;
-  height: 32px;
+  height: 28px;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .option-control .switch::before {
   content: '';
   position: absolute;
-  width: 100%;
-  height: 100%;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   background-color: var(--md-sys-color-surface-container-highest);
   border: 2px solid var(--md-sys-color-outline);
-  border-radius: 16px;
+  border-radius: 14px;
   transition: all 0.2s ease;
   box-sizing: border-box;
 }
@@ -470,9 +473,9 @@ watch(useExclusiveMode, (newValue) => {
 }
 
 .option-control .switch.active .switch-handle {
-  left: 22px;
-  width: 24px;
-  height: 24px;
+  left: 28px;
+  width: 18px;
+  height: 18px;
   background-color: var(--md-sys-color-on-primary);
 }
 

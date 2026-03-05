@@ -49,7 +49,7 @@ const baseTabs = [
   { id: 'titleExtraction', icon: 'title', label: 'config.titleExtraction' },
   { id: 'playlist', icon: 'queue_music', label: 'config.playlistSettings' },
   { id: 'audioDevice', icon: 'speaker', label: 'config.audioDeviceSettings' },
-  { id: 'equalizer', icon: 'equalizer', label: 'config.equalizer' },
+  { id: 'equalizer', icon: 'graphic_eq', label: 'config.equalizer' },
 ]
 
 // 动态计算可见的 tabs

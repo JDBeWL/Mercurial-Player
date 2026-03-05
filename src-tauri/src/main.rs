@@ -121,6 +121,8 @@ fn main() {
             decode_thread_id: Arc::new(AtomicU64::new(0)),
             equalizer: Arc::new(Mutex::new(Equalizer::new(48000, 2))),
             device_monitor: Arc::new(Mutex::new(DeviceMonitor::new(device_name))),
+            target_fps: Arc::new(AtomicU64::new(60)), // 默认60fps
+            enable_vertical_sync: Arc::new(AtomicBool::new(false)), // 默认关闭垂直同步
         },
         config_manager,
         equalizer: GlobalEqualizer::new(),
@@ -230,12 +232,15 @@ fn main() {
             system::commands::get_system_info,
             system::commands::get_system_fonts,
             system::commands::get_platform,
+            system::commands::get_screen_refresh_rate,
             // 音频设备命令
             audio::commands::get_audio_devices,
             audio::commands::set_audio_device,
             audio::commands::get_current_audio_device,
             audio::commands::toggle_exclusive_mode,
             audio::commands::get_exclusive_mode,
+            audio::commands::set_target_fps,
+            audio::commands::set_vertical_sync,
             // EQ 均衡器命令
             equalizer::commands::get_eq_bands,
             equalizer::commands::get_eq_settings,

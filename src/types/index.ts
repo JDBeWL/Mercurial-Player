@@ -114,6 +114,12 @@ export interface AudioConfig {
   volume: number
 }
 
+export interface VisualizerConfig {
+  targetFps: number
+  enableVerticalSync: boolean
+  detectedRefreshRate?: number
+}
+
 export interface AppConfig {
   musicDirectories: string[]
   directoryScan: DirectoryScanConfig
@@ -123,6 +129,7 @@ export interface AppConfig {
   lyrics: LyricsConfig
   ui: UIConfig
   audio: AudioConfig
+  visualizer: VisualizerConfig
 }
 
 // ============ 错误处理类型 ============

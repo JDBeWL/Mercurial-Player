@@ -18,23 +18,23 @@ use spectrum_analyzer::windows::hann_window;
 use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
 // ============================================================================
-// 预计算查找表 - 避免热路径上的数学运算
+// 预计算查找表
 // ============================================================================
 
-/// 软削波查找表大小（覆盖 0.0 到 2.0 范围，精度 0.001）
+/// 软削波查找表大小（覆盖0.0到2.0范围，精度0.001）
 const SOFT_CLIP_TABLE_SIZE: usize = 2001;
 
 /// 预计算的软削波查找表
 static SOFT_CLIP_TABLE: std::sync::LazyLock<[f32; SOFT_CLIP_TABLE_SIZE]> = std::sync::LazyLock::new(|| {
     let mut table = [0.0f32; SOFT_CLIP_TABLE_SIZE];
     for (i, item) in table.iter_mut().enumerate() {
-        let x = i as f32 / 1000.0; // 0.0 到 2.0
+        let x = i as f32 / 1000.0; // 0.0到2.0
         *item = compute_soft_clip(x);
     }
     table
@@ -58,7 +58,7 @@ fn soft_clip_fast(x: f32) -> f32 {
     let sign = x.signum();
     let abs_x = x.abs();
     
-    // 快速路径：大多数采样在 [-0.95, 0.95] 范围内
+    // 快速路径：大多数采样在[-0.95, 0.95]范围内
     if abs_x <= 0.95 {
         return x;
     }
@@ -68,7 +68,7 @@ fn soft_clip_fast(x: f32) -> f32 {
     sign * SOFT_CLIP_TABLE[index]
 }
 
-/// Preamp 增益查找表（-8dB 到 +8dB，精度 0.1dB）
+/// Preamp增益查找表（-8dB到+8dB，精度0.1dB）
 const PREAMP_TABLE_SIZE: usize = 161;
 
 static PREAMP_TABLE: std::sync::LazyLock<[f32; PREAMP_TABLE_SIZE]> = std::sync::LazyLock::new(|| {
@@ -80,7 +80,7 @@ static PREAMP_TABLE: std::sync::LazyLock<[f32; PREAMP_TABLE_SIZE]> = std::sync::
     table
 });
 
-/// 快速 dB 到线性增益转换
+/// 快速dB到线性增益转换
 #[inline(always)]
 fn db_to_linear_fast(db: f32) -> f32 {
     let clamped = db.clamp(-8.0, 8.0);
@@ -88,7 +88,7 @@ fn db_to_linear_fast(db: f32) -> f32 {
     PREAMP_TABLE[index.min(PREAMP_TABLE_SIZE - 1)]
 }
 
-/// 批量处理块大小（对齐到 SIMD 友好的边界）
+/// 批量处理块大小（对齐到SIMD友好的边界）
 const BATCH_SIZE: usize = 64;
 
 #[derive(Debug, serde::Serialize, Clone)]
@@ -118,7 +118,7 @@ pub struct TrackEndedEvent {}
 
 #[inline]
 fn emit_spectrum_update(app: &AppHandle, data: &[f32]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // 直接发送数据数组，减少 JSON 包装开销
+    // 直接发送数据数组，减少JSON包装开销
     app.emit("spectrum-update", SpectrumUpdateEvent { data: data.to_vec() })?;
     Ok(())
 }
@@ -141,10 +141,10 @@ fn emit_playback_position(app: &AppHandle, position: f32) -> Result<(), Box<dyn 
 }
 
 // ============================================================================
-// 批量处理缓冲区 - 减少函数调用开销
+// 批量处理缓冲区
 // ============================================================================
 
-/// 批量 EQ 处理器 - 一次处理多个采样
+/// 批量EQ处理器
 struct BatchEqProcessor {
     coefficients: Vec<crate::equalizer::BiquadCoefficients>,
     states: Vec<Vec<crate::equalizer::BiquadState>>,
@@ -169,7 +169,7 @@ impl BatchEqProcessor {
     /// 更新缓存的设置和滤波器系数
     fn update_settings(&mut self, settings: &EqSettings) {
         self.cached_enabled = settings.enabled;
-        // 使用查找表获取 preamp 乘数
+        // 使用查找表获取preamp乘数
         self.cached_preamp_multiplier = db_to_linear_fast(settings.preamp);
         
         if settings.enabled {
@@ -192,7 +192,7 @@ impl BatchEqProcessor {
         let preamp = self.cached_preamp_multiplier;
         let channels = self.channels;
         
-        // 应用 preamp（向量化友好的循环）
+        // 应用preamp（向量化友好的循环）
         for sample in samples.iter_mut() {
             *sample *= preamp;
         }
@@ -235,17 +235,21 @@ pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     pending_samples: Vec<f32>,
     pending_processed: Vec<f32>,
     pending_index: usize,
-    // EOF 标志 - 用于发送 track-ended 事件
+    // EOF标志 - 用于发送track-ended事件
     eof_sent: bool,
+    /// 目标刷新率（用于FFT计算频率）
+    target_fps: Arc<AtomicU64>,
+    /// 是否启用垂直同步（启用后FFT与屏幕刷新率同步）
+    enable_vertical_sync: Arc<AtomicBool>,
 }
 
-/// 根据采样率计算最佳 FFT 缓冲区大小
-/// 目标是保持约 ~43ms 的分析窗口（2048 @ 48kHz）
+/// 根据采样率计算最佳FFT缓冲区大小
+/// 目标是保持约~43ms的分析窗口（2048@48kHz）
 #[must_use]
 const fn calculate_fft_size(sample_rate: u32) -> usize {
-    // 基准：48kHz 使用 2048 样本 ≈ 42.7ms
+    // 基准：48kHz使用2048样本 ≈ 42.7ms
     // 公式：fft_size = sample_rate * 0.0427
-    // 但 FFT 大小必须是 2 的幂次
+    // FFT大小必须是2的幂次
     match sample_rate {
         0..=32000 => 1024,      // ≤32kHz: 1024 样本
         32001..=64000 => 2048,  // 44.1k/48k: 2048 样本
@@ -255,7 +259,7 @@ const fn calculate_fft_size(sample_rate: u32) -> usize {
 }
 
 impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
-    pub fn new(input: I, waveform_data: Arc<Mutex<Vec<f32>>>, spectrum_data: Arc<Mutex<Vec<f32>>>, app_handle: Option<AppHandle>) -> Self {
+    pub fn new(input: I, waveform_data: Arc<Mutex<Vec<f32>>>, spectrum_data: Arc<Mutex<Vec<f32>>>, app_handle: Option<AppHandle>, target_fps: Arc<AtomicU64>, enable_vertical_sync: Arc<AtomicBool>) -> Self {
         let (sr, ch) = (input.sample_rate(), input.channels());
         let fft_size = calculate_fft_size(sr);
         Self {
@@ -280,10 +284,12 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             pending_processed: Vec::with_capacity(BATCH_SIZE),
             pending_index: 0,
             eof_sent: false,
+            target_fps,
+            enable_vertical_sync,
         }
     }
     
-    /// 设置初始播放位置（用于 seek 操作）
+    /// 设置初始播放位置（用于seek操作）
     #[must_use]
     pub fn with_start_position(mut self, position_secs: f32) -> Self {
         self.samples_played = (position_secs * self.sample_rate as f32 * self.channels as f32) as u64;
@@ -318,16 +324,16 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             return false;
         }
         
-        // 更新 EQ 设置（每批次检查一次，而不是每 512 采样）
+        // 更新EQ设置（每批次检查一次，而不是每512采样）
         self.eq_update_counter += 1;
-        if self.eq_update_counter >= 8 { // 每 8 批次 = 512 采样
+        if self.eq_update_counter >= 8 { // 每8批次 = 512采样
             self.eq_update_counter = 0;
             if let Ok(s) = self.eq_settings.try_read() {
                 self.eq_processor.update_settings(&s);
             }
         }
         
-        // 批量 EQ 处理
+        // 批量EQ处理
         self.pending_processed = self.pending_samples.clone();
         self.eq_processor.process_batch(&mut self.pending_processed);
         
@@ -360,7 +366,7 @@ impl<I: Source<Item = f32> + Send> Iterator for VisualizationSource<I> {
         // 添加到可视化缓冲区
         self.buffer.push(processed);
         
-        // FFT 和事件发送逻辑（仅在缓冲区满时执行）
+        // FFT和事件发送逻辑（仅在缓冲区满时执行）
         if self.buffer.len() >= self.fft_size {
             self.process_visualization();
         }
@@ -370,7 +376,7 @@ impl<I: Source<Item = f32> + Send> Iterator for VisualizationSource<I> {
 }
 
 impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
-    /// 处理可视化数据（FFT 和事件发送）
+    /// 处理可视化数据（FFT和事件发送）
     #[inline(never)] // 避免内联到热路径
     fn process_visualization(&mut self) {
         let now = std::time::SystemTime::now()
@@ -378,7 +384,7 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             .unwrap_or_default()
             .as_millis() as u64;
         
-        // 发送播放位置（每 100ms 一次）
+        // 发送播放位置（每100ms一次）
         let last_pos_emit = self.last_position_emit_time.load(Ordering::Relaxed);
         if now - last_pos_emit >= 100 {
             self.last_position_emit_time.store(now, Ordering::Relaxed);
@@ -390,8 +396,19 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         
         let last_fft = self.last_fft_time.load(Ordering::Relaxed);
         
-        // 限制 FFT 计算和发送频率为约 60fps (16ms)
-        if now - last_fft >= 16 {
+        // 根据垂直同步设置决定FFT频率
+        let enable_vsync = self.enable_vertical_sync.load(Ordering::Relaxed);
+        let target_fps = self.target_fps.load(Ordering::Relaxed).max(1);
+        let fft_interval_ms = if enable_vsync {
+            // 垂直同步开启：使用屏幕刷新率同步
+            1000 / target_fps
+        } else {
+            // 垂直同步关闭：使用目标帧率
+            1000 / target_fps
+        };
+        
+        // 限制FFT计算和发送频率
+        if now - last_fft >= fft_interval_ms {
             self.last_fft_time.store(now, Ordering::Relaxed);
             self.compute_spectrum();
         }
@@ -418,7 +435,7 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
                 // 重置频谱缓冲区
                 self.spectrum_buffer.fill(0.0);
                 
-                // AE 风格：线性频率分布
+                // AE风格：线性频率分布
                 const NUM_BINS: usize = 128;
                 const FREQ_MIN: f32 = 20.0;
                 const FREQ_MAX: f32 = 16000.0;
@@ -437,7 +454,7 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
                     }
                 }
                 
-                // AE 风格的平滑：快速上升，缓慢下降
+                // AE风格的平滑：快速上升，缓慢下降
                 for i in 0..128 {
                     let target = self.spectrum_buffer[i];
                     let current = self.prev_spectrum[i];
@@ -454,7 +471,7 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             }
         }
         
-        // 发送事件 - 与 FFT 计算同步，不再单独节流
+        // 发送事件 - 与FFT计算同步，不再单独节流
         if let Some(ref app) = self.app_handle {
             let _ = emit_spectrum_update(app, &self.prev_spectrum);
         }
@@ -474,16 +491,18 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
     {
         let sink = player.sink.lock().unwrap();
         // 直接停止，不做淡出（淡出会阻塞主线程）
-        // 新音源会有 fade_in 效果来平滑过渡
+        // 新音源会有fade_in效果来平滑过渡
         sink.stop();
         sink.set_volume(*player.target_volume.lock().unwrap());
     }
     *player.current_path.lock().unwrap() = Some(path.to_string());
     *player.current_source.lock().unwrap() = None;
-    let (waveform, spectrum, eq_settings) = (
+    let (waveform, spectrum, eq_settings, target_fps, enable_vertical_sync) = (
         Arc::clone(&player.waveform_data),
         Arc::clone(&player.spectrum_data),
         state.equalizer.get_settings_handle(),
+        Arc::clone(&player.target_fps),
+        Arc::clone(&player.enable_vertical_sync),
     );
 
     let source: Box<dyn Source<Item = f32> + Send> = match SymphoniaDecoder::new(path) {
@@ -493,7 +512,7 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
             let _ = dec.prefill_buffer();
             println!("Symphonia decoder: {path}");
             Box::new(
-                VisualizationSource::new(LockFreeSymphoniaSource::new(dec), waveform, spectrum, Some(app.clone()))
+                VisualizationSource::new(LockFreeSymphoniaSource::new(dec), waveform, spectrum, Some(app.clone()), target_fps, enable_vertical_sync)
                     .with_start_position(start_pos)
                     .with_eq_settings(eq_settings)
                     .fade_in(Duration::from_millis(80)) // 稍长的淡入来补偿没有淡出
@@ -503,7 +522,7 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
             println!("Symphonia decoder failed, fallback to rodio: {e}");
             let file = File::open(path).map_err(|e| e.to_string())?;
             Box::new(
-                VisualizationSource::new(rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?, waveform, spectrum, Some(app.clone()))
+                VisualizationSource::new(rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?, waveform, spectrum, Some(app.clone()), target_fps, enable_vertical_sync)
                     .with_start_position(position.unwrap_or(0.0))
                     .with_eq_settings(eq_settings)
                     .fade_in(Duration::from_millis(80))
@@ -560,7 +579,7 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
         state.equalizer.get_settings_handle(),
     );
     let app_clone = app.clone();
-    let thread_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let thread_started = Arc::new(AtomicBool::new(false));
     let thread_started_clone = Arc::clone(&thread_started);
 
     std::thread::spawn(move || {
@@ -570,15 +589,25 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
         }));
     });
 
-    // 减少等待时间
+    // 等待解码线程启动
     let mut wait = 0;
     while !thread_started.load(Ordering::SeqCst) && wait < 20 {
         std::thread::sleep(Duration::from_millis(5));
         wait += 1;
     }
+    
+    // 等待缓冲区有足够数据再开始播放，避免音频开头欠载
     {
         if let Some(ref wasapi) = *player.wasapi_player.lock().unwrap() {
-            std::thread::sleep(Duration::from_millis(80));
+            // 等待至少200ms的音频数据（约 1/5 秒）
+            let min_buffer_samples = target_sr as usize * target_ch as usize / 5;
+            let mut buffer_wait = 0;
+            while wasapi.get_buffer_size() < min_buffer_samples && buffer_wait < 50 {
+                std::thread::sleep(Duration::from_millis(10));
+                buffer_wait += 1;
+            }
+            // 额外等待一小段时间确保数据稳定
+            std::thread::sleep(Duration::from_millis(20));
             wasapi.start().map_err(|e| format!("Failed to start WASAPI: {e:?}"))?;
         }
     }
@@ -591,8 +620,8 @@ pub fn play_track_exclusive(_app: &AppHandle, _state: &State<AppState>, _path: &
     Err("Exclusive mode is only supported on Windows".to_string())
 }
 
-/// 根据采样率计算解码 chunk 大小
-/// 目标是保持约 ~21ms 的处理块（1024 @ 48kHz）
+/// 根据采样率计算解码chunk 大小
+/// 目标是保持约~21ms的处理块（1024@48kHz）
 #[must_use]
 const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
     match sample_rate {
@@ -666,7 +695,7 @@ fn decode_and_push_to_wasapi(
     _waveform: Arc<Mutex<Vec<f32>>>,
     _spectrum: Arc<Mutex<Vec<f32>>>,
     app: AppHandle,
-    stop_flag: Arc<std::sync::atomic::AtomicBool>,
+    stop_flag: Arc<AtomicBool>,
     thread_id_ref: Arc<AtomicU64>,
     my_id: u64,
     src_sr: u32,
@@ -685,10 +714,11 @@ fn decode_and_push_to_wasapi(
     }
     let need_resample = src_sr != target_sr;
     let chunk_size = calculate_decode_chunk_size(src_sr);
+    let resample_ratio = target_sr as f64 / src_sr as f64;
     let mut eq_update_counter: u32 = 0;
     let mut resampler: Option<SincFixedIn<f32>> = if need_resample {
         SincFixedIn::<f32>::new(
-            target_sr as f64 / src_sr as f64,
+            resample_ratio,
             2.0,
             SincInterpolationParameters {
                 sinc_len: 128,
@@ -702,8 +732,10 @@ fn decode_and_push_to_wasapi(
         ).ok()
     } else { None };
 
-    let mut input_frames: Vec<Vec<f32>> = vec![Vec::with_capacity(chunk_size * 2); src_ch as usize];
-    let mut output_buffer: Vec<f32> = Vec::with_capacity(chunk_size * target_ch as usize * 4);
+    let mut input_frames: Vec<Vec<f32>> = vec![Vec::with_capacity(chunk_size); src_ch as usize];
+    // 精确计算最大输出缓冲区大小
+    let max_output_frames = ((chunk_size as f64 * resample_ratio).ceil() as usize).max(chunk_size);
+    let mut output_buffer: Vec<f32> = Vec::with_capacity(max_output_frames * target_ch as usize);
     
     // 播放位置追踪
     let mut last_position_emit_time: u64 = 0;
@@ -760,21 +792,29 @@ fn decode_and_push_to_wasapi(
             }
         }
 
+        // 处理重采样
         let output_frames: Vec<Vec<f32>> = if let Some(ref mut r) = resampler {
             let actual = input_frames[0].len();
-            if actual < chunk_size {
+            if actual < chunk_size && !eof {
+                // 非EOF情况下填充到chunk_size
                 for ch in &mut input_frames {
                     let last_sample = ch.last().copied().unwrap_or(0.0);
                     let samples_to_add = chunk_size - ch.len();
-                    for i in 0..samples_to_add {
+                    ch.extend((0..samples_to_add).map(|i| {
                         let fade = 1.0 - (i as f32 / samples_to_add as f32);
-                        ch.push(last_sample * fade);
-                    }
+                        last_sample * fade
+                    }));
                 }
+                r.process(&input_frames, None).unwrap_or_else(|_| input_frames.clone())
+            } else if eof && actual < chunk_size {
+                // EOF情况下 - 直接复制剩余数据
+                input_frames.clone()
+            } else {
+                r.process(&input_frames, None).unwrap_or_else(|_| input_frames.clone())
             }
-            r.process(&input_frames, None).unwrap_or_else(|_| input_frames.clone())
         } else { input_frames.clone() };
 
+        // 交错输出帧
         output_buffer.clear();
         let out_len = output_frames.first().map_or(0, Vec::len);
         for i in 0..out_len {
@@ -783,9 +823,13 @@ fn decode_and_push_to_wasapi(
             }
         }
 
-        let final_out: Vec<f32> = if src_ch != target_ch {
-            convert_channels(&output_buffer, src_ch, target_ch)
-        } else { output_buffer.clone() };
+        // 通道转换：使用当前实际通道数（重采样后仍是src_ch通道）
+        let current_ch = output_frames.len() as u16;
+        let final_out: Vec<f32> = if current_ch != target_ch {
+            convert_channels(&output_buffer, current_ch, target_ch)
+        } else {
+            output_buffer.clone()
+        };
 
         if !final_out.is_empty() {
             // 等待缓冲区有空间（防止解码过快导致内存无限增长）
@@ -823,8 +867,8 @@ fn decode_and_push_to_wasapi(
     }
 }
 
-/// 5.1/7.1 环绕声到立体声的专业混音
-/// 使用 ITU-R BS.775-1 标准的下混系数
+/// 5.1/7.1环绕声到立体声的专业混音
+/// 使用ITU-R BS.775-1标准的下混系数
 fn downmix_surround_to_stereo(samples: &[f32], src_ch: usize, frame: usize) -> (f32, f32) {
     let start = frame * src_ch;
     
@@ -890,7 +934,7 @@ fn convert_channels(samples: &[f32], src_ch: u16, target_ch: u16) -> Vec<f32> {
                 out.push((samples[start] + samples[start + 1]) / 2.0);
             }
             (6, 2) | (8, 2) => {
-                // 5.1/7.1 到立体声的专业混音
+                // 5.1/7.1到立体声的专业混音
                 let (left, right) = downmix_surround_to_stereo(samples, src, f);
                 out.push(left);
                 out.push(right);
@@ -906,7 +950,7 @@ fn convert_channels(samples: &[f32], src_ch: u16, target_ch: u16) -> Vec<f32> {
     out
 }
 
-/// Seek 共享模式
+/// Seek共享模式
 pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, time: f32) -> Result<(), String> {
     let player = &state.player;
     let eq_settings = state.equalizer.get_settings_handle();
@@ -919,10 +963,12 @@ pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, t
             Arc::clone(&player.waveform_data),
             Arc::clone(&player.spectrum_data),
             Some(app.clone()),
+            Arc::clone(&player.target_fps),
+            Arc::clone(&player.enable_vertical_sync),
         )
         .with_start_position(time)
         .with_eq_settings(eq_settings)
-        .fade_in(Duration::from_millis(50)) // seek 时使用较短的淡入
+        .fade_in(Duration::from_millis(50)) // seek时使用较短的淡入
     );
     {
         let sink = player.sink.lock().unwrap();
@@ -938,7 +984,7 @@ pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, t
 
 /// 获取播放状态
 pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
-    // 使用 try_lock 避免阻塞主线程
+    // 使用try_lock避免阻塞主线程
     let volume = state.player.target_volume.try_lock()
         .map(|g| *g)
         .unwrap_or(1.0);
@@ -970,7 +1016,7 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
 
 /// 检查音轨是否播放完毕
 pub fn check_track_finished(state: &State<AppState>) -> Result<bool, String> {
-    // 使用 try_lock 避免阻塞主线程
+    // 使用try_lock避免阻塞主线程
     let exclusive_mode = state.player.exclusive_mode.try_lock()
         .map(|g| *g)
         .unwrap_or(false);

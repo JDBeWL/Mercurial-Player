@@ -65,6 +65,10 @@ pub struct PlayerState {
     pub equalizer: Arc<Mutex<Equalizer>>,
     /// 设备监听器
     pub device_monitor: Arc<Mutex<DeviceMonitor>>,
+    /// 目标刷新率（用于可视化FFT计算，默认60fps）
+    pub target_fps: Arc<AtomicU64>,
+    /// 是否启用垂直同步（启用后FFT频率与屏幕刷新率同步）
+    pub enable_vertical_sync: Arc<AtomicBool>,
 }
 
 /// 应用程序状态

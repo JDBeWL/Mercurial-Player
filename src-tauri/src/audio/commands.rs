@@ -364,3 +364,22 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
         audio_mode_status,
     })
 }
+
+#[command]
+pub fn set_target_fps(state: State<AppState>, fps: u32) -> Result<(), String> {
+    if fps == 0 {
+        return Err("FPS cannot be zero".to_string());
+    }
+    // 限制最大刷新率为 240fps，防止过高频率
+    let clamped_fps = fps.min(240);
+    state.player.target_fps.store(clamped_fps as u64, std::sync::atomic::Ordering::Relaxed);
+    println!("Target FPS set to {}", clamped_fps);
+    Ok(())
+}
+
+#[command]
+pub fn set_vertical_sync(state: State<AppState>, enabled: bool) -> Result<(), String> {
+    state.player.enable_vertical_sync.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    println!("Vertical sync {}", if enabled { "enabled" } else { "disabled" });
+    Ok(())
+}

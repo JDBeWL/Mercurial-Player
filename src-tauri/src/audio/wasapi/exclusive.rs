@@ -1,6 +1,6 @@
-//! WASAPI 独占模式音频播放实现
+//! WASAPI独占模式音频播放实现
 //!
-//! 这个模块实现了真正的 WASAPI 独占模式音频输出。
+//! 这个模块实现了WASAPI独占模式音频输出。
 
 #![allow(dead_code)]
 
@@ -33,7 +33,7 @@ pub enum AudioResponse {
     Error(String),
 }
 
-/// WASAPI 独占模式播放器状态
+/// WASAPI独占模式播放器状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackState {
     Uninitialized,
@@ -42,7 +42,7 @@ pub enum PlaybackState {
     Paused,
 }
 
-/// WASAPI 独占模式播放器
+/// WASAPI独占模式播放器
 pub struct WasapiExclusivePlayback {
     command_tx: Sender<AudioCommand>,
     response_rx: Receiver<AudioResponse>,
@@ -58,10 +58,10 @@ pub struct WasapiExclusivePlayback {
 }
 
 /// 根据采样率和声道数计算 WASAPI 缓冲区容量
-/// 目标是保持约 4 秒的缓冲（48000 * 2 * 4 @ 48kHz stereo）
+/// 目标是保持约4秒的缓冲（48000 * 2 * 4 @48kHz stereo）
 #[must_use]
 fn calculate_wasapi_buffer_capacity(sample_rate: u32, channels: u16) -> usize {
-    // 基准：48kHz 立体声使用 4 秒缓冲
+    // 基准：48kHz立体声使用4秒缓冲
     // 高采样率需要更大缓冲以保持相同时长
     let duration_secs = 4;
     sample_rate as usize * channels as usize * duration_secs
@@ -77,7 +77,7 @@ impl WasapiExclusivePlayback {
         let volume = Arc::new(Mutex::new(1.0f32));
         let is_running = Arc::new(AtomicBool::new(true));
         let samples_written = Arc::new(AtomicU64::new(0));
-        // 初始使用默认 48kHz 立体声的缓冲区大小，初始化后会调整
+        // 初始使用默认48kHz立体声的缓冲区大小，初始化后会调整
         let initial_capacity = calculate_wasapi_buffer_capacity(48000, 2);
         let sample_buffer = Arc::new((Mutex::new(VecDeque::with_capacity(initial_capacity)), Condvar::new()));
 
@@ -306,7 +306,11 @@ fn audio_thread_main(
                     }
                 }
             }
-            Ok(AudioCommand::SetVolume(vol)) => current_volume = vol,
+            Ok(AudioCommand::SetVolume(vol)) => {
+                current_volume = vol;
+                // 注意：wasapi crate的AudioClient没有直接的音量控制方法
+                // 音量在process_audio_output中通过软件乘法应用
+            }
             Ok(AudioCommand::ClearBuffer) => sample_buffer.0.lock().unwrap().clear(),
             Ok(AudioCommand::Shutdown) => break,
             Err(crossbeam_channel::TryRecvError::Empty) => {}
@@ -399,16 +403,29 @@ fn process_audio_output(
     samples_written: &Arc<AtomicU64>,
 ) {
     if let (Some(client), Some(rc), Some(eh)) = (audio_client, render_client, event_handle) {
-        if eh.wait_for_event(10).is_ok() {
+        // 使用更短的超时以获得更低延迟
+        if eh.wait_for_event(5).is_ok() {
             if let Ok(frames_available) = client.get_available_space_in_frames() {
                 if frames_available > 0 {
                     let samples_needed = frames_available as usize * current_channels as usize;
                     let (buffer, _) = &**sample_buffer;
                     let mut buf = buffer.lock().unwrap();
 
+                    // 检测缓冲区欠载
+                    let mut underrun_count = 0;
                     let output_samples: Vec<f32> = (0..samples_needed)
-                        .map(|_| buf.pop_front().unwrap_or(0.0) * current_volume)
+                        .map(|_| {
+                            buf.pop_front().unwrap_or_else(|| {
+                                underrun_count += 1;
+                                0.0
+                            }) * current_volume
+                        })
                         .collect();
+
+                    // 记录欠载情况
+                    if underrun_count > samples_needed / 2 {
+                        println!("WASAPI buffer underrun: {}/{} samples", underrun_count, samples_needed);
+                    }
 
                     drop(buf);
 
@@ -416,7 +433,7 @@ fn process_audio_output(
 
                     if rc.write_to_device(frames_available as usize, &output_bytes, None).is_ok() {
                         // 更新已写入硬件的采样数
-                        samples_written.fetch_add(samples_needed as u64, Ordering::SeqCst);
+                        samples_written.fetch_add((frames_available as usize * current_channels as usize) as u64, Ordering::SeqCst);
                     } else {
                         *is_playing = false;
                         *state.lock().unwrap() = PlaybackState::Stopped;
@@ -488,7 +505,7 @@ fn initialize_exclusive_device(device_name: Option<&str>) -> Result<(wasapi::Aud
                     println!("Exclusive mode initialization attempt {attempt} failed, retrying...");
                     thread::sleep(Duration::from_millis(100 * attempt as u64));
                     
-                    // 重新获取 audio client
+                    // 重新获取audio client
                     audio_client = device.get_iaudioclient().map_err(|e| format!("Failed to get audio client on retry: {e:?}"))?;
                 }
             }

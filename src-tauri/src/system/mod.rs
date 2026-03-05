@@ -7,5 +7,5 @@ pub mod fonts;
 
 // 重新导出命令
 pub use commands::{
-    get_system_fonts, get_system_info, set_mini_mode,
+    get_system_fonts, get_system_info, set_mini_mode, get_screen_refresh_rate,
 };

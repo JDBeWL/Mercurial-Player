@@ -126,3 +126,31 @@ pub const fn get_platform() -> &'static str {
         "unknown"
     }
 }
+
+/// 获取屏幕刷新率
+#[command]
+pub fn get_screen_refresh_rate() -> Result<u32, String> {
+    match display_info::DisplayInfo::all() {
+        Ok(displays) => {
+            // 获取主显示器（通常是第一个）
+            if let Some(display) = displays.first() {
+                // frequency 是 f32 类型，不是 Option
+                let refresh_rate = display.frequency;
+                if refresh_rate > 0.0 {
+                    let rate = refresh_rate.round() as u32;
+                    println!("Detected screen refresh rate: {} Hz", rate);
+                    return Ok(rate);
+                }
+            }
+            
+            // 如果没有刷新率信息，返回默认值
+            println!("No refresh rate information available, using default 60 Hz");
+            Ok(60)
+        }
+        Err(e) => {
+            eprintln!("Failed to get display info: {e}");
+            // 返回默认值而不是错误
+            Ok(60)
+        }
+    }
+}
