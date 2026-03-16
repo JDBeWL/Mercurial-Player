@@ -28,7 +28,7 @@ export default defineConfig({
         manualChunks: {
           'vendor': ['vue', 'pinia', 'vue-i18n'],
           'tauri-core': ['@tauri-apps/api'],
-          'tauri-plugins': ['@tauri-apps/plugin-dialog', '@tauri-apps/plugin-fs', '@tauri-apps/plugin-shell'],
+          'tauri-plugins': ['@tauri-apps/plugin-dialog', '@tauri-apps/plugin-fs'],
         },
         // 优化 chunk 文件名
         chunkFileNames: 'assets/[name]-[hash].js',
