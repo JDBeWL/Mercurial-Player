@@ -1,6 +1,6 @@
 [package]
 name = "mercurial-player"
-version = "1.0.3"
+version = "1.0.4"
 description = "A music player by JDBeWL"
 authors = ["jdbEwl"]
 license = "GPL-3.0"
@@ -29,7 +29,7 @@ rayon = "1"
 spectrum-analyzer = "1.7"
 tauri-plugin-dialog = "2.4"
 tauri-plugin-fs = "2.4"
-tauri-plugin-shell = "2.3"
+
 crossbeam-channel = "0.5"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
@@ -37,6 +37,7 @@ futures = "0.3"
 urlencoding = "2"
 aes = "0.8"
 md5 = "0.7"
+sha2 = "0.10"
 display-info = "0.5"
 
 [target.'cfg(windows)'.dependencies]

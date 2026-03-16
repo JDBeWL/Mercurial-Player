@@ -69,6 +69,9 @@ pub struct GeneralConfig {
     /// 是否启用自动更新（默认关闭）
     #[serde(default)]
     pub enable_auto_update: bool,
+    /// 可打开的外部链接白名单主机（用于 open_external_url）
+    #[serde(default = "default_external_url_allowed_hosts")]
+    pub external_url_allowed_hosts: Vec<String>,
 }
 
 /// 音频设置
@@ -118,6 +121,21 @@ fn default_lyrics_font_family() -> String {
 
 fn default_lyrics_style() -> String {
     "modern".to_string()
+}
+
+fn default_external_url_allowed_hosts() -> Vec<String> {
+    vec![
+        "github.com".to_string(),
+        "www.github.com".to_string(),
+        "api.github.com".to_string(),
+        "tauri.app".to_string(),
+        "www.tauri.app".to_string(),
+        "vuejs.org".to_string(),
+        "www.vuejs.org".to_string(),
+        "docs.rs".to_string(),
+        "gnu.org".to_string(),
+        "www.gnu.org".to_string(),
+    ]
 }
 
 const fn default_volume() -> f32 {
@@ -185,6 +203,7 @@ impl Default for GeneralConfig {
             auto_save_config: true,
             show_audio_info: true,
             enable_auto_update: false,
+            external_url_allowed_hosts: default_external_url_allowed_hosts(),
         }
     }
 }

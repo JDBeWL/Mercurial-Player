@@ -13,7 +13,7 @@ use super::wasapi::WasapiExclusivePlayback;
 
 use crate::AppState;
 use cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{OutputStreamBuilder, Sink};
+use rodio::{OutputStream, OutputStreamBuilder, Sink};
 use tauri::{command, AppHandle, State};
 
 // ============================================================================
@@ -248,14 +248,12 @@ fn switch_to_shared_mode(
         .find(|d| d.name().is_ok_and(|name| name == device_name))
         .ok_or(format!("Audio device not found: {device_name}"))?;
 
-    let stream = OutputStreamBuilder::from_device(device)
+    let stream: OutputStream = OutputStreamBuilder::from_device(device)
         .map_err(|e| format!("Failed to create output stream builder: {e}"))?
         .open_stream()
         .map_err(|e| format!("Failed to open output stream: {e}"))?;
 
     let new_sink = Sink::connect_new(stream.mixer());
-    
-    Box::leak(Box::new(stream));
 
     let (is_playing, volume, current_path) = {
         let old_sink = state.player.sink.lock().unwrap();
@@ -267,6 +265,7 @@ fn switch_to_shared_mode(
 
     *state.player.wasapi_player.lock().unwrap() = None;
     *state.player.sink.lock().unwrap() = new_sink;
+    *state.player.output_stream.lock().unwrap() = Some(stream);
 
     {
         let sink_guard = state.player.sink.lock().unwrap();

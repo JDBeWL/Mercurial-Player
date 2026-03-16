@@ -25,8 +25,7 @@
     "core:window:allow-set-decorations",
     "core:window:allow-set-always-on-top",
     "core:window:allow-set-content-protected",
-    "dialog:default",
-    "shell:allow-open"
+    "dialog:default"
   ],
   "scope": {
     "deny": [

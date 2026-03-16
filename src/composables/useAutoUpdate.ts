@@ -17,6 +17,11 @@ interface GitHubRelease {
   assets: GitHubAsset[]
 }
 
+interface UpdateFinishedPayload {
+  installerPath: string
+  sha256: string
+}
+
 /**
  * 自动更新 Composable（模块级单例，避免多个组件重复监听事件）
  */
@@ -30,14 +35,45 @@ const isDownloading = ref(false)
 const error = ref<string | null>(null)
 const lastCheckTime = ref<string | null>(null)
 const releaseNotes = ref<string | null>(null)
-// 下载完成信息（installer 路径）
+// 下载参数（由官方 checksum 解析得到）
+const expectedInstallerSha256 = ref<string | null>(null)
+
+// 下载完成信息（installer 路径 + 落盘校验值）
 const installerPath = ref<string | null>(null)
+const installerSha256 = ref<string | null>(null)
 const downloadFinished = ref(false)
 // 后端日志（最后一条）
 const updateLog = ref<string | null>(null)
 
 let listenersStarted = false
 let unlistenFns: UnlistenFn[] = []
+
+
+const CHECKSUM_ASSET_NAME_REGEX = /^(checksums?\.txt|sha256sums?(\.txt)?)$/i
+
+const findChecksumAsset = (assets: GitHubAsset[]): GitHubAsset | null => {
+  return assets.find(asset => CHECKSUM_ASSET_NAME_REGEX.test(asset.name)) ?? null
+}
+
+const parseSha256FromChecksumFile = (content: string, targetFileName: string): string | null => {
+  const lines = content.split(/\r?\n/)
+  const escapedName = targetFileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern1 = new RegExp(`^([a-fA-F0-9]{64})\\s+[*]?${escapedName}$`)
+  const pattern2 = new RegExp(`^SHA256\\s*\\(${escapedName}\\)\\s*=\\s*([a-fA-F0-9]{64})$`, 'i')
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line) continue
+
+    const m1 = line.match(pattern1)
+    if (m1?.[1]) return m1[1].toLowerCase()
+
+    const m2 = line.match(pattern2)
+    if (m2?.[1]) return m2[1].toLowerCase()
+  }
+
+  return null
+}
 
 /** GitHub 仓库信息 */
 const GITHUB_REPO = 'JDBeWL/Mercurial-Player' // 替换为你的仓库
@@ -80,13 +116,13 @@ async function startListeners() {
   unlistenFns.push(unLog)
 
   // 完成事件
-  const un3 = await listen<string>('update-finished', event => {
+  const un3 = await listen<UpdateFinishedPayload>('update-finished', event => {
     logger.info('[auto-update] finished', event.payload)
     downloadProgress.value = 100
     isDownloading.value = false
     downloadFinished.value = true
-    // event.payload 可能是 installer path 或简短消息
-    installerPath.value = typeof event.payload === 'string' && event.payload.length > 0 ? event.payload : null
+    installerPath.value = event.payload?.installerPath || null
+    installerSha256.value = event.payload?.sha256 || null
   })
   unlistenFns.push(un3)
 }
@@ -251,6 +287,7 @@ const isNewVersionAvailable = (current: string, latestTag: string): boolean => {
 const checkForUpdates = async () => {
   isChecking.value = true
   error.value = null
+  expectedInstallerSha256.value = null
   // 立即显示正在检查，给用户即时反馈
   lastCheckTime.value = 'Checking...'
 
@@ -274,12 +311,30 @@ const checkForUpdates = async () => {
       const windowsAsset = windowsAssets.find(asset => asset.name.endsWith('.exe'))
         ?? windowsAssets.find(asset => asset.name.endsWith('.msi')) ?? null
 
-      if (windowsAsset) {
-        downloadUrl.value = windowsAsset.browser_download_url
-      } else {
+      if (!windowsAsset) {
         throw new Error('No Windows installer found in release')
       }
+
+      const checksumAsset = findChecksumAsset(release.assets)
+      if (!checksumAsset) {
+        throw new Error('No official checksum file found in release assets')
+      }
+
+      const checksumResp = await fetch(checksumAsset.browser_download_url)
+      if (!checksumResp.ok) {
+        throw new Error(`Failed to fetch checksum file: HTTP ${checksumResp.status}`)
+      }
+      const checksumText = await checksumResp.text()
+      const parsedSha256 = parseSha256FromChecksumFile(checksumText, windowsAsset.name)
+      if (!parsedSha256) {
+        throw new Error(`Failed to parse SHA-256 for installer from ${checksumAsset.name}`)
+      }
+
+      downloadUrl.value = windowsAsset.browser_download_url
+      expectedInstallerSha256.value = parsedSha256
     } else {
+      downloadUrl.value = ''
+      expectedInstallerSha256.value = null
       lastCheckTime.value = new Date().toLocaleString()
     }
   } catch (err) {
@@ -301,6 +356,11 @@ const downloadAndInstall = async () => {
     return
   }
 
+  if (!expectedInstallerSha256.value) {
+    error.value = 'No official checksum available for this installer'
+    return
+  }
+
   // 开始监听进度/错误事件
   await startListeners()
 
@@ -312,6 +372,7 @@ const downloadAndInstall = async () => {
     // 旧命令名保持不变以兼容前端调用，但后端已改为只执行下载
     await invoke('download_and_install_update', {
       downloadUrl: downloadUrl.value,
+      expectedSha256: expectedInstallerSha256.value,
     })
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Download failed'
@@ -328,8 +389,17 @@ const runInstaller = async () => {
     error.value = 'No installer path available'
     return
   }
+
+  if (!installerSha256.value) {
+    error.value = 'No installer hash available'
+    return
+  }
+
   try {
-    await invoke('run_installer', { installerPath: installerPath.value })
+    await invoke('run_installer', {
+      installerPath: installerPath.value,
+      expectedSha256: installerSha256.value,
+    })
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   }
@@ -342,9 +412,11 @@ const resetUpdateState = () => {
   updateAvailable.value = false
   newVersion.value = ''
   downloadUrl.value = ''
+  expectedInstallerSha256.value = null
   downloadProgress.value = 0
   error.value = null
   installerPath.value = null
+  installerSha256.value = null
   downloadFinished.value = false
 }
 
@@ -364,6 +436,7 @@ export function useAutoUpdate() {
     lastCheckTime,
     releaseNotes,
     installerPath,
+    installerSha256,
     downloadFinished,
     updateLog,
     hasError,

@@ -136,7 +136,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { getVersion } from '@tauri-apps/api/app'
-import { open } from '@tauri-apps/plugin-shell'
+import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 import UpdateDialog from '@/components/UpdateDialog.vue'
 import { useAutoUpdate } from '@/composables/useAutoUpdate'
@@ -205,29 +205,25 @@ const loadAppVersion = async () => {
   }
 }
 
-const openGitHub = async () => {
+const openExternalUrl = async (url) => {
   try {
-    await open(githubUrl)
+    await invoke('open_external_url', { url })
   } catch (error) {
-    logger.error('Failed to open GitHub:', error)
+    logger.error('Failed to open external URL:', error)
   }
+}
+
+const openGitHub = async () => {
+  await openExternalUrl(githubUrl)
 }
 
 const openLink = async (url) => {
-  try {
-    await open(url)
-  } catch (error) {
-    logger.error('Failed to open link:', error)
-  }
+  await openExternalUrl(url)
 }
 
 const openLicense = async () => {
-  try {
-    // 打开 LICENSE 文件或 GitHub 上的许可证页面
-    await open('https://www.gnu.org/licenses/gpl-3.0.html')
-  } catch (error) {
-    logger.error('Failed to open license:', error)
-  }
+  // 打开 LICENSE 文件或 GitHub 上的许可证页面
+  await openExternalUrl('https://www.gnu.org/licenses/gpl-3.0.html')
 }
 
 const isDownloadFinishedLog = (s) => {

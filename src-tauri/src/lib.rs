@@ -23,7 +23,7 @@ use audio::DeviceMonitor;
 use config::ConfigManager;
 use equalizer::{Equalizer, GlobalEqualizer};
 
-use rodio::Sink;
+use rodio::{OutputStream, Sink};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
@@ -37,6 +37,9 @@ pub struct Placeholder;
 pub struct PlayerState {
     /// 音频输出 sink
     pub sink: Arc<Mutex<Sink>>,
+    /// 音频输出流（必须长期持有，否则会静音）
+    pub output_stream: Arc<Mutex<Option<OutputStream>>>,
+
     /// 当前音频源
     pub current_source: Arc<Mutex<Option<SymphoniaSource>>>,
     /// 当前播放文件路径

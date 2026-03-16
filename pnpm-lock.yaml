@@ -20,9 +20,6 @@ importers:
       '@tauri-apps/plugin-fs':
         specifier: ^2.4.0
         version: 2.4.4
-      '@tauri-apps/plugin-shell':
-        specifier: ^2.3.0
-        version: 2.3.3
       pinia:
         specifier: ^2.1.6
         version: 2.3.1(typescript@5.9.3)(vue@3.5.24(typescript@5.9.3))
@@ -556,9 +553,6 @@ packages:
 
   '@tauri-apps/plugin-fs@2.4.4':
     resolution: {integrity: sha512-MTorXxIRmOnOPT1jZ3w96vjSuScER38ryXY88vl5F0uiKdnvTKKTtaEjTEo8uPbl4e3gnUtfsDVwC7h77GQLvQ==}
-
-  '@tauri-apps/plugin-shell@2.3.3':
-    resolution: {integrity: sha512-Xod+pRcFxmOWFWEnqH5yZcA7qwAMuaaDkMR1Sply+F8VfBj++CGnj2xf5UoialmjZ2Cvd8qrvSCbU+7GgNVsKQ==}
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
@@ -1519,10 +1513,6 @@ snapshots:
       '@tauri-apps/api': 2.9.1
 
   '@tauri-apps/plugin-fs@2.4.4':
-    dependencies:
-      '@tauri-apps/api': 2.9.1
-
-  '@tauri-apps/plugin-shell@2.3.3':
     dependencies:
       '@tauri-apps/api': 2.9.1
 

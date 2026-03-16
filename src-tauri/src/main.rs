@@ -39,7 +39,7 @@ use mercurial_player::audio::DeviceMonitor;
 use mercurial_player::taskbar;
 
 use cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{OutputStreamBuilder, Sink};
+use rodio::{OutputStream, OutputStreamBuilder, Sink};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
@@ -81,7 +81,7 @@ fn main() {
     println!("Loaded exclusive mode from config: {exclusive_mode_enabled}");
 
     // 根据独占模式设置创建播放器
-    let (sink, wasapi_player) = {
+    let (sink, output_stream, wasapi_player) = {
         if exclusive_mode_enabled {
             create_exclusive_mode_player(&device_name)
         } else {
@@ -93,6 +93,7 @@ fn main() {
     let app_state = AppState {
         player: PlayerState {
             sink: Arc::new(Mutex::new(sink)),
+            output_stream: Arc::new(Mutex::new(Some(output_stream))),
             current_source: Arc::new(Mutex::new(None)),
             current_path: Arc::new(Mutex::new(None)),
             target_volume: Arc::new(Mutex::new(1.0)),
@@ -190,7 +191,6 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             // 文件系统命令
             media::commands::read_directory,
@@ -233,6 +233,7 @@ fn main() {
             system::commands::get_system_fonts,
             system::commands::get_platform,
             system::commands::get_screen_refresh_rate,
+            system::commands::open_external_url,
             // 音频设备命令
             audio::commands::get_audio_devices,
             audio::commands::set_audio_device,
@@ -279,13 +280,12 @@ fn main() {
 
 /// 创建独占模式播放器
 #[cfg(windows)]
-fn create_exclusive_mode_player(device_name: &str) -> (Sink, Option<PlatformPlayer>) {
+fn create_exclusive_mode_player(device_name: &str) -> (Sink, OutputStream, Option<PlatformPlayer>) {
     println!("Starting in WASAPI exclusive mode");
 
     // 创建一个空的rodio sink
     let stream = OutputStreamBuilder::open_default_stream().expect("Failed to create default output stream");
     let sink = Sink::connect_new(stream.mixer());
-    Box::leak(Box::new(stream));
 
     // 创建 WASAPI 独占播放器
     let wasapi_playback = WasapiExclusivePlayback::new();
@@ -294,24 +294,23 @@ fn create_exclusive_mode_player(device_name: &str) -> (Sink, Option<PlatformPlay
             println!(
                 "WASAPI Exclusive initialized: {actual_name} @ {sample_rate}Hz, {channels} channels"
             );
-            (sink, Some(wasapi_playback))
+            (sink, stream, Some(wasapi_playback))
         }
         Err(e) => {
             eprintln!("Failed to initialize WASAPI exclusive mode: {e}");
             eprintln!("Falling back to shared mode");
-            (sink, None)
+            (sink, stream, None)
         }
     }
 }
 
 /// 创建独占模式播放器（非Windows平台回退到共享模式）
 #[cfg(not(windows))]
-fn create_exclusive_mode_player(_device_name: &str) -> (Sink, Option<PlatformPlayer>) {
+fn create_exclusive_mode_player(_device_name: &str) -> (Sink, OutputStream, Option<PlatformPlayer>) {
     println!("Exclusive mode is only supported on Windows, falling back to shared mode");
     let stream = OutputStreamBuilder::open_default_stream().expect("Failed to create default output stream");
     let sink = Sink::connect_new(stream.mixer());
-    Box::leak(Box::new(stream));
-    (sink, None)
+    (sink, stream, None)
 }
 
 /// 设置任务栏按钮点击钩子
@@ -391,7 +390,7 @@ fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
 }
 
 /// 创建共享模式播放器
-fn create_shared_mode_player(device: &cpal::Device) -> (Sink, Option<PlatformPlayer>) {
+fn create_shared_mode_player(device: &cpal::Device) -> (Sink, OutputStream, Option<PlatformPlayer>) {
     println!("Starting in shared mode");
 
     // 从选定的设备创建音频输出流
@@ -401,9 +400,6 @@ fn create_shared_mode_player(device: &cpal::Device) -> (Sink, Option<PlatformPla
         .expect("Failed to open output stream from device");
 
     let sink = Sink::connect_new(stream.mixer());
-    
-    // 保持流的存活
-    Box::leak(Box::new(stream));
 
-    (sink, None)
+    (sink, stream, None)
 }
