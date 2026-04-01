@@ -61,12 +61,21 @@ impl DeviceMonitor {
 
     /// 更新当前设备
     pub fn update_current_device(&self, device_name: String) {
-        *self.current_device.lock().unwrap() = device_name;
+        match self.current_device.lock() {
+            Ok(mut current_device) => *current_device = device_name,
+            Err(err) => eprintln!("Failed to update current device: {err}"),
+        }
     }
 
     /// 获取当前设备
     pub fn get_current_device(&self) -> String {
-        self.current_device.lock().unwrap().clone()
+        match self.current_device.lock() {
+            Ok(current_device) => current_device.clone(),
+            Err(err) => {
+                eprintln!("Failed to get current device: {err}");
+                String::new()
+            }
+        }
     }
 }
 
@@ -89,7 +98,14 @@ fn monitor_device_changes(
         thread::sleep(Duration::from_secs(1));
 
         let current_devices = get_device_names(&host);
-        let current_device_name = current_device.lock().unwrap().clone();
+        let current_device_name = match current_device.lock() {
+            Ok(device) => device.clone(),
+            Err(err) => {
+                eprintln!("Failed to read current device in monitor loop: {err}");
+                previous_devices = current_devices;
+                continue;
+            }
+        };
 
         // 检查设备是否被移除
         if !current_devices.contains(&current_device_name) && previous_devices.contains(&current_device_name) {

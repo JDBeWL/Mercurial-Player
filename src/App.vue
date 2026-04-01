@@ -525,7 +525,7 @@ onMounted(async () => {
   themeStore.applyTheme()
 
   // 初始化音频播放器
-  playerStore.initAudio()
+  await playerStore.initAudio()
 
   // 获取屏幕刷新率并设置到后端，用于动态调整FFT计算频率
   try {

@@ -7,6 +7,7 @@ import { readonly } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import {
   PluginPermission,
   type PluginAPI,
@@ -523,7 +524,7 @@ export function createPluginAPI(
         }
 
         try {
-          const response = await fetch(url, {
+          const response = await tauriFetch(url, {
             ...options,
             headers: {
               ...options.headers,

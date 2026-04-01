@@ -2,7 +2,7 @@
 //!
 //! 提供从网易云音乐搜索和获取歌词的功能
 
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, REFERER, USER_AGENT};
+use tauri_plugin_http::reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, REFERER, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use crate::media::http_client::get_client;
 

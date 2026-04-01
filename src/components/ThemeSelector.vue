@@ -425,11 +425,17 @@ const onHexInput = async (event) => {
   border-radius: var(--md-sys-shape-corner-medium);
   cursor: pointer;
   padding: 0;
+  background: transparent;
   overflow: hidden;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .custom-color-input input[type="color"]::-webkit-color-swatch-wrapper {
   padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
 }
 
 .custom-color-input input[type="color"]::-webkit-color-swatch {

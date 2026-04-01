@@ -1,140 +1,32 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { listen, UnlistenFn } from '@tauri-apps/api/event'
+import { check, type Update } from '@tauri-apps/plugin-updater'
 import logger from '@/utils/logger'
 
-/** GitHub Release 资源类型 */
-interface GitHubAsset {
-  name: string
-  browser_download_url: string
-}
-
-/** GitHub Release 类型 */
-interface GitHubRelease {
-  draft: boolean
-  tag_name: string
-  body: string | null
-  assets: GitHubAsset[]
-}
-
-interface UpdateFinishedPayload {
-  installerPath: string
-  sha256: string
-}
-
 /**
- * 自动更新 Composable（模块级单例，避免多个组件重复监听事件）
+ * 自动更新 Composable（使用 Tauri v2 plugin-updater）
+ *
+ * plugin-updater 会自动根据 tauri.conf.json 中的 updater.endpoints 检查更新、
+ * 下载差分/全量包并原地替换，无需手动下载 .exe 安装程序。
  */
+
 // 状态（模块级单例）
 const isChecking = ref(false)
 const updateAvailable = ref(false)
 const newVersion = ref('')
-const downloadUrl = ref('')
 const downloadProgress = ref(0)
 const isDownloading = ref(false)
 const error = ref<string | null>(null)
 const lastCheckTime = ref<string | null>(null)
 const releaseNotes = ref<string | null>(null)
-// 下载参数（由官方 checksum 解析得到）
-const expectedInstallerSha256 = ref<string | null>(null)
-
-// 下载完成信息（installer 路径 + 落盘校验值）
-const installerPath = ref<string | null>(null)
-const installerSha256 = ref<string | null>(null)
 const downloadFinished = ref(false)
-// 后端日志（最后一条）
 const updateLog = ref<string | null>(null)
 
-let listenersStarted = false
-let unlistenFns: UnlistenFn[] = []
+// 保留一份 Update 对象引用，用于后续安装
+let pendingUpdate: Update | null = null
 
-
-const CHECKSUM_ASSET_NAME_REGEX = /^(checksums?\.txt|sha256sums?(\.txt)?)$/i
-
-const findChecksumAsset = (assets: GitHubAsset[]): GitHubAsset | null => {
-  return assets.find(asset => CHECKSUM_ASSET_NAME_REGEX.test(asset.name)) ?? null
-}
-
-const parseSha256FromChecksumFile = (content: string, targetFileName: string): string | null => {
-  const lines = content.split(/\r?\n/)
-  const escapedName = targetFileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const pattern1 = new RegExp(`^([a-fA-F0-9]{64})\\s+[*]?${escapedName}$`)
-  const pattern2 = new RegExp(`^SHA256\\s*\\(${escapedName}\\)\\s*=\\s*([a-fA-F0-9]{64})$`, 'i')
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim()
-    if (!line) continue
-
-    const m1 = line.match(pattern1)
-    if (m1?.[1]) return m1[1].toLowerCase()
-
-    const m2 = line.match(pattern2)
-    if (m2?.[1]) return m2[1].toLowerCase()
-  }
-
-  return null
-}
-
-/** GitHub 仓库信息 */
-const GITHUB_REPO = 'JDBeWL/Mercurial-Player' // 替换为你的仓库
-const GITHUB_API = `https://api.github.com/repos/${GITHUB_REPO}`
-
-/** 启动 Tauri 事件监听（只启动一次） */
-async function startListeners() {
-  if (listenersStarted) return
-  listenersStarted = true
-
-  // 更新开始事件（可带 total size）
-  const un0 = await listen<number>('update-started', event => {
-    logger.info('[auto-update] started, total size', event.payload)
-    downloadProgress.value = 0
-    isDownloading.value = true
-  })
-  unlistenFns.push(un0)
-
-  // 进度事件
-  const un1 = await listen<number>('update-progress', event => {
-    logger.debug('[auto-update] progress', event.payload)
-    downloadProgress.value = event.payload as number
-    isDownloading.value = true
-  })
-  unlistenFns.push(un1)
-
-  // 错误事件
-  const un2 = await listen<string>('update-error', event => {
-    logger.warn('[auto-update] error', event.payload)
-    error.value = event.payload as string
-    isDownloading.value = false
-  })
-  unlistenFns.push(un2)
-
-  // 日志事件（后端会发送下载路径、开始/完成/失败消息）
-  const unLog = await listen<string>('update-log', event => {
-    logger.info('[auto-update] log', event.payload)
-    updateLog.value = event.payload as string
-  })
-  unlistenFns.push(unLog)
-
-  // 完成事件
-  const un3 = await listen<UpdateFinishedPayload>('update-finished', event => {
-    logger.info('[auto-update] finished', event.payload)
-    downloadProgress.value = 100
-    isDownloading.value = false
-    downloadFinished.value = true
-    installerPath.value = event.payload?.installerPath || null
-    installerSha256.value = event.payload?.sha256 || null
-  })
-  unlistenFns.push(un3)
-}
-
-/** 清理监听器 */
-export async function stopListeners() {
-  for (const u of unlistenFns) {
-    try { await u() } catch { /* ignore cleanup errors */ }
-  }
-  unlistenFns = []
-  listenersStarted = false
-}
+const hasError = computed(() => error.value !== null)
+const isUpdateProcessing = computed(() => isChecking.value || isDownloading.value)
 
 /**
  * 获取当前应用版本
@@ -149,197 +41,31 @@ const getCurrentVersion = async (): Promise<string> => {
 }
 
 /**
- * 获取 GitHub Releases 列表并选择一个合适的 release
- * 选择规则：跳过 draft；跳过带非数字 prerelease 后缀的 tag（例如 beta）；
- * 在基础版本（major.minor.patch）优先比较，基础相同则：
- *   - 稳定版本（无 prerelease）优先于任何 prerelease；
- *   - 若双方均为数字型 prerelease，则取数字更大的那个（例如 1.0.0-2 > 1.0.0-1）。
- */
-const getLatestRelease = async (): Promise<GitHubRelease> => {
-  try {
-    const response = await fetch(`${GITHUB_API}/releases?per_page=50`)
-    if (!response.ok) {
-      throw new Error('Failed to fetch releases list')
-    }
-
-    const releases = await response.json()
-
-    type Parsed = {
-      baseNums: number[]
-      prereleaseNum: number | null
-      raw: string
-    }
-
-    const parseTag = (tag: string): { valid: boolean; parsed?: Parsed } => {
-      const s = String(tag).replace(/^v/i, '')
-      if (!s) return { valid: false }
-      const [base, pre] = s.split('-', 2)
-      const baseParts = base.split('.').slice(0, 3).map(p => parseInt(p.replace(/[^0-9]/g, ''), 10) || 0)
-      while (baseParts.length < 3) baseParts.push(0)
-
-      if (pre === undefined || pre === '') {
-        return { valid: true, parsed: { baseNums: baseParts, prereleaseNum: null, raw: s } }
-      }
-
-      // 要求 prerelease 为全部数字（例如 1），否则视为不合规并跳过
-      if (/^\d+$/.test(pre)) {
-        return { valid: true, parsed: { baseNums: baseParts, prereleaseNum: parseInt(pre, 10), raw: s } }
-      }
-
-      // 非数字的 prerelease（比如 beta）视为无效（按你的要求）
-      return { valid: false }
-    }
-
-    const compareParsed = (a: Parsed, b: Parsed): number => {
-      for (let i = 0; i < 3; i++) {
-        if (a.baseNums[i] !== b.baseNums[i]) return a.baseNums[i] - b.baseNums[i]
-      }
-      // base 相同：稳定版本（prereleaseNum === null）优先
-      if (a.prereleaseNum === null && b.prereleaseNum === null) return 0
-      if (a.prereleaseNum === null && b.prereleaseNum !== null) return 1
-      if (a.prereleaseNum !== null && b.prereleaseNum === null) return -1
-      // 双方均为数字型 prerelease，比较数字
-      return (a.prereleaseNum! - b.prereleaseNum!)
-    }
-
-    let best: { release: GitHubRelease; parsed: Parsed } | null = null
-
-    for (const r of releases as GitHubRelease[]) {
-      if (r.draft) continue
-      const { valid, parsed } = parseTag(r.tag_name || '')
-      if (!valid || !parsed) continue
-
-      if (!best) {
-        best = { release: r, parsed }
-        continue
-      }
-
-      if (compareParsed(parsed, best.parsed) > 0) {
-        best = { release: r, parsed }
-      }
-    }
-
-    if (!best) throw new Error('No suitable release found')
-    return best.release
-  } catch (err) {
-    logger.error('Failed to get latest release:', err)
-    throw err
-  }
-}
-
-/**
- * 将版本规范化为前三位数字（major.minor.patch），忽略任何预发布/构建编号
- */
-const normalizeToThree = (v: string): number[] => {
-  const s = String(v).replace(/^v/i, '')
-  const parts = s.split('.')
-  const nums = parts.slice(0, 3).map(p => parseInt(p.replace(/[^0-9]/g, ''), 10) || 0)
-  while (nums.length < 3) nums.push(0)
-  return nums
-}
-
-/**
- * 解析 tag，返回基础三段及可选的数字型 prerelease（null 表示稳定版）
- */
-const parseVersionTag = (tag: string): { baseNums: number[]; prereleaseNum: number | null } => {
-  const s = String(tag).replace(/^v/i, '')
-  const [base, pre] = s.split('-', 2)
-  const baseNums = base.split('.').slice(0, 3).map(p => parseInt(p.replace(/[^0-9]/g, ''), 10) || 0)
-  while (baseNums.length < 3) baseNums.push(0)
-
-  if (pre === undefined || pre === '') return { baseNums, prereleaseNum: null }
-  if (/^\d+$/.test(pre)) return { baseNums, prereleaseNum: parseInt(pre, 10) }
-  // 非数字 prerelease 视为无效，返回 prereleaseNum = null 但上层会依赖合法性检查
-  return { baseNums, prereleaseNum: null }
-}
-
-/**
- * 比较版本（考虑数值型 prerelease）：
- * - 先比较前三位数字
- * - 若前三位不同则按大小判定
- * - 若前三位相同：稳定版本（无 prerelease）优先；若双方都为数字型 prerelease，则比较数字
- * 返回 true 如果 latest > current
- */
-const isNewVersionAvailable = (current: string, latestTag: string): boolean => {
-  const cur = parseVersionTag(current)
-  const lat = parseVersionTag(latestTag)
-
-  for (let i = 0; i < 3; i++) {
-    if (cur.baseNums[i] < lat.baseNums[i]) return true
-    if (cur.baseNums[i] > lat.baseNums[i]) return false
-  }
-
-  // base 相同
-  if (cur.prereleaseNum === null && lat.prereleaseNum === null) return false
-  // 当前稳定，远端为 prerelease => prerelease 在语义上低于稳定，不认为是新版本
-  if (cur.prereleaseNum === null && lat.prereleaseNum !== null) return false
-  // 当前为 prerelease，远端为稳定 => 远端为新版本
-  if (cur.prereleaseNum !== null && lat.prereleaseNum === null) return true
-  // 双方均为数字型 prerelease，比较数字
-  if (cur.prereleaseNum !== null && lat.prereleaseNum !== null) return lat.prereleaseNum > cur.prereleaseNum
-
-  return false
-}
-
-/**
- * 检查更新
+ * 检查更新（通过 plugin-updater 自动读取 tauri.conf.json 中的 endpoints）
  */
 const checkForUpdates = async () => {
   isChecking.value = true
   error.value = null
-  expectedInstallerSha256.value = null
-  // 立即显示正在检查，给用户即时反馈
   lastCheckTime.value = 'Checking...'
 
   try {
-    const currentVersion = await getCurrentVersion()
-    const release = await getLatestRelease()
+    const update = await check()
 
-    const latestTagStr = String(release.tag_name || '').replace(/^v/i, '')
-
-    if (isNewVersionAvailable(currentVersion, latestTagStr)) {
+    if (update) {
+      pendingUpdate = update
       updateAvailable.value = true
-      // 仅展示前三位版本供用户参考
-      newVersion.value = normalizeToThree(latestTagStr).join('.')
-      lastCheckTime.value = new Date().toLocaleString()
-      releaseNotes.value = release.body || ''
-
-      // 查找 Windows 的安装包：优先选择 .exe，其次 .msi
-      const windowsAssets = release.assets.filter(asset =>
-        asset.name.endsWith('.exe') || asset.name.endsWith('.msi')
-      )
-      const windowsAsset = windowsAssets.find(asset => asset.name.endsWith('.exe'))
-        ?? windowsAssets.find(asset => asset.name.endsWith('.msi')) ?? null
-
-      if (!windowsAsset) {
-        throw new Error('No Windows installer found in release')
-      }
-
-      const checksumAsset = findChecksumAsset(release.assets)
-      if (!checksumAsset) {
-        throw new Error('No official checksum file found in release assets')
-      }
-
-      const checksumResp = await fetch(checksumAsset.browser_download_url)
-      if (!checksumResp.ok) {
-        throw new Error(`Failed to fetch checksum file: HTTP ${checksumResp.status}`)
-      }
-      const checksumText = await checksumResp.text()
-      const parsedSha256 = parseSha256FromChecksumFile(checksumText, windowsAsset.name)
-      if (!parsedSha256) {
-        throw new Error(`Failed to parse SHA-256 for installer from ${checksumAsset.name}`)
-      }
-
-      downloadUrl.value = windowsAsset.browser_download_url
-      expectedInstallerSha256.value = parsedSha256
+      newVersion.value = update.version
+      releaseNotes.value = update.body ?? ''
+      logger.info(`[auto-update] New version available: ${update.version}`)
     } else {
-      downloadUrl.value = ''
-      expectedInstallerSha256.value = null
-      lastCheckTime.value = new Date().toLocaleString()
+      pendingUpdate = null
+      updateAvailable.value = false
+      logger.info('[auto-update] Already up to date')
     }
+
+    lastCheckTime.value = new Date().toLocaleString()
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Unknown error occurred'
-    // 也记录检查时间，方便用户知道检查已完成但失败
     lastCheckTime.value = new Date().toLocaleString()
     logger.error('Update check failed:', err)
   } finally {
@@ -348,60 +74,73 @@ const checkForUpdates = async () => {
 }
 
 /**
- * 下载更新（不自动执行安装，安装由前端确认后触发）
+ * 下载并安装更新
+ *
+ * plugin-updater 的 downloadAndInstall() 会自动下载差分包、校验签名、
+ * 替换二进制并在关闭时生效。
  */
 const downloadAndInstall = async () => {
-  if (!downloadUrl.value) {
-    error.value = 'No download URL available'
+  if (!pendingUpdate) {
+    error.value = 'No update available to download'
     return
   }
-
-  if (!expectedInstallerSha256.value) {
-    error.value = 'No official checksum available for this installer'
-    return
-  }
-
-  // 开始监听进度/错误事件
-  await startListeners()
 
   isDownloading.value = true
   downloadProgress.value = 0
   error.value = null
 
   try {
-    // 旧命令名保持不变以兼容前端调用，但后端已改为只执行下载
-    await invoke('download_and_install_update', {
-      downloadUrl: downloadUrl.value,
-      expectedSha256: expectedInstallerSha256.value,
+    let contentLength = 0
+
+    await pendingUpdate.downloadAndInstall((event) => {
+      switch (event.event) {
+        case 'Started':
+          contentLength = event.data.contentLength ?? 0
+          updateLog.value = `Download started, total size: ${contentLength}`
+          logger.info(`[auto-update] Download started, size: ${contentLength}`)
+          break
+        case 'Progress': {
+          const chunkLength = event.data.chunkLength
+          if (contentLength > 0) {
+            // 累加进度
+            downloadProgress.value = Math.min(
+              100,
+              downloadProgress.value + Math.round((chunkLength / contentLength) * 100)
+            )
+          }
+          break
+        }
+        case 'Finished':
+          downloadProgress.value = 100
+          downloadFinished.value = true
+          isDownloading.value = false
+          updateLog.value = 'Download finished, update will apply on next restart'
+          logger.info('[auto-update] Download and install finished')
+          break
+      }
     })
+
+    // downloadAndInstall 完成后，更新已准备好，下次重启应用即可生效
+    downloadFinished.value = true
+    isDownloading.value = false
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Download failed'
-    logger.error('Download failed:', err)
+    error.value = err instanceof Error ? err.message : 'Download/install failed'
+    logger.error('Download/install failed:', err)
     isDownloading.value = false
   }
 }
 
 /**
- * 在用户确认后执行安装程序（会在 release 构建中运行）
+ * 重启应用以应用更新（plugin-updater 自动处理）
  */
 const runInstaller = async () => {
-  if (!installerPath.value) {
-    error.value = 'No installer path available'
-    return
-  }
-
-  if (!installerSha256.value) {
-    error.value = 'No installer hash available'
-    return
-  }
-
   try {
-    await invoke('run_installer', {
-      installerPath: installerPath.value,
-      expectedSha256: installerSha256.value,
-    })
+    // plugin-updater 在 downloadAndInstall 完成后，重启应用即可生效
+    const { relaunch } = await import('@tauri-apps/plugin-process')
+    await relaunch()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
+    logger.error('Failed to relaunch:', err)
   }
 }
 
@@ -411,17 +150,11 @@ const runInstaller = async () => {
 const resetUpdateState = () => {
   updateAvailable.value = false
   newVersion.value = ''
-  downloadUrl.value = ''
-  expectedInstallerSha256.value = null
   downloadProgress.value = 0
   error.value = null
-  installerPath.value = null
-  installerSha256.value = null
   downloadFinished.value = false
+  pendingUpdate = null
 }
-
-const hasError = computed(() => error.value !== null)
-const isUpdateProcessing = computed(() => isChecking.value || isDownloading.value)
 
 export function useAutoUpdate() {
   return {
@@ -429,14 +162,11 @@ export function useAutoUpdate() {
     isChecking,
     updateAvailable,
     newVersion,
-    downloadUrl,
     downloadProgress,
     isDownloading,
     error,
     lastCheckTime,
     releaseNotes,
-    installerPath,
-    installerSha256,
     downloadFinished,
     updateLog,
     hasError,

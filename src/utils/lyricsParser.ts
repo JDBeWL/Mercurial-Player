@@ -83,9 +83,10 @@ export class LyricsParser {
       }
 
       const line = lines[i]
+      const linePattern = new RegExp(pattern)
       const timestamps: Array<{ time: number; index: number }> = []
       let match: RegExpExecArray | null
-      while ((match = pattern.exec(line)) !== null) {
+      while ((match = linePattern.exec(line)) !== null) {
         let time: number
         if (match[1] !== undefined) {
           time = parseInt(match[1]) * 60 + parseInt(match[2]) + parseInt(match[3]) / 100
@@ -95,7 +96,7 @@ export class LyricsParser {
         timestamps.push({ time, index: match.index })
       }
       if (timestamps.length < 1) continue
-      const text = line.replace(pattern, "").trim()
+      const text = line.replace(linePattern, "").trim()
       if (!text) continue
       const startTime = timestamps[0].time
       resultMap[startTime] = resultMap[startTime] || { time: startTime, texts: [], karaoke: null }

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
+import { load, type Store } from '@tauri-apps/plugin-store'
 import { useThemeStore } from './theme'
 import { useMusicLibraryStore } from './musicLibrary'
 import logger from '../utils/logger'
@@ -15,6 +16,18 @@ import type {
   VisualizerConfig,
   AppConfig
 } from '@/types'
+
+// plugin-store 实例（懒加载单例）
+let _storeInstance: Store | null = null
+async function getStore(): Promise<Store> {
+  if (!_storeInstance) {
+    _storeInstance = await load('config.json', {
+      defaults: {},
+      autoSave: false,
+    })
+  }
+  return _storeInstance
+}
 
 // 防抖函数（带取消功能）
 interface DebouncedFunction<T extends (...args: unknown[]) => unknown> {
@@ -181,25 +194,53 @@ export const useConfigStore = defineStore('config', {
     async loadConfig(): Promise<void> {
       this._isInitializing = true
 
-      const configResult = await handlePromise(
-        invoke<Partial<AppConfig>>('load_config'),
-        {
-          type: ErrorType.CONFIG_LOAD_ERROR,
-          severity: ErrorSeverity.MEDIUM,
-          context: { action: 'loadConfig' },
-          showToUser: false,
-          throw: false
+      // 优先从 plugin-store 加载配置
+      let configData: Partial<AppConfig> | null = null
+      try {
+        const store = await getStore()
+        const storeConfig = await store.get<Partial<AppConfig>>('appConfig')
+        if (storeConfig && typeof storeConfig === 'object' && Object.keys(storeConfig).length > 0) {
+          configData = storeConfig
+          logger.info('Configuration loaded from plugin-store')
         }
-      )
+      } catch (err) {
+        logger.warn('Failed to load from plugin-store, falling back to backend:', err)
+      }
 
-      if (configResult.success && configResult.data) {
+      // 回退到后端 ConfigManager（首次迁移或 store 为空时）
+      if (!configData) {
+        const configResult = await handlePromise(
+          invoke<Partial<AppConfig>>('load_config'),
+          {
+            type: ErrorType.CONFIG_LOAD_ERROR,
+            severity: ErrorSeverity.MEDIUM,
+            context: { action: 'loadConfig' },
+            showToUser: false,
+            throw: false
+          }
+        )
+        if (configResult.success && configResult.data) {
+          configData = configResult.data
+          logger.info('Configuration loaded from backend ConfigManager')
+          // 首次迁移：写入 plugin-store 以便后续直接使用
+          try {
+            const store = await getStore()
+            await store.set('appConfig', configData)
+            await store.save()
+            logger.info('Migrated config to plugin-store')
+          } catch (err) {
+            logger.warn('Failed to migrate config to plugin-store:', err)
+          }
+        }
+      }
+
+      if (configData) {
         // 迁移旧的歌词设置从 general 到 lyrics
-        if (configResult.data.general) {
-          const general = configResult.data.general as any
+        if (configData.general) {
+          const general = configData.general as any
           if (general.lyricsAlignment || general.lyricsFontFamily || general.lyricsStyle) {
-            // 如果 lyrics 配置不存在，创建它
-            if (!configResult.data.lyrics) {
-              configResult.data.lyrics = {
+            if (!configData.lyrics) {
+              configData.lyrics = {
                 enableOnlineFetch: false,
                 autoSaveOnlineLyrics: true,
                 preferTranslation: true,
@@ -209,44 +250,33 @@ export const useConfigStore = defineStore('config', {
                 lyricsStyle: 'modern'
               }
             }
-            
-            // 迁移歌词设置
             if (general.lyricsAlignment) {
-              configResult.data.lyrics.lyricsAlignment = general.lyricsAlignment
+              configData.lyrics.lyricsAlignment = general.lyricsAlignment
               delete general.lyricsAlignment
             }
             if (general.lyricsFontFamily) {
-              configResult.data.lyrics.lyricsFontFamily = general.lyricsFontFamily
+              configData.lyrics.lyricsFontFamily = general.lyricsFontFamily
               delete general.lyricsFontFamily
             }
             if (general.lyricsStyle) {
-              configResult.data.lyrics.lyricsStyle = general.lyricsStyle
+              configData.lyrics.lyricsStyle = general.lyricsStyle
               delete general.lyricsStyle
             }
-            
-            // 确保迁移后的配置有默认值
-            if (!configResult.data.lyrics.lyricsAlignment) {
-              configResult.data.lyrics.lyricsAlignment = 'center'
-            }
-            if (!configResult.data.lyrics.lyricsFontFamily) {
-              configResult.data.lyrics.lyricsFontFamily = 'Roboto'
-            }
-            if (!configResult.data.lyrics.lyricsStyle) {
-              configResult.data.lyrics.lyricsStyle = 'modern'
-            }
-            
+            if (!configData.lyrics.lyricsAlignment) configData.lyrics.lyricsAlignment = 'center'
+            if (!configData.lyrics.lyricsFontFamily) configData.lyrics.lyricsFontFamily = 'Roboto'
+            if (!configData.lyrics.lyricsStyle) configData.lyrics.lyricsStyle = 'modern'
+
             logger.info('Migrated lyrics settings from general to lyrics config')
-            // 标记为需要保存，以便保存迁移后的配置
             this._markDirty()
           }
         }
-        
-        this.$patch(configResult.data)
+
+        this.$patch(configData)
         this._lastSavedConfig = JSON.parse(JSON.stringify(this._getSaveableConfig()))
 
         const themeStore = useThemeStore()
-        if (configResult.data.general && configResult.data.general.theme !== themeStore.themePreference) {
-          themeStore.setThemePreference(configResult.data.general.theme)
+        if (configData.general && configData.general.theme !== themeStore.themePreference) {
+          themeStore.setThemePreference(configData.general.theme)
         }
 
         logger.info('Configuration loaded successfully')
@@ -305,40 +335,42 @@ export const useConfigStore = defineStore('config', {
           lyricsStyle: 'modern'
         }
       } else {
-        // 确保所有必需字段都存在
-        if (!configToSave.lyrics.lyricsAlignment) {
-          configToSave.lyrics.lyricsAlignment = 'center'
-        }
-        if (!configToSave.lyrics.lyricsFontFamily) {
-          configToSave.lyrics.lyricsFontFamily = 'Roboto'
-        }
-        if (!configToSave.lyrics.lyricsStyle) {
-          configToSave.lyrics.lyricsStyle = 'modern'
-        }
-        if (configToSave.lyrics.onlineSource === undefined) {
-          configToSave.lyrics.onlineSource = 'netease'
-        }
+        if (!configToSave.lyrics.lyricsAlignment) configToSave.lyrics.lyricsAlignment = 'center'
+        if (!configToSave.lyrics.lyricsFontFamily) configToSave.lyrics.lyricsFontFamily = 'Roboto'
+        if (!configToSave.lyrics.lyricsStyle) configToSave.lyrics.lyricsStyle = 'modern'
+        if (configToSave.lyrics.onlineSource === undefined) configToSave.lyrics.onlineSource = 'netease'
       }
 
-      this._savePromise = handlePromise(
-        invoke('save_config', { config: configToSave }),
-        {
-          type: ErrorType.CONFIG_SAVE_ERROR,
-          severity: ErrorSeverity.MEDIUM,
-          context: { action: 'saveConfig' },
-          showToUser: false,
-          throw: false
+      // 主存储：plugin-store
+      this._savePromise = (async () => {
+        try {
+          const store = await getStore()
+          await store.set('appConfig', configToSave)
+          await store.save()
+          logger.debug('Configuration saved to plugin-store')
+        } catch (err) {
+          logger.warn('Failed to save to plugin-store:', err)
         }
-      )
 
-      const result = await this._savePromise
+        // 同步到后端 ConfigManager（确保 Rust 侧的 exclusive_mode 等配置保持一致）
+        await handlePromise(
+          invoke('save_config', { config: configToSave }),
+          {
+            type: ErrorType.CONFIG_SAVE_ERROR,
+            severity: ErrorSeverity.LOW,
+            context: { action: 'saveConfigBackend' },
+            showToUser: false,
+            throw: false
+          }
+        )
+      })()
+
+      await this._savePromise
       this._savePromise = null
 
-      if ((result as { success: boolean }).success) {
-        this._lastSavedConfig = configToSave
-        this._isDirty = false
-        logger.debug('Configuration saved successfully')
-      }
+      this._lastSavedConfig = configToSave
+      this._isDirty = false
+      logger.debug('Configuration saved successfully')
     },
 
     // 防抖保存（2秒延迟）

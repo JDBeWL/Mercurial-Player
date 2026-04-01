@@ -25,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; media-src 'self' file: blob:; connect-src 'self' https://api.github.com https://github.com https://objects.githubusercontent.com https://github-releases.githubusercontent.com ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' asset: http://asset.localhost data: https:; media-src 'self' asset: http://asset.localhost file: blob:; connect-src 'self' https://api.github.com https://github.com https://objects.githubusercontent.com https://github-releases.githubusercontent.com ipc: http://ipc.localhost asset: http://asset.localhost"
     }
   },
   "bundle": {
@@ -47,6 +47,13 @@
     "fs": {
       "requireLiteralLeadingDot": false
     },
-    "dialog": null
+    "dialog": null,
+    "opener": null,
+    "updater": {
+      "endpoints": [
+        "https://github.com/JDBeWL/Mercurial-Player/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENDMTA2NjZDNEEyMjM3QjAKUldTd055SktiR1lRek5wNnlncVIrQ084NDJ3MDRCMVdlYnFGSm9aTjFCSVFZNE56YVRjZ295MlMK"
+    }
   }
 }

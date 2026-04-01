@@ -435,7 +435,6 @@ export default {
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: none;
-    -ms-overflow-style: none;
     scroll-behavior: smooth;
 }
 

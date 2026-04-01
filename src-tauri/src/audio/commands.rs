@@ -40,7 +40,11 @@ pub fn get_spectrum_data(state: State<AppState>) -> Result<Vec<f32>, String> {
 
 #[command]
 pub fn play_track(app: AppHandle, state: State<AppState>, path: String, position: Option<f32>) -> Result<(), String> {
-    if *state.player.exclusive_mode.lock().unwrap() {
+    let exclusive_mode = state.player.exclusive_mode.try_lock()
+        .map(|g| *g)
+        .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
+
+    if exclusive_mode {
         play_track_exclusive(&app, &state, &path, position)
     } else {
         play_track_shared(&app, &state, &path, position)
@@ -139,8 +143,16 @@ pub fn is_track_finished(state: State<AppState>) -> Result<bool, String> {
 
 #[command]
 pub fn seek_track(app: AppHandle, state: State<AppState>, time: f32) -> Result<(), String> {
-    let path = state.player.current_path.lock().unwrap().clone().ok_or("No track currently loaded")?;
-    if *state.player.exclusive_mode.lock().unwrap() {
+    let path = state.player.current_path.try_lock()
+        .map_err(|_| "Failed to acquire current path lock".to_string())?
+        .clone()
+        .ok_or("No track currently loaded")?;
+
+    let exclusive_mode = state.player.exclusive_mode.try_lock()
+        .map(|g| *g)
+        .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
+
+    if exclusive_mode {
         play_track_exclusive(&app, &state, &path, Some(time))
     } else {
         seek_track_shared(&app, &state, &path, time)
@@ -165,7 +177,9 @@ pub fn set_audio_device(
 ) -> Result<(), String> {
     println!("Attempting to switch to audio device: {device_name}");
 
-    let exclusive_mode = *state.player.exclusive_mode.lock().unwrap();
+    let exclusive_mode = state.player.exclusive_mode.try_lock()
+        .map(|g| *g)
+        .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
 
     let result = if exclusive_mode {
         switch_to_wasapi_exclusive(&app, &state, &device_name, current_time)
@@ -175,7 +189,9 @@ pub fn set_audio_device(
 
     // 如果切换成功，更新设备监听器
     if result.is_ok() {
-        state.player.device_monitor.lock().unwrap().update_current_device(device_name);
+        if let Ok(monitor) = state.player.device_monitor.try_lock() {
+            monitor.update_current_device(device_name);
+        }
     }
 
     result
@@ -191,16 +207,18 @@ fn switch_to_wasapi_exclusive(
     println!("Switching to WASAPI exclusive mode for device: {device_name}");
 
     {
-        let sink = state.player.sink.lock().unwrap();
-        sink.stop();
-        sink.clear();
+        if let Ok(sink) = state.player.sink.try_lock() {
+            sink.stop();
+            sink.clear();
+        }
     }
 
     // 确保旧的 WASAPI 播放器被正确清理
     {
-        let mut old_wasapi = state.player.wasapi_player.lock().unwrap();
-        // take() 会获取所有权，drop 会自动清理线程和资源
-        let _ = old_wasapi.take();
+        if let Ok(mut old_wasapi) = state.player.wasapi_player.try_lock() {
+            // take() 会获取所有权，drop 会自动清理线程和资源
+            let _ = old_wasapi.take();
+        }
     }
 
     let wasapi_playback = WasapiExclusivePlayback::new();
@@ -209,15 +227,26 @@ fn switch_to_wasapi_exclusive(
         Ok((sample_rate, channels, actual_device_name)) => {
             println!("WASAPI Exclusive initialized: {actual_device_name} @ {sample_rate}Hz, {channels} channels");
 
-            *state.player.wasapi_player.lock().unwrap() = Some(wasapi_playback);
-            *state.player.current_device_name.lock().unwrap() = device_name.to_string();
+            if let Ok(mut wasapi_guard) = state.player.wasapi_player.try_lock() {
+                *wasapi_guard = Some(wasapi_playback);
+            } else {
+                return Err("Failed to acquire WASAPI player lock".to_string());
+            }
+
+            if let Ok(mut device_name_guard) = state.player.current_device_name.try_lock() {
+                *device_name_guard = device_name.to_string();
+            } else {
+                return Err("Failed to acquire current device name lock".to_string());
+            }
 
             println!("Successfully switched to WASAPI exclusive mode");
             Ok(())
         }
         Err(e) => {
             eprintln!("Failed to initialize WASAPI exclusive mode: {e}");
-            *state.player.exclusive_mode.lock().unwrap() = false;
+            if let Ok(mut exclusive_mode_guard) = state.player.exclusive_mode.try_lock() {
+                *exclusive_mode_guard = false;
+            }
             Err(format!("Failed to initialize WASAPI exclusive mode: {e}. The device may be in use by another application."))
         }
     }
@@ -256,19 +285,27 @@ fn switch_to_shared_mode(
     let new_sink = Sink::connect_new(stream.mixer());
 
     let (is_playing, volume, current_path) = {
-        let old_sink = state.player.sink.lock().unwrap();
+        let old_sink = state.player.sink.try_lock()
+            .map_err(|_| "Failed to acquire sink lock".to_string())?;
         let playing = !old_sink.is_paused();
         let vol = old_sink.volume();
         old_sink.stop();
-        (playing, vol, state.player.current_path.lock().unwrap().clone())
+        let current_path = state.player.current_path.try_lock()
+            .map_err(|_| "Failed to acquire current path lock".to_string())?
+            .clone();
+        (playing, vol, current_path)
     };
 
-    *state.player.wasapi_player.lock().unwrap() = None;
-    *state.player.sink.lock().unwrap() = new_sink;
-    *state.player.output_stream.lock().unwrap() = Some(stream);
+    {
+        let mut wasapi_guard = state.player.wasapi_player.try_lock()
+            .map_err(|_| "Failed to acquire WASAPI player lock".to_string())?;
+        *wasapi_guard = None;
+    }
 
     {
-        let sink_guard = state.player.sink.lock().unwrap();
+        let mut sink_guard = state.player.sink.try_lock()
+            .map_err(|_| "Failed to acquire sink lock".to_string())?;
+        *sink_guard = new_sink;
         sink_guard.set_volume(volume);
         if is_playing {
             sink_guard.play();
@@ -277,7 +314,17 @@ fn switch_to_shared_mode(
         }
     }
 
-    *state.player.current_device_name.lock().unwrap() = device_name.to_string();
+    {
+        let mut output_stream_guard = state.player.output_stream.try_lock()
+            .map_err(|_| "Failed to acquire output stream lock".to_string())?;
+        *output_stream_guard = Some(stream);
+    }
+
+    {
+        let mut device_name_guard = state.player.current_device_name.try_lock()
+            .map_err(|_| "Failed to acquire current device name lock".to_string())?;
+        *device_name_guard = device_name.to_string();
+    }
 
     if let Some(path) = current_path {
         play_track(app.clone(), state.clone(), path, current_time)?;
@@ -296,7 +343,9 @@ pub fn toggle_exclusive_mode(
 ) -> Result<(), String> {
     println!("Toggling exclusive mode: {enabled} (requires restart)");
 
-    let prev_exclusive = *state.player.exclusive_mode.lock().unwrap();
+    let prev_exclusive = state.player.exclusive_mode.try_lock()
+        .map(|g| *g)
+        .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
     if prev_exclusive == enabled {
         println!("Exclusive mode already set to {enabled}, no action needed");
         return Ok(());
@@ -312,12 +361,16 @@ pub fn toggle_exclusive_mode(
 
 #[command]
 pub fn get_exclusive_mode(state: State<AppState>) -> Result<bool, String> {
-    Ok(*state.player.exclusive_mode.lock().unwrap())
+    state.player.exclusive_mode.try_lock()
+        .map(|g| *g)
+        .map_err(|_| "Failed to acquire exclusive mode lock".to_string())
 }
 
 #[command]
 pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInfo, String> {
-    let current_device_name = state.player.current_device_name.lock().unwrap().clone();
+    let current_device_name = state.player.current_device_name.try_lock()
+        .map_err(|_| "Failed to acquire current device name lock".to_string())?
+        .clone();
 
     let host = cpal::default_host();
     let default_device_name = host.default_output_device().and_then(|d| d.name().ok());
@@ -333,17 +386,18 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
             false
         }
     };
-    let is_exclusive_mode = *state.player.exclusive_mode.lock().unwrap();
+    let is_exclusive_mode = state.player.exclusive_mode.try_lock()
+        .map(|g| *g)
+        .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
 
     let audio_mode_status = {
         if is_exclusive_mode {
             #[cfg(windows)]
             {
-                if state.player.wasapi_player.lock().unwrap().is_some() {
-                    "exclusive"
-                } else {
-                    "standard"
-                }
+                let wasapi_active = state.player.wasapi_player.try_lock()
+                    .map(|g| g.is_some())
+                    .unwrap_or(false);
+                if wasapi_active { "exclusive" } else { "standard" }
             }
             #[cfg(not(windows))]
             {

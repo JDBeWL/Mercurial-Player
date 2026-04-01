@@ -138,8 +138,11 @@ export class FileUtils {
    * 获取文件名（含扩展名）
    */
   static getFileName(filePath: string): string {
-    const parts = filePath.split(/[/\\]/)
-    return parts[parts.length - 1] || filePath
+    const normalizedPath = filePath.replace(/[\\/]+$/, '')
+    if (!normalizedPath) return filePath
+
+    const parts = normalizedPath.split(/[/\\]/)
+    return parts[parts.length - 1] || normalizedPath
   }
 
   /**
@@ -155,8 +158,13 @@ export class FileUtils {
    * 获取文件所在目录路径
    */
   static getDirectoryPath(filePath: string): string {
-    const parts = filePath.split(/[/\\]/)
-    return parts.slice(0, -1).join('/') || ''
+    const normalizedPath = filePath.replace(/[\\/]+$/, '')
+    const lastSeparatorIndex = Math.max(normalizedPath.lastIndexOf('/'), normalizedPath.lastIndexOf('\\'))
+
+    if (lastSeparatorIndex < 0) return ''
+    if (lastSeparatorIndex === 0) return normalizedPath[0]
+
+    return normalizedPath.slice(0, lastSeparatorIndex).replace(/\\/g, '/')
   }
 
   /**
@@ -178,17 +186,32 @@ export class FileUtils {
   }
 
   /**
+   * 拼接路径片段，自动兼容分隔符
+   */
+  static joinPath(...segments: string[]): string {
+    const validSegments = segments.filter(segment => segment.length > 0)
+    if (validSegments.length === 0) return ''
+
+    const separator = validSegments[0].includes('\\') ? '\\' : '/'
+    const [firstSegment, ...restSegments] = validSegments
+    const normalizedFirst = firstSegment.replace(/[\\/]+$/, '')
+    const normalizedRest = restSegments.map(segment => segment.replace(/^[\\/]+|[\\/]+$/g, ''))
+
+    return [normalizedFirst, ...normalizedRest].filter(Boolean).join(separator)
+  }
+
+  /**
    * 根据音频文件路径查找对应的歌词文件
    */
   static async findLyricsFile(audioPath: string): Promise<string | null> {
     const baseName = this.getFileNameWithoutExtension(audioPath)
     const directory = this.getDirectoryPath(audioPath)
-    
+
     // 尝试常见的歌词文件扩展名
     const lyricsExtensions = ['lrc', 'ass', 'srt']
-    
+
     for (const ext of lyricsExtensions) {
-      const lyricsPath = `${directory}/${baseName}.${ext}`
+      const lyricsPath = this.joinPath(directory, `${baseName}.${ext}`)
       try {
         // 先检查文件是否存在
         const exists = await this.fileExists(lyricsPath)
@@ -199,7 +222,7 @@ export class FileUtils {
         // 文件不存在，继续尝试下一个扩展名
       }
     }
-    
+
     return null
   }
 

@@ -3,7 +3,7 @@
 //! 提供可重用的 HTTP 客户端，避免重复创建连接
 
 use std::sync::LazyLock;
-use reqwest::Client;
+use tauri_plugin_http::reqwest::Client;
 
 /// 全局 HTTP 客户端实例
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {

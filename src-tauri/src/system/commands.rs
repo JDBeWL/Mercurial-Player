@@ -4,8 +4,13 @@
 
 use crate::AppState;
 use std::collections::HashMap;
-use std::process::Command;
 use tauri::{command, AppHandle, LogicalSize, Manager, Size, State};
+
+/// 获取应用版本信息
+#[command]
+pub fn get_app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
 
 /// 迷你模式窗口尺寸
 const MINI_SIZE: LogicalSize<f64> = LogicalSize { width: 300.0, height: 100.0 };
@@ -160,7 +165,7 @@ pub fn get_screen_refresh_rate() -> Result<u32, String> {
 /// 安全打开外部链接（仅允许 HTTPS 且主机在白名单内）
 #[command]
 pub fn open_external_url(state: State<AppState>, url: String) -> Result<(), String> {
-    let parsed = reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
+    let parsed = tauri_plugin_http::reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
 
     if parsed.scheme() != "https" {
         return Err("Only HTTPS URLs are allowed".to_string());
@@ -198,29 +203,8 @@ pub fn open_external_url(state: State<AppState>, url: String) -> Result<(), Stri
         return Err(format!("Host not allowed: {host}"));
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        Command::new("cmd")
-            .args(["/C", "start", "", &url])
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {e}"))?;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {e}"))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        Command::new("xdg-open")
-            .arg(&url)
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {e}"))?;
-    }
+    tauri_plugin_opener::open_url(&url, None::<&str>)
+        .map_err(|e| format!("Failed to open URL: {e}"))?;
 
     Ok(())
 }

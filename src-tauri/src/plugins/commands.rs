@@ -68,31 +68,10 @@ pub fn get_plugins_directory() -> Result<String, String> {
 #[command]
 pub fn open_plugins_directory() -> Result<(), String> {
     let plugins_dir = manager::get_plugins_dir()?;
-    
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(&plugins_dir)
-            .spawn()
-            .map_err(|e| format!("无法打开目录: {e}"))?;
-    }
-    
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&plugins_dir)
-            .spawn()
-            .map_err(|e| format!("无法打开目录: {e}"))?;
-    }
-    
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&plugins_dir)
-            .spawn()
-            .map_err(|e| format!("无法打开目录: {e}"))?;
-    }
-    
+
+    tauri_plugin_opener::reveal_item_in_dir(&plugins_dir)
+        .map_err(|e| format!("无法打开目录: {e}"))?;
+
     Ok(())
 }
 
@@ -127,38 +106,17 @@ pub fn open_screenshots_directory() -> Result<(), String> {
         .map_err(|e| format!("无法获取可执行文件路径: {e}"))?;
     let exe_dir = exe_path.parent()
         .ok_or("无法获取可执行文件目录")?;
-    
+
     let screenshots_dir = exe_dir.join("screenshots");
-    
+
     // 创建目录（如果不存在）
     if !screenshots_dir.exists() {
         std::fs::create_dir_all(&screenshots_dir)
             .map_err(|e| format!("无法创建截图目录: {e}"))?;
     }
-    
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(&screenshots_dir)
-            .spawn()
-            .map_err(|e| format!("无法打开目录: {e}"))?;
-    }
-    
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&screenshots_dir)
-            .spawn()
-            .map_err(|e| format!("无法打开目录: {e}"))?;
-    }
-    
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&screenshots_dir)
-            .spawn()
-            .map_err(|e| format!("无法打开目录: {e}"))?;
-    }
-    
+
+    tauri_plugin_opener::reveal_item_in_dir(&screenshots_dir)
+        .map_err(|e| format!("无法打开目录: {e}"))?;
+
     Ok(())
 }

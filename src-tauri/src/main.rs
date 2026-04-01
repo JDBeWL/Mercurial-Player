@@ -26,7 +26,7 @@ use mercurial_player::{
     config::ConfigManager,
     equalizer,
     equalizer::{Equalizer, GlobalEqualizer},
-    media, plugins, system, update,
+    media, plugins, system,
 };
 
 #[cfg(windows)]
@@ -191,6 +191,12 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             // 文件系统命令
             media::commands::read_directory,
@@ -269,10 +275,8 @@ fn main() {
             taskbar::commands::update_taskbar_state,
             #[cfg(windows)]
             taskbar::commands::set_taskbar_stopped,
-            // 自动更新命令
-            update::commands::get_app_version,
-            update::commands::download_and_install_update,
-            update::commands::run_installer,
+            // 系统版本命令（保留 get_app_version 用于前端显示）
+            system::commands::get_app_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -383,7 +387,11 @@ fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
     // 替换窗口过程
     unsafe {
         let hwnd = HWND(hwnd as *mut std::ffi::c_void);
-        let original = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (custom_wndproc as usize).cast_signed());
+        let original = SetWindowLongPtrW(
+            hwnd,
+            GWLP_WNDPROC,
+            (custom_wndproc as *const () as usize).cast_signed(),
+        );
         let _ = ORIGINAL_WNDPROC.set(original);
         println!("Taskbar hook installed");
     }

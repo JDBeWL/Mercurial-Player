@@ -25,7 +25,22 @@
     "core:window:allow-set-decorations",
     "core:window:allow-set-always-on-top",
     "core:window:allow-set-content-protected",
-    "dialog:default"
+    "dialog:default",
+    "opener:default",
+    "process:default",
+    "updater:default",
+    "store:default",
+    "global-shortcut:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://api.github.com/*" },
+        { "url": "https://github.com/*" },
+        { "url": "https://objects.githubusercontent.com/*" },
+        { "url": "https://github-releases.githubusercontent.com/*" },
+        { "url": "https://*.githubusercontent.com/*" }
+      ]
+    }
   ],
   "scope": {
     "deny": [

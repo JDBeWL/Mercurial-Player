@@ -9,7 +9,6 @@ pub mod error;
 pub mod media;
 pub mod plugins;
 pub mod system;
-pub mod update;
 
 #[cfg(windows)]
 pub mod taskbar;
@@ -74,12 +73,7 @@ pub struct PlayerState {
     pub enable_vertical_sync: Arc<AtomicBool>,
 }
 
-// SAFETY: PlayerState 的所有字段都通过 Arc<Mutex<...>> 或 Arc<Atomic...> 进行保护，
-// 确保了线程安全的访问。在 macOS 上 cpal 的 CoreAudio 后端中 OutputStream 包含了
-// Box<dyn FnMut()>（没有 Send bound），导致自动派生的 Send/Sync 失败。
-// 但由于我们通过 Mutex 来保护所有访问，手动实现 Send + Sync 是安全的。
-unsafe impl Send for PlayerState {}
-unsafe impl Sync for PlayerState {}
+
 
 /// 应用程序状态
 ///
@@ -93,11 +87,7 @@ pub struct AppState {
     pub equalizer: GlobalEqualizer,
 }
 
-// SAFETY: AppState 的所有字段都是线程安全的：
-// - PlayerState 通过上方的 unsafe impl 已标记为 Send + Sync
-// - ConfigManager 和 GlobalEqualizer 本身就是 Send + Sync
-unsafe impl Send for AppState {}
-unsafe impl Sync for AppState {}
+
 
 // 重新导出常用类型
 pub use audio::{AudioDeviceInfo, PlaybackStatus, SymphoniaDecoder};

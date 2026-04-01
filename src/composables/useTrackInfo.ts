@@ -44,8 +44,8 @@ export function useTrackInfo() {
       processTrackInfo(trackPath)
     }
 
-    // 如果还没处理完，暂时返回track中已有的name或文件名
-    return track.name || FileUtils.getFileName(trackPath)
+    // 处理中：优先读 store 已用元数据填充的 title 字段，避免显示原始文件名
+    return track.title || track.name || FileUtils.getFileName(trackPath)
   }
 
   /**
@@ -68,7 +68,7 @@ export function useTrackInfo() {
       processTrackInfo(trackPath)
     }
 
-    // 如果还没处理完，暂时返回track中已有的artist信息
+    // 处理中：读 store 已填充的 artist 字段
     return track.artist || fallback
   }
 
@@ -116,11 +116,27 @@ export function useTrackInfo() {
 
   /**
    * 设置音轨变化监听器
+   * 切换曲目时先用 track.title/artist（store 已用元数据填充）预填缓存，
+   * 再触发异步精细提取，避免首次渲染返回原始文件名造成视觉抖动。
    */
   const watchTrack = (trackGetter: () => Track | null | undefined): WatchStopHandle => {
     return watch(trackGetter, (newTrack) => {
       if (newTrack && newTrack.path) {
-        processTrackInfo(newTrack.path)
+        const path = newTrack.path
+        // 如果尚无缓存或仍在处理中，先用已有的 title/artist 预填
+        // 让 getTrackTitle/getTrackArtist 在异步完成前也能返回有意义的值
+        if (!processedTracks.value[path] || processedTracks.value[path].processing) {
+          const preTitle = newTrack.title || newTrack.name || FileUtils.getFileName(path)
+          const preArtist = newTrack.artist || ''
+          processedTracks.value[path] = {
+            processing: true,
+            title: preTitle,
+            artist: preArtist,
+            fileName: FileUtils.getFileName(path),
+            isFromMetadata: false
+          }
+        }
+        processTrackInfo(path)
       }
     }, { immediate: true })
   }
