@@ -20,13 +20,14 @@ pub struct AudioDeviceInfo {
 /// 获取所有可用的音频输出设备
 pub fn get_all_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
     let host = cpal::default_host();
-    let default_device_name = host.default_output_device().and_then(|d| d.name().ok());
+    let default_device_name = host.default_output_device().and_then(|d| d.description().ok().map(|desc| desc.name().to_string()));
 
     let devices = host.output_devices().map_err(|e| e.to_string())?;
     let mut device_infos: Vec<AudioDeviceInfo> = Vec::new();
 
     for device in devices {
-        if let Ok(name) = device.name() {
+        if let Ok(desc) = device.description() {
+            let name = desc.name().to_string();
             let is_default = default_device_name.as_ref().is_some_and(|d_name| *d_name == name);
             let supports_exclusive_mode = check_wasapi_exclusive_support(&name);
 

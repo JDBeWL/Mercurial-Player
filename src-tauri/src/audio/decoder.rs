@@ -168,8 +168,12 @@ impl Iterator for LockFreeSymphoniaSource {
 
 impl Source for LockFreeSymphoniaSource {
     fn current_span_len(&self) -> Option<usize> { None }
-    fn channels(&self) -> u16 { self.cached_channels }
-    fn sample_rate(&self) -> u32 { self.cached_sample_rate }
+    fn channels(&self) -> std::num::NonZero<u16> {
+        std::num::NonZero::new(self.cached_channels).unwrap_or(std::num::NonZero::new(2).unwrap())
+    }
+    fn sample_rate(&self) -> std::num::NonZero<u32> {
+        std::num::NonZero::new(self.cached_sample_rate).unwrap_or(std::num::NonZero::new(48000).unwrap())
+    }
     fn total_duration(&self) -> Option<Duration> { self.cached_total_duration }
 }
 
@@ -207,8 +211,12 @@ impl Iterator for SymphoniaSource {
 
 impl Source for SymphoniaSource {
     fn current_span_len(&self) -> Option<usize> { None }
-    fn channels(&self) -> u16 { self.cached_channels }
-    fn sample_rate(&self) -> u32 { self.cached_sample_rate }
+    fn channels(&self) -> std::num::NonZero<u16> {
+        std::num::NonZero::new(self.cached_channels).unwrap_or(std::num::NonZero::new(2).unwrap())
+    }
+    fn sample_rate(&self) -> std::num::NonZero<u32> {
+        std::num::NonZero::new(self.cached_sample_rate).unwrap_or(std::num::NonZero::new(48000).unwrap())
+    }
     fn total_duration(&self) -> Option<Duration> { self.cached_total_duration }
 }
 
@@ -506,7 +514,11 @@ impl Iterator for SymphoniaDecoder {
 
 impl Source for SymphoniaDecoder {
     fn current_span_len(&self) -> Option<usize> { None }
-    fn channels(&self) -> u16 { self.target_channels }
-    fn sample_rate(&self) -> u32 { self.sample_rate }
+    fn channels(&self) -> std::num::NonZero<u16> {
+        std::num::NonZero::new(self.target_channels).unwrap_or(std::num::NonZero::new(2).unwrap())
+    }
+    fn sample_rate(&self) -> std::num::NonZero<u32> {
+        std::num::NonZero::new(self.sample_rate).unwrap_or(std::num::NonZero::new(48000).unwrap())
+    }
     fn total_duration(&self) -> Option<Duration> { self.total_duration }
 }

@@ -149,10 +149,10 @@ fn monitor_device_changes(
 
                 // 检查新添加的设备是否为系统默认设备
                 if let Some(default_device) = host.default_output_device() {
-                    if let Ok(default_name) = default_device.name() {
-                        if default_name == *device_name {
+                    if let Ok(desc) = default_device.description() {
+                        if desc.name() == device_name.as_str() {
                             println!("New device is system default, switching to: {device_name}");
-                            
+
                             // 发送自动切换到默认设备的事件
                             let _ = app.emit("device-default-changed", DeviceChangeEvent {
                                 event_type: "device-default-changed".to_string(),
@@ -174,7 +174,7 @@ fn get_device_names(host: &cpal::Host) -> Vec<String> {
         .ok()
         .map(|devices| {
             devices
-                .filter_map(|device| device.name().ok())
+                .filter_map(|device| device.description().ok().map(|desc| desc.name().to_string()))
                 .collect()
         })
         .unwrap_or_default()
@@ -184,9 +184,10 @@ fn get_device_names(host: &cpal::Host) -> Vec<String> {
 fn find_fallback_device(host: &cpal::Host, excluded_device: &str) -> Option<String> {
     // 首先尝试默认设备
     if let Some(default_device) = host.default_output_device() {
-        if let Ok(name) = default_device.name() {
+        if let Ok(desc) = default_device.description() {
+            let name = desc.name();
             if name != excluded_device {
-                return Some(name);
+                return Some(name.to_string());
             }
         }
     }
@@ -194,6 +195,6 @@ fn find_fallback_device(host: &cpal::Host, excluded_device: &str) -> Option<Stri
     // 如果默认设备不可用，选择第一个可用设备
     host.output_devices()
         .ok()?
-        .filter_map(|device| device.name().ok())
+        .filter_map(|device| device.description().ok().map(|desc| desc.name().to_string()))
         .find(|name| name != excluded_device)
 }

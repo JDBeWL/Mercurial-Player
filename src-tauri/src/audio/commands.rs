@@ -13,7 +13,6 @@ use super::wasapi::WasapiExclusivePlayback;
 
 use crate::AppState;
 use cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{OutputStream, OutputStreamBuilder, Sink};
 use tauri::{command, AppHandle, State};
 
 // ============================================================================
@@ -68,8 +67,8 @@ pub fn pause_track(state: State<AppState>) -> Result<(), String> {
             }
         }
     } else {
-        if let Ok(sink) = state.player.sink.try_lock() {
-            sink.pause();
+        if let Ok(player) = state.player.sink.try_lock() {
+            player.pause();
         }
     }
     Ok(())
@@ -92,8 +91,8 @@ pub fn resume_track(state: State<AppState>) -> Result<(), String> {
             }
         }
     } else {
-        if let Ok(sink) = state.player.sink.try_lock() {
-            sink.play();
+        if let Ok(player) = state.player.sink.try_lock() {
+            player.play();
         }
     }
     Ok(())
@@ -124,8 +123,8 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), String> {
             }
         }
     } else {
-        if let Ok(sink) = state.player.sink.try_lock() {
-            sink.set_volume(volume);
+        if let Ok(player) = state.player.sink.try_lock() {
+            player.set_volume(volume);
         }
     }
     Ok(())
@@ -207,9 +206,9 @@ fn switch_to_wasapi_exclusive(
     println!("Switching to WASAPI exclusive mode for device: {device_name}");
 
     {
-        if let Ok(sink) = state.player.sink.try_lock() {
-            sink.stop();
-            sink.clear();
+        if let Ok(player) = state.player.sink.try_lock() {
+            player.stop();
+            player.clear();
         }
     }
 
@@ -274,22 +273,22 @@ fn switch_to_shared_mode(
     let device = host
         .output_devices()
         .map_err(|e| format!("Failed to get output devices: {e}"))?
-        .find(|d| d.name().is_ok_and(|name| name == device_name))
+        .find(|d| d.description().ok().map(|desc| desc.name() == device_name).unwrap_or(false))
         .ok_or(format!("Audio device not found: {device_name}"))?;
 
-    let stream: OutputStream = OutputStreamBuilder::from_device(device)
-        .map_err(|e| format!("Failed to create output stream builder: {e}"))?
+    let new_mixer_sink = rodio::stream::DeviceSinkBuilder::from_device(device)
+        .map_err(|e| format!("Failed to create device sink builder: {e}"))?
         .open_stream()
-        .map_err(|e| format!("Failed to open output stream: {e}"))?;
+        .map_err(|e| format!("Failed to create mixer sink: {e}"))?;
 
-    let new_sink = Sink::connect_new(stream.mixer());
+    let new_player = rodio::Player::connect_new(new_mixer_sink.mixer());
 
     let (is_playing, volume, current_path) = {
-        let old_sink = state.player.sink.try_lock()
-            .map_err(|_| "Failed to acquire sink lock".to_string())?;
-        let playing = !old_sink.is_paused();
-        let vol = old_sink.volume();
-        old_sink.stop();
+        let old_player = state.player.sink.try_lock()
+            .map_err(|_| "Failed to acquire player lock".to_string())?;
+        let playing = !old_player.is_paused();
+        let vol = old_player.volume();
+        old_player.stop();
         let current_path = state.player.current_path.try_lock()
             .map_err(|_| "Failed to acquire current path lock".to_string())?
             .clone();
@@ -303,21 +302,21 @@ fn switch_to_shared_mode(
     }
 
     {
-        let mut sink_guard = state.player.sink.try_lock()
-            .map_err(|_| "Failed to acquire sink lock".to_string())?;
-        *sink_guard = new_sink;
-        sink_guard.set_volume(volume);
+        let mut player_guard = state.player.sink.try_lock()
+            .map_err(|_| "Failed to acquire player lock".to_string())?;
+        *player_guard = new_player;
+        player_guard.set_volume(volume);
         if is_playing {
-            sink_guard.play();
+            player_guard.play();
         } else {
-            sink_guard.pause();
+            player_guard.pause();
         }
     }
 
     {
         let mut output_stream_guard = state.player.output_stream.try_lock()
             .map_err(|_| "Failed to acquire output stream lock".to_string())?;
-        *output_stream_guard = Some(stream);
+        *output_stream_guard = Some(new_mixer_sink);
     }
 
     {
@@ -373,7 +372,7 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
         .clone();
 
     let host = cpal::default_host();
-    let default_device_name = host.default_output_device().and_then(|d| d.name().ok());
+    let default_device_name = host.default_output_device().and_then(|d| d.description().ok().map(|desc| desc.name().to_string()));
 
     let is_default = default_device_name.is_some_and(|d_name| d_name == current_device_name);
     let supports_exclusive_mode = {

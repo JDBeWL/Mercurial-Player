@@ -260,7 +260,7 @@ const fn calculate_fft_size(sample_rate: u32) -> usize {
 
 impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
     pub fn new(input: I, waveform_data: Arc<Mutex<Vec<f32>>>, spectrum_data: Arc<Mutex<Vec<f32>>>, app_handle: Option<AppHandle>, target_fps: Arc<AtomicU64>, enable_vertical_sync: Arc<AtomicBool>) -> Self {
-        let (sr, ch) = (input.sample_rate(), input.channels());
+        let (sr, ch) = (input.sample_rate().get(), input.channels().get());
         let fft_size = calculate_fft_size(sr);
         Self {
             input,
@@ -480,8 +480,8 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
 
 impl<I: Source<Item = f32> + Send> Source for VisualizationSource<I> {
     fn current_span_len(&self) -> Option<usize> { self.input.current_span_len() }
-    fn channels(&self) -> u16 { self.input.channels() }
-    fn sample_rate(&self) -> u32 { self.input.sample_rate() }
+    fn channels(&self) -> std::num::NonZero<u16> { self.input.channels() }
+    fn sample_rate(&self) -> std::num::NonZero<u32> { self.input.sample_rate() }
     fn total_duration(&self) -> Option<Duration> { self.input.total_duration() }
 }
 
@@ -489,11 +489,11 @@ impl<I: Source<Item = f32> + Send> Source for VisualizationSource<I> {
 pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, position: Option<f32>) -> Result<(), String> {
     let player = &state.player;
     {
-        let sink = player.sink.lock().unwrap();
+        let player_lock = player.sink.lock().unwrap();
         // 直接停止，不做淡出（淡出会阻塞主线程）
         // 新音源会有fade_in效果来平滑过渡
-        sink.stop();
-        sink.set_volume(*player.target_volume.lock().unwrap());
+        player_lock.stop();
+        player_lock.set_volume(*player.target_volume.lock().unwrap());
     }
     *player.current_path.lock().unwrap() = Some(path.to_string());
     *player.current_source.lock().unwrap() = None;
@@ -529,9 +529,9 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
             )
         }
     };
-    let sink = player.sink.lock().unwrap();
-    sink.append(source);
-    sink.play();
+    let player_lock = player.sink.lock().unwrap();
+    player_lock.append(source);
+    player_lock.play();
     Ok(())
 }
 
@@ -585,7 +585,7 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
     std::thread::spawn(move || {
         thread_started_clone.store(true, Ordering::SeqCst);
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            decode_and_push_to_wasapi(source, wasapi_clone, waveform, spectrum, app_clone, stop_flag, thread_id, new_thread_id, src_sr, src_ch, target_sr, target_ch, eq_settings, start_pos)
+            decode_and_push_to_wasapi(source, wasapi_clone, waveform, spectrum, app_clone, stop_flag, thread_id, new_thread_id, src_sr, src_ch.get(), target_sr, target_ch, eq_settings, start_pos)
         }));
     });
 
@@ -1007,7 +1007,7 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
             }
         } else {
             state.player.sink.try_lock()
-                .map(|sink| !sink.is_paused())
+                .map(|player| !player.is_paused())
                 .unwrap_or(false)
         }
     };
@@ -1034,7 +1034,7 @@ pub fn check_track_finished(state: &State<AppState>) -> Result<bool, String> {
         }
     } else {
         state.player.sink.try_lock()
-            .map(|sink| Ok(sink.empty() && !sink.is_paused()))
+            .map(|player| Ok(player.empty() && !player.is_paused()))
             .unwrap_or(Ok(false))
     }
 }

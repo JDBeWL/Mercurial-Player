@@ -22,7 +22,6 @@ use audio::DeviceMonitor;
 use config::ConfigManager;
 use equalizer::{Equalizer, GlobalEqualizer};
 
-use rodio::{OutputStream, Sink};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
@@ -35,9 +34,9 @@ pub struct Placeholder;
 /// 包含音频播放所需的所有状态信息
 pub struct PlayerState {
     /// 音频输出 sink
-    pub sink: Arc<Mutex<Sink>>,
+    pub sink: Arc<Mutex<rodio::Player>>,
     /// 音频输出流（必须长期持有，否则会静音）
-    pub output_stream: Arc<Mutex<Option<OutputStream>>>,
+    pub output_stream: Arc<Mutex<Option<rodio::MixerDeviceSink>>>,
 
     /// 当前音频源
     pub current_source: Arc<Mutex<Option<SymphoniaSource>>>,

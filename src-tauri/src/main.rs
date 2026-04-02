@@ -39,7 +39,7 @@ use mercurial_player::audio::DeviceMonitor;
 use mercurial_player::taskbar;
 
 use cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{OutputStream, OutputStreamBuilder, Sink};
+use rodio::stream::{MixerDeviceSink, DeviceSinkBuilder};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
@@ -61,8 +61,10 @@ fn main() {
         .default_output_device()
         .expect("No default output device available");
     let device_name = device
-        .name()
-        .unwrap_or_else(|_| "Unknown Device".to_string());
+        .description()
+        .ok()
+        .map(|desc| desc.name().to_string())
+        .unwrap_or_else(|| "Unknown Device".to_string());
 
     // 创建配置管理器
     let config_manager = ConfigManager::new();
@@ -286,12 +288,15 @@ fn main() {
 
 /// 创建独占模式播放器
 #[cfg(windows)]
-fn create_exclusive_mode_player(device_name: &str) -> (Sink, OutputStream, Option<PlatformPlayer>) {
+fn create_exclusive_mode_player(device_name: &str) -> (rodio::Player, MixerDeviceSink, Option<PlatformPlayer>) {
     println!("Starting in WASAPI exclusive mode");
 
     // 创建一个空的rodio sink
-    let stream = OutputStreamBuilder::open_default_stream().expect("Failed to create default output stream");
-    let sink = Sink::connect_new(stream.mixer());
+    let mixer_sink = DeviceSinkBuilder::from_default_device()
+        .expect("Failed to create default device sink builder")
+        .open_stream()
+        .expect("Failed to create default mixer sink");
+    let player = rodio::Player::connect_new(mixer_sink.mixer());
 
     // 创建 WASAPI 独占播放器
     let wasapi_playback = WasapiExclusivePlayback::new();
@@ -300,23 +305,26 @@ fn create_exclusive_mode_player(device_name: &str) -> (Sink, OutputStream, Optio
             println!(
                 "WASAPI Exclusive initialized: {actual_name} @ {sample_rate}Hz, {channels} channels"
             );
-            (sink, stream, Some(wasapi_playback))
+            (player, mixer_sink, Some(wasapi_playback))
         }
         Err(e) => {
             eprintln!("Failed to initialize WASAPI exclusive mode: {e}");
             eprintln!("Falling back to shared mode");
-            (sink, stream, None)
+            (player, mixer_sink, None)
         }
     }
 }
 
 /// 创建独占模式播放器（非Windows平台回退到共享模式）
 #[cfg(not(windows))]
-fn create_exclusive_mode_player(_device_name: &str) -> (Sink, OutputStream, Option<PlatformPlayer>) {
+fn create_exclusive_mode_player(_device_name: &str) -> (rodio::Player, MixerDeviceSink, Option<PlatformPlayer>) {
     println!("Exclusive mode is only supported on Windows, falling back to shared mode");
-    let stream = OutputStreamBuilder::open_default_stream().expect("Failed to create default output stream");
-    let sink = Sink::connect_new(stream.mixer());
-    (sink, stream, None)
+    let mixer_sink = DeviceSinkBuilder::from_default_device()
+        .expect("Failed to create default device sink builder")
+        .open_stream()
+        .expect("Failed to create default mixer sink");
+    let player = rodio::Player::connect_new(mixer_sink.mixer());
+    (player, mixer_sink, None)
 }
 
 /// 设置任务栏按钮点击钩子
@@ -400,16 +408,16 @@ fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
 }
 
 /// 创建共享模式播放器
-fn create_shared_mode_player(device: &cpal::Device) -> (Sink, OutputStream, Option<PlatformPlayer>) {
+fn create_shared_mode_player(device: &cpal::Device) -> (rodio::Player, MixerDeviceSink, Option<PlatformPlayer>) {
     println!("Starting in shared mode");
 
     // 从选定的设备创建音频输出流
-    let stream = OutputStreamBuilder::from_device(device.clone())
-        .expect("Failed to create output stream builder")
+    let mixer_sink = DeviceSinkBuilder::from_device(device.clone())
+        .expect("Failed to create device sink builder")
         .open_stream()
-        .expect("Failed to open output stream from device");
+        .expect("Failed to create mixer sink from device");
 
-    let sink = Sink::connect_new(stream.mixer());
+    let player = rodio::Player::connect_new(mixer_sink.mixer());
 
-    (sink, stream, None)
+    (player, mixer_sink, None)
 }
