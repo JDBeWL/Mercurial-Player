@@ -206,8 +206,10 @@ fn main() {
             media::commands::get_all_audio_files,
             media::commands::check_file_exists,
             // 元数据命令
+
             media::commands::get_track_metadata,
             media::commands::get_tracks_metadata_batch,
+            media::commands::get_track_cover_path,
             media::commands::extract_cover,
             // 网易云音乐API命令
             media::commands::netease_search_songs,

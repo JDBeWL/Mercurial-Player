@@ -57,6 +57,7 @@
     "emptyDescription": "Select a directory containing your music files to get started.",
     "selectFirstDirectory": "Select First Directory",
     "loading": "Loading...",
+    "refreshing": "Updating music library...",
     "toggleSortOrder": "Toggle sort order",
     "playNext": "Play Next",
     "addedToPlayNext": "Added to play next"

@@ -6,10 +6,13 @@ use super::filesystem::{
     check_file_exists_internal, get_all_audio_files_from_dirs, get_audio_files_from_dir, read_dir,
     read_lyrics_file_internal, write_lyrics_file_internal,
 };
-use super::metadata::{Playlist, TrackMetadata, get_track_metadata_internal, extract_cover_internal};
+use super::metadata::{
+    extract_cover_internal, get_track_cover_path_internal, get_track_metadata_internal, Playlist,
+    TrackMetadata,
+};
 use super::netease;
 use crate::AppState;
-use tauri::{State, command};
+use tauri::{command, State};
 
 /// 读取指定目录中的子目录列表
 #[command]
@@ -25,10 +28,7 @@ pub fn get_audio_files(path: String) -> Result<Playlist, String> {
 
 /// 获取多个目录中的所有音频文件，并创建播放列表
 #[command]
-pub fn get_all_audio_files(
-    state: State<AppState>,
-    paths: Vec<String>,
-) -> Result<Vec<Playlist>, String> {
+pub fn get_all_audio_files(state: State<AppState>, paths: Vec<String>) -> Result<Vec<Playlist>, String> {
     let config = state.config_manager.load_config()?;
     get_all_audio_files_from_dirs(&paths, &config)
 }
@@ -51,20 +51,25 @@ pub fn write_lyrics_file(path: String, content: String) -> Result<(), String> {
     write_lyrics_file_internal(&path, &content)
 }
 
-/// 获取音轨的元数据信息
+/// 获取音轨的元数据信息（轻量）
 #[command]
 pub fn get_track_metadata(path: String) -> Result<TrackMetadata, String> {
     get_track_metadata_internal(&path)
 }
 
 /// 批量获取多个音轨的元数据信息
-/// 返回成功获取的元数据列表，失败的文件会被跳过
 #[command]
 pub fn get_tracks_metadata_batch(paths: Vec<String>) -> Vec<TrackMetadata> {
     paths
         .into_iter()
         .filter_map(|path| get_track_metadata_internal(&path).ok())
         .collect()
+}
+
+/// 按需提取并返回音轨封面缓存路径
+#[command]
+pub fn get_track_cover_path(path: String) -> Result<Option<String>, String> {
+    get_track_cover_path_internal(&path)
 }
 
 /// 搜索网易云音乐歌曲
@@ -82,7 +87,6 @@ pub async fn netease_search_songs(
 pub async fn netease_get_lyrics(song_id: String) -> Result<netease::LyricsData, String> {
     netease::get_lyrics(&song_id).await
 }
-
 
 /// 提取音频文件的封面并保存到指定路径
 #[command]

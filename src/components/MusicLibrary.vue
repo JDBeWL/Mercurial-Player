@@ -131,12 +131,12 @@
         </div>
       </div>
       
-      <!-- 加载状态 -->
-      <div class="loading-overlay" v-if="isLoading">
-        <div class="loading-spinner">
-          <span class="material-symbols-rounded">progress_activity</span>
-          <span>{{ $t('library.loading') }}</span>
+      <!-- 轻量刷新提示：顶部细进度条（不打断浏览） -->
+      <div class="top-loading-bar" v-if="isLoading" aria-live="polite">
+        <div class="top-loading-bar__track">
+          <div class="top-loading-bar__fill"></div>
         </div>
+        <span class="top-loading-bar__text">{{ $t('library.loading') }}</span>
       </div>
     </div>
   </div>
@@ -317,13 +317,38 @@ onMounted(async () => {
   if (musicLibraryStore.musicFolders.length === 0) {
     await musicLibraryStore.loadMusicFolders()
   }
-  
-  // 只在播放列表为空时刷新，避免频繁扫描
+
+  // 播放列表为空时：先尝试缓存，再后台刷新
   if (musicLibraryStore.playlists.length === 0) {
-    await musicLibraryStore.refreshMusicFolders()
+    // 1. 优先从缓存加载（瞬间恢复）
+    const loadedFromCache = await musicLibraryStore.loadPlaylistsFromCache()
+
+    if (loadedFromCache) {
+      // 有缓存 -> 先计算统计 -> 再用与手动刷新一致的加载 UI 进行更新
+      await calculateDirectoryStats()
+
+      isLoading.value = true
+      try {
+        await musicLibraryStore.refreshMusicFolders()
+        await calculateDirectoryStats()
+      } catch (err) {
+        logger.warn('Background refresh failed:', err)
+      } finally {
+        isLoading.value = false
+      }
+    } else {
+      // 无缓存 -> 正常扫描（首次使用）
+      isLoading.value = true
+      try {
+        await musicLibraryStore.refreshMusicFolders()
+      } finally {
+        isLoading.value = false
+      }
+      await calculateDirectoryStats()
+    }
+  } else {
+    await calculateDirectoryStats()
   }
-  
-  await calculateDirectoryStats()
 })
 
 // 目录树管理
@@ -781,36 +806,48 @@ const addFileNext = (file) => {
   color: var(--md-sys-color-on-surface-variant);
 }
 
-/* 加载状态 */
-.loading-overlay {
-  position: absolute;
+/* 轻量刷新提示：顶部细进度条 */
+.top-loading-bar {
+  position: sticky;
   top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 5;
-}
-
-.loading-spinner {
+  z-index: 6;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  color: var(--md-sys-color-on-surface);
+  gap: 4px;
+  padding: 6px 0 2px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--md-sys-color-surface) 96%, transparent),
+    color-mix(in srgb, var(--md-sys-color-surface) 85%, transparent)
+  );
 }
 
-.loading-spinner .material-symbols-rounded {
-  font-size: 32px;
-  animation: spin 1s linear infinite;
+.top-loading-bar__track {
+  width: 100%;
+  height: 2px;
+  background-color: color-mix(in srgb, var(--md-sys-color-primary) 14%, transparent);
+  overflow: hidden;
+  border-radius: 999px;
 }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+.top-loading-bar__fill {
+  width: 28%;
+  height: 100%;
+  background-color: var(--md-sys-color-primary);
+  border-radius: 999px;
+  animation: top-loading-indeterminate 1.35s ease-in-out infinite;
+}
+
+.top-loading-bar__text {
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+@keyframes top-loading-indeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(420%); }
 }
 
 

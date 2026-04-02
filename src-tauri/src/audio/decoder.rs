@@ -2,7 +2,7 @@
 //!
 //! 使用 Symphonia 库实现高性能音频解码，支持多种格式。
 
-use crossbeam_channel::{unbounded, Receiver};
+use crossbeam_channel::{bounded, Receiver};
 use rodio::Source;
 use std::fs::File;
 use std::path::Path;
@@ -44,17 +44,51 @@ impl AudioBuffer {
     fn new(capacity: usize, sample_rate: u32, channels: u16) -> Self {
         Self { samples: Vec::with_capacity(capacity), position: 0, capacity, sample_rate, channels, refill_threshold_ms: 100 }
     }
-    #[inline(always)] fn is_empty(&self) -> bool { self.position >= self.samples.len() }
-    #[inline(always)] fn next(&mut self) -> Option<f32> {
-        if self.position < self.samples.len() { let s = self.samples[self.position]; self.position += 1; Some(s) } else { None }
+
+    #[inline(always)]
+    fn is_empty(&self) -> bool { self.position >= self.samples.len() }
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<f32> {
+        if self.position < self.samples.len() {
+            let s = self.samples[self.position];
+            self.position += 1;
+            // 避免“已消费样本”长期滞留导致内存缓慢上涨
+            self.compact_if_needed();
+            Some(s)
+        } else {
+            None
+        }
     }
-    fn clear(&mut self) { self.samples.clear(); self.position = 0; }
-    fn append(&mut self, samples: &[f32]) { self.samples.extend_from_slice(samples); }
-    #[inline] fn remaining(&self) -> usize { self.samples.len() - self.position }
+
+    fn clear(&mut self) {
+        self.samples.clear();
+        self.position = 0;
+    }
+
+    fn append(&mut self, samples: &[f32]) {
+        self.samples.extend_from_slice(samples);
+    }
+
+    #[inline]
+    fn remaining(&self) -> usize { self.samples.len() - self.position }
+
     fn needs_refill(&self) -> bool {
         (self.remaining() as u64 * 1000) < (self.sample_rate as u64 * self.channels as u64 * self.refill_threshold_ms as u64)
     }
+
     fn set_refill_threshold(&mut self, threshold_ms: u32) { self.refill_threshold_ms = threshold_ms; }
+
+    #[inline]
+    fn compact_if_needed(&mut self) {
+        // 至少回收 4096 个样本，且已消费超过当前数组一半时再压缩，避免频繁搬移
+        if self.position >= 4096 && self.position * 2 >= self.samples.len() {
+            let remaining = self.samples.len() - self.position;
+            self.samples.copy_within(self.position.., 0);
+            self.samples.truncate(remaining);
+            self.position = 0;
+        }
+    }
 }
 
 pub struct LockFreeSymphoniaSource {
@@ -69,9 +103,13 @@ pub struct LockFreeSymphoniaSource {
 }
 
 impl LockFreeSymphoniaSource {
+    // 有界队列：避免“生产者解码速度 > 消费者播放速度”时无限堆积内存
+    // 约等于 3 秒 44.1kHz 立体声 PCM（264600 samples，约 1MB）
+    const CHANNEL_CAPACITY_SAMPLES: usize = 44_100 * 2 * 3;
+
     pub fn new(mut decoder: SymphoniaDecoder) -> Self {
         let (channels, sample_rate, total_duration) = (decoder.target_channels(), decoder.sample_rate(), decoder.total_duration());
-        let (sender, receiver) = unbounded();
+        let (sender, receiver) = bounded(Self::CHANNEL_CAPACITY_SAMPLES);
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = Arc::clone(&stop_flag);
         let _ = decoder.prefill_buffer();
@@ -79,11 +117,27 @@ impl LockFreeSymphoniaSource {
         let decoder_thread = thread::spawn(move || {
             let mut batch = Vec::with_capacity(16384);
             loop {
-                if stop_flag_clone.load(Ordering::Relaxed) { break; }
+                if stop_flag_clone.load(Ordering::Relaxed) {
+                    break;
+                }
                 batch.clear();
-                for _ in 0..16384 { if let Some(s) = decoder.next() { batch.push(s); } else { break; } }
-                if batch.is_empty() { break; }
-                for s in &batch { if sender.send(*s).is_err() { break; } }
+                for _ in 0..16384 {
+                    if let Some(s) = decoder.next() {
+                        batch.push(s);
+                    } else {
+                        break;
+                    }
+                }
+                if batch.is_empty() {
+                    break;
+                }
+
+                // 有界通道 + 阻塞发送，给消费端施加背压，防止内存无限增长
+                for s in &batch {
+                    if sender.send(*s).is_err() {
+                        return;
+                    }
+                }
             }
         });
 

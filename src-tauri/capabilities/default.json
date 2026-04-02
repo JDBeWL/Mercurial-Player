@@ -4,6 +4,8 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "fs:allow-read-file",
+    "fs:scope-temp-recursive",
     "core:window:allow-close",
     "core:window:allow-hide",
     "core:window:allow-show",
@@ -31,6 +33,11 @@
     "updater:default",
     "store:default",
     "global-shortcut:default",
+    "global-shortcut:allow-is-registered",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-register-all",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all",
     {
       "identifier": "http:default",
       "allow": [
@@ -43,6 +50,9 @@
     }
   ],
   "scope": {
+    "allow": [
+      "$TEMP/mercurial-player/**"
+    ],
     "deny": [
       "$HOME/.ssh/**",
       "$HOME/.gnupg/**",

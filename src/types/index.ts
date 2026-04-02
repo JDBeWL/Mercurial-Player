@@ -8,7 +8,8 @@ export interface Track {
   artist?: string
   displayArtist?: string
   album?: string
-  cover?: string
+  coverPath?: string
+
   duration?: number
   bitrate?: number | null
   sampleRate?: number | null

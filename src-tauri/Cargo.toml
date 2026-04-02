@@ -1,6 +1,6 @@
 [package]
 name = "mercurial-player"
-version = "1.0.4"
+version = "1.1.0"
 description = "A music player by JDBeWL"
 authors = ["jdbEwl"]
 license = "GPL-3.0"
@@ -13,7 +13,7 @@ default-run = "mercurial-player"
 tauri-build = { version = "2.5", features = [] }
 
 [dependencies]
-tauri = { version = "2.10", features = ["rustls-tls"] }
+tauri = { version = "2.10", features = ["protocol-asset", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rodio = { version = "0.21", default-features = false, features = ["playback"] }

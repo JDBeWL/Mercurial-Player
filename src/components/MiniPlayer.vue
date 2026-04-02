@@ -9,7 +9,7 @@
       <!-- 左侧：封面 -->
       <div class="cover-container" data-tauri-drag-region>
         <div class="cover" :style="{ backgroundImage: currentTrackCover }">
-          <div v-if="!currentTrack || !currentTrack.cover" class="cover-placeholder">
+          <div v-if="!currentTrack || !currentTrack.coverPath" class="cover-placeholder">
             <span class="material-symbols-rounded">album</span>
           </div>
         </div>
@@ -65,6 +65,7 @@ import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
 import { useConfigStore } from '../stores/config'
 import { useTrackInfo } from '../composables/useTrackInfo'
+import { convertFileSrc } from '@tauri-apps/api/core'
 
 const playerStore = usePlayerStore()
 const configStore = useConfigStore()
@@ -82,8 +83,9 @@ const dragPercentage = ref(0)
 
 // 计算属性
 const currentTrackCover = computed(() => {
-  if (currentTrack.value && currentTrack.value.cover) {
-    return `url('${currentTrack.value.cover}')`
+  if (currentTrack.value && currentTrack.value.coverPath) {
+    // 使用 convertFileSrc 将本地文件路径转换为可渲染的 URL
+    return `url('${convertFileSrc(currentTrack.value.coverPath)}')`
   }
   return 'none'
 })

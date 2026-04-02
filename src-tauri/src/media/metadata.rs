@@ -2,12 +2,15 @@
 //!
 //! 提供音轨元数据结构和处理函数。
 
-use base64::{engine::general_purpose, Engine as _};
+use lofty::picture::Picture;
 use lofty::prelude::{Accessor, AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
 use serde::Serialize;
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
-use std::path::Path;
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 /// 单个音轨的元数据
 #[derive(Debug, Serialize, Default, Clone)]
@@ -19,52 +22,12 @@ pub struct TrackMetadata {
     pub artist: Option<String>,
     pub album: Option<String>,
     pub duration: Option<f64>,
-    pub cover: Option<String>,
+    pub cover_path: Option<String>,
     pub bitrate: Option<u32>,
     pub sample_rate: Option<u32>,
     pub channels: Option<u8>,
     pub bit_depth: Option<u8>,
     pub format: Option<String>,
-}
-
-impl TrackMetadata {
-    #[must_use]
-    #[allow(dead_code)]
-    pub fn new(path: String, name: String) -> Self {
-        Self { path, name, ..Default::default() }
-    }
-
-    #[must_use]
-    #[allow(dead_code)]
-    pub fn with_title(mut self, title: Option<String>) -> Self { self.title = title; self }
-    
-    #[must_use]
-    #[allow(dead_code)]
-    pub fn with_artist(mut self, artist: Option<String>) -> Self { self.artist = artist; self }
-    
-    #[must_use]
-    #[allow(dead_code)]
-    pub fn with_album(mut self, album: Option<String>) -> Self { self.album = album; self }
-    
-    #[must_use]
-    #[allow(dead_code)]
-    pub const fn with_duration(mut self, duration: Option<f64>) -> Self { self.duration = duration; self }
-    
-    #[must_use]
-    #[allow(dead_code)]
-    pub fn with_cover(mut self, cover: Option<String>) -> Self { self.cover = cover; self }
-    
-    #[must_use]
-    #[allow(dead_code)]
-    pub const fn with_bitrate(mut self, bitrate: Option<u32>) -> Self { self.bitrate = bitrate; self }
-    
-    #[must_use]
-    #[allow(dead_code)]
-    pub const fn with_sample_rate(mut self, sample_rate: Option<u32>) -> Self { self.sample_rate = sample_rate; self }
-    
-    #[must_use]
-    #[allow(dead_code)]
-    pub const fn with_channels(mut self, channels: Option<u8>) -> Self { self.channels = channels; self }
 }
 
 /// 包含多个音轨的播放列表
@@ -86,40 +49,67 @@ impl Playlist {
     }
 
     #[must_use]
-    #[allow(dead_code)]
-    pub fn track_count(&self) -> usize {
-        self.files.len()
-    }
-
-    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.files.is_empty()
     }
+}
 
-    #[must_use]
-    #[allow(dead_code)]
-    pub fn get_track(&self, index: usize) -> Option<&TrackMetadata> {
-        self.files.get(index)
-    }
+fn cover_cache_dir() -> PathBuf {
+    std::env::temp_dir().join("mercurial-player").join("cover-cache")
+}
 
-    #[allow(dead_code)]
-    pub fn get_track_mut(&mut self, index: usize) -> Option<&mut TrackMetadata> {
-        self.files.get_mut(index)
-    }
-
-    #[allow(dead_code)]
-    pub fn remove_track(&mut self, index: usize) -> Option<TrackMetadata> {
-        if index < self.files.len() { Some(self.files.remove(index)) } else { None }
-    }
-
-    #[allow(dead_code)]
-    pub fn clear(&mut self) {
-        self.files.clear();
+fn cover_extension_from_mime(mime: Option<&str>) -> &'static str {
+    match mime {
+        Some("image/png") => "png",
+        Some("image/gif") => "gif",
+        Some("image/webp") => "webp",
+        Some("image/bmp") => "bmp",
+        _ => "jpg",
     }
 }
 
+fn get_cover_cache_path(audio_path: &Path, picture: &Picture) -> Result<PathBuf, String> {
+    let mut hasher = DefaultHasher::new();
+    audio_path.to_string_lossy().hash(&mut hasher);
+
+    let modified_secs = fs::metadata(audio_path)
+        .ok()
+        .and_then(|meta| meta.modified().ok())
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map_or(0_u64, |d| d.as_secs());
+    modified_secs.hash(&mut hasher);
+
+    let hash = hasher.finish();
+    let ext = cover_extension_from_mime(picture.mime_type().map(lofty::picture::MimeType::as_str));
+    let cache_dir = cover_cache_dir();
+    fs::create_dir_all(&cache_dir).map_err(|e| format!("无法创建封面缓存目录: {e}"))?;
+    Ok(cache_dir.join(format!("{hash}.{ext}")))
+}
+
+fn extract_cover_to_cache(audio_path: &Path, picture: &Picture) -> Result<String, String> {
+    let cache_file = get_cover_cache_path(audio_path, picture)?;
+
+    if !cache_file.exists() {
+        fs::write(&cache_file, picture.data()).map_err(|e| format!("写入封面缓存失败: {e}"))?;
+    }
+
+    Ok(cache_file.to_string_lossy().to_string())
+}
+
 /// 获取音轨的元数据信息（内部函数）
+///
+/// 默认轻量模式：不提取封面，降低扫描负担，避免前端长时间卡顿。
 pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> {
+    get_track_metadata_with_options(path, false)
+}
+
+/// 获取音轨元数据（包含封面路径）
+pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, String> {
+    get_track_metadata_with_options(path, true)
+}
+
+/// 获取音轨元数据的统一实现
+fn get_track_metadata_with_options(path: &str, include_cover: bool) -> Result<TrackMetadata, String> {
     let file_path = Path::new(path);
 
     let tagged_file = Probe::open(file_path)
@@ -129,8 +119,7 @@ pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> 
 
     let properties = tagged_file.properties();
     let duration = properties.duration().as_secs_f64();
-    
-    // 获取文件格式
+
     let format = file_path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -153,10 +142,10 @@ pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> 
         metadata.artist = tag.artist().map(|s| s.to_string());
         metadata.album = tag.album().map(|s| s.to_string());
 
-        if let Some(picture) = tag.pictures().first() {
-            let mime_type = picture.mime_type().map_or("image/jpeg", lofty::picture::MimeType::as_str);
-            let data = picture.data();
-            metadata.cover = Some(format!("data:{mime_type};base64,{}", general_purpose::STANDARD.encode(data)));
+        if include_cover {
+            if let Some(picture) = tag.pictures().first() {
+                metadata.cover_path = extract_cover_to_cache(file_path, picture).ok();
+            }
         }
     }
 
@@ -167,6 +156,22 @@ pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> 
     Ok(metadata)
 }
 
+/// 获取音频封面缓存路径（按需提取）
+pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, String> {
+    let file_path = Path::new(path);
+    let tagged_file = Probe::open(file_path)
+        .map_err(|e| format!("无法打开文件: {e}"))?
+        .read()
+        .map_err(|e| format!("无法读取文件: {e}"))?;
+
+    let cover = tagged_file
+        .primary_tag()
+        .and_then(|tag| tag.pictures().first())
+        .map(|picture| extract_cover_to_cache(file_path, picture))
+        .transpose()?;
+
+    Ok(cover)
+}
 
 /// 提取音频文件的封面并保存到指定路径
 pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<String, String> {
@@ -186,35 +191,20 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
         .first()
         .ok_or_else(|| "文件没有封面图片".to_string())?;
 
-    let data = picture.data();
-    
-    // 根据 MIME 类型确定文件扩展名
-    let extension = match picture.mime_type().map(lofty::picture::MimeType::as_str) {
-        Some("image/png") => "png",
-        Some("image/gif") => "gif",
-        Some("image/webp") => "webp",
-        Some("image/bmp") => "bmp",
-        _ => "jpg", // 默认为 jpg
-    };
+    let extension = cover_extension_from_mime(picture.mime_type().map(lofty::picture::MimeType::as_str));
 
-    // 处理输出路径
     let output = Path::new(output_path);
     let final_path = if output.extension().is_none() {
-        // 如果没有扩展名，添加正确的扩展名
         output.with_extension(extension)
     } else {
         output.to_path_buf()
     };
 
-    // 确保父目录存在
     if let Some(parent) = final_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("无法创建目录: {e}"))?;
+        fs::create_dir_all(parent).map_err(|e| format!("无法创建目录: {e}"))?;
     }
 
-    // 写入文件
-    fs::write(&final_path, data)
-        .map_err(|e| format!("无法写入文件: {e}"))?;
+    fs::write(&final_path, picture.data()).map_err(|e| format!("无法写入文件: {e}"))?;
 
     Ok(final_path.to_string_lossy().to_string())
 }

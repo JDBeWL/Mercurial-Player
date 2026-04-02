@@ -1,8 +1,27 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
+import { load, type Store } from '@tauri-apps/plugin-store'
 import { useConfigStore } from './config'
 import logger from '../utils/logger'
 import type { Track, Playlist, LibraryStats } from '@/types'
+
+// plugin-store 实例（懒加载单例）
+let _libraryStoreInstance: Store | null = null
+async function getLibraryStore(): Promise<Store> {
+  if (!_libraryStoreInstance) {
+    _libraryStoreInstance = await load('library-cache.json', {
+      defaults: {},
+      autoSave: false,
+    })
+  }
+  return _libraryStoreInstance
+}
+
+/** 缓存中存储的播放列表数据（不包含封面以减小体积） */
+interface CachedPlaylist {
+  name: string
+  files: Omit<Track, 'coverPath'>[]
+}
 
 interface PlayHistoryItem extends Track {
   timestamp: string
@@ -24,11 +43,17 @@ interface MusicLibraryState {
   searchTerm: string
   playHistory: PlayHistoryItem[]
   isLoading: boolean
+  /** 是否正在后台刷新（区别于首次加载的阻塞加载） */
+  isBackgroundRefreshing: boolean
+  /** 加载进度（0-100） */
+  loadingProgress: number
   error: string | null
   directoryTree: unknown | null
   stats: LibraryStats
   /** 记录已排序的播放列表名称，用于惰性排序 */
   _sortedPlaylists: Set<string>
+  /** 是否已从缓存加载 */
+  _loadedFromCache: boolean
 }
 
 export const useMusicLibraryStore = defineStore('musicLibrary', {
@@ -53,6 +78,8 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
 
     // 加载状态
     isLoading: false,
+    isBackgroundRefreshing: false,
+    loadingProgress: 0,
     error: null,
 
     // 目录结构
@@ -68,6 +95,9 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
 
     // 惰性排序追踪
     _sortedPlaylists: new Set<string>(),
+
+    // 缓存标记
+    _loadedFromCache: false,
   }),
 
   getters: {
@@ -229,18 +259,123 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
 
     /**
      * 刷新音乐文件夹
-     * 不再立即排序所有播放列表，改为惰性排序（在 selectPlaylist 时按需排序）
+     * 使用分批更新策略，避免一次性替换大数组导致前端卡顿
+     * 扫描完成后自动将播放列表缓存到 plugin-store 以加速下次启动
      */
     async refreshMusicFolders(): Promise<{ success: boolean; message: string }> {
       try {
-        this.playlists = await invoke<Playlist[]>('get_all_audio_files', { paths: this.musicFolders })
+        // 先记录当前选中状态，刷新后重新绑定到新对象，避免封面/元数据显示不更新
+        const currentPlaylistName = this.currentPlaylist?.name ?? null
+        const currentFilePath = this.currentFile?.path ?? null
+
+        // 获取新的播放列表数据
+        const newPlaylists = await invoke<Playlist[]>('get_all_audio_files', { paths: this.musicFolders })
+
+        // 分批更新，避免一次性替换导致响应式风暴
+        const BATCH_SIZE = 10 // 每批处理 10 个播放列表
+        this.playlists = [] // 先清空
+
+        for (let i = 0; i < newPlaylists.length; i += BATCH_SIZE) {
+          const batch = newPlaylists.slice(i, i + BATCH_SIZE)
+          this.playlists.push(...batch)
+
+          // 让出主线程，避免阻塞 UI
+          if (i + BATCH_SIZE < newPlaylists.length) {
+            await new Promise(resolve => setTimeout(resolve, 0))
+          }
+        }
+
         // 重置惰性排序追踪，让下次选择播放列表时重新排序
         this._sortedPlaylists = new Set<string>()
+
+        // 重新绑定当前播放列表（指向刷新后的新对象）
+        if (currentPlaylistName) {
+          this.currentPlaylist = this.playlists.find(p => p.name === currentPlaylistName) ?? null
+        }
+
+        // 重新绑定当前文件（指向刷新后的新对象，确保 coverPath 等字段能更新）
+        if (currentFilePath) {
+          const playlistToSearch = this.currentPlaylist ? [this.currentPlaylist] : this.playlists
+          let refreshedTrack: Track | null = null
+
+          for (const p of playlistToSearch) {
+            const found = p.files.find(f => f.path === currentFilePath)
+            if (found) {
+              refreshedTrack = found
+              // 同步索引缓存
+              if (this.currentPlaylist && this.currentPlaylist.name === p.name) {
+                this._currentFileIndex = p.files.findIndex(f => f.path === currentFilePath)
+              }
+              break
+            }
+          }
+
+          this.currentFile = refreshedTrack
+        }
+
+        // 异步缓存到 plugin-store（不阻塞当前流程）
+        this._savePlaylistsToCache().catch(err =>
+          logger.warn('Failed to save playlists cache:', err)
+        )
 
         return { success: true, message: 'Library refreshed successfully' }
       } catch (error) {
         logger.error('Error refreshing music folders:', error)
         return { success: false, message: String(error) }
+      }
+    },
+
+    /**
+     * 从缓存中加载播放列表（启动时快速恢复）
+     * 返回是否成功加载了缓存
+     */
+    async loadPlaylistsFromCache(): Promise<boolean> {
+      try {
+        const store = await getLibraryStore()
+        const cached = await store.get<{ playlists: CachedPlaylist[], timestamp: number }>('libraryCache')
+        if (!cached || !cached.playlists || cached.playlists.length === 0) {
+          return false
+        }
+
+        // 检查缓存是否过期（超过 7 天视为过期）
+        const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000
+        if (Date.now() - cached.timestamp > CACHE_MAX_AGE) {
+          logger.info('Library cache is too old, will refresh')
+          return false
+        }
+
+        // 将缓存的播放列表恢复到 state（coverPath 字段为 undefined，后续按需加载）
+        this.playlists = cached.playlists as Playlist[]
+        this._loadedFromCache = true
+        this._sortedPlaylists = new Set<string>()
+        logger.info(`Loaded ${cached.playlists.length} playlists from cache`)
+        return true
+      } catch (err) {
+        logger.warn('Failed to load playlists from cache:', err)
+        return false
+      }
+    },
+
+    /**
+     * 将当前播放列表保存到缓存
+     * 去除 cover 数据以减小缓存体积
+     */
+    async _savePlaylistsToCache(): Promise<void> {
+      try {
+        const store = await getLibraryStore()
+        // 去除 coverPath 字段以减小体积
+        const lightPlaylists: CachedPlaylist[] = this.playlists.map(p => ({
+          name: p.name,
+          files: p.files.map(({ coverPath, ...rest }) => rest)
+        }))
+        await store.set('libraryCache', {
+          playlists: lightPlaylists,
+          timestamp: Date.now()
+        })
+        await store.save()
+        logger.debug('Playlists cache saved')
+      } catch (err) {
+        logger.warn('Failed to save playlists cache:', err)
       }
     },
 
@@ -487,6 +622,9 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       this.searchTerm = ''
       this.directoryTree = null
       this._sortedPlaylists = new Set<string>()
+      this._loadedFromCache = false
+      this.isBackgroundRefreshing = false
+      this.loadingProgress = 0
       this.stats = {
         totalDirectories: 0,
         totalAudioFiles: 0,

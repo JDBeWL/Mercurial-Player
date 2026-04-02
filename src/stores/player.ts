@@ -617,11 +617,23 @@ export const usePlayerStore = defineStore('player', {
         title: metadata.title,
         artist: metadata.artist,
         album: metadata.album,
-        duration: metadata.duration
+        duration: metadata.duration,
+        coverPath: track.coverPath // 保留原始的 coverPath
       }
 
       this.lastTrackIndex = this.currentTrackIndex
       this.currentTrack = resolvedTrack
+
+      // 按需加载封面路径（如果还没有）
+      if (!resolvedTrack.coverPath) {
+        invoke<string | null>('get_track_cover_path', { path: resolvedPath })
+          .then(coverPath => {
+            if (this.currentTrack?.path === resolvedPath && coverPath) {
+              this.currentTrack.coverPath = coverPath
+            }
+          })
+          .catch(err => logger.debug('Failed to load cover path:', err))
+      }
       this.duration = metadata.duration || 0
       this.currentTime = 0
       this.lyrics = null
@@ -788,14 +800,16 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
-    async resetPlayerState(): Promise<void> {
+    async resetPlayerState(clearPlaylist = true): Promise<void> {
       logger.info('Resetting player state')
 
       this.isPlaying = false
       this.stopStatusPolling()
 
       this.currentTrack = null
-      this.playlist = []
+      if (clearPlaylist) {
+        this.playlist = []
+      }
       this.currentTime = 0
       this.duration = 0
       this.lyrics = null
@@ -956,6 +970,41 @@ export const usePlayerStore = defineStore('player', {
 
     // --- 播放列表管理 ---
 
+    removeTrack(path: string): void {
+      const index = this.playlist.findIndex(t => t.path === path)
+      if (index === -1) return
+
+      // 先从播放列表中移除
+      this.playlist.splice(index, 1)
+
+      // 如果播放列表为空，重置状态
+      if (this.playlist.length === 0) {
+        this.resetPlayerState(false)
+        return
+      }
+
+      // 如果删除的是当前播放的歌曲
+      if (this.currentTrack?.path === path) {
+        const nextIndex = index >= this.playlist.length ? 0 : index
+        const wasPlaying = this.isPlaying
+
+        // 暂停当前播放，避免音频状态不一致
+        if (wasPlaying) {
+          invoke('pause_track').catch(err => logger.debug('pause before remove:', err))
+        }
+
+        this.playTrack(this.playlist[nextIndex]).then(() => {
+          if (!wasPlaying) {
+            this.pause()
+          }
+        })
+      } else {
+        // 如果删除的不是当前播放的歌曲，但删除了当前歌曲前面的歌曲，
+        // 我们不需要更新 currentTrack，但需要处理 vue 响应式带来的潜在问题
+        // 虽然在目前的设计中 currentTrackIndex 是一个 getter，所以它会自动更新
+      }
+    },
+
     /**
      * 将曲目添加到当前播放列表的下一首位置
      */
@@ -1042,6 +1091,7 @@ export const usePlayerStore = defineStore('player', {
       }
 
       this._cachePlaylistMetadata(playlist)
+      this._loadPlaylistCovers(playlist)
     },
 
     async _cachePlaylistMetadata(playlist: Track[]): Promise<void> {
@@ -1085,6 +1135,39 @@ export const usePlayerStore = defineStore('player', {
       }
 
       logger.debug(`Cached metadata for ${cached} tracks`)
+    },
+
+    async _loadPlaylistCovers(playlist: Track[]): Promise<void> {
+      if (!playlist || playlist.length === 0) return
+
+      // 批量加载封面路径，每次处理 10 首歌曲
+      const BATCH_SIZE = 10
+      for (let i = 0; i < playlist.length; i += BATCH_SIZE) {
+        const batch = playlist.slice(i, i + BATCH_SIZE)
+
+        // 并行加载这一批的封面
+        await Promise.all(
+          batch.map(async (track) => {
+            if (!track.coverPath) {
+              try {
+                const coverPath = await invoke<string | null>('get_track_cover_path', { path: track.path })
+                if (coverPath) {
+                  track.coverPath = coverPath
+                }
+              } catch (err) {
+                logger.debug(`Failed to load cover for ${track.path}:`, err)
+              }
+            }
+          })
+        )
+
+        // 让出主线程，避免阻塞 UI
+        if (i + BATCH_SIZE < playlist.length) {
+          await new Promise(resolve => setTimeout(resolve, 0))
+        }
+      }
+
+      logger.debug(`Loaded covers for playlist`)
     },
 
     async loadLyrics(trackPath: string, requestId?: number): Promise<void> {

@@ -84,7 +84,7 @@ pub fn get_all_audio_files_from_dirs(paths: &[String], config: &AppConfig) -> Re
     Ok(all_playlists)
 }
 
-/// 扫描目录并按文件夹创建播放列表
+/// 扫描目录并按文件夹创建播放列表（轻量模式，不读取封面）
 fn scan_with_folder_playlists(dir: &Path, max_depth: usize) -> Vec<Playlist> {
     let audio_files: Vec<_> = WalkDir::new(dir)
         .max_depth(max_depth)
@@ -106,6 +106,7 @@ fn scan_with_folder_playlists(dir: &Path, max_depth: usize) -> Vec<Playlist> {
             let file_path = entry.path().to_string_lossy().to_string();
             get_track_metadata_internal(&file_path)
                 .map(|metadata| (folder_name, metadata))
+                .map_err(|e| eprintln!("Failed to get metadata for file '{file_path}': {e}"))
                 .ok()
         })
         .collect();
@@ -124,7 +125,7 @@ fn scan_with_folder_playlists(dir: &Path, max_depth: usize) -> Vec<Playlist> {
         .collect()
 }
 
-/// 扫描目录创建单个播放列表
+/// 扫描目录创建单个播放列表（完整模式，包含封面）
 fn scan_single_playlist(dir: &Path) -> Option<Playlist> {
     let playlist_name = dir
         .file_name()
@@ -140,7 +141,9 @@ fn scan_single_playlist(dir: &Path) -> Option<Playlist> {
         .par_iter()
         .filter_map(|entry| {
             let file_path = entry.path().to_string_lossy().to_string();
-            get_track_metadata_internal(&file_path).ok()
+            get_track_metadata_internal(&file_path)
+                .map_err(|e| eprintln!("Failed to get metadata for file '{file_path}': {e}"))
+                .ok()
         })
         .collect();
 

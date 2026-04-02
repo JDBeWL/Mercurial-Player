@@ -57,13 +57,13 @@
                       @mouseleave="handleAlbumArtMouseLeave"
                     >
                       <div class="album-art" :style="{ backgroundImage: currentTrackCover }">
-                        <div v-if="!currentTrack || !currentTrack.cover" class="album-art-placeholder">
+                        <div v-if="!currentTrack || !currentTrack.coverPath" class="album-art-placeholder">
                           <span class="material-symbols-rounded">album</span>
                         </div>
                       </div>
                       <!-- 提取封面按钮 -->
-                      <button 
-                        v-if="currentTrack && currentTrack.cover" 
+                      <button
+                        v-if="currentTrack && currentTrack.coverPath"
                         class="extract-cover-btn"
                         :class="{ 'show': showExtractButton }"
                         @click="extractCover"
@@ -180,6 +180,7 @@ import { useThemeStore } from './stores/theme'
 import { useConfigStore } from './stores/config'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import logger from './utils/logger'
 import { useErrorNotification } from './composables/useErrorNotification'
@@ -252,16 +253,16 @@ const toggleViewMode = () => {
 
 // 处理专辑封面鼠标移动事件，检测是否在右下角区域
 const handleAlbumArtMouseMove = (event: MouseEvent) => {
-  if (!currentTrack.value || !currentTrack.value.cover) {
+  if (!currentTrack.value || !currentTrack.value.coverPath) {
     showExtractButton.value = false
     return
   }
-  
+
   const wrapper = event.currentTarget as HTMLElement
   const rect = wrapper.getBoundingClientRect()
   const x = event.clientX - rect.left
   const y = event.clientY - rect.top
-  
+
   // 定义右下角区域（右下角80x80像素区域）
   const cornerSize = 80
   showExtractButton.value = x >= rect.width - cornerSize && y >= rect.height - cornerSize
@@ -309,8 +310,9 @@ const extractCover = async () => {
 
 
 const currentTrackCover = computed(() => {
-  if (currentTrack.value && currentTrack.value.cover) {
-    return `url('${currentTrack.value.cover}')`
+  if (currentTrack.value && currentTrack.value.coverPath) {
+    // 使用 convertFileSrc 将本地文件路径转换为可渲染的 URL
+    return `url('${convertFileSrc(currentTrack.value.coverPath)}')`
   }
   return 'none' // 如果没有封面，返回none
 })
