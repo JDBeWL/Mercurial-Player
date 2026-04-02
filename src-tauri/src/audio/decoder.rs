@@ -104,8 +104,8 @@ pub struct LockFreeSymphoniaSource {
 
 impl LockFreeSymphoniaSource {
     // 有界队列：避免“生产者解码速度 > 消费者播放速度”时无限堆积内存
-    // 约等于 3 秒 44.1kHz 立体声 PCM（264600 samples，约 1MB）
-    const CHANNEL_CAPACITY_SAMPLES: usize = 44_100 * 2 * 3;
+    // 约等于 5 秒 48kHz 立体声 PCM（480000 samples，约 2MB）
+    const CHANNEL_CAPACITY_SAMPLES: usize = 48_000 * 2 * 5;
 
     pub fn new(mut decoder: SymphoniaDecoder) -> Self {
         let (channels, sample_rate, total_duration) = (decoder.target_channels(), decoder.sample_rate(), decoder.total_duration());
