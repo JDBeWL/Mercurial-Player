@@ -1,3 +1,13 @@
+/* =========================================
+   Fonts
+   ========================================= */
+@font-face {
+  font-family: 'Material Symbols Rounded';
+  font-style: normal;
+  font-weight: 100 700;
+  src: url('./assets/fonts/material-symbols-rounded.woff2') format('woff2');
+}
+
 :root {
   /* Shape */
   --md-sys-shape-corner-none: 0px;
@@ -38,6 +48,10 @@
   --primary-alpha-10: rgba(100, 181, 246, 0.1);
   --primary-alpha-20: rgba(100, 181, 246, 0.2);
   --primary-alpha-30: rgba(100, 181, 246, 0.3);
+  
+  /* 性能优化的颜色变量 - 替代 color-mix() 运行时计算 */
+  --md-sys-color-hover-overlay: rgba(0, 0, 0, 0.08);
+  --md-sys-color-error-hover: rgba(211, 47, 47, 0.12);
   
   /* 动画时长 */
   --transition-fast: 0.15s;

@@ -484,8 +484,8 @@ const openFolderDialog = async () => {
       if (musicLibraryStore.musicFolders.length === 1) {
         logger.info('初次添加音乐库，正在刷新配置和播放列表...')
         
-        // 初次添加音乐库时，主动加载配置
-        await configStore.loadConfig()
+        // 初次添加音乐库时，主动加载配置（不重置当前 UI 视图，避免正在设置时被跳回）
+        await configStore.loadConfig(false)
         
         // 刷新音乐文件夹以生成播放列表
         await musicLibraryStore.refreshMusicFolders()

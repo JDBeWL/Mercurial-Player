@@ -128,7 +128,7 @@ impl DesktopLyricsManager {
             // 调整窗口位置到屏幕左下角
             self.position_window()?;
 
-            println!("Desktop lyrics window initialized");
+            log::info!("Desktop lyrics window initialized");
             Ok(())
         }
     }

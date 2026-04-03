@@ -174,7 +174,18 @@ export const useConfigStore = defineStore('config', {
     // 获取可保存的配置（排除内部状态）
     _getSaveableConfig(): Partial<AppConfig> {
       const { _isInitializing, _isDirty, _lastSavedConfig, _savePromise, ...config } = this.$state
-      return config
+
+      // 创建一个副本以避免修改当前状态，因为 UI 临时状态不应持久化
+      const saveableConfig = { ...config }
+      if (saveableConfig.ui) {
+        saveableConfig.ui = { 
+          ...saveableConfig.ui,
+          showSettings: false,
+          showConfigPanel: false
+        }
+      }
+
+      return saveableConfig
     },
 
     // 标记配置已更改
@@ -191,7 +202,7 @@ export const useConfigStore = defineStore('config', {
       return !deepEqual(currentConfig, this._lastSavedConfig)
     },
 
-    async loadConfig(): Promise<void> {
+    async loadConfig(resetUI = true): Promise<void> {
       this._isInitializing = true
 
       // 优先从 plugin-store 加载配置
@@ -272,6 +283,13 @@ export const useConfigStore = defineStore('config', {
         }
 
         this.$patch(configData)
+
+        // 仅在明确要求时重置 UI 临时面板状态，避免在用户正在使用设置页时意外关闭
+        if (resetUI) {
+          this.ui.showSettings = false
+          this.ui.showConfigPanel = false
+        }
+
         this._lastSavedConfig = JSON.parse(JSON.stringify(this._getSaveableConfig()))
 
         const themeStore = useThemeStore()

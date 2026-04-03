@@ -84,7 +84,7 @@
       <p>{{ $t('config.loadingDevices') }}</p>
     </div>
     
-    <div v-if="error === 'restart_required'" class="restart-notice">
+    <div v-if="restartRequired" class="restart-notice">
       <span class="material-symbols-rounded">restart_alt</span>
       <div class="notice-content">
         <p>{{ $t('config.exclusiveModeRestartRequired') }}</p>
@@ -127,6 +127,7 @@ const audioDevices = ref([]);
 const currentDevice = ref(null);
 const loading = ref(false);
 const error = ref(null);
+const restartRequired = ref(false);
 const useExclusiveMode = ref(false);
 const currentPlatform = ref('unknown');
 
@@ -178,6 +179,17 @@ const selectDevice = async (device) => {
   }
 };
 
+// 检查是否需要重启以应用独占模式设置
+const checkRestartRequired = async () => {
+  try {
+    const activeExclusiveMode = await invoke('get_exclusive_mode');
+    // 如果当前活跃状态与 store 中的意向状态不一致，则需要重启
+    restartRequired.value = activeExclusiveMode !== useExclusiveMode.value;
+  } catch (err) {
+    logger.error('Failed to check active exclusive mode:', err);
+  }
+};
+
 // 切换独占模式
 const toggleExclusiveMode = async () => {
   // 在非 Windows 平台上阻止启用独占模式
@@ -197,7 +209,10 @@ const toggleExclusiveMode = async () => {
       enabled: !useExclusiveMode.value,
       currentTime: playerStore.currentTime,
     });
+    
+    // 如果成功返回（说明切换到了当前已生效的状态），更新状态并清除提示
     useExclusiveMode.value = !useExclusiveMode.value;
+    restartRequired.value = false;
 
     // 重新获取当前设备信息以更新状态
     try {
@@ -214,7 +229,7 @@ const toggleExclusiveMode = async () => {
       // 更新本地状态以反映配置已更改
       useExclusiveMode.value = !useExclusiveMode.value;
       // 显示需要重启的提示
-      error.value = 'restart_required';
+      restartRequired.value = true;
     } else {
       logger.error('Failed to toggle exclusive mode:', err);
       error.value = errorMessage || 'Failed to toggle exclusive mode';
@@ -238,13 +253,20 @@ onMounted(async () => {
     currentPlatform.value = 'unknown';
   }
 
-  // 尝试从后端加载独占模式状态，如果失败则使用配置中的值
-  try {
-    useExclusiveMode.value = await invoke('get_exclusive_mode') ?? configStore.audio?.exclusiveMode ?? false;
-  } catch (err) {
-    logger.warn('Failed to get exclusive mode from backend, using config value:', err);
-    useExclusiveMode.value = configStore.audio?.exclusiveMode ?? false;
+  // 优先从 store 获取独占模式设置
+  if (configStore.audio?.exclusiveMode !== undefined) {
+    useExclusiveMode.value = configStore.audio.exclusiveMode;
+  } else {
+    try {
+      useExclusiveMode.value = await invoke('get_exclusive_mode') ?? false;
+    } catch (err) {
+      logger.warn('Failed to get exclusive mode from backend:', err);
+      useExclusiveMode.value = false;
+    }
   }
+
+  // 检查是否需要重启提示
+  await checkRestartRequired();
 
   // 获取音频设备时不重新加载配置，避免重置主题
   await fetchAudioDevices();

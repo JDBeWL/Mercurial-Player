@@ -510,7 +510,7 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
             let start_pos = position.unwrap_or(0.0);
             if let Some(t) = position { let _ = dec.seek(Duration::from_secs_f32(t)); }
             let _ = dec.prefill_buffer();
-            println!("Symphonia decoder: {path}");
+            log::debug!("Symphonia decoder: {path}");
             Box::new(
                 VisualizationSource::new(LockFreeSymphoniaSource::new(dec), waveform, spectrum, Some(app.clone()), target_fps, enable_vertical_sync)
                     .with_start_position(start_pos)
@@ -519,7 +519,7 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
             )
         }
         Err(e) => {
-            println!("Symphonia decoder failed, fallback to rodio: {e}");
+            log::warn!("Symphonia decoder failed, fallback to rodio: {e}");
             let file = File::open(path).map_err(|e| e.to_string())?;
             Box::new(
                 VisualizationSource::new(rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?, waveform, spectrum, Some(app.clone()), target_fps, enable_vertical_sync)
@@ -529,8 +529,29 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
             )
         }
     };
+
+    // 获取 mixer 输出配置，手动重采样到 mixer 的采样率
+    // rodio 0.22 的 UniformSourceIterator 在 queue keep_alive 模式下，
+    // 当 source.current_span_len() 返回 None 时不会重新 bootstrap SampleRateConverter，
+    // 导致高采样率音频以错误的速率播放（降速）。
+    // 解决方案：在 append 之前手动将 source 重采样到 mixer 的采样率。
+    let resampled: Box<dyn Source<Item = f32> + Send> = {
+        let stream_guard = player.output_stream.lock().unwrap();
+        if let Some(ref mixer_sink) = *stream_guard {
+            let mixer_sr = mixer_sink.config().sample_rate();
+            let mixer_ch = mixer_sink.config().channel_count();
+            let source_sr = source.sample_rate();
+            #[cfg(debug_assertions)]
+            println!("Source sample_rate: {source_sr}, Mixer sample_rate: {mixer_sr}, Mixer channels: {mixer_ch}");
+            Box::new(rodio::source::UniformSourceIterator::new(source, mixer_ch, mixer_sr))
+        } else {
+            log::warn!("No output stream available, skipping manual resample");
+            source
+        }
+    };
+
     let player_lock = player.sink.lock().unwrap();
-    player_lock.append(source);
+    player_lock.append(resampled);
     player_lock.play();
     Ok(())
 }
@@ -560,13 +581,13 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
     if position.is_none() {
         *player.current_path.lock().unwrap() = Some(path.to_string());
     }
-    println!("WASAPI Exclusive: {path} @ {target_sr}Hz, {target_ch} ch");
+    log::info!("WASAPI Exclusive: {path} @ {target_sr}Hz, {target_ch} ch");
 
     let mut decoder = SymphoniaDecoder::new(path).map_err(|e| format!("Failed to create decoder: {e}"))?;
     if let Some(t) = position { let _ = decoder.seek(Duration::from_secs_f32(t)); }
     let _ = decoder.prefill_buffer();
     let (src_sr, src_ch) = (decoder.sample_rate(), decoder.channels());
-    println!("Source: {src_sr}Hz, {src_ch} ch -> Target: {target_sr}Hz, {target_ch} ch");
+    log::debug!("Source: {src_sr}Hz, {src_ch} ch -> Target: {target_sr}Hz, {target_ch} ch");
 
     let source = LockFreeSymphoniaSource::new(decoder);
     let start_pos = position.unwrap_or(0.0);
@@ -970,6 +991,19 @@ pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, t
         .with_eq_settings(eq_settings)
         .fade_in(Duration::from_millis(50)) // seek时使用较短的淡入
     );
+
+    // 手动重采样到 mixer 采样率（同 play_track_shared 的修复）
+    let resampled: Box<dyn Source<Item = f32> + Send> = {
+        let stream_guard = player.output_stream.lock().unwrap();
+        if let Some(ref mixer_sink) = *stream_guard {
+            let mixer_sr = mixer_sink.config().sample_rate();
+            let mixer_ch = mixer_sink.config().channel_count();
+            Box::new(rodio::source::UniformSourceIterator::new(source, mixer_ch, mixer_sr))
+        } else {
+            source
+        }
+    };
+
     {
         let sink = player.sink.lock().unwrap();
         // 直接停止，不做阻塞的淡出
@@ -977,64 +1011,88 @@ pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, t
         sink.set_volume(*player.target_volume.lock().unwrap());
     }
     let sink = player.sink.lock().unwrap();
-    sink.append(source);
+    sink.append(resampled);
     sink.play();
     Ok(())
 }
 
 /// 获取播放状态
 pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
-    // 使用try_lock避免阻塞主线程
-    let volume = state.player.target_volume.try_lock()
+    let volume = state
+        .player
+        .target_volume
+        .try_lock()
         .map(|g| *g)
-        .unwrap_or(1.0);
-    
-    let is_playing = {
-        let exclusive_mode = state.player.exclusive_mode.try_lock()
-            .map(|g| *g)
-            .unwrap_or(false);
-        
-        if exclusive_mode {
-            #[cfg(windows)]
-            {
-                state.player.wasapi_player.try_lock()
-                    .map(|g| g.as_ref().map_or(false, |wasapi| wasapi.get_state() == PlaybackState::Playing))
-                    .unwrap_or(false)
-            }
-            #[cfg(not(windows))]
-            {
-                false
-            }
-        } else {
-            state.player.sink.try_lock()
-                .map(|player| !player.is_paused())
-                .unwrap_or(false)
+        .map_err(|_| "Failed to acquire target volume lock".to_string())?;
+
+    let exclusive_mode = state
+        .player
+        .exclusive_mode
+        .try_lock()
+        .map(|g| *g)
+        .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
+
+    let is_playing = if exclusive_mode {
+        #[cfg(windows)]
+        {
+            let guard = state
+                .player
+                .wasapi_player
+                .try_lock()
+                .map_err(|_| "Failed to acquire WASAPI player lock".to_string())?;
+            guard
+                .as_ref()
+                .map(|wasapi| wasapi.get_state() == PlaybackState::Playing)
+                .ok_or("WASAPI player not initialized".to_string())?
         }
+        #[cfg(not(windows))]
+        {
+            return Err("Exclusive mode is only supported on Windows".to_string());
+        }
+    } else {
+        let player = state
+            .player
+            .sink
+            .try_lock()
+            .map_err(|_| "Failed to acquire player lock".to_string())?;
+        !player.is_paused() && !player.empty()
     };
+
     Ok(PlaybackStatus::new(is_playing, 0.0, volume))
 }
 
 /// 检查音轨是否播放完毕
 pub fn check_track_finished(state: &State<AppState>) -> Result<bool, String> {
-    // 使用try_lock避免阻塞主线程
-    let exclusive_mode = state.player.exclusive_mode.try_lock()
+    let exclusive_mode = state
+        .player
+        .exclusive_mode
+        .try_lock()
         .map(|g| *g)
-        .unwrap_or(false);
-    
+        .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
+
     if exclusive_mode {
         #[cfg(windows)]
         {
-            Ok(state.player.wasapi_player.try_lock()
-                .map(|g| g.as_ref().map_or(true, |wasapi| wasapi.get_state() == PlaybackState::Stopped))
-                .unwrap_or(false))
+            let guard = state
+                .player
+                .wasapi_player
+                .try_lock()
+                .map_err(|_| "Failed to acquire WASAPI player lock".to_string())?;
+            let wasapi = guard
+                .as_ref()
+                .ok_or("WASAPI player not initialized".to_string())?;
+            Ok(wasapi.get_state() == PlaybackState::Stopped)
         }
         #[cfg(not(windows))]
         {
-            Ok(false)
+            Err("Exclusive mode is only supported on Windows".to_string())
         }
     } else {
-        state.player.sink.try_lock()
-            .map(|player| Ok(player.empty() && !player.is_paused()))
-            .unwrap_or(Ok(false))
+        let player = state
+            .player
+            .sink
+            .try_lock()
+            .map_err(|_| "Failed to acquire player lock".to_string())?;
+        Ok(player.empty() && !player.is_paused())
     }
 }

@@ -95,6 +95,7 @@ pub struct LockFreeSymphoniaSource {
     receiver: Receiver<f32>,
     _decoder_thread: thread::JoinHandle<()>,
     stop_flag: Arc<AtomicBool>,
+    producer_finished: Arc<AtomicBool>,
     cached_channels: u16,
     cached_sample_rate: u32,
     cached_total_duration: Option<Duration>,
@@ -108,10 +109,16 @@ impl LockFreeSymphoniaSource {
     const CHANNEL_CAPACITY_SAMPLES: usize = 48_000 * 2 * 5;
 
     pub fn new(mut decoder: SymphoniaDecoder) -> Self {
-        let (channels, sample_rate, total_duration) = (decoder.target_channels(), decoder.sample_rate(), decoder.total_duration());
+        let (channels, sample_rate, total_duration) = (
+            decoder.target_channels(),
+            decoder.sample_rate(),
+            decoder.total_duration(),
+        );
         let (sender, receiver) = bounded(Self::CHANNEL_CAPACITY_SAMPLES);
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = Arc::clone(&stop_flag);
+        let producer_finished = Arc::new(AtomicBool::new(false));
+        let producer_finished_clone = Arc::clone(&producer_finished);
         let _ = decoder.prefill_buffer();
 
         let decoder_thread = thread::spawn(move || {
@@ -135,13 +142,25 @@ impl LockFreeSymphoniaSource {
                 // 有界通道 + 阻塞发送，给消费端施加背压，防止内存无限增长
                 for s in &batch {
                     if sender.send(*s).is_err() {
+                        producer_finished_clone.store(true, Ordering::Release);
                         return;
                     }
                 }
             }
+            producer_finished_clone.store(true, Ordering::Release);
         });
 
-        Self { receiver, _decoder_thread: decoder_thread, stop_flag, cached_channels: channels, cached_sample_rate: sample_rate, cached_total_duration: total_duration, chunk_buffer: Vec::with_capacity(16384), chunk_pos: 0 }
+        Self {
+            receiver,
+            _decoder_thread: decoder_thread,
+            stop_flag,
+            producer_finished,
+            cached_channels: channels,
+            cached_sample_rate: sample_rate,
+            cached_total_duration: total_duration,
+            chunk_buffer: Vec::with_capacity(16384),
+            chunk_pos: 0,
+        }
     }
 }
 
@@ -149,20 +168,39 @@ impl Iterator for LockFreeSymphoniaSource {
     type Item = f32;
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.chunk_pos < self.chunk_buffer.len() { let s = self.chunk_buffer[self.chunk_pos]; self.chunk_pos += 1; return Some(s); }
-        self.chunk_buffer.clear(); self.chunk_pos = 0;
-        let mut count = 0;
-        loop {
-            match self.receiver.try_recv() {
-                Ok(s) => { self.chunk_buffer.push(s); count += 1; if count >= 16384 { break; } }
-                Err(crossbeam_channel::TryRecvError::Empty) => {
-                    if count > 0 { break; }
-                    match self.receiver.recv_timeout(Duration::from_micros(100)) { Ok(s) => { self.chunk_buffer.push(s); count += 1; } Err(_) => break }
+        if self.chunk_pos < self.chunk_buffer.len() {
+            let s = self.chunk_buffer[self.chunk_pos];
+            self.chunk_pos += 1;
+            return Some(s);
+        }
+
+        self.chunk_buffer.clear();
+        self.chunk_pos = 0;
+
+        let first = loop {
+            match self.receiver.recv_timeout(Duration::from_millis(10)) {
+                Ok(s) => break Some(s),
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                    if self.producer_finished.load(Ordering::Acquire) && self.receiver.is_empty() {
+                        break None;
+                    }
                 }
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break None,
+            }
+        }?;
+
+        self.chunk_buffer.push(first);
+        while self.chunk_buffer.len() < 16384 {
+            match self.receiver.try_recv() {
+                Ok(s) => self.chunk_buffer.push(s),
+                Err(crossbeam_channel::TryRecvError::Empty) => break,
                 Err(crossbeam_channel::TryRecvError::Disconnected) => break,
             }
         }
-        if self.chunk_pos < self.chunk_buffer.len() { let s = self.chunk_buffer[self.chunk_pos]; self.chunk_pos += 1; Some(s) } else { None }
+
+        let s = self.chunk_buffer[self.chunk_pos];
+        self.chunk_pos += 1;
+        Some(s)
     }
 }
 

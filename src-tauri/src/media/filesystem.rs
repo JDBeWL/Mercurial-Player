@@ -47,7 +47,7 @@ pub fn get_audio_files_from_dir(path: &str) -> Result<Playlist, String> {
         .filter_map(|entry| {
             let file_path = entry.path().to_string_lossy().to_string();
             get_track_metadata_internal(&file_path)
-                .map_err(|e| eprintln!("Failed to get metadata for file '{file_path}': {e}"))
+                .map_err(|e| log::warn!("Failed to get metadata for file '{file_path}': {e}"))
                 .ok()
         })
         .collect();
@@ -69,7 +69,7 @@ pub fn get_all_audio_files_from_dirs(paths: &[String], config: &AppConfig) -> Re
     for path in paths {
         let dir = Path::new(path);
         if !dir.is_dir() {
-            eprintln!("Provided path is not a directory: {path}");
+            log::warn!("Provided path is not a directory: {path}");
             continue;
         }
 
@@ -106,7 +106,7 @@ fn scan_with_folder_playlists(dir: &Path, max_depth: usize) -> Vec<Playlist> {
             let file_path = entry.path().to_string_lossy().to_string();
             get_track_metadata_internal(&file_path)
                 .map(|metadata| (folder_name, metadata))
-                .map_err(|e| eprintln!("Failed to get metadata for file '{file_path}': {e}"))
+                .map_err(|e| log::warn!("Failed to get metadata for file '{file_path}': {e}"))
                 .ok()
         })
         .collect();
@@ -142,7 +142,7 @@ fn scan_single_playlist(dir: &Path) -> Option<Playlist> {
         .filter_map(|entry| {
             let file_path = entry.path().to_string_lossy().to_string();
             get_track_metadata_internal(&file_path)
-                .map_err(|e| eprintln!("Failed to get metadata for file '{file_path}': {e}"))
+                .map_err(|e| log::warn!("Failed to get metadata for file '{file_path}': {e}"))
                 .ok()
         })
         .collect();

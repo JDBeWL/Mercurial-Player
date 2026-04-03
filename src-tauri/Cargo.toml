@@ -16,7 +16,7 @@ tauri-build = { version = "2.5", features = [] }
 tauri = { version = "2.10", features = ["protocol-asset", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rodio = "0.22"
+rodio = { version = "0.22", default-features = false, features = ["playback"] }
 cpal = "0.17"
 dirs = "6"
 walkdir = "2"
@@ -27,6 +27,8 @@ symphonia = { version = "0.5", features = ["all", "opt-simd"] }
 rubato = "0.15"
 rayon = "1"
 spectrum-analyzer = "1.7"
+log = "0.4"
+tauri-plugin-log = "2"
 tauri-plugin-dialog = "2.6"
 tauri-plugin-fs = "2.4"
 tauri-plugin-http = { version = "2.5", features = ["stream"] }

@@ -51,25 +51,46 @@ export default {
     const canvasRef = ref(null);
     const visualizerContainer = ref(null);
     let animationId = null;
-    let audioData = [];
-    let smoothedAudioData = [];
+    let audioData = new Float32Array(128);
+    let smoothedAudioData = new Float32Array(128);
     let spectrumListener = null;
-    let isAnimating = false; // 追踪动画状态
+    let isAnimating = false;
     
-    // 使用requestAnimationFrame同步屏幕刷新率
-    // 后端以 60fps 发送数据，前端按屏幕刷新率消费
     let pendingSpectrumData = null;
 
-    // 平滑插值函数
-    const smoothData = (currentData, targetData, smoothingFactor = 0.7) => {
-      const result = new Array(128).fill(0);
-      for (let i = 0; i < 128; i++) {
-        const current = currentData[i] || 0;
-        const target = targetData[i] || 0;
-        result[i] = current * smoothingFactor + target * (1 - smoothingFactor);
+    const SPECTRUM_SIZE = 128
+    const noiseBuffer = new Float32Array(SPECTRUM_SIZE)
+    for (let i = 0; i < SPECTRUM_SIZE; i++) {
+      noiseBuffer[i] = Math.random() * 0.01
+    }
+    let noiseIndex = 0
+
+    let cachedGradient = null
+    let cachedPrimaryColor = null
+    let lastCanvasHeight = 0
+
+    const getPrimaryColor = () => {
+      return cachedPrimaryColor || (cachedPrimaryColor = getComputedStyle(document.documentElement).getPropertyValue('--md-sys-color-primary').trim() || '#6750a4')
+    }
+
+    const getOrCreateGradient = (ctx, height) => {
+      if (!cachedGradient || lastCanvasHeight !== height) {
+        const primaryColor = getPrimaryColor()
+        cachedGradient = ctx.createLinearGradient(0, height, 0, 0)
+        cachedGradient.addColorStop(0, primaryColor)
+        cachedGradient.addColorStop(1, `${primaryColor}40`)
+        lastCanvasHeight = height
       }
-      return result;
-    };
+      return cachedGradient
+    }
+
+    const smoothDataInPlace = (currentData, targetData, smoothingFactor = 0.85) => {
+      for (let i = 0; i < SPECTRUM_SIZE; i++) {
+        const current = currentData[i] || 0
+        const target = targetData[i] || 0
+        currentData[i] = current * smoothingFactor + target * (1 - smoothingFactor)
+      }
+    }
 
     // 当前歌词
     const currentLyric = computed(() => {
@@ -88,7 +109,6 @@ export default {
     const visualTime = ref(0);
     let lastFrameTime = 0;
 
-    // 监听时间跳变（seek 操作）
     watch(() => playerStore.currentTime, (newTime, oldTime) => {
         const jump = newTime - oldTime;
         if (Math.abs(jump) > 1.5 || jump < -0.1) {
@@ -96,38 +116,46 @@ export default {
         }
     });
 
-    // 监听歌曲切换，立即重置 visualTime
     watch(() => playerStore.currentTrack?.path, () => {
         visualTime.value = playerStore.currentTime;
+        karaokeStyleCache.clear()
     });
 
-    // 应用歌词偏移
+    const karaokeStyleCache = new Map()
+    const activeColor = 'var(--md-sys-color-primary)'
+    const inactiveColor = 'color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1))'
+
     const getKaraokeStyle = (word) => {
         const offset = playerStore.lyricsOffset || 0;
         const t = visualTime.value - offset;
         
-        // 使用和经典模式一致的颜色
-        const activeColor = 'var(--md-sys-color-primary)';
-        const inactiveColor = 'color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1))';
-        
+        let progress
         if (t >= word.end) {
-            return { 
-                '--progress': '100%',
-                backgroundImage: `linear-gradient(90deg, ${activeColor} 100%, ${inactiveColor} 100%)`
-            };
-        }
-        if (t < word.start) {
-            return { 
-                '--progress': '0%',
-                backgroundImage: `linear-gradient(90deg, ${activeColor} 0%, ${inactiveColor} 0%)`
-            };
+            progress = 100
+        } else if (t < word.start) {
+            progress = 0
+        } else {
+            progress = ((t - word.start) / (word.end - word.start)) * 100
         }
 
-        const progress = ((t - word.start) / (word.end - word.start)) * 100;
-        return { 
-            '--progress': `${progress.toFixed(2)}%`,
-            backgroundImage: `linear-gradient(90deg, ${activeColor} ${progress}%, ${inactiveColor} ${progress}%)`
-        };
+        const roundedProgress = Math.round(progress)
+        const cacheKey = `${word.start}-${word.end}-${roundedProgress}`
+        
+        let cached = karaokeStyleCache.get(cacheKey)
+        if (cached) return cached
+
+        const p = roundedProgress
+        cached = { 
+            '--progress': `${p}%`,
+            backgroundImage: `linear-gradient(90deg, ${activeColor} ${p}%, ${inactiveColor} ${p}%)`
+        }
+        
+        if (karaokeStyleCache.size > 500) {
+            const firstKey = karaokeStyleCache.keys().next().value
+            karaokeStyleCache.delete(firstKey)
+        }
+        karaokeStyleCache.set(cacheKey, cached)
+        return cached
     };
 
     // 绘制静态状态（暂停时的直线）
@@ -143,7 +171,7 @@ export default {
       ctx.beginPath();
       ctx.moveTo(0, height - 2);
       ctx.lineTo(width, height - 2);
-      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--md-sys-color-primary').trim() || '#6750a4';
+      ctx.strokeStyle = getPrimaryColor();
       ctx.stroke();
       
       visualTime.value = playerStore.currentTime;
@@ -153,7 +181,6 @@ export default {
     const drawVisualizer = (timestamp) => {
       if (!canvasRef.value || !visualizerContainer.value) return;
       
-      // 暂停时停止动画循环
       if (!playerStore.isPlaying) {
         drawStaticState();
         isAnimating = false;
@@ -162,7 +189,10 @@ export default {
       }
       
       if (pendingSpectrumData) {
-        audioData = pendingSpectrumData;
+        const data = pendingSpectrumData
+        for (let i = 0; i < SPECTRUM_SIZE && i < data.length; i++) {
+          audioData[i] = data[i]
+        }
         pendingSpectrumData = null;
       }
       
@@ -171,75 +201,51 @@ export default {
       const width = canvas.width;
       const height = canvas.height;
       
-      // 清空画布
       ctx.clearRect(0, 0, width, height);
 
-      // 应用平滑处理
-      if (audioData.length > 0) {
-        smoothedAudioData = smoothData(smoothedAudioData, audioData, 0.85);
-      }
+      smoothDataInPlace(smoothedAudioData, audioData, 0.85);
       
-      // 绘制频谱条
-      const drawData = smoothedAudioData.length > 0 ? smoothedAudioData : audioData;
+      const drawData = smoothedAudioData
 
-      // 如果没有数据，显示直线在底部
       if (drawData.length === 0) {
           ctx.beginPath();
           ctx.moveTo(0, height - 2);
           ctx.lineTo(width, height - 2);
-          ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--md-sys-color-primary').trim() || '#6750a4';
+          ctx.strokeStyle = getPrimaryColor();
           ctx.stroke();
           
           animationId = requestAnimationFrame(drawVisualizer);
           return;
       }
 
-      const bufferLength = drawData.length;
-      const barWidth = (width / bufferLength) * 0.8; // 留出间隙
+      const bufferLength = SPECTRUM_SIZE;
+      const barWidth = (width / bufferLength) * 0.8;
       const gap = (width / bufferLength) * 0.2;
       let x = 0;
 
-      // 创建渐变
-      const gradient = ctx.createLinearGradient(0, height, 0, 0); // 从底部向上
-      const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--md-sys-color-primary').trim() || '#6750a4';
-      
-      gradient.addColorStop(0, primaryColor); // 底部深
-      gradient.addColorStop(1, `${primaryColor}40`); // 顶部淡
-
-      ctx.fillStyle = gradient;
-      
-      // 移除发光效果
+      ctx.fillStyle = getOrCreateGradient(ctx, height);
       ctx.shadowBlur = 0;
 
       for (let i = 0; i < bufferLength; i++) {
-        // 极小的底噪，确保最低限度的动画，同时避免过多抖动
-        const baseNoise = 0.01 + (Math.random() * 0.01);
+        const baseNoise = 0.01 + noiseBuffer[noiseIndex]
+        noiseIndex = (noiseIndex + 1) % SPECTRUM_SIZE
         const value = drawData[i] + baseNoise;
-        // 使用对数缩放以增强微小变化的可视性
         let barHeight = Math.pow(value, 0.9) * height * 0.9; 
         
-        // 限制最大高度，但尽量让它自然过渡
         if (barHeight > height) barHeight = height;
-        
-        // 降低最小高度，让微小的频率变化也能显示
         if (barHeight < 2) barHeight = 2;
 
-        // 单侧绘制 (从底部向上)
-        // 使用 roundRect 绘制圆角柱子 (如果浏览器支持)
-        // 顶部圆角
         if (ctx.roundRect) {
             ctx.beginPath();
             ctx.roundRect(x, height - barHeight, barWidth, barHeight, [5, 5, 0, 0]);
             ctx.fill();
         } else {
-            // 回退方案
             ctx.fillRect(x, height - barHeight, barWidth, barHeight);
         }
 
         x += barWidth + gap;
       }
 
-      // 清除阴影
       ctx.shadowBlur = 0;
 
       

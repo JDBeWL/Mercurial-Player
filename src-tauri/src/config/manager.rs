@@ -247,7 +247,7 @@ impl ConfigManager {
     pub fn new() -> Self {
         let config_dir = Self::get_app_config_dir().unwrap_or_else(|_| "./config".to_string());
         if let Err(e) = std::fs::create_dir_all(&config_dir) {
-            eprintln!("Failed to create config directory: {e}");
+            log::error!("Failed to create config directory: {e}");
         }
         Self { config_dir }
     }
@@ -274,12 +274,12 @@ impl ConfigManager {
         let user_config_path = self.get_user_config_path();
 
         if !Path::new(&default_config_path).exists() {
-            println!("创建默认配置文件: {default_config_path}");
+            log::info!("创建默认配置文件: {default_config_path}");
             self.save_config_to_file(&AppConfig::default(), &default_config_path)?;
         }
 
         if !Path::new(&user_config_path).exists() {
-            println!("创建用户配置文件: {user_config_path}");
+            log::info!("创建用户配置文件: {user_config_path}");
             self.save_config_to_file(&AppConfig::default(), &user_config_path)?;
         }
 
@@ -292,14 +292,14 @@ impl ConfigManager {
         let user_config_path = self.get_user_config_path();
         if Path::new(&user_config_path).exists() {
             if let Ok(config) = self.load_config_from_file(&user_config_path) {
-                println!("Loaded user configuration from: {user_config_path}");
+                log::info!("Loaded user configuration from: {user_config_path}");
                 return Ok(config);
             }
         }
 
         let default_config_path = self.get_default_config_path();
         self.load_config_from_file(&default_config_path).or_else(|_| {
-            println!("Creating default configuration");
+            log::info!("Creating default configuration");
             let default_config = AppConfig::default();
             let _ = self.save_default_config(&default_config);
             Ok(default_config)
@@ -337,7 +337,7 @@ impl ConfigManager {
         let user_config_path = self.get_user_config_path();
         if Path::new(&user_config_path).exists() {
             if let Err(e) = std::fs::remove_file(&user_config_path) {
-                eprintln!("Failed to remove user config file: {e}");
+                log::error!("Failed to remove user config file: {e}");
             }
         }
         Ok(default_config)

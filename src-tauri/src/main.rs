@@ -38,7 +38,7 @@ use mercurial_player::audio::DeviceMonitor;
 #[cfg(windows)]
 use mercurial_player::taskbar;
 
-use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::traits::HostTrait;
 use rodio::stream::{MixerDeviceSink, DeviceSinkBuilder};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
@@ -60,10 +60,7 @@ fn main() {
     let device = host
         .default_output_device()
         .expect("No default output device available");
-    let device_name = device
-        .description()
-        .ok()
-        .map(|desc| desc.name().to_string())
+    let device_name = audio::device::get_device_friendly_name(&device)
         .unwrap_or_else(|| "Unknown Device".to_string());
 
     // 创建配置管理器
@@ -71,7 +68,7 @@ fn main() {
 
     // 初始化配置文件
     if let Err(e) = config_manager.initialize_config_files() {
-        eprintln!("Failed to initialize config files: {e}");
+        log::error!("Failed to initialize config files: {e}");
     }
 
     // 从配置加载独占模式设置
@@ -80,7 +77,7 @@ fn main() {
         .map(|c| c.audio.exclusive_mode)
         .unwrap_or(false);
 
-    println!("Loaded exclusive mode from config: {exclusive_mode_enabled}");
+    log::info!("Loaded exclusive mode from config: {exclusive_mode_enabled}");
 
     // 根据独占模式设置创建播放器
     let (sink, output_stream, wasapi_player) = {
@@ -147,7 +144,7 @@ fn main() {
                 let state: tauri::State<AppState> = app.state();
                 let mut monitor = state.player.device_monitor.lock().unwrap();
                 monitor.start(app.handle().clone());
-                println!("Device monitor started");
+                log::info!("Device monitor started");
             }
 
             // 初始化Windows任务栏缩略图工具栏
@@ -178,9 +175,9 @@ fn main() {
 
                         // 初始化任务栏
                         if let Err(e) = taskbar::init_taskbar(hwnd_value) {
-                            eprintln!("Failed to initialize taskbar: {e}");
+                            log::error!("Failed to initialize taskbar: {e}");
                         } else {
-                            println!("Taskbar initialized successfully");
+                            log::info!("Taskbar initialized successfully");
 
                             // 设置窗口消息钩子来处理按钮点击
                             setup_taskbar_hook(hwnd_value, app_handle);
@@ -192,6 +189,7 @@ fn main() {
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
@@ -289,7 +287,7 @@ fn main() {
 /// 创建独占模式播放器
 #[cfg(windows)]
 fn create_exclusive_mode_player(device_name: &str) -> (rodio::Player, MixerDeviceSink, Option<PlatformPlayer>) {
-    println!("Starting in WASAPI exclusive mode");
+    log::info!("Starting in WASAPI exclusive mode");
 
     // 创建一个空的rodio sink
     let mixer_sink = DeviceSinkBuilder::from_default_device()
@@ -302,14 +300,14 @@ fn create_exclusive_mode_player(device_name: &str) -> (rodio::Player, MixerDevic
     let wasapi_playback = WasapiExclusivePlayback::new();
     match wasapi_playback.initialize(Some(device_name)) {
         Ok((sample_rate, channels, actual_name)) => {
-            println!(
+            log::info!(
                 "WASAPI Exclusive initialized: {actual_name} @ {sample_rate}Hz, {channels} channels"
             );
             (player, mixer_sink, Some(wasapi_playback))
         }
         Err(e) => {
-            eprintln!("Failed to initialize WASAPI exclusive mode: {e}");
-            eprintln!("Falling back to shared mode");
+            log::error!("Failed to initialize WASAPI exclusive mode: {e}");
+            log::warn!("Falling back to shared mode");
             (player, mixer_sink, None)
         }
     }
@@ -318,7 +316,7 @@ fn create_exclusive_mode_player(device_name: &str) -> (rodio::Player, MixerDevic
 /// 创建独占模式播放器（非Windows平台回退到共享模式）
 #[cfg(not(windows))]
 fn create_exclusive_mode_player(_device_name: &str) -> (rodio::Player, MixerDeviceSink, Option<PlatformPlayer>) {
-    println!("Exclusive mode is only supported on Windows, falling back to shared mode");
+    log::warn!("Exclusive mode is only supported on Windows, falling back to shared mode");
     let mixer_sink = DeviceSinkBuilder::from_default_device()
         .expect("Failed to create default device sink builder")
         .open_stream()
@@ -363,17 +361,17 @@ fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
                     match cmd_id {
                         0 => {
                             // BTN_PREVIOUS
-                            println!("Taskbar: Previous button clicked");
+                            log::debug!("Taskbar: Previous button clicked");
                             let _ = app.emit("taskbar-previous", ());
                         }
                         1 => {
                             // BTN_PLAY_PAUSE
-                            println!("Taskbar: Play/Pause button clicked");
+                            log::debug!("Taskbar: Play/Pause button clicked");
                             let _ = app.emit("taskbar-play-pause", ());
                         }
                         2 => {
                             // BTN_NEXT
-                            println!("Taskbar: Next button clicked");
+                            log::debug!("Taskbar: Next button clicked");
                             let _ = app.emit("taskbar-next", ());
                         }
                         _ => {}
@@ -403,13 +401,13 @@ fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
             (custom_wndproc as *const () as usize).cast_signed(),
         );
         let _ = ORIGINAL_WNDPROC.set(original);
-        println!("Taskbar hook installed");
+        log::info!("Taskbar hook installed");
     }
 }
 
 /// 创建共享模式播放器
 fn create_shared_mode_player(device: &cpal::Device) -> (rodio::Player, MixerDeviceSink, Option<PlatformPlayer>) {
-    println!("Starting in shared mode");
+    log::info!("Starting in shared mode");
 
     // 从选定的设备创建音频输出流
     let mixer_sink = DeviceSinkBuilder::from_device(device.clone())

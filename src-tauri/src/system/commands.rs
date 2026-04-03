@@ -58,7 +58,7 @@ pub fn get_system_fonts() -> Result<Vec<String>, String> {
         }
         Err(e) => {
             // 如果获取系统字体失败，返回一些常见字体作为后备
-            eprintln!("Failed to get system fonts: {e}");
+            log::warn!("Failed to get system fonts: {e}");
             Ok(vec![
                 "system-ui".to_string(),
                 "sans-serif".to_string(),
@@ -145,17 +145,17 @@ pub fn get_screen_refresh_rate() -> Result<u32, String> {
                 let refresh_rate = display.frequency;
                 if refresh_rate > 0.0 {
                     let rate = refresh_rate.round() as u32;
-                    println!("Detected screen refresh rate: {} Hz", rate);
+                    log::info!("Detected screen refresh rate: {} Hz", rate);
                     return Ok(rate);
                 }
             }
 
             // 如果没有刷新率信息，返回默认值
-            println!("No refresh rate information available, using default 60 Hz");
+            log::info!("No refresh rate information available, using default 60 Hz");
             Ok(60)
         }
         Err(e) => {
-            eprintln!("Failed to get display info: {e}");
+            log::error!("Failed to get display info: {e}");
             // 返回默认值而不是错误
             Ok(60)
         }

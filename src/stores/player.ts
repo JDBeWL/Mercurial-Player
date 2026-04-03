@@ -395,38 +395,36 @@ export const usePlayerStore = defineStore('player', {
      * MediaPlayPause / MediaTrackNext / MediaTrackPrevious
      */
     async _setupGlobalShortcuts(): Promise<void> {
-      try {
-        // 注册 MediaPlayPause
-        if (!(await isRegistered('MediaPlayPause'))) {
-          await register('MediaPlayPause', () => {
-            if (this._isDestroyed) return
-            logger.debug('Global shortcut: MediaPlayPause')
-            this.togglePlay()
-          })
-        }
+      const shortcuts = [
+        { key: 'MediaPlayPause', handler: () => this.togglePlay() },
+        { key: 'MediaTrackNext', handler: () => this.nextTrack() },
+        { key: 'MediaTrackPrevious', handler: () => this.previousTrack() }
+      ];
 
-        // 注册 MediaTrackNext
-        if (!(await isRegistered('MediaTrackNext'))) {
-          await register('MediaTrackNext', () => {
-            if (this._isDestroyed) return
-            logger.debug('Global shortcut: MediaTrackNext')
-            this.nextTrack()
-          })
-        }
+      for (const { key, handler } of shortcuts) {
+        try {
+          if (await isRegistered(key)) {
+            logger.debug(`Shortcut ${key} already registered, skipping`);
+            continue;
+          }
 
-        // 注册 MediaTrackPrevious
-        if (!(await isRegistered('MediaTrackPrevious'))) {
-          await register('MediaTrackPrevious', () => {
-            if (this._isDestroyed) return
-            logger.debug('Global shortcut: MediaTrackPrevious')
-            this.previousTrack()
-          })
+          await register(key, () => {
+            if (this._isDestroyed) return;
+            logger.debug(`Global shortcut: ${key}`);
+            handler();
+          });
+        } catch (err: any) {
+          // 如果错误信息包含 "already registered"，说明已经注册过了，可以忽略
+          const errorMsg = String(err);
+          if (errorMsg.includes('already registered')) {
+            logger.debug(`Shortcut ${key} was already registered (caught exception)`);
+          } else {
+            logger.error(`Failed to register shortcut ${key}:`, err);
+          }
         }
-
-        logger.info('Global media shortcuts registered')
-      } catch (err) {
-        logger.error('Failed to setup global shortcuts:', err)
       }
+      
+      logger.info('Global media shortcuts setup complete');
     },
 
     async _switchAudioDevice(deviceName: string, successAction: 'switch-fallback-success' | 'switch-default-success', successMessage: string, errorAction: 'switch-fallback' | 'switch-default', errorSeverity: ErrorSeverity): Promise<void> {

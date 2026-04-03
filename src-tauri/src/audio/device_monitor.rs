@@ -2,12 +2,14 @@
 //!
 //! 监听音频设备的连接和断开事件，并在设备断开时自动切换到其他可用设备。
 
-use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::traits::HostTrait;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+
+use super::device::get_device_friendly_name;
 
 /// 设备变更事件
 #[derive(Debug, serde::Serialize, Clone)]
@@ -63,7 +65,7 @@ impl DeviceMonitor {
     pub fn update_current_device(&self, device_name: String) {
         match self.current_device.lock() {
             Ok(mut current_device) => *current_device = device_name,
-            Err(err) => eprintln!("Failed to update current device: {err}"),
+            Err(err) => log::error!("Failed to update current device: {err}"),
         }
     }
 
@@ -72,7 +74,7 @@ impl DeviceMonitor {
         match self.current_device.lock() {
             Ok(current_device) => current_device.clone(),
             Err(err) => {
-                eprintln!("Failed to get current device: {err}");
+                log::error!("Failed to get current device: {err}");
                 String::new()
             }
         }
@@ -101,7 +103,7 @@ fn monitor_device_changes(
         let current_device_name = match current_device.lock() {
             Ok(device) => device.clone(),
             Err(err) => {
-                eprintln!("Failed to read current device in monitor loop: {err}");
+                log::error!("Failed to read current device in monitor loop: {err}");
                 previous_devices = current_devices;
                 continue;
             }
@@ -109,7 +111,7 @@ fn monitor_device_changes(
 
         // 检查设备是否被移除
         if !current_devices.contains(&current_device_name) && previous_devices.contains(&current_device_name) {
-            println!("Device removed: {current_device_name}");
+            log::info!("Device removed: {current_device_name}");
             
             // 发送设备移除事件
             let _ = app.emit("device-removed", DeviceChangeEvent {
@@ -119,7 +121,7 @@ fn monitor_device_changes(
 
             // 尝试切换到其他可用设备
             if let Some(fallback_device) = find_fallback_device(&host, &current_device_name) {
-                println!("Switching to fallback device: {fallback_device}");
+                log::warn!("Switching to fallback device: {fallback_device}");
                 
                 // 发送设备切换请求
                 let _ = app.emit("device-switch-required", DeviceChangeEvent {
@@ -127,7 +129,7 @@ fn monitor_device_changes(
                     device_name: Some(fallback_device.clone()),
                 });
             } else {
-                println!("No fallback device available");
+                log::error!("No fallback device available");
                 
                 // 发送无可用设备事件
                 let _ = app.emit("no-device-available", DeviceChangeEvent {
@@ -140,7 +142,7 @@ fn monitor_device_changes(
         // 检查新设备添加
         for device_name in &current_devices {
             if !previous_devices.contains(device_name) {
-                println!("Device added: {device_name}");
+                log::info!("Device added: {device_name}");
                 
                 let _ = app.emit("device-added", DeviceChangeEvent {
                     event_type: "device-added".to_string(),
@@ -149,9 +151,9 @@ fn monitor_device_changes(
 
                 // 检查新添加的设备是否为系统默认设备
                 if let Some(default_device) = host.default_output_device() {
-                    if let Ok(desc) = default_device.description() {
-                        if desc.name() == device_name.as_str() {
-                            println!("New device is system default, switching to: {device_name}");
+                    if let Some(default_name) = get_device_friendly_name(&default_device) {
+                        if default_name == *device_name {
+                            log::info!("New device is system default, switching to: {device_name}");
 
                             // 发送自动切换到默认设备的事件
                             let _ = app.emit("device-default-changed", DeviceChangeEvent {
@@ -174,7 +176,7 @@ fn get_device_names(host: &cpal::Host) -> Vec<String> {
         .ok()
         .map(|devices| {
             devices
-                .filter_map(|device| device.description().ok().map(|desc| desc.name().to_string()))
+                .filter_map(|device| get_device_friendly_name(&device))
                 .collect()
         })
         .unwrap_or_default()
@@ -184,10 +186,9 @@ fn get_device_names(host: &cpal::Host) -> Vec<String> {
 fn find_fallback_device(host: &cpal::Host, excluded_device: &str) -> Option<String> {
     // 首先尝试默认设备
     if let Some(default_device) = host.default_output_device() {
-        if let Ok(desc) = default_device.description() {
-            let name = desc.name();
+        if let Some(name) = get_device_friendly_name(&default_device) {
             if name != excluded_device {
-                return Some(name.to_string());
+                return Some(name);
             }
         }
     }
@@ -195,6 +196,6 @@ fn find_fallback_device(host: &cpal::Host, excluded_device: &str) -> Option<Stri
     // 如果默认设备不可用，选择第一个可用设备
     host.output_devices()
         .ok()?
-        .filter_map(|device| device.description().ok().map(|desc| desc.name().to_string()))
+        .filter_map(|device| get_device_friendly_name(&device))
         .find(|name| name != excluded_device)
 }

@@ -132,7 +132,7 @@ impl TaskbarManager {
         self.taskbar_list = Some(taskbar_list);
         self.initialized.store(true, Ordering::SeqCst);
 
-        println!("Taskbar thumbnail toolbar initialized");
+        log::info!("Taskbar thumbnail toolbar initialized");
         Ok(())
     }
 

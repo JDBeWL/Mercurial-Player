@@ -491,6 +491,8 @@ watch(currentTrackIndex, (newIndex, oldIndex) => {
 // 应用关闭前强制保存配置
 const handleBeforeUnload = async () => {
   await configStore.flushPendingSave()
+  // 清理播放器资源（包括全局快捷键）
+  await playerStore.cleanup()
   // 清理插件管理器（保存所有插件存储）
   pluginManager.cleanup()
 }
@@ -499,9 +501,9 @@ onMounted(async () => {
   // 注册 beforeunload 事件，确保关闭前保存配置
   window.addEventListener('beforeunload', handleBeforeUnload)
   
-  // 加载配置文件
+  // 加载配置文件（启动时允许重置 UI 状态）
   try {
-    await configStore.loadConfig()
+    await configStore.loadConfig(true)
   } catch (error) {
     logger.warn('Failed to load configuration:', error)
   }
@@ -599,15 +601,17 @@ onUnmounted(async () => {
 
 .slide-right-enter-active,
 .slide-right-leave-active {
-  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.3s ease;
 }
 
 .slide-right-enter-from {
   transform: translateX(100%);
+  opacity: 0;
 }
 
 .slide-right-leave-to {
   transform: translateX(100%);
+  opacity: 0;
 }
 
 /* 专辑封面过渡动画 */

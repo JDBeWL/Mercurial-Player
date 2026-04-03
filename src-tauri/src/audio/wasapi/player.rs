@@ -26,7 +26,7 @@ impl WasapiExclusivePlayer {
             ("Default Device".to_string(), sr, ch)
         };
 
-        println!("WASAPI Exclusive Mode available: {actual_device_name} @ {sample_rate}Hz, {channels} channels");
+        log::info!("WASAPI Exclusive Mode available: {actual_device_name} @ {sample_rate}Hz, {channels} channels");
 
         Ok(Self {
             device_name: actual_device_name,

@@ -259,7 +259,7 @@ fn audio_thread_main(
     let mut is_playing = false;
     let mut current_volume = 1.0f32;
 
-    println!("WASAPI audio thread started");
+    log::info!("WASAPI audio thread started");
 
     while is_running.load(Ordering::SeqCst) {
         match command_rx.try_recv() {
@@ -340,7 +340,7 @@ fn audio_thread_main(
         let _ = client.stop_stream();
     }
 
-    println!("WASAPI audio thread stopped");
+    log::info!("WASAPI audio thread stopped");
 }
 
 fn handle_initialize(
@@ -360,7 +360,7 @@ fn handle_initialize(
             *current_bits = bits;
             *current_sample_type_is_float = is_float;
 
-            println!("Audio format: {sr}Hz, {ch} channels, {bits} bits, float: {is_float}");
+            log::info!("Audio format: {sr}Hz, {ch} channels, {bits} bits, float: {is_float}");
 
             match client.get_audiorenderclient() {
                 Ok(rc) => match client.set_get_eventhandle() {
@@ -424,7 +424,7 @@ fn process_audio_output(
 
                     // 记录欠载情况
                     if underrun_count > samples_needed / 2 {
-                        println!("WASAPI buffer underrun: {}/{} samples", underrun_count, samples_needed);
+                        log::warn!("WASAPI buffer underrun: {}/{} samples", underrun_count, samples_needed);
                     }
 
                     drop(buf);
@@ -463,7 +463,7 @@ fn initialize_exclusive_device(device_name: Option<&str>) -> Result<(wasapi::Aud
     let default_sample_rate = default_format.get_samplespersec() as usize;
     let default_channels = default_format.get_nchannels() as usize;
 
-    println!("Device default format: {default_sample_rate}Hz, {default_channels} channels");
+    log::info!("Device default format: {default_sample_rate}Hz, {default_channels} channels");
 
     let sample_rates_to_try: [usize; 12] = [default_sample_rate, 384000, 352800, 192000, 176400, 96000, 88200, 48000, 44100, 32000, 22050, 16000];
     let bit_depths: [(usize, bool); 4] = [(32, true), (32, false), (24, false), (16, false)];
@@ -496,13 +496,13 @@ fn initialize_exclusive_device(device_name: Option<&str>) -> Result<(wasapi::Aud
     for attempt in 1..=3 {
         match audio_client.initialize_client(&wave_format, &Direction::Render, &stream_mode) {
             Ok(()) => {
-                println!("WASAPI Exclusive Mode initialized: {device_name} @ {sample_rate}Hz, {channels} channels, {bits} bits, float: {is_float}");
+                log::info!("WASAPI Exclusive Mode initialized: {device_name} @ {sample_rate}Hz, {channels} channels, {bits} bits, float: {is_float}");
                 return Ok((audio_client, (sample_rate, channels, device_name, bits, is_float)));
             }
             Err(e) => {
                 last_error = Some(e);
                 if attempt < 3 {
-                    println!("Exclusive mode initialization attempt {attempt} failed, retrying...");
+                    log::warn!("Exclusive mode initialization attempt {attempt} failed, retrying...");
                     thread::sleep(Duration::from_millis(100 * attempt as u64));
                     
                     // 重新获取audio client

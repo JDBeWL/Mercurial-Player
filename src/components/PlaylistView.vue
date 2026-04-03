@@ -288,8 +288,12 @@ onUnmounted(() => {
   stopWatchPlaylist()
   stopWatchScrollOnMount?.()
 
-  // 清理缓存
+  // 清理缓存和状态
+  processedMap.clear()
   processedMap = new Map()
+  processedPlaylist.value = []
+  titleCache.clear()
+  artistCache.clear()
 })
 
 // 通过路径删除音轨
@@ -312,6 +316,8 @@ const removeTrackByPath = (path) => {
   flex-direction: column;
   overflow: hidden;
   transform: translateX(0);
+  /* 优化：使用 will-change 提示浏览器优化，而非强制 transition */
+  will-change: transform;
   transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
@@ -396,16 +402,17 @@ const removeTrackByPath = (path) => {
   cursor: pointer;
   overflow: hidden;
   border-radius: 8px;
-  /* 使用 contain 优化渲染性能 */
-  contain: layout style paint;
+  /* 使用 contain 优化渲染性能 - 仅 layout 和 style，避免 paint 导致滚动重计算 */
+  contain: layout style;
+  will-change: background-color;
 }
 
 .list-item:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+  background-color: var(--md-sys-color-hover-overlay);
 }
 
 .list-item.selected {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+  background-color: var(--md-sys-color-hover-overlay);
   border-radius: 8px;
   z-index: 1;
 }
@@ -494,11 +501,11 @@ const removeTrackByPath = (path) => {
 
 .play-button:hover,
 .pause-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
+  background-color: var(--md-sys-color-hover-overlay);
 }
 
 .remove-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-error) 12%, transparent);
+  background-color: var(--md-sys-color-error-hover);
 }
 
 .play-button .material-symbols-rounded,
