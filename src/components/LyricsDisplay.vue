@@ -400,15 +400,18 @@ export default {
         });
 
         onUnmounted(() => {
-            stopAnimationLoop();
-            // 清理 scrollTimeout
-            if (scrollTimeout) {
-                clearTimeout(scrollTimeout);
-                scrollTimeout = null;
-            }
-            // 清理 resize 事件监听器
-            window.removeEventListener("resize", handleResize);
-        });
+        stopAnimationLoop();
+        // 清理 scrollTimeout
+        if (scrollTimeout) {
+            clearTimeout(scrollTimeout);
+            scrollTimeout = null;
+        }
+        // 清理 resize 事件监听器
+        window.removeEventListener("resize", handleResize);
+        // 清理任何其他可能的定时器或事件监听器
+        isUserScroll.value = false;
+        isAutoScrolling.value = false;
+    });
 
         return {
             lyrics, loading, containerRef, configStore, lyricsSource, hasCurrentTrack, playerStore,

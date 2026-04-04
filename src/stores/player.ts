@@ -84,6 +84,7 @@ interface TrackMetadata {
   artist: string
   album: string
   duration: number
+  coverPath?: string
   bitrate: number | null
   sampleRate: number | null
   channels: number | null
@@ -131,6 +132,8 @@ interface PlayerState {
   _lastDeviceSwitchTarget: string | null
   /** 用于取消正在进行的 _cachePlaylistMetadata 任务 */
   _cacheAbortController: AbortController | null
+  /** 用于清理 nextTrack 定时器 */
+  _nextTrackTimeoutId: ReturnType<typeof setTimeout> | null
 }
 
 
@@ -199,6 +202,7 @@ export const usePlayerStore = defineStore('player', {
     _isSwitchingDevice: false,
     _lastDeviceSwitchTarget: null,
     _cacheAbortController: null,
+    _nextTrackTimeoutId: null,
   }),
 
   getters: {
@@ -624,13 +628,23 @@ export const usePlayerStore = defineStore('player', {
 
       // 按需加载封面路径（如果还没有）
       if (!resolvedTrack.coverPath) {
+        logger.debug('Loading cover for track:', resolvedPath)
         invoke<string | null>('get_track_cover_path', { path: resolvedPath })
           .then(coverPath => {
+            logger.debug('Cover path result:', coverPath)
             if (this.currentTrack?.path === resolvedPath && coverPath) {
               this.currentTrack.coverPath = coverPath
+              // 同时更新元数据缓存中的封面路径
+              const cachedMetadata = metadataCache.get(resolvedPath)
+              if (cachedMetadata) {
+                cachedMetadata.coverPath = coverPath
+                metadataCache.set(resolvedPath, cachedMetadata)
+              }
             }
           })
-          .catch(err => logger.debug('Failed to load cover path:', err))
+          .catch(err => logger.error('Failed to load cover path:', err))
+      } else {
+        logger.debug('Track already has coverPath:', resolvedTrack.coverPath)
       }
       this.duration = metadata.duration || 0
       this.currentTime = 0
@@ -649,12 +663,20 @@ export const usePlayerStore = defineStore('player', {
       try {
         logger.info('Playing track:', resolvedPath)
 
+        let timeoutId: ReturnType<typeof setTimeout> | null = null
         const playPromise = invoke('play_track', { path: resolvedPath })
         const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('播放超时')), 5000)
+          timeoutId = setTimeout(() => reject(new Error('播放超时')), 5000)
         })
 
-        await Promise.race([playPromise, timeoutPromise])
+        try {
+          await Promise.race([playPromise, timeoutPromise])
+        } finally {
+          if (timeoutId) {
+            clearTimeout(timeoutId)
+            timeoutId = null
+          }
+        }
 
         if (this._activePlayRequestId !== requestId || this._isDestroyed) {
           return
@@ -688,7 +710,13 @@ export const usePlayerStore = defineStore('player', {
 
         const currentIdx = this.playlist.findIndex(t => t.path === track.path || t.path === resolvedPath)
         if (this.playlist.length > 1 && currentIdx >= 0 && currentIdx < this.playlist.length - 1) {
-          setTimeout(() => this.nextTrack(), 100)
+          const nextTrackTimeoutId = setTimeout(() => {
+            if (!this._isDestroyed && this._activePlayRequestId === requestId) {
+              this.nextTrack()
+            }
+          }, 100)
+          // 保存定时器ID以便在cleanup时清理
+          this._nextTrackTimeoutId = nextTrackTimeoutId
         }
       } finally {
         if (this._activePlayRequestId === requestId) {
@@ -1138,6 +1166,8 @@ export const usePlayerStore = defineStore('player', {
     async _loadPlaylistCovers(playlist: Track[]): Promise<void> {
       if (!playlist || playlist.length === 0) return
 
+      const metadataCache = this._getMetadataCache()
+
       // 批量加载封面路径，每次处理 10 首歌曲
       const BATCH_SIZE = 10
       for (let i = 0; i < playlist.length; i += BATCH_SIZE) {
@@ -1151,6 +1181,12 @@ export const usePlayerStore = defineStore('player', {
                 const coverPath = await invoke<string | null>('get_track_cover_path', { path: track.path })
                 if (coverPath) {
                   track.coverPath = coverPath
+                  // 同时更新元数据缓存中的封面路径
+                  const cachedMetadata = metadataCache.get(track.path)
+                  if (cachedMetadata) {
+                    cachedMetadata.coverPath = coverPath
+                    metadataCache.set(track.path, cachedMetadata)
+                  }
                 }
               } catch (err) {
                 logger.debug(`Failed to load cover for ${track.path}:`, err)
@@ -1284,6 +1320,11 @@ export const usePlayerStore = defineStore('player', {
       if (this._cacheAbortController) {
         this._cacheAbortController.abort()
         this._cacheAbortController = null
+      }
+
+      if (this._nextTrackTimeoutId) {
+        clearTimeout(this._nextTrackTimeoutId)
+        this._nextTrackTimeoutId = null
       }
 
       logger.info('Player store cleaned up')

@@ -61,9 +61,14 @@ export function useLyrics() {
   const lyricsSource: Ref<'local' | 'online'> = sharedLyricsSource
   const onlineLyricsError = ref<string | null>(null)
 
+  // 添加 AbortController 来取消网络请求
+  let abortController: AbortController | null = null
+
   const fetchOnlineLyrics = async (track: Track | null): Promise<string | null> => {
     if (!track) return null
     try {
+      // 创建新的 AbortController
+      abortController = new AbortController()
       const title = track.title || track.name || FileUtils.getFileNameWithoutExtension(track.path)
       const artist = track.artist || ''
       const duration = track.duration ? track.duration * 1000 : 0
@@ -82,6 +87,9 @@ export function useLyrics() {
       logger.error('Failed to fetch online lyrics:', error)
       onlineLyricsError.value = (error as Error).message
       return null
+    } finally {
+      // 重置 AbortController
+      abortController = null
     }
   }
 
@@ -260,6 +268,11 @@ export function useLyrics() {
   const cleanup = (): void => {
     stopWatchTrack()
     stopWatchEffect()
+    // 取消正在进行的网络请求
+    if (abortController) {
+      abortController.abort()
+      abortController = null
+    }
   }
 
   return {

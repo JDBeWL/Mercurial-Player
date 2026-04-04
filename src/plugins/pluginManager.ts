@@ -732,6 +732,14 @@ class PluginManager {
         return safeSave(storage)
       }
       
+      // 添加清理方法（用于插件卸载时）
+      ;(persistentStorage as Record<string, unknown>)._cleanup = () => {
+        if (saveTimeout) {
+          clearTimeout(saveTimeout)
+          saveTimeout = null
+        }
+      }
+      
       this.storage.set(pluginId, persistentStorage)
     }
     return this.storage.get(pluginId)!

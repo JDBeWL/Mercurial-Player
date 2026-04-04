@@ -14,7 +14,7 @@
 
     color: var(--md-sys-color-on-surface-variant);
     opacity: 0.6;
-    transform: scale(0.94);
+    transform: scale(0.9);
 
     transform-origin: var(--align-origin, left center);
 
@@ -51,7 +51,7 @@
     opacity: 1;
     /* filter: blur(0px); */
     /* font-size: 36px; */
-    transform: scale(1.05);
+    transform: scale(1);
     /* 放大 */
 }
 

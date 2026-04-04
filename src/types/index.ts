@@ -92,6 +92,10 @@ export interface GeneralConfig {
   showAudioInfo: boolean
   // Whether automatic update checks are enabled (default: false)
   enableAutoUpdate?: boolean
+  // Cover cache size in MB (default: 1024 = 1GB)
+  coverCacheSizeMb?: number
+  // Cover cache path (default: null = use system temp dir)
+  coverCachePath?: string
 }
 
 export interface LyricsConfig {

@@ -528,6 +528,15 @@ onMounted(async () => {
   // 应用主题
   themeStore.applyTheme()
 
+  // 初始化封面缓存路径
+  try {
+    await invoke('set_cover_cache_path_command', { 
+      path: configStore.general.coverCachePath 
+    })
+  } catch (error) {
+    logger.warn('Failed to set cover cache path:', error)
+  }
+
   // 初始化音频播放器
   await playerStore.initAudio()
 

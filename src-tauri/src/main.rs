@@ -147,6 +147,28 @@ fn main() {
                 log::info!("Device monitor started");
             }
 
+            // 清理封面缓存
+            {
+                use mercurial_player::media::metadata;
+                let state: tauri::State<AppState> = app.state();
+                let max_cache_size_mb = state
+                    .config_manager
+                    .load_config()
+                    .ok()
+                    .map(|config| config.general.cover_cache_size_mb);
+                
+                match metadata::clean_cover_cache(max_cache_size_mb) {
+                    Ok(count) => {
+                        if count > 0 {
+                            log::info!("应用启动时清理了 {} 个封面缓存文件", count);
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("清理封面缓存失败: {}", e);
+                    }
+                }
+            }
+
             // 初始化Windows任务栏缩略图工具栏
             #[cfg(windows)]
             {
@@ -206,11 +228,15 @@ fn main() {
             media::commands::get_all_audio_files,
             media::commands::check_file_exists,
             // 元数据命令
-
             media::commands::get_track_metadata,
             media::commands::get_tracks_metadata_batch,
             media::commands::get_track_cover_path,
             media::commands::extract_cover,
+            media::commands::clean_cover_cache_command,
+            media::commands::set_cover_cache_path_command,
+            media::commands::clear_metadata_cache_command,
+            media::commands::get_metadata_cache_stats_command,
+            media::commands::get_temp_dir_command,
             // 网易云音乐API命令
             media::commands::netease_search_songs,
             media::commands::netease_get_lyrics,

@@ -105,16 +105,82 @@
       </div>
     </div>
     
+    <!-- 缓存设置 -->
+    <div class="settings-section">
+      <h4 class="section-title">{{ $t('config.cacheSettings') || '缓存设置' }}</h4>
+      
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.coverCacheSize') || '封面缓存大小' }}</span>
+          <div class="setting-desc">{{ $t('config.coverCacheSizeDesc') || '封面图片缓存的最大磁盘空间' }}</div>
+        </div>
+        <div class="cache-size-control">
+          <input
+            ref="cacheSliderRef"
+            type="range"
+            min="1024"
+            max="8192"
+            step="512"
+            v-model.number="coverCacheSizeMb"
+            @input="handleCacheSizeChange"
+            class="cache-slider"
+          />
+          <span class="cache-size-value">{{ formatCacheSize(coverCacheSizeMb) }}</span>
+        </div>
+      </div>
+      
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.coverCachePath') || '封面缓存路径' }}</span>
+          <div class="setting-desc">{{ $t('config.coverCachePathDesc') || '封面缓存存储位置，默认使用系统临时目录' }}</div>
+        </div>
+        <div class="cache-path-control">
+          <span class="cache-path-value">{{ coverCachePathDisplay }}</span>
+          <button class="cache-path-btn" @click="selectCachePath">
+            <span class="material-symbols-rounded">folder_open</span>
+          </button>
+          <button v-if="coverCachePath" class="cache-path-btn" @click="resetCachePath" title="恢复默认">
+            <span class="material-symbols-rounded">refresh</span>
+          </button>
+        </div>
+      </div>
+      
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.clearCoverCache') || '清理封面缓存' }}</span>
+          <div class="setting-desc">{{ $t('config.clearCoverCacheDesc') || '立即清理所有过期的封面缓存文件' }}</div>
+        </div>
+        <button class="clear-cache-btn" @click="clearCoverCache" :disabled="isClearingCache">
+          <span v-if="!isClearingCache">{{ $t('config.clearCache') || '清理' }}</span>
+          <span v-else>{{ $t('config.clearing') || '清理中...' }}</span>
+        </button>
+      </div>
+      
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.metadataCache') || '元数据缓存' }}</span>
+          <div class="setting-desc">{{ metadataCacheDesc }}</div>
+        </div>
+        <button class="clear-cache-btn" @click="clearMetadataCache" :disabled="isClearingMetadataCache">
+          <span v-if="!isClearingMetadataCache">{{ $t('config.clearCache') || '清理' }}</span>
+          <span v-else>{{ $t('config.clearing') || '清理中...' }}</span>
+        </button>
+      </div>
+    </div>
+    
 
   </div>
 </template>
 
-<script setup>
-import { computed } from 'vue'
+<script setup lang="ts">
+import { computed, ref, onMounted } from 'vue'
 import { useConfigStore } from '../../stores/config'
 import { setLocale } from '../../i18n'
 import logger from '../../utils/logger'
 import MD3Select from '../MD3Select.vue'
+import { invoke } from '@tauri-apps/api/core'
+
+const cacheSliderRef = ref<HTMLInputElement | null>(null)
 
 const configStore = useConfigStore()
 
@@ -122,6 +188,67 @@ const languageOptions = computed(() => [
   { value: 'zh', label: '中文' },
   { value: 'en', label: 'English' }
 ])
+
+const coverCacheSizeMb = computed({
+  get: () => configStore.general.coverCacheSizeMb || 1024,
+  set: (value: number) => {
+    configStore.general.coverCacheSizeMb = value
+  }
+})
+
+const coverCachePath = computed({
+  get: () => configStore.general.coverCachePath,
+  set: (value: string | undefined) => {
+    configStore.general.coverCachePath = value
+  }
+})
+
+const coverCachePathDisplay = computed(() => {
+  if (!coverCachePath.value) {
+    return tempDirPath.value
+  }
+  // 缩短路径显示
+  const path = coverCachePath.value
+  if (path.length > 30) {
+    return '...' + path.slice(-30)
+  }
+  return path
+})
+
+const tempDirPath = ref('')
+
+const loadTempDirPath = async () => {
+  try {
+    tempDirPath.value = await invoke<string>('get_temp_dir_command')
+  } catch (error) {
+    tempDirPath.value = '系统临时目录'
+    logger.error('Failed to get temp dir:', error)
+  }
+}
+
+const isClearingCache = ref(false)
+const isClearingMetadataCache = ref(false)
+const metadataCacheStats = ref({ count: 0, size: 0 })
+
+const metadataCacheDesc = computed(() => {
+  const { count, size } = metadataCacheStats.value
+  if (count === 0) {
+    return '暂无元数据缓存'
+  }
+  const sizeStr = size > 1024 * 1024 
+    ? `${(size / 1024 / 1024).toFixed(2)} MB` 
+    : `${(size / 1024).toFixed(2)} KB`
+  return `已缓存 ${count} 首歌曲的元数据，占用 ${sizeStr}`
+})
+
+const loadMetadataCacheStats = async () => {
+  try {
+    const [count, size] = await invoke<[number, number]>('get_metadata_cache_stats_command')
+    metadataCacheStats.value = { count, size }
+  } catch (error) {
+    logger.error('Failed to load metadata cache stats:', error)
+  }
+}
 
 const saveConfig = async () => {
   try {
@@ -131,13 +258,13 @@ const saveConfig = async () => {
   }
 }
 
-const toggleSetting = async (key) => {
-  configStore.general[key] = !configStore.general[key]
+const toggleSetting = async (key: string) => {
+  (configStore.general as Record<string, unknown>)[key] = !(configStore.general as Record<string, unknown>)[key]
   await saveConfig()
 }
 
-const toggleDirectoryScan = async (key) => {
-  configStore.directoryScan[key] = !configStore.directoryScan[key]
+const toggleDirectoryScan = async (key: string) => {
+  (configStore.directoryScan as Record<string, unknown>)[key] = !(configStore.directoryScan as Record<string, unknown>)[key]
   configStore.setDirectoryScanConfig(configStore.directoryScan)
 }
 
@@ -163,6 +290,93 @@ const handleLanguageChange = async () => {
     logger.error('Failed to change language:', error)
   }
 }
+
+const updateSliderBackground = () => {
+  if (!cacheSliderRef.value) return
+  
+  const slider = cacheSliderRef.value
+  const min = parseInt(slider.min)
+  const max = parseInt(slider.max)
+  const value = parseInt(slider.value)
+  const percentage = ((value - min) / (max - min)) * 100
+  
+  slider.style.background = `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`
+}
+
+const handleCacheSizeChange = async () => {
+  updateSliderBackground()
+  await saveConfig()
+}
+
+const formatCacheSize = (mb: number): string => {
+  if (mb >= 1024) {
+    return `${(mb / 1024).toFixed(1)} GB`
+  }
+  return `${mb} MB`
+}
+
+const clearCoverCache = async () => {
+  if (isClearingCache.value) return
+  
+  isClearingCache.value = true
+  try {
+    const count = await invoke<number>('clean_cover_cache_command', {
+      maxCacheSizeMb: configStore.general.coverCacheSizeMb
+    })
+    logger.info(`Cleaned ${count} cover cache files`)
+  } catch (error) {
+    logger.error('Failed to clear cover cache:', error)
+  } finally {
+    isClearingCache.value = false
+  }
+}
+
+const selectCachePath = async () => {
+  try {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: '选择封面缓存目录'
+    })
+    if (selected && typeof selected === 'string') {
+      coverCachePath.value = selected
+      // 通知后端更新缓存路径
+      await invoke('set_cover_cache_path_command', { path: selected })
+      await saveConfig()
+    }
+  } catch (error) {
+    logger.error('Failed to select cache path:', error)
+  }
+}
+
+const resetCachePath = async () => {
+  coverCachePath.value = undefined
+  // 通知后端恢复默认路径
+  await invoke('set_cover_cache_path_command', { path: null })
+  await saveConfig()
+}
+
+const clearMetadataCache = async () => {
+  if (isClearingMetadataCache.value) return
+  
+  isClearingMetadataCache.value = true
+  try {
+    await invoke('clear_metadata_cache_command')
+    logger.info('Metadata cache cleared')
+    await loadMetadataCacheStats()
+  } catch (error) {
+    logger.error('Failed to clear metadata cache:', error)
+  } finally {
+    isClearingMetadataCache.value = false
+  }
+}
+
+onMounted(() => {
+  updateSliderBackground()
+  loadMetadataCacheStats()
+  loadTempDirPath()
+})
 
 </script>
 
@@ -236,7 +450,7 @@ const handleLanguageChange = async () => {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: var(--md-sys-color-surface-container-highest);
+  background-color: var(--md-sys-color-surface-container);
   border: 2px solid var(--md-sys-color-outline);
   border-radius: 14px;
   transition: all 0.2s ease;
@@ -299,7 +513,7 @@ const handleLanguageChange = async () => {
 }
 
 .number-btn:hover:not(:disabled) {
-  background-color: var(--md-sys-color-surface-container-highest);
+  background-color: var(--md-sys-color-surface-container);
 }
 
 .number-btn:disabled {
@@ -317,5 +531,116 @@ const handleLanguageChange = async () => {
   font-size: 14px;
   font-weight: 500;
   color: var(--md-sys-color-on-surface);
+}
+
+/* 缓存大小控制 */
+.cache-size-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 200px;
+}
+
+.cache-slider {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.cache-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  background: var(--md-sys-color-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.cache-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+}
+
+.cache-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  background: var(--md-sys-color-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.cache-size-value {
+  /* min-width: 60px; */
+  text-align: right;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+}
+
+/* 缓存路径控制 */
+.cache-path-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* min-width: 200px; */
+}
+
+.cache-path-value {
+  flex: 1;
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* max-width: 200px; */
+}
+
+.cache-path-btn {
+  padding: 8px;
+  background-color: transparent;
+  color: var(--md-sys-color-primary);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cache-path-btn:hover {
+  background-color: var(--md-sys-color-primary-container);
+}
+
+.cache-path-btn .material-symbols-rounded {
+  font-size: 20px;
+}
+
+/* 清理缓存按钮 */
+.clear-cache-btn {
+  padding: 8px 16px;
+  background-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  border: none;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clear-cache-btn:hover:not(:disabled) {
+  background-color: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+.clear-cache-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>

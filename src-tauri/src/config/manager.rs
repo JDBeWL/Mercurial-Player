@@ -72,6 +72,16 @@ pub struct GeneralConfig {
     /// 可打开的外部链接白名单主机（用于 open_external_url）
     #[serde(default = "default_external_url_allowed_hosts")]
     pub external_url_allowed_hosts: Vec<String>,
+    /// 封面缓存大小（单位：MB），默认 1024MB (1GB)
+    #[serde(default = "default_cover_cache_size_mb")]
+    pub cover_cache_size_mb: u64,
+    /// 封面缓存路径，默认为空表示使用系统临时目录
+    #[serde(default)]
+    pub cover_cache_path: Option<String>,
+}
+
+fn default_cover_cache_size_mb() -> u64 {
+    1024 // 1GB
 }
 
 /// 音频设置
@@ -204,6 +214,8 @@ impl Default for GeneralConfig {
             show_audio_info: true,
             enable_auto_update: false,
             external_url_allowed_hosts: default_external_url_allowed_hosts(),
+            cover_cache_size_mb: default_cover_cache_size_mb(),
+            cover_cache_path: None,
         }
     }
 }

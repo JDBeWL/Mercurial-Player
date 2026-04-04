@@ -7,7 +7,8 @@ use super::filesystem::{
     read_lyrics_file_internal, write_lyrics_file_internal,
 };
 use super::metadata::{
-    extract_cover_internal, get_track_cover_path_internal, get_track_metadata_internal, Playlist,
+    clean_cover_cache, clear_metadata_cache, extract_cover_internal, get_metadata_cache_stats,
+    get_track_cover_path_internal, get_track_metadata_internal, set_cover_cache_path, Playlist,
     TrackMetadata,
 };
 use super::netease;
@@ -92,4 +93,34 @@ pub async fn netease_get_lyrics(song_id: String) -> Result<netease::LyricsData, 
 #[command]
 pub fn extract_cover(audio_path: String, output_path: String) -> Result<String, String> {
     extract_cover_internal(&audio_path, &output_path)
+}
+
+/// 清理封面缓存
+#[command]
+pub fn clean_cover_cache_command(max_cache_size_mb: Option<u64>) -> Result<usize, String> {
+    clean_cover_cache(max_cache_size_mb)
+}
+
+/// 设置封面缓存路径
+#[command]
+pub fn set_cover_cache_path_command(path: Option<String>) {
+    set_cover_cache_path(path);
+}
+
+/// 清除元数据缓存
+#[command]
+pub fn clear_metadata_cache_command() -> Result<(), String> {
+    clear_metadata_cache()
+}
+
+/// 获取元数据缓存统计信息
+#[command]
+pub fn get_metadata_cache_stats_command() -> (usize, u64) {
+    get_metadata_cache_stats()
+}
+
+/// 获取系统临时目录路径
+#[command]
+pub fn get_temp_dir_command() -> String {
+    std::env::temp_dir().to_string_lossy().to_string()
 }

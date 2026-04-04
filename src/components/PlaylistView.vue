@@ -7,7 +7,7 @@
       </button>
     </div>
 
-    <div class="playlist-content" ref="scrollContainer">
+    <div class="playlist-content" ref="scrollContainer" @scroll="handleScroll" :class="{ 'is-scrolling': isScrolling }">
       <div v-if="playlist.length === 0" class="playlist-empty">
         <div class="empty-state">
           <span class="material-symbols-rounded">queue_music</span>
@@ -83,6 +83,19 @@ let closeTimeout = null
 
 // 滚动容器引用
 const scrollContainer = ref(null)
+
+// 滚动状态检测（用于禁用滚动时的 hover 效果）
+const isScrolling = ref(false)
+let scrollTimeout = null
+
+const handleScroll = () => {
+  isScrolling.value = true
+  if (scrollTimeout) clearTimeout(scrollTimeout)
+  scrollTimeout = setTimeout(() => {
+    isScrolling.value = false
+    scrollTimeout = null
+  }, 150)
+}
 
 // 关闭动画处理
 const handleClose = () => {
@@ -284,6 +297,11 @@ onUnmounted(() => {
     closeTimeout = null
   }
 
+  if (scrollTimeout) {
+    clearTimeout(scrollTimeout)
+    scrollTimeout = null
+  }
+
   stopCoverCheck()
   stopWatchPlaylist()
   stopWatchScrollOnMount?.()
@@ -307,23 +325,21 @@ const removeTrackByPath = (path) => {
   position: fixed;
   top: 0;
   right: 0;
-  width: 400px;
+  max-width: 400px;
   height: 100%;
   background-color: var(--md-sys-color-surface);
-  box-shadow: var(--md-sys-elevation-level2);
+  /* box-shadow: var(--md-sys-elevation-level2); */
   z-index: 1000;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transform: translateX(0);
-  /* 优化：使用 will-change 提示浏览器优化，而非强制 transition */
   will-change: transform;
-  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  /* transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); */
 }
 
-.playlist-view.slide-out {
+/* .playlist-view.slide-out {
   transform: translateX(100%);
-}
+} */
 
 .playlist-header {
   display: flex;
@@ -345,7 +361,6 @@ const removeTrackByPath = (path) => {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 16px;
-  /* 使用 CSS containment 优化滚动性能 */
   contain: layout style paint;
 }
 
@@ -387,6 +402,10 @@ const removeTrackByPath = (path) => {
   height: 100%;
 }
 
+.is-scrolling .list-item:hover {
+  background-color: transparent;
+}
+
 .list {
   background-color: var(--md-sys-color-surface);
   border-radius: var(--md-sys-shape-corner-medium);
@@ -402,7 +421,6 @@ const removeTrackByPath = (path) => {
   cursor: pointer;
   overflow: hidden;
   border-radius: 8px;
-  /* 使用 contain 优化渲染性能 - 仅 layout 和 style，避免 paint 导致滚动重计算 */
   contain: layout style;
   will-change: background-color;
 }
