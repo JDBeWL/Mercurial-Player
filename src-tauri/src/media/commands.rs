@@ -12,6 +12,7 @@ use super::metadata::{
     TrackMetadata,
 };
 use super::netease;
+use super::bilibili;
 use crate::AppState;
 use tauri::{command, State};
 
@@ -123,4 +124,14 @@ pub fn get_metadata_cache_stats_command() -> (usize, u64) {
 #[command]
 pub fn get_temp_dir_command() -> String {
     std::env::temp_dir().to_string_lossy().to_string()
+}
+
+/// 搜索哔哩哔哩视频
+#[command]
+pub async fn bilibili_search_videos(
+    keyword: String,
+    page: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Vec<bilibili::BilibiliVideoResult>, String> {
+    bilibili::search_videos(&keyword, page.unwrap_or(1), limit.unwrap_or(10)).await
 }

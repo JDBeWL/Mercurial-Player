@@ -137,6 +137,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { useI18n } from 'vue-i18n'
 import UpdateDialog from '@/components/UpdateDialog.vue'
 import { useAutoUpdate } from '@/composables/useAutoUpdate'
@@ -207,7 +208,7 @@ const loadAppVersion = async () => {
 
 const openExternalUrl = async (url) => {
   try {
-    await invoke('open_external_url', { url })
+    await openUrl(url)
   } catch (error) {
     logger.error('Failed to open external URL:', error)
   }

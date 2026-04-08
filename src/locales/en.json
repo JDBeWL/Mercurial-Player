@@ -245,6 +245,17 @@
     },
     "unknown": "Unknown"
   },
+  "idolSearch": {
+    "title": "Web Search",
+    "searchPlaceholder": "Search songs, artists...",
+    "results": "Search Results",
+    "noResults": "No results found",
+    "tryDifferent": "Try different keywords",
+    "welcome": "Search LoveLive and BanG Dream",
+    "welcomeDesc": "Find music from your favorite music, jump to Bilibili or NetEase Music",
+    "searching": "Searching...",
+    "openLink": "Open in new window"
+  },
   "themeSelector": {
     "chooseThemeColor": "Choose Theme Color",
     "customColor": "Custom Color:"

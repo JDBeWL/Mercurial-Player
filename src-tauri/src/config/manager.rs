@@ -145,6 +145,9 @@ fn default_external_url_allowed_hosts() -> Vec<String> {
         "docs.rs".to_string(),
         "gnu.org".to_string(),
         "www.gnu.org".to_string(),
+        "bilibili.com".to_string(),
+        "www.bilibili.com".to_string(),
+        "music.163.com".to_string(),
     ]
 }
 

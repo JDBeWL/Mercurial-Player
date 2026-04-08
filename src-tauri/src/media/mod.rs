@@ -2,6 +2,7 @@
 //!
 //! 提供文件系统操作和音频元数据处理功能。
 
+pub mod bilibili;
 pub mod commands;
 pub mod filesystem;
 pub mod http_client;

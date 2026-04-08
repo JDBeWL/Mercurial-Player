@@ -2,9 +2,8 @@
 //!
 //! 包含系统信息获取和窗口管理功能。
 
-use crate::AppState;
 use std::collections::HashMap;
-use tauri::{command, AppHandle, LogicalSize, Manager, Size, State};
+use tauri::{command, AppHandle, LogicalSize, Manager, Size};
 
 /// 获取应用版本信息
 #[command]
@@ -162,50 +161,4 @@ pub fn get_screen_refresh_rate() -> Result<u32, String> {
     }
 }
 
-/// 安全打开外部链接（仅允许 HTTPS 且主机在白名单内）
-#[command]
-pub fn open_external_url(state: State<AppState>, url: String) -> Result<(), String> {
-    let parsed = tauri_plugin_http::reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
-
-    if parsed.scheme() != "https" {
-        return Err("Only HTTPS URLs are allowed".to_string());
-    }
-
-    let host = parsed
-        .host_str()
-        .ok_or("URL host is missing")?
-        .to_ascii_lowercase();
-
-    // 从配置读取白名单（兼容旧配置）
-    let allowed_hosts = state
-        .config_manager
-        .load_config()
-        .map(|cfg| cfg.general.external_url_allowed_hosts)
-        .unwrap_or_else(|_| {
-            vec![
-                "github.com".to_string(),
-                "www.github.com".to_string(),
-                "api.github.com".to_string(),
-                "tauri.app".to_string(),
-                "www.tauri.app".to_string(),
-                "vuejs.org".to_string(),
-                "www.vuejs.org".to_string(),
-                "docs.rs".to_string(),
-                "gnu.org".to_string(),
-                "www.gnu.org".to_string(),
-            ]
-        });
-
-    if !allowed_hosts
-        .iter()
-        .any(|allowed| allowed.eq_ignore_ascii_case(&host))
-    {
-        return Err(format!("Host not allowed: {host}"));
-    }
-
-    tauri_plugin_opener::open_url(&url, None::<&str>)
-        .map_err(|e| format!("Failed to open URL: {e}"))?;
-
-    Ok(())
-}
 

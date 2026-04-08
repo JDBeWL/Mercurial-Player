@@ -2677,6 +2677,7 @@ dependencies = [
  "log",
  "md5",
  "rayon",
+ "regex",
  "rodio",
  "rubato",
  "serde",

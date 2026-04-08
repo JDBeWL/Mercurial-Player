@@ -237,8 +237,19 @@
       "installerPath": "安装程序路径：{path}",
       "noInstallerPath": "未提供安装程序路径"
     },
-    "aboutApp": "关于本应用", 
+    "aboutApp": "关于本应用",
     "unknown": "未知"
+  },
+  "idolSearch": {
+    "title": "Web搜索",
+    "searchPlaceholder": "搜索歌曲、歌手...",
+    "results": "搜索结果",
+    "noResults": "未找到结果",
+    "tryDifferent": "尝试不同的关键词",
+    "welcome": "搜索 LoveLive 和 BanG Dream",
+    "welcomeDesc": "查找喜欢的音乐，可跳转到哔哩哔哩或网易云音乐",
+    "searching": "搜索中...",
+    "openLink": "在新窗口打开"
   },
   "themeSelector": {
     "chooseThemeColor": "选择主题颜色",

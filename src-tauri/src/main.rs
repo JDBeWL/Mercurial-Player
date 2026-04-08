@@ -240,6 +240,8 @@ fn main() {
             // 网易云音乐API命令
             media::commands::netease_search_songs,
             media::commands::netease_get_lyrics,
+            // 哔哩哔哩API命令
+            media::commands::bilibili_search_videos,
             // 播放命令
             audio::commands::play_track,
             audio::commands::pause_track,
@@ -267,7 +269,6 @@ fn main() {
             system::commands::get_system_fonts,
             system::commands::get_platform,
             system::commands::get_screen_refresh_rate,
-            system::commands::open_external_url,
             // 音频设备命令
             audio::commands::get_audio_devices,
             audio::commands::set_audio_device,

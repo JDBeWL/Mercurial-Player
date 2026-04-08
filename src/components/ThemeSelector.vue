@@ -136,6 +136,13 @@ const colorPresets = [
   { hex: '#FF4081', name: '霓虹粉', category: 'pink' },
   { hex: '#F50057', name: '亮玫红', category: 'pink' },
   { hex: '#E040FB', name: '紫粉', category: 'pink' },
+  { hex: '#FFD1DC', name: '初樱', category: 'pink' },
+  { hex: '#FFB7C5', name: '樱花', category: 'pink' },
+  { hex: '#FFA0B4', name: '枝垂樱', category: 'pink' },
+  { hex: '#FF8DA1', name: '满开樱', category: 'pink' },
+  { hex: '#FFB3C1', name: '春霞', category: 'pink' },
+  // Wildest Flower
+  { hex: '#C44E76', name: '花海咲季', category: 'pink' },
   
   // 红色系 - 热情、活力、警示
   { hex: '#EF5350', name: '珊瑚红', category: 'red' },

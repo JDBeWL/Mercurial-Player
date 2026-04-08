@@ -7,6 +7,9 @@
         <button class="icon-button" data-tauri-drag-region="false" @click="toggleLibrary">
           <span class="material-symbols-rounded">menu</span>
         </button>
+        <button class="icon-button" data-tauri-drag-region="false" @click="showIdolSearch = true" title="偶像搜索">
+          <span class="material-symbols-rounded">stars</span>
+        </button>
         <button class="icon-button" data-tauri-drag-region="false" @click="toggleSettings" title="设置">
           <span class="material-symbols-rounded">settings</span>
         </button>
@@ -36,6 +39,10 @@
     <main class="main-content">
       <Transition name="slide-left">
         <MusicLibrary v-if="showLibrary" @close="showLibrary = false" />
+      </Transition>
+
+      <Transition name="slide-left">
+        <IdolSearch v-if="showIdolSearch" @close="showIdolSearch = false" />
       </Transition>
 
       <!-- 配置面板 - 替换主内容区域 -->
@@ -193,6 +200,7 @@ import PlaylistView from './components/PlaylistView.vue'
 import ThemeSelector from './components/ThemeSelector.vue'
 import Settings from './components/Settings.vue'
 import MiniPlayer from './components/MiniPlayer.vue'
+import IdolSearch from './components/IdolSearch.vue'
 
 // 获取屏幕刷新率
 const getScreenRefreshRate = (): Promise<number> => {
@@ -242,6 +250,7 @@ const { lyricsSource } = useLyrics()
 
 const showLibrary = ref(false)
 const showPlaylist = ref(false)
+const showIdolSearch = ref(false)
 const isFullscreen = ref(false)
 const isMaximized = ref(false)
 const viewMode = ref('lyrics') // 'lyrics' or 'visualizer'
