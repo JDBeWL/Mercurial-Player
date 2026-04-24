@@ -156,7 +156,10 @@ function generateCustomCSS(primaryColor: string, isDark: boolean, enableGlass: b
   css += `--shadow-soft: 0 4px 20px rgba(0, 0, 0, ${shadowAlpha[0]});\n`
   css += `--shadow-medium: 0 8px 30px rgba(0, 0, 0, ${shadowAlpha[1]});\n`
   css += `--shadow-strong: 0 12px 40px rgba(0, 0, 0, ${shadowAlpha[2]});\n`
-  
+
+  // Hover 叠加层 - 暗色模式用白色，亮色模式用黑色
+  css += `--md-sys-color-hover-overlay: ${isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'};\n`
+
   // 主色透明度变体
   css += `--primary-alpha-5: color-mix(in srgb, var(--md-sys-color-primary) 5%, transparent);\n`
   css += `--primary-alpha-10: color-mix(in srgb, var(--md-sys-color-primary) 10%, transparent);\n`

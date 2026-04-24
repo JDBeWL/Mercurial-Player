@@ -111,11 +111,16 @@ body {
   justify-content: center;
   cursor: pointer;
   border: none;
-  font-family: 'Roboto', sans-serif;
-  transition: all var(--transition-normal) var(--ease-out-expo);
+  transition: background-color var(--transition-fast) var(--ease-out-expo),
+              color var(--transition-fast) var(--ease-out-expo);
 }
 
 .icon-button, .window-button { display: flex; } /* Icon buttons are often flex containers */
+
+/* 标题栏按钮 - 仅在需要禁用拖拽的标题栏按钮上使用 */
+.titlebar-button {
+  -webkit-app-region: no-drag;
+}
 
 /* Filled Button - MD3 Filled Tonal Button 风格 */
 .filled-button {
@@ -182,7 +187,6 @@ body {
   width: 40px;
   height: 40px;
   padding: 0;
-  -webkit-app-region: no-drag;
 }
 
 .icon-button:hover {
@@ -192,6 +196,46 @@ body {
 
 .icon-button.active {
   background-color: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+.play-button,
+.pause-button,
+.remove-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.play-button:hover,
+.pause-button:hover {
+  background-color: var(--md-sys-color-hover-overlay);
+}
+
+.remove-button:hover {
+  background-color: var(--md-sys-color-error-hover);
+}
+
+.play-button .material-symbols-rounded,
+.pause-button .material-symbols-rounded {
+  font-size: 20px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.remove-button .material-symbols-rounded {
+  font-size: 18px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.list-item.selected .play-button .material-symbols-rounded,
+.list-item.selected .pause-button .material-symbols-rounded {
   color: var(--md-sys-color-on-primary-container);
 }
 

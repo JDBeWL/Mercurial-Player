@@ -59,27 +59,23 @@ export default {
     let pendingSpectrumData = null;
 
     const SPECTRUM_SIZE = 128
-    const noiseBuffer = new Float32Array(SPECTRUM_SIZE)
-    for (let i = 0; i < SPECTRUM_SIZE; i++) {
-      noiseBuffer[i] = Math.random() * 0.01
-    }
-    let noiseIndex = 0
 
     let cachedGradient = null
-    let cachedPrimaryColor = null
     let lastCanvasHeight = 0
+    let lastPrimaryColor = null
 
     const getPrimaryColor = () => {
-      return cachedPrimaryColor || (cachedPrimaryColor = getComputedStyle(document.documentElement).getPropertyValue('--md-sys-color-primary').trim() || '#6750a4')
+      return getComputedStyle(document.documentElement).getPropertyValue('--md-sys-color-primary').trim() || '#6750a4'
     }
 
     const getOrCreateGradient = (ctx, height) => {
-      if (!cachedGradient || lastCanvasHeight !== height) {
-        const primaryColor = getPrimaryColor()
+      const primaryColor = getPrimaryColor()
+      if (!cachedGradient || lastCanvasHeight !== height || lastPrimaryColor !== primaryColor) {
         cachedGradient = ctx.createLinearGradient(0, height, 0, 0)
         cachedGradient.addColorStop(0, primaryColor)
         cachedGradient.addColorStop(1, `${primaryColor}40`)
         lastCanvasHeight = height
+        lastPrimaryColor = primaryColor
       }
       return cachedGradient
     }
@@ -158,31 +154,52 @@ export default {
         return cached
     };
 
-    // 绘制静态状态（暂停时的直线）
-    const drawStaticState = () => {
+    // 绘制冻结状态（暂停时保留最后一帧）
+    const drawFrozenFrame = () => {
       if (!canvasRef.value || !visualizerContainer.value) return;
-      
+
       const canvas = canvasRef.value;
       const ctx = canvas.getContext('2d');
       const width = canvas.width;
       const height = canvas.height;
-      
+
       ctx.clearRect(0, 0, width, height);
-      ctx.beginPath();
-      ctx.moveTo(0, height - 2);
-      ctx.lineTo(width, height - 2);
-      ctx.strokeStyle = getPrimaryColor();
-      ctx.stroke();
-      
-      visualTime.value = playerStore.currentTime;
+
+      const drawData = smoothedAudioData;
+      if (!drawData || drawData.length === 0) return;
+
+      const bufferLength = SPECTRUM_SIZE;
+      const barWidth = (width / bufferLength) * 0.8;
+      const gap = (width / bufferLength) * 0.2;
+      let x = 0;
+
+      ctx.fillStyle = getOrCreateGradient(ctx, height);
+      ctx.shadowBlur = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        const value = drawData[i];
+        let barHeight = Math.pow(value, 0.9) * height * 0.9;
+
+        if (barHeight > height) barHeight = height;
+        if (barHeight < 2) barHeight = 2;
+
+        if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(x, height - barHeight, barWidth, barHeight, [5, 5, 0, 0]);
+            ctx.fill();
+        } else {
+            ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+        }
+
+        x += barWidth + gap;
+      }
     };
 
     // --- 可视化绘制 ---
     const drawVisualizer = (timestamp) => {
       if (!canvasRef.value || !visualizerContainer.value) return;
-      
+
       if (!playerStore.isPlaying) {
-        drawStaticState();
         isAnimating = false;
         animationId = null;
         return;
@@ -227,11 +244,9 @@ export default {
       ctx.shadowBlur = 0;
 
       for (let i = 0; i < bufferLength; i++) {
-        const baseNoise = 0.01 + noiseBuffer[noiseIndex]
-        noiseIndex = (noiseIndex + 1) % SPECTRUM_SIZE
-        const value = drawData[i] + baseNoise;
-        let barHeight = Math.pow(value, 0.9) * height * 0.9; 
-        
+        const value = drawData[i];
+        let barHeight = Math.pow(value, 0.9) * height * 0.9;
+
         if (barHeight > height) barHeight = height;
         if (barHeight < 2) barHeight = 2;
 
@@ -248,7 +263,7 @@ export default {
 
       ctx.shadowBlur = 0;
 
-      
+
       // 更新视觉时间
       if (!lastFrameTime) lastFrameTime = timestamp;
       const deltaTime = Math.min((timestamp - lastFrameTime) / 1000, 0.1);
@@ -290,7 +305,7 @@ export default {
         animationId = null;
       }
       isAnimating = false;
-      drawStaticState();
+      pendingSpectrumData = null;
     };
 
     // 监听播放状态变化
@@ -306,9 +321,8 @@ export default {
         if (canvasRef.value && visualizerContainer.value) {
             canvasRef.value.width = visualizerContainer.value.clientWidth;
             canvasRef.value.height = visualizerContainer.value.clientHeight;
-            // 重绘当前状态
             if (!playerStore.isPlaying) {
-              drawStaticState();
+              drawFrozenFrame();
             }
         }
     };
@@ -333,7 +347,7 @@ export default {
       if (playerStore.isPlaying) {
         startAnimation();
       } else {
-        drawStaticState();
+        drawFrozenFrame();
       }
     });
 

@@ -700,15 +700,15 @@ const addFileNext = (file) => {
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border-radius: 8px;
   margin: 2px 0;
+  cursor: pointer;
+  overflow: hidden;
+  border-radius: 8px;
+  contain: layout style paint;
 }
 
 .list-item:hover {
   background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
-  transform: translateX(2px);
 }
 
 .list-item:active {
@@ -848,11 +848,6 @@ const addFileNext = (file) => {
 @keyframes top-loading-indeterminate {
   0% { transform: translateX(-120%); }
   100% { transform: translateX(420%); }
-}
-
-
-.icon-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
 }
 
 .filled-button {

@@ -40,7 +40,7 @@
             <div class="list-item-trailing">
               <button
                 v-if="track.path !== currentPath || !playerStore.isPlaying"
-                class="icon-button play-button"
+                class="play-button"
                 @click.stop="playTrack(track)"
                 :title="$t('playlist.play')"
               >
@@ -48,13 +48,13 @@
               </button>
               <button
                 v-if="track.path === currentPath && playerStore.isPlaying"
-                class="icon-button pause-button"
+                class="pause-button"
                 @click.stop="pauseTrack"
                 :title="$t('playlist.pause')"
               >
                 <span class="material-symbols-rounded">pause</span>
               </button>
-              <button class="icon-button remove-button" @click.stop="removeTrackByPath(track.path)" :title="$t('playlist.remove')">
+              <button class="remove-button" @click.stop="removeTrackByPath(track.path)" :title="$t('playlist.remove')">
                 <span class="material-symbols-rounded">close</span>
               </button>
             </div>
@@ -402,9 +402,7 @@ const removeTrackByPath = (path) => {
   height: 100%;
 }
 
-.is-scrolling .list-item:hover {
-  background-color: transparent;
-}
+.is-scrolling .list { pointer-events: none; }
 
 .list {
   background-color: var(--md-sys-color-surface);
@@ -421,8 +419,7 @@ const removeTrackByPath = (path) => {
   cursor: pointer;
   overflow: hidden;
   border-radius: 8px;
-  contain: layout style;
-  will-change: background-color;
+  contain: layout style paint;
 }
 
 .list-item:hover {
@@ -500,46 +497,6 @@ const removeTrackByPath = (path) => {
   display: flex;
   gap: 4px;
   align-items: center;
-}
-
-.play-button,
-.pause-button,
-.remove-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background-color: transparent;
-  border: none;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-.play-button:hover,
-.pause-button:hover {
-  background-color: var(--md-sys-color-hover-overlay);
-}
-
-.remove-button:hover {
-  background-color: var(--md-sys-color-error-hover);
-}
-
-.play-button .material-symbols-rounded,
-.pause-button .material-symbols-rounded {
-  font-size: 20px;
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-.remove-button .material-symbols-rounded {
-  font-size: 18px;
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-.list-item.selected .play-button .material-symbols-rounded,
-.list-item.selected .pause-button .material-symbols-rounded {
-  color: var(--md-sys-color-on-primary-container);
 }
 
 @media (max-width: 480px) {
