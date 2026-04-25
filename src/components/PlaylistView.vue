@@ -1,5 +1,5 @@
 <template>
-  <div class="playlist-view" :class="{ 'slide-out': isClosing }">
+  <div class="playlist-view">
     <div class="playlist-header">
       <h2 class="playlist-title">{{ $t('playlist.title') }}</h2>
       <button class="icon-button" @click="handleClose">
@@ -77,10 +77,6 @@ const emit = defineEmits(['close'])
 const playerStore = usePlayerStore()
 const { playlist, currentTrack } = storeToRefs(playerStore)
 
-// 控制动画状态
-const isClosing = ref(false)
-let closeTimeout = null
-
 // 滚动容器引用
 const scrollContainer = ref(null)
 
@@ -97,14 +93,9 @@ const handleScroll = () => {
   }, 150)
 }
 
-// 关闭动画处理
+// 关闭处理
 const handleClose = () => {
-  isClosing.value = true
-  if (closeTimeout) clearTimeout(closeTimeout)
-  closeTimeout = setTimeout(() => {
-    emit('close')
-    closeTimeout = null
-  }, 300)
+  emit('close')
 }
 
 // ===== 核心优化：用简单的 computed 替代 Map 遍历 =====
@@ -292,11 +283,6 @@ onMounted(() => {
 
 // 组件卸载时清理所有资源
 onUnmounted(() => {
-  if (closeTimeout) {
-    clearTimeout(closeTimeout)
-    closeTimeout = null
-  }
-
   if (scrollTimeout) {
     clearTimeout(scrollTimeout)
     scrollTimeout = null

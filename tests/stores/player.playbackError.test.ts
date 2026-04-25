@@ -38,38 +38,6 @@ import { ErrorType } from '@/utils/errorHandler'
 import errorHandler from '@/utils/errorHandler'
 import { usePlayerStore } from '@/stores/player'
 import { invoke } from '@tauri-apps/api/core'
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(),
-}))
-
-vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn(() => Promise.resolve(() => {})),
-}))
-
-vi.mock('@/utils/logger', () => ({
-  default: {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
-}))
-
-vi.mock('@/utils/fileUtils', () => ({
-  default: {
-    fileExists: vi.fn(async () => true),
-    findLyricsFile: vi.fn(async () => null),
-    readFile: vi.fn(async () => ''),
-    getFileName: vi.fn((p: string) => p.split(/[\\/]/).pop() || p),
-    getFileExtension: vi.fn(() => 'mp3'),
-  },
-}))
-
-vi.mock('@/utils/lyricsParser', () => ({
-  default: {
-    parseAsync: vi.fn(async () => []),
-  },
-}))
 
 const track = {
   path: '/music/test.mp3',
@@ -83,7 +51,6 @@ describe('usePlayerStore playTrack error classification', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
-    invokeMock.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -93,9 +60,15 @@ describe('usePlayerStore playTrack error classification', () => {
   async function expectErrorType(err: unknown, expectedType: ErrorType) {
     const store = usePlayerStore()
     invokeMock.mockReset()
-    invokeMock.mockResolvedValue(undefined) // default for any extra calls
-    invokeMock.mockResolvedValueOnce(undefined) // pause_track
-    invokeMock.mockRejectedValueOnce(err) // play_track
+    // playTrack calls: pause_track -> play_track -> get_track_cover_path (async, may not be awaited)
+    // We need to handle multiple calls: pause_track resolves, play_track rejects
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === 'pause_track') return Promise.resolve(undefined)
+      if (cmd === 'play_track') return Promise.reject(err)
+      if (cmd === 'get_track_cover_path') return Promise.resolve(null)
+      return Promise.resolve(undefined)
+    })
+
     const handleSpy = vi.spyOn(errorHandler, 'handle')
 
     await store.playTrack(track)
@@ -106,6 +79,7 @@ describe('usePlayerStore playTrack error classification', () => {
     const options = lastCall[1]
     expect((handledError as Error).message).toBe(err instanceof Error ? err.message : String(err))
     expect(options?.type).toBe(expectedType)
+    handleSpy.mockRestore()
   }
 
   it('maps decode/probe errors to AUDIO_DECODE_ERROR', async () => {
@@ -122,5 +96,3 @@ describe('usePlayerStore playTrack error classification', () => {
     await expectErrorType(new Error('random failure'), ErrorType.AUDIO_PLAYBACK_ERROR)
   })
 })
-
-

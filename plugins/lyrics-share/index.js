@@ -217,9 +217,10 @@ const generateClassicImage = async (options = {}) => {
 
   // 预加载封面图片（只加载一次）
   let coverImg = null
-  if (state.currentTrack.cover) {
+  const coverPath = state.currentTrack.coverPath || state.currentTrack.cover
+  if (coverPath) {
     try {
-      coverImg = await api.utils.loadImage(state.currentTrack.cover)
+      coverImg = await api.utils.loadImage(coverPath)
     } catch (e) {
       api.log.debug('封面加载失败:', e)
     }
@@ -512,9 +513,10 @@ const generateCompactImage = async (options = {}) => {
 
   // 预加载封面图片
   let coverImg = null
-  if (state.currentTrack.cover) {
+  const compactCoverPath = state.currentTrack.coverPath || state.currentTrack.cover
+  if (compactCoverPath) {
     try {
-      coverImg = await api.utils.loadImage(state.currentTrack.cover)
+      coverImg = await api.utils.loadImage(compactCoverPath)
     } catch (e) {
       api.log.debug('封面加载失败:', e)
     }

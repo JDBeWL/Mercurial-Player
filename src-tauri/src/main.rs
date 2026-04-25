@@ -237,6 +237,12 @@ fn main() {
             media::commands::clear_metadata_cache_command,
             media::commands::get_metadata_cache_stats_command,
             media::commands::get_temp_dir_command,
+            // Tantivy 搜索命令
+            media::commands::search_tracks_command,
+            media::commands::get_index_doc_count_command,
+            media::commands::rebuild_tantivy_index_command,
+            media::commands::clear_tantivy_index_command,
+            media::commands::commit_tantivy_index_command,
             // 网易云音乐API命令
             media::commands::netease_search_songs,
             media::commands::netease_get_lyrics,

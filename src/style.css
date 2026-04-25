@@ -248,8 +248,8 @@ body {
   height: 56px;
   box-shadow: var(--md-sys-elevation-level3);
   position: fixed;
-  bottom: 24px;
-  right: 24px;
+  bottom: 20px;
+  right: 20px;
   z-index: 1000;
   display: flex;
   transition: all 0.2s ease;

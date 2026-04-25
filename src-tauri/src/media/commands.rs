@@ -7,10 +7,11 @@ use super::filesystem::{
     read_lyrics_file_internal, write_lyrics_file_internal,
 };
 use super::metadata::{
-    clean_cover_cache, clear_metadata_cache, extract_cover_internal, get_metadata_cache_stats,
-    get_track_cover_path_internal, get_track_metadata_internal, set_cover_cache_path, Playlist,
-    TrackMetadata,
+    clean_cover_cache, clear_metadata_cache, extract_cover_internal, flush_metadata_cache,
+    get_metadata_cache_stats, get_track_cover_path_internal, get_track_metadata_internal,
+    set_cover_cache_path, Playlist, TrackMetadata,
 };
+use super::tantivy_index;
 use super::netease;
 use crate::AppState;
 use tauri::{command, State};
@@ -117,6 +118,42 @@ pub fn clear_metadata_cache_command() -> Result<(), String> {
 #[command]
 pub fn get_metadata_cache_stats_command() -> (usize, u64) {
     get_metadata_cache_stats()
+}
+
+/// 手动刷新元数据缓存到磁盘
+#[command]
+pub fn flush_metadata_cache_command() -> Result<(), String> {
+    flush_metadata_cache()
+}
+
+/// 搜索音轨
+#[command]
+pub fn search_tracks_command(query: String, limit: Option<usize>) -> Result<Vec<TrackMetadata>, String> {
+    tantivy_index::search_tracks(&query, limit.unwrap_or(50))
+}
+
+/// 获取索引文档数量
+#[command]
+pub fn get_index_doc_count_command() -> Result<usize, String> {
+    tantivy_index::get_index_doc_count()
+}
+
+/// 重建 Tantivy 索引
+#[command]
+pub fn rebuild_tantivy_index_command() -> Result<(), String> {
+    tantivy_index::rebuild_tantivy_index()
+}
+
+/// 清除 Tantivy 索引
+#[command]
+pub fn clear_tantivy_index_command() -> Result<(), String> {
+    tantivy_index::clear_tantivy_index()
+}
+
+/// 提交 Tantivy 索引
+#[command]
+pub fn commit_tantivy_index_command() -> Result<(), String> {
+    tantivy_index::commit_index()
 }
 
 /// 获取系统临时目录路径

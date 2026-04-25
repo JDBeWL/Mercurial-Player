@@ -1,5 +1,5 @@
 <template>
-  <div class="music-library" :class="{ 'slide-out': isClosing }">
+  <div class="music-library">
     <div class="library-header">
       <h2 class="library-title">{{ $t('library.title') }}</h2>
       <div class="header-actions">
@@ -162,28 +162,10 @@ const playerStore = usePlayerStore()
 const configStore = useConfigStore()
 
 
-// 控制动画状态
-const isClosing = ref(false)
-
-// 关闭动画处理
-let closeTimeout = null
-
+// 关闭处理
 const handleClose = () => {
-  isClosing.value = true
-  if (closeTimeout) clearTimeout(closeTimeout)
-  closeTimeout = setTimeout(() => {
-    emit('close')
-    closeTimeout = null
-  }, 300) // 与CSS动画时间一致
+  emit('close')
 }
-
-// 组件卸载时清理
-onUnmounted(() => {
-  if (closeTimeout) {
-    clearTimeout(closeTimeout)
-    closeTimeout = null
-  }
-})
 
 const { musicFolders, playlists } = storeToRefs(musicLibraryStore)
 const searchTerm = ref('')
@@ -580,12 +562,6 @@ const addFileNext = (file) => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transform: translateX(0);
-  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
-
-.music-library.slide-out {
-  transform: translateX(-100%);
 }
 
 @media (max-width: 480px) {

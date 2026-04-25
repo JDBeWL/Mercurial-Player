@@ -4,7 +4,7 @@
  */
 
 import { readonly } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
@@ -579,7 +579,11 @@ export function createPluginAPI(
           img.crossOrigin = 'anonymous'
           img.onload = () => resolve(img)
           img.onerror = (e) => reject(new Error(`图片加载失败: ${(e as ErrorEvent).message || src}`))
-          img.src = src
+          // 自动转换本地文件路径为 Tauri 可访问的 URL
+          const url = src.startsWith('http') || src.startsWith('data:') || src.startsWith('asset:')
+            ? src
+            : convertFileSrc(src)
+          img.src = url
         })
       },
 

@@ -134,7 +134,7 @@
 
             <!-- 下方区域：进度条和控制按钮 -->
             <div class="player-lower">
-              <ProgressBar />
+              <ProgressBar class="global-progress-bar" />
               <PlayerControls />
             </div>
           </div>
@@ -678,14 +678,14 @@ onUnmounted(async () => {
   flex: 1;
   display: flex;
   overflow: hidden;
-  padding: 0 6% 0.5%;
+  padding: 0 0 0.5%;
   background-color: var(--md-sys-color-surface-container-low);
 }
 
 .player-container {
   flex: 1;
   display: flex;
-  padding: 16px;
+  padding: 12px 16px;
   gap: 16px;
   overflow: hidden;
   background-color: var(--md-sys-color-surface-container);
@@ -704,21 +704,27 @@ onUnmounted(async () => {
   flex: 1;
   display: flex;
   gap: max(10px, min((41vw - 600px), 2vw));
-  margin-bottom: 16px;
+  /* margin-bottom: 8px; */
   min-height: 0;
 }
 
-/* 下方区域：进度条和控制按钮 */
+/* 下方区域：控制按钮 */
 .player-lower {
   display: flex;
   flex-direction: column;
   gap: 0px;
 }
 
+.global-progress-bar {
+  width: calc(100% + 32px);
+  margin-left: -16px;
+  margin-right: -16px;
+}
+
 /* 左侧：专辑封面和歌曲信息 */
 .player-left {
   flex: 0 0 min(600px, 30vw);
-  margin-left: 2vw;
+  margin-left: 6vw;
   max-width: 600px;
   display: flex;
   flex-direction: column;
@@ -731,6 +737,7 @@ onUnmounted(async () => {
   flex: 1;
   min-width: 0;
   position: relative;
+  margin-right: 6vw;
 }
 
 .view-controls-container {

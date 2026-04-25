@@ -5,15 +5,16 @@
          @mousedown="handleMouseDown"
          @mouseenter="isHovering = true"
          @mouseleave="handleMouseLeave"
+         @mousemove="handleMouseMoveHover"
          :class="{ 'is-hovering': isHovering, 'is-dragging': isDragging }">
       <div class="progress-bar" ref="progressBar">
         <div class="progress-bar-fill" :style="{ width: `${displayPercent}%` }"></div>
         <div class="progress-bar-handle" :style="{ left: `${displayPercent}%` }"></div>
+        <!-- 悬停/拖动时间提示 - 跟随真实滑柄位置 -->
+        <div v-if="isHovering || isDragging" class="hover-time-tooltip" :style="{ left: `${displayPercent}%` }">
+          {{ formatTime(displayTime) }} / {{ formatTime(playerStore.duration) }}
+        </div>
       </div>
-    </div>
-    <div class="time-display">
-      <span class="time-current">{{ formatTime(displayTime) }}</span>
-      <span class="time-duration">{{ formatTime(playerStore.duration) }}</span>
     </div>
   </div>
 </template>
@@ -29,6 +30,23 @@ const isDragging = ref(false)
 const isHovering = ref(false)
 const dragPercent = ref(0)
 const pendingSeek = ref(false) // 标记是否有待完成的 seek 操作
+const hoverPercent = ref(0)
+const hoverTime = computed(() => {
+  if (playerStore.duration === 0) return 0
+  return (hoverPercent.value / 100) * playerStore.duration
+})
+
+// 提示显示的位置和时间的计算属性
+const tooltipPercent = computed(() => {
+  if (isDragging.value) return dragPercent.value
+  return hoverPercent.value
+})
+
+const tooltipTime = computed(() => {
+  if (playerStore.duration === 0) return 0
+  if (isDragging.value) return (dragPercent.value / 100) * playerStore.duration
+  return (hoverPercent.value / 100) * playerStore.duration
+})
 
 const progressPercent = computed(() => {
   if (playerStore.duration === 0) return 0
@@ -105,6 +123,13 @@ const handleMouseUp = () => {
   document.removeEventListener('mouseup', handleMouseUp)
 }
 
+const handleMouseMoveHover = (event: MouseEvent) => {
+  if (!progressBarWrapper.value || isDragging.value) return
+  const rect = progressBarWrapper.value.getBoundingClientRect()
+  const percent = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100))
+  hoverPercent.value = percent
+}
+
 const handleMouseLeave = () => {
   if (!isDragging.value) {
     isHovering.value = false
@@ -130,31 +155,33 @@ onUnmounted(() => {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .progress-bar-wrapper {
   width: 100%;
-  padding: 6px 0;
+  height: 16px;
+  display: flex;
+  align-items: center;
   cursor: pointer;
   position: relative;
 }
 
 .progress-bar {
   width: 100%;
-  height: 4px;
+  height: 2px;
   background-color: var(--md-sys-color-surface-variant);
-  border-radius: 2px;
+  border-radius: 1px;
   overflow: visible;
   position: relative;
-  transition: transform 0.15s ease;
+  transition: transform 0.2s ease;
   transform-origin: center center;
 }
 
-/* 悬停时扩大进度条高度 - 使用 transform 避免重排 */
+/* 悬停时扩大进度条高度 - 使用 transform 避免影响布局 */
 .progress-bar-wrapper.is-hovering .progress-bar,
 .progress-bar-wrapper.is-dragging .progress-bar {
-  transform: scaleY(1.5);
+  transform: scaleY(2);
 }
 
 .progress-bar-fill {
@@ -163,36 +190,36 @@ onUnmounted(() => {
   left: 0;
   height: 100%;
   background-color: var(--md-sys-color-primary);
-  border-radius: 2px;
+  border-radius: inherit;
   transition: width 0.1s linear;
 }
 
-/* 拖动手柄 */
+/* 拖动手柄 - 网易云风格小圆点 */
 .progress-bar-handle {
   position: absolute;
   top: 50%;
-  width: 12px;
-  height: 12px;
+  width: 8px;
+  height: 8px;
   background-color: var(--md-sys-color-primary);
   border-radius: 50%;
-  transform: translate(-50%, -50%);
-  opacity: 0;
-  transition: opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transform: translate(-50%, -50%) scale(0);
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   pointer-events: none;
+  opacity: 0;
 }
 
-/* 悬停时显示手柄 - 添加 scaleY(0.667) 抵消父元素的 scaleY(1.5) 保持圆形 */
+/* 悬停时显示手柄 - 添加 scaleY(0.5) 抵消父元素的 scaleY(2) 保持圆形 */
 .progress-bar-wrapper.is-hovering .progress-bar-handle,
 .progress-bar-wrapper.is-dragging .progress-bar-handle {
   opacity: 1;
-  transform: translate(-50%, -50%) scaleY(0.667);
+  transform: translate(-50%, -50%) scale(1) scaleY(0.5);
 }
 
 /* 拖动时手柄放大 */
 .progress-bar-wrapper.is-dragging .progress-bar-handle {
-  transform: translate(-50%, -50%) scale(1.3) scaleY(0.667);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+  transform: translate(-50%, -50%) scale(1.2) scaleY(0.5);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 
 /* 拖动时的视觉反馈 */
@@ -204,10 +231,34 @@ onUnmounted(() => {
   transition: none;
 }
 
-.time-display {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: var(--md-sys-color-on-surface-variant);
+/* 悬停时间提示 */
+.hover-time-tooltip {
+  position: absolute;
+  top: -28px;
+  transform: translateX(-50%) scaleY(0.5);
+  transform-origin: center bottom;
+  background-color: var(--md-sys-color-inverse-surface);
+  color: var(--md-sys-color-inverse-on-surface);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 100;
+  opacity: 0;
+  animation: tooltipFadeIn 0.15s ease forwards;
 }
+
+@keyframes tooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scaleY(0.5) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scaleY(0.5) translateY(0);
+  }
+}
+
+
 </style>

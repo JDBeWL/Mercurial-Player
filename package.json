@@ -1,7 +1,7 @@
 {
   "name": "mercurial-player",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "license": "GPL-3.0",
   "type": "module",
   "scripts": {
@@ -17,33 +17,32 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
-    "@fontsource-variable/material-symbols-rounded": "^5.2.39",
-    "@fontsource/roboto": "^5.2.10",
     "@material/material-color-utilities": "^0.3.0",
     "@tauri-apps/api": "^2.10.1",
-    "@tauri-apps/plugin-dialog": "^2.6.0",
-    "@tauri-apps/plugin-fs": "^2.4.5",
-    "@tauri-apps/plugin-global-shortcut": "^2.0.0",
-    "@tauri-apps/plugin-http": "^2.5.7",
-    "@tauri-apps/plugin-opener": "^2.0.0",
-    "@tauri-apps/plugin-process": "^2.0.0",
-    "@tauri-apps/plugin-store": "^2.0.0",
-    "@tauri-apps/plugin-updater": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.7.0",
+    "@tauri-apps/plugin-fs": "^2.5.0",
+    "@tauri-apps/plugin-global-shortcut": "^2.3.1",
+    "@tauri-apps/plugin-http": "^2.5.8",
+    "@tauri-apps/plugin-opener": "^2.5.3",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-store": "^2.4.2",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "pinia": "^2.1.6",
-    "vue": "^3.3.4",
+    "vue": "^3.5.33",
     "vue-i18n": "^9.14.5"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1",
-    "@types/node": "^25.0.3",
-    "@vitejs/plugin-vue": "^5.0.0",
-    "@vitest/coverage-v8": "4.0.16",
-    "@vue/test-utils": "^2.2.7",
+    "@types/node": "^25.6.0",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "@vitest/coverage-v8": "^4.1.5",
+    "@vue/test-utils": "^2.4.8",
+    "esbuild": "^0.28.0",
     "happy-dom": "^20.0.11",
-    "sass": "^1.64.2",
-    "typescript": "^5.9.3",
-    "vite": "^6.0.0",
-    "vitest": "^4.0.16",
-    "vue-tsc": "^3.2.1"
+    "sass": "^1.99.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10",
+    "vitest": "^4.1.5",
+    "vue-tsc": "^3.2.7"
   }
 }

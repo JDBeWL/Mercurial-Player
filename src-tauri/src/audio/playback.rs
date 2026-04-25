@@ -540,6 +540,7 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
         if let Some(ref mixer_sink) = *stream_guard {
             let mixer_sr = mixer_sink.config().sample_rate();
             let mixer_ch = mixer_sink.config().channel_count();
+            #[cfg(debug_assertions)]
             let source_sr = source.sample_rate();
             #[cfg(debug_assertions)]
             println!("Source sample_rate: {source_sr}, Mixer sample_rate: {mixer_sr}, Mixer channels: {mixer_ch}");

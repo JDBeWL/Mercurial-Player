@@ -78,6 +78,7 @@ const visibleTabs = computed(() => {
   display: flex;
   overflow: hidden;
   background-color: var(--md-sys-color-surface-container-low);
+  padding: 0 6vw;
 }
 
 .settings-content {

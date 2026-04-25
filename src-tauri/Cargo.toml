@@ -1,6 +1,6 @@
 [package]
 name = "mercurial-player"
-version = "1.1.0"
+version = "1.2.0"
 description = "A music player by JDBeWL"
 authors = ["jdbEwl"]
 license = "GPL-3.0"
@@ -27,16 +27,17 @@ symphonia = { version = "0.5", features = ["all", "opt-simd"] }
 rubato = "0.15"
 rayon = "1"
 spectrum-analyzer = "1.7"
+tantivy = "0.25"
 log = "0.4"
 tauri-plugin-log = "2"
-tauri-plugin-dialog = "2.6"
-tauri-plugin-fs = "2.4"
+tauri-plugin-dialog = "2.7"
+tauri-plugin-fs = "2.5"
 tauri-plugin-http = { version = "2.5", features = ["stream"] }
-tauri-plugin-opener = "2"
-tauri-plugin-process = "2"
+tauri-plugin-opener = "2.5"
+tauri-plugin-process = "2.3"
 tauri-plugin-updater = "2"
-tauri-plugin-store = "2"
-tauri-plugin-global-shortcut = "2"
+tauri-plugin-store = "2.4"
+tauri-plugin-global-shortcut = "2.3"
 
 crossbeam-channel = "0.5"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

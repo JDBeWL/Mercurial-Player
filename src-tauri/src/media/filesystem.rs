@@ -2,7 +2,8 @@
 //!
 //! 提供目录读取、文件检查等功能。
 
-use super::metadata::{get_track_metadata_internal, Playlist};
+use super::metadata::{flush_metadata_cache, get_track_metadata_internal, Playlist};
+use super::tantivy_index;
 use crate::config::AppConfig;
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -78,6 +79,23 @@ pub fn get_all_audio_files_from_dirs(paths: &[String], config: &AppConfig) -> Re
             all_playlists.extend(playlists);
         } else if let Some(playlist) = scan_single_playlist(dir) {
             all_playlists.push(playlist);
+        }
+    }
+    
+    // 扫描完成后，批量保存内存缓存到磁盘
+    if let Err(e) = flush_metadata_cache() {
+        log::warn!("批量保存元数据缓存失败: {}", e);
+    } else {
+        log::info!("元数据缓存已批量保存到磁盘");
+    }
+    
+    // 将所有音轨添加到 Tantivy 索引
+    let all_tracks: Vec<_> = all_playlists.iter().flat_map(|p| p.files.clone()).collect();
+    if !all_tracks.is_empty() {
+        if let Err(e) = tantivy_index::index_tracks_batch(&all_tracks) {
+            log::warn!("添加到 Tantivy 索引失败: {}", e);
+        } else {
+            log::info!("已添加 {} 首歌曲到 Tantivy 索引", all_tracks.len());
         }
     }
 

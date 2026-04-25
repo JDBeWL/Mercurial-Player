@@ -29,7 +29,7 @@ struct CachedMetadata {
 }
 
 /// 元数据缓存
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 struct MetadataCache {
     /// 版本号，用于缓存格式升级
     version: u32,
@@ -118,40 +118,29 @@ fn get_file_modified_time(path: &Path) -> Option<u64> {
 
 /// 从缓存获取元数据（如果文件未修改）
 pub fn get_metadata_from_cache(path: &str) -> Option<TrackMetadata> {
-    let cache = load_metadata_cache();
+    let cache = get_memory_cache();
     let cached = cache.entries.get(path)?;
     
     // 检查文件是否被修改
     let current_modified = get_file_modified_time(Path::new(path))?;
     if current_modified != cached.modified_time {
-        log::debug!("文件已修改，需要重新提取元数据: {}", path);
+        log::debug!("文件已修改，缓存失效: {}", path);
         return None;
     }
+    
+    log::debug!("缓存命中: {}", path);
     
     Some(cached.metadata.clone())
 }
 
-/// 将元数据保存到缓存
+/// 将元数据保存到缓存（立即写入磁盘，适合单条保存）
 pub fn save_metadata_to_cache(path: &str, metadata: &TrackMetadata) {
-    let mut cache = load_metadata_cache();
+    save_metadata_to_memory_cache(path, metadata);
     
-    if let Some(modified_time) = get_file_modified_time(Path::new(path)) {
-        let cached = CachedMetadata {
-            metadata: metadata.clone(),
-            modified_time,
-            cached_at: std::time::SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-        };
-        
-        cache.entries.insert(path.to_string(), cached);
-        
-        if let Err(e) = save_metadata_cache(&cache) {
-            log::warn!("保存元数据缓存失败: {}", e);
-        } else {
-            log::debug!("元数据已缓存: {}", path);
-        }
+    if let Err(e) = flush_memory_cache() {
+        log::warn!("保存元数据缓存到磁盘失败: {}", e);
+    } else {
+        log::debug!("元数据已缓存: {}", path);
     }
 }
 
@@ -197,6 +186,62 @@ pub fn get_metadata_cache_stats() -> (usize, u64) {
 
 // 全局自定义缓存路径
 static CUSTOM_CACHE_PATH: Mutex<Option<String>> = Mutex::new(None);
+
+// 全局内存缓存，用于批量保存
+static MEMORY_CACHE: Mutex<Option<MetadataCache>> = Mutex::new(None);
+
+/// 获取内存缓存（如果不存在则加载）
+fn get_memory_cache() -> MetadataCache {
+    if let Ok(lock) = MEMORY_CACHE.lock() {
+        if let Some(cache) = lock.as_ref() {
+            return cache.clone();
+        }
+    }
+    let cache = load_metadata_cache();
+    if let Ok(mut lock) = MEMORY_CACHE.lock() {
+        *lock = Some(cache.clone());
+    }
+    cache
+}
+
+/// 将内存缓存持久化到磁盘
+fn flush_memory_cache() -> Result<(), String> {
+    if let Ok(lock) = MEMORY_CACHE.lock() {
+        if let Some(cache) = lock.as_ref() {
+            return save_metadata_cache(cache);
+        }
+    }
+    Ok(())
+}
+
+/// 保存元数据到内存缓存（不立即写入磁盘）
+pub fn save_metadata_to_memory_cache(path: &str, metadata: &TrackMetadata) {
+    if let Some(modified_time) = get_file_modified_time(Path::new(path)) {
+        let cached = CachedMetadata {
+            metadata: metadata.clone(),
+            modified_time,
+            cached_at: std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+        
+        if let Ok(mut lock) = MEMORY_CACHE.lock() {
+            if lock.is_none() {
+                *lock = Some(load_metadata_cache());
+            }
+            if let Some(cache) = lock.as_mut() {
+                cache.entries.insert(path.to_string(), cached);
+                log::debug!("元数据已加入内存缓存: {}", path);
+            }
+        }
+    }
+}
+
+/// 批量保存内存缓存到磁盘
+pub fn flush_metadata_cache() -> Result<(), String> {
+    flush_memory_cache()
+}
 
 /// 设置自定义封面缓存路径
 pub fn set_cover_cache_path(path: Option<String>) {
@@ -426,18 +471,16 @@ fn cover_extension_from_mime(mime: Option<&str>) -> &'static str {
     }
 }
 
-fn get_cover_cache_path(audio_path: &Path, picture: &Picture) -> Result<PathBuf, String> {
+/// 获取封面数据的哈希值，用于识别相同的封面
+fn get_picture_hash(picture: &Picture) -> u64 {
     let mut hasher = DefaultHasher::new();
-    audio_path.to_string_lossy().hash(&mut hasher);
+    picture.data().hash(&mut hasher);
+    hasher.finish()
+}
 
-    let modified_secs = fs::metadata(audio_path)
-        .ok()
-        .and_then(|meta| meta.modified().ok())
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map_or(0_u64, |d| d.as_secs());
-    modified_secs.hash(&mut hasher);
-
-    let hash = hasher.finish();
+fn get_cover_cache_path(_audio_path: &Path, picture: &Picture) -> Result<PathBuf, String> {
+    // 使用封面数据哈希作为缓存键，相同封面的不同歌曲会共享缓存
+    let hash = get_picture_hash(picture);
     let ext = cover_extension_from_mime(picture.mime_type().map(lofty::picture::MimeType::as_str));
     let cache_dir = cover_cache_dir();
     fs::create_dir_all(&cache_dir).map_err(|e| format!("无法创建封面缓存目录: {e}"))?;
@@ -473,23 +516,46 @@ pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> 
     // 缓存未命中，提取元数据
     let metadata = get_track_metadata_with_options(path, false)?;
     
-    // 保存到缓存
-    save_metadata_to_cache(path, &metadata);
+    // 保存到内存缓存（不立即写入磁盘，批量保存更高效）
+    save_metadata_to_memory_cache(path, &metadata);
     
     Ok(metadata)
 }
 
 /// 获取音轨元数据（包含封面路径）
 pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, String> {
-    // 首先尝试从缓存获取（不包含封面路径）
-    let mut metadata = if let Some(cached) = get_metadata_from_cache(path) {
-        log::debug!("使用缓存的元数据（需要补充封面）: {}", path);
-        cached
-    } else {
-        // 缓存未命中，提取元数据（不包含封面）
-        let metadata = get_track_metadata_with_options(path, false)?;
-        metadata
-    };
+    // 首先尝试从缓存获取
+    if let Some(mut cached) = get_metadata_from_cache(path) {
+        log::debug!("使用缓存的元数据: {}", path);
+        
+        // 如果缓存中已有封面路径且封面文件存在，直接返回
+        if let Some(ref cover_path) = cached.cover_path {
+            if Path::new(cover_path).exists() {
+                log::debug!("缓存的封面文件存在，直接使用: {}", cover_path);
+                return Ok(cached);
+            } else {
+                log::debug!("缓存的封面文件不存在，需要重新提取: {}", cover_path);
+                cached.cover_path = None;
+            }
+        }
+        
+        // 缓存中没有封面或封面文件不存在，补充提取封面
+        let file_path = Path::new(path);
+        if let Ok(tagged_file) = Probe::open(file_path).and_then(|f| f.read()) {
+            if let Some(tag) = tagged_file.primary_tag() {
+                if let Some(picture) = tag.pictures().first() {
+                    cached.cover_path = extract_cover_to_cache(file_path, picture).ok();
+                }
+            }
+        }
+        
+        // 更新缓存（包含封面路径）
+        save_metadata_to_cache(path, &cached);
+        return Ok(cached);
+    }
+    
+    // 缓存未命中，提取元数据（不包含封面）
+    let mut metadata = get_track_metadata_with_options(path, false)?;
     
     // 提取封面路径
     let file_path = Path::new(path);
