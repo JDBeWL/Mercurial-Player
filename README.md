@@ -74,24 +74,25 @@
 ## 前端
 | 技术 | 版本 |
 |------|------|
-| Vue | ^3.3.4 |
-| Vite | ^6.0.0 |
+| Vue | ^3.5.33 |
+| Vite | ^8.0.10 |
 | Pinia | ^2.1.6 |
 | Vue I18n | ^9.14.5 |
-| Sass | ^1.64.2 |
-| TypeScript | ^5.9.3 |
-| Tauri API | ^2.9.1 |
-| @vitejs/plugin-vue | ^5.0.0 |
-| Vitest | ^4.0.16 |
+| Sass | ^1.99.0 |
+| TypeScript | ^6.0.3 |
+| Tauri API | ^2.10.1 |
+| @vitejs/plugin-vue | ^6.0.6 |
+| Vitest | ^4.1.5 |
+| esbuild | ^0.28.0 |
 
 ## 后端 (Rust)
 | 技术 | 版本 | 说明 |
 |------|------|------|
 | Rust | 1.92+ |
-| Tauri | 2.9 |
+| Tauri | 2.10 |
 | Symphonia | 0.5 | 音频解码器 |
-| Rodio | 0.21 | 音频播放引擎 |
-| CPAL | 0.16 |
+| Rodio | 0.22 | 音频播放引擎 |
+| CPAL | 0.17 |
 | WASAPI | 0.22 | Windows独占模式音频 |
 | Windows API | 0.61 | Win32 API绑定 |
 | Rubato | 0.15 | 音频重采样 |
