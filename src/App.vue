@@ -17,6 +17,9 @@
       </div>
       <!-- 右侧控制区 -->
       <div class="nav-right">
+        <button class="icon-button" :class="{ active: configStore.lyrics?.desktopLyrics?.enabled }" data-tauri-drag-region="false" @click="toggleDesktopLyrics" :title="$t('config.toggleDesktopLyrics')">
+          <span class="material-symbols-rounded">subtitles</span>
+        </button>
         <button class="icon-button" data-tauri-drag-region="false" @click="configStore.toggleMiniMode" title="Mini模式">
           <span class="material-symbols-rounded">picture_in_picture_alt</span>
         </button>
@@ -217,6 +220,7 @@ const getScreenRefreshRate = (): Promise<number> => {
 import { useTrackInfo } from './composables/useTrackInfo'
 import { useLyrics } from './composables/useLyrics'
 import { useAutoUpdate } from './composables/useAutoUpdate'
+import { useDesktopLyrics } from './composables/useDesktopLyrics'
 import { useI18n } from 'vue-i18n'
 import { setLocale } from './i18n'
 import { pluginManager } from './plugins'
@@ -239,6 +243,8 @@ const { getTrackTitle, getTrackArtist, watchTrack } = useTrackInfo()
 
 // 获取歌词来源
 const { lyricsSource } = useLyrics()
+
+useDesktopLyrics()
 
 const showLibrary = ref(false)
 const showPlaylist = ref(false)
@@ -420,6 +426,11 @@ const toggleSettings = () => {
 
 const togglePlaylist = () => {
   showPlaylist.value = !showPlaylist.value
+}
+
+const toggleDesktopLyrics = () => {
+  const current = configStore.lyrics?.desktopLyrics?.enabled ?? false
+  configStore.setDesktopLyricsConfig({ enabled: !current })
 }
 
 const minimizeWindow = async () => {

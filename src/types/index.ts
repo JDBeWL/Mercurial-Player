@@ -106,6 +106,14 @@ export interface LyricsConfig {
   lyricsAlignment: string
   lyricsFontFamily: string
   lyricsStyle: string
+  desktopLyrics?: DesktopLyricsConfig
+}
+
+export interface DesktopLyricsConfig {
+  enabled: boolean
+  locked: boolean
+  fontSize: number
+  colorPreset: 'dark' | 'light' | 'blue' | 'pink' | 'orange' | 'green'
 }
 
 export interface UIConfig {

@@ -309,6 +309,21 @@ fn main() {
             taskbar::commands::update_taskbar_state,
             #[cfg(windows)]
             taskbar::commands::set_taskbar_stopped,
+            // 桌面歌词命令（Windows Only）
+            #[cfg(windows)]
+            taskbar::desktop_lyrics::show_desktop_lyrics,
+            #[cfg(windows)]
+            taskbar::desktop_lyrics::hide_desktop_lyrics,
+            #[cfg(windows)]
+            taskbar::desktop_lyrics::update_desktop_lyric,
+            #[cfg(windows)]
+            taskbar::desktop_lyrics::set_desktop_lyrics_locked,
+            #[cfg(windows)]
+            taskbar::desktop_lyrics::set_desktop_lyrics_font_size,
+            #[cfg(windows)]
+            taskbar::desktop_lyrics::set_desktop_lyrics_color_preset,
+            #[cfg(windows)]
+            taskbar::desktop_lyrics::is_desktop_lyrics_visible,
             // 系统版本命令（保留 get_app_version 用于前端显示）
             system::commands::get_app_version,
         ])

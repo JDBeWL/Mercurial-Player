@@ -78,6 +78,117 @@
       </div>
     </div>
 
+    <div class="settings-section">
+      <h4 class="section-title">{{ $t('config.desktopLyrics') }}</h4>
+      
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.enableDesktopLyrics') }}</span>
+          <span class="setting-description">{{ $t('config.enableDesktopLyricsDesc') }}</span>
+        </div>
+        <div class="switch" :class="{ active: desktopLyricsConfig.enabled }" @click="toggleDesktopLyrics">
+          <div class="switch-track"></div>
+          <div class="switch-handle"></div>
+        </div>
+      </div>
+
+      <template v-if="desktopLyricsConfig.enabled">
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-label">{{ $t('config.lockDesktopLyrics') }}</span>
+            <span class="setting-description">{{ $t('config.lockDesktopLyricsDesc') }}</span>
+          </div>
+          <div class="switch" :class="{ active: desktopLyricsConfig.locked }" @click="toggleDesktopLyricsLock">
+            <div class="switch-track"></div>
+            <div class="switch-handle"></div>
+          </div>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-label">{{ $t('config.desktopLyricsFontSize') }}</span>
+            <span class="setting-description">{{ $t('config.desktopLyricsFontSizeDesc') }}</span>
+          </div>
+          <div class="font-size-control">
+            <input
+              type="range"
+              class="font-size-slider"
+              :min="16"
+              :max="48"
+              :step="1"
+              :value="desktopLyricsConfig.fontSize"
+              @input="handleFontSizeChange"
+              :style="fontSizeSliderStyle"
+            />
+            <span class="font-size-value">{{ desktopLyricsConfig.fontSize }}px</span>
+          </div>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-label">{{ $t('config.desktopLyricsColorPreset') }}</span>
+            <span class="setting-description">{{ $t('config.desktopLyricsColorPresetDesc') }}</span>
+          </div>
+          <div class="preset-buttons">
+            <button
+              class="preset-btn"
+              :class="{ active: desktopLyricsConfig.colorPreset === 'dark' }"
+              @click="setColorPreset('dark')"
+              :title="$t('config.colorPresetDark')"
+            >
+              <span class="preset-preview dark-preview"></span>
+              <span class="preset-label">{{ $t('config.colorPresetDark') }}</span>
+            </button>
+            <button
+              class="preset-btn"
+              :class="{ active: desktopLyricsConfig.colorPreset === 'light' }"
+              @click="setColorPreset('light')"
+              :title="$t('config.colorPresetLight')"
+            >
+              <span class="preset-preview light-preview"></span>
+              <span class="preset-label">{{ $t('config.colorPresetLight') }}</span>
+            </button>
+            <button
+              class="preset-btn"
+              :class="{ active: desktopLyricsConfig.colorPreset === 'blue' }"
+              @click="setColorPreset('blue')"
+              :title="$t('config.colorPresetBlue') || '深蓝'"
+            >
+              <span class="preset-preview blue-preview"></span>
+              <span class="preset-label">{{ $t('config.colorPresetBlue') || '深蓝' }}</span>
+            </button>
+            <button
+              class="preset-btn"
+              :class="{ active: desktopLyricsConfig.colorPreset === 'pink' }"
+              @click="setColorPreset('pink')"
+              :title="$t('config.colorPresetPink') || '粉色'"
+            >
+              <span class="preset-preview pink-preview"></span>
+              <span class="preset-label">{{ $t('config.colorPresetPink') || '粉色' }}</span>
+            </button>
+            <button
+              class="preset-btn"
+              :class="{ active: desktopLyricsConfig.colorPreset === 'orange' }"
+              @click="setColorPreset('orange')"
+              :title="$t('config.colorPresetOrange') || '橙色'"
+            >
+              <span class="preset-preview orange-preview"></span>
+              <span class="preset-label">{{ $t('config.colorPresetOrange') || '橙色' }}</span>
+            </button>
+            <button
+              class="preset-btn"
+              :class="{ active: desktopLyricsConfig.colorPreset === 'green' }"
+              @click="setColorPreset('green')"
+              :title="$t('config.colorPresetGreen') || '绿色'"
+            >
+              <span class="preset-preview green-preview"></span>
+              <span class="preset-label">{{ $t('config.colorPresetGreen') || '绿色' }}</span>
+            </button>
+          </div>
+        </div>
+      </template>
+    </div>
+
     <!-- 可视化设置 -->
     <div class="settings-section">
       <div class="section-header">
@@ -125,7 +236,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useConfigStore } from '../../stores/config'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
@@ -365,6 +476,49 @@ const toggleSetting = async (key) => {
   await saveConfig()
 }
 
+const desktopLyricsConfig = computed({
+  get: () => {
+    if (!configStore.lyrics?.desktopLyrics) {
+      return { enabled: false, locked: true, fontSize: 28, colorPreset: 'dark' }
+    }
+    return configStore.lyrics.desktopLyrics
+  },
+  set: (value) => {
+    configStore.setDesktopLyricsConfig(value)
+  }
+})
+
+const fontSizeSliderStyle = computed(() => {
+  const min = 16
+  const max = 48
+  const value = desktopLyricsConfig.value.fontSize
+  const percentage = ((value - min) / (max - min)) * 100
+  return {
+    background: `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`
+  }
+})
+
+const toggleDesktopLyrics = async () => {
+  configStore.setDesktopLyricsConfig({ enabled: !desktopLyricsConfig.value.enabled })
+  await saveConfig()
+}
+
+const toggleDesktopLyricsLock = async () => {
+  configStore.setDesktopLyricsConfig({ locked: !desktopLyricsConfig.value.locked })
+  await saveConfig()
+}
+
+const handleFontSizeChange = async (event) => {
+  const size = parseInt(event.target.value, 10)
+  configStore.setDesktopLyricsConfig({ fontSize: size })
+  await saveConfig()
+}
+
+const setColorPreset = async (preset) => {
+  configStore.setDesktopLyricsConfig({ colorPreset: preset })
+  await saveConfig()
+}
+
 onMounted(() => {
   loadSystemFonts()
   
@@ -571,6 +725,123 @@ onMounted(() => {
 
 .filled-tonal-button .material-symbols-rounded {
   font-size: 20px;
+}
+
+.font-size-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 200px;
+}
+
+.font-size-slider {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.font-size-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  background: var(--md-sys-color-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.font-size-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+}
+
+.font-size-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  background: var(--md-sys-color-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.font-size-value {
+  min-width: 48px;
+  text-align: right;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+}
+
+.preset-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  justify-content: flex-end;
+  max-width: 400px;
+}
+
+.preset-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-small);
+  background: var(--md-sys-color-surface-container-highest);
+  color: var(--md-sys-color-on-surface);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.preset-btn:hover {
+  background: var(--md-sys-color-surface-container);
+}
+
+.preset-btn.active {
+  border-color: var(--md-sys-color-primary);
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+.preset-preview {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.dark-preview {
+  background: #1a1a1a;
+}
+
+.light-preview {
+  background: #f5f5f5;
+}
+
+.blue-preview {
+  background: #0288d1;
+}
+
+.pink-preview {
+  background: #e91e63;
+}
+
+.orange-preview {
+  background: #f57c00;
+}
+
+.green-preview {
+  background: #388e3c;
+}
+
+.preset-label {
+  font-size: 12px;
 }
 
 </style>

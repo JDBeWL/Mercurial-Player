@@ -11,6 +11,9 @@ pub use windows_impl::*;
 #[cfg(windows)]
 pub mod commands;
 
+#[cfg(windows)]
+pub mod desktop_lyrics;
+
 /// 播放状态枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackState {

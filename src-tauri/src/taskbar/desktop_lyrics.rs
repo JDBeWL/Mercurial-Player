@@ -1,240 +1,1466 @@
-//! 桌面歌词显示模块
+//! 妗岄潰姝岃瘝鏄剧ず妯″潡
 //!
-//! 在Windows任务栏左下角显示当前播放的歌词
+//! 鍦ㄥ睆骞曞簳閮ㄦ樉绀轰竴涓疆椤剁獥鍙ｏ紝灞曠ず褰撳墠鎾斁姝岃瘝銆?
+//! 浣跨敤 Direct2D 娓叉煋锛岀‘淇濇枃瀛楄竟缂樺钩婊戞棤姣涘埡銆?
+//! 鏀寔鐐瑰嚮绌块€忥紙閿佸畾妯″紡锛夊拰椤堕儴鎷栨嫿锛堣В閿佹ā寮忥級銆?
+//! 鎮诞鏃舵樉绀洪攣瀹氭寜閽拰鍏抽棴鎸夐挳銆?
+//! 鏀寔鍙岃姝岃瘝銆?
 
 #![allow(unsafe_code)]
 
+use std::collections::HashMap;
+use std::cell::RefCell;
+use std::mem::size_of;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::{Arc, Mutex, OnceLock};
+use tauri::command;
+use tauri::Emitter;
+use serde::Deserialize;
+
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM, COLORREF};
-use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, EndPaint, FW_NORMAL, HBRUSH, HFONT,
-    PAINTSTRUCT, SetBkMode, SetTextColor, TRANSPARENT, HGDIOBJ, FONT_CHARSET, FONT_OUTPUT_PRECISION,
-    FONT_CLIP_PRECISION, FONT_QUALITY,
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
+use windows::Win32::Graphics::Direct2D::{
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_FACTORY_TYPE_SINGLE_THREADED,
+    D2D1_FEATURE_LEVEL_DEFAULT, D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT,
+    D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+    D2D1CreateFactory, ID2D1DCRenderTarget, ID2D1Factory, ID2D1SolidColorBrush,
+};
+use windows::Win32::Graphics::DirectWrite::{
+    DWriteCreateFactory, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL,
+    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_MEASURING_MODE_NATURAL,
+    DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER,
+    DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_RANGE, DWRITE_WORD_WRAPPING_NO_WRAP,
+    DWRITE_TEXT_METRICS, DWRITE_HIT_TEST_METRICS, IDWriteFactory, IDWriteFontCollection, IDWriteTextFormat,
+    IDWriteTextLayout,
+};
+
+
+
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+use windows::Win32::Graphics::Gdi::{
+    BeginPaint, BLENDFUNCTION, CreateCompatibleDC, CreateDIBSection, CreateFontW,
+    DeleteDC, DeleteObject, EndPaint,
+    InvalidateRect, SelectObject, ScreenToClient,
+    SetBkMode, TRANSPARENT,
+    BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
+    FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_NORMAL,
+    HBRUSH, HFONT, HGDIOBJ, PAINTSTRUCT, RGBQUAD,
+};
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+use windows_numerics::Vector2;
+use unicode_segmentation::UnicodeSegmentation;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect,
-    PostQuitMessage, RegisterClassW, SetLayeredWindowAttributes, SetWindowPos,
-    ShowWindow, CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST, LWA_ALPHA,
-    SWP_NOACTIVATE, SW_HIDE, SW_SHOWNOACTIVATE,
-    WM_DESTROY, WM_PAINT, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, GetClientRect, GetCursorPos, GetMessageW, GetWindowLongPtrW,
+    GetWindowRect, IsWindowVisible, PostMessageW, PostQuitMessage, RegisterClassW,
+    SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, DispatchMessageW,
+    UpdateLayeredWindow, SetTimer, KillTimer,
+    CS_HREDRAW, CS_VREDRAW, GWL_EXSTYLE, HWND_TOPMOST, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT,
+    HTTRANSPARENT,
+    ULW_ALPHA, MSG, SET_WINDOW_POS_FLAGS, SW_HIDE, SW_SHOWNOACTIVATE,
+    WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_NCHITTEST, WM_PAINT, WM_SIZE, WM_USER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WM_TIMER,
 };
 
-/// 全局桌面歌词管理器
-static DESKTOP_LYRICS_MANAGER: OnceLock<Arc<Mutex<DesktopLyricsManager>>> = OnceLock::new();
+const WM_MOUSELEAVE: u32 = 0x02A3;
+#[allow(non_camel_case_types)]
+type DPI_AWARENESS_CONTEXT = *mut core::ffi::c_void;
 
-/// 桌面歌词管理器
-pub struct DesktopLyricsManager {
-    hwnd: isize, // 使用 isize 而不是 HWND 以实现 Send
-    current_lyric: String,
-    is_visible: bool,
-    font: isize,
-    bg_brush: isize,
+unsafe fn set_thread_dpi_awareness_context(ctx: DPI_AWARENESS_CONTEXT) -> DPI_AWARENESS_CONTEXT {
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn SetThreadDpiAwarenessContext(dpiContext: DPI_AWARENESS_CONTEXT) -> DPI_AWARENESS_CONTEXT;
+    }
+    unsafe { SetThreadDpiAwarenessContext(ctx) }
 }
 
-// 手动实现 Send 和 Sync
+unsafe fn get_dpi_for_window(hwnd: HWND) -> u32 {
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetDpiForWindow(hwnd: HWND) -> u32;
+    }
+    unsafe { GetDpiForWindow(hwnd) }
+}
+
+const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: DPI_AWARENESS_CONTEXT =
+    (-4isize) as *mut core::ffi::c_void;
+
+const WM_DL_UPDATE: u32 = WM_USER + 0x100;
+const HOVER_TIMER_ID: usize = 1001;
+const CLOSE_BTN_SIZE: i32 = 28;
+const CLOSE_BTN_MARGIN: i32 = 6;
+const RESIZE_EDGE_WIDTH: i32 = 18;
+const MARQUEE_SPEED_PX_PER_SEC: i32 = 42;
+
+#[derive(Clone, Copy, Debug)]
+struct ColorPreset {
+    text_color: u32,
+    highlight_color: u32,
+    hover_bg_alpha: u8,
+}
+
+const PRESET_DARK: ColorPreset = ColorPreset {
+    text_color: 0x00000000,
+    highlight_color: 0x0000A8E8,
+    hover_bg_alpha: 180,
+};
+
+const PRESET_LIGHT: ColorPreset = ColorPreset {
+    text_color: 0x00FFFFFF,
+    highlight_color: 0x00FBC02D,
+    hover_bg_alpha: 180,
+};
+
+const PRESET_BLUE: ColorPreset = ColorPreset {
+    text_color: 0x0003A9F4,
+    highlight_color: 0x004FC3F7,
+    hover_bg_alpha: 180,
+};
+
+const PRESET_PINK: ColorPreset = ColorPreset {
+    text_color: 0x00E91E63,
+    highlight_color: 0x00FF80AB,
+    hover_bg_alpha: 180,
+};
+
+const PRESET_ORANGE: ColorPreset = ColorPreset {
+    text_color: 0x00FF9800,
+    highlight_color: 0x00FFB74D,
+    hover_bg_alpha: 180,
+};
+
+const PRESET_GREEN: ColorPreset = ColorPreset {
+    text_color: 0x004CAF50,
+    highlight_color: 0x0069F0AE,
+    hover_bg_alpha: 180,
+};
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLyricWord {
+    text: String,
+    start: f32,
+    end: f32,
+}
+
+
+
+
+struct SharedLyricState {
+    current_line: String,
+    sub_line: String,
+    prev_line: String,
+    prev_sub_line: String,
+    current_words: Vec<DesktopLyricWord>,
+    font_size: i32,
+    is_locked: bool,
+    is_hovered: bool,
+    is_playing: bool,
+    color_preset: ColorPreset,
+    fade_alpha: f32,
+    fade_pending: bool,
+    marquee_active: bool,
+    marquee_start_ms: i64,
+    visual_time: f32,
+    target_time: f32,
+    visual_time_last_ms: i64,
+    lyric_progress: f32,
+    smooth_lyric_progress: f32,
+    render_pending: bool,
+}
+
+static FONT_CACHE: OnceLock<Mutex<HashMap<i32, usize>>> = OnceLock::new();
+
+static SHARED_STATE: OnceLock<Arc<Mutex<SharedLyricState>>> = OnceLock::new();
+static LYRICS_HWND: OnceLock<isize> = OnceLock::new();
+
+thread_local! {
+    static D2D_STATE: RefCell<Option<Direct2DState>> = const { RefCell::new(None) };
+}
+
+struct Direct2DState {
+    dwrite_factory: IDWriteFactory,
+    dc_render_target: ID2D1DCRenderTarget,
+    text_format_cache: HashMap<i32, IDWriteTextFormat>,
+}
+
+impl Direct2DState {
+    unsafe fn new() -> windows::core::Result<Self> {
+        let d2d_factory: ID2D1Factory = unsafe {
+            D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?
+        };
+        let dwrite_factory: IDWriteFactory = unsafe {
+            DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?
+        };
+        let target_props = D2D1_RENDER_TARGET_PROPERTIES {
+            r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX: 96.0,
+            dpiY: 96.0,
+            usage: D2D1_RENDER_TARGET_USAGE_NONE,
+            minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
+        };
+        let dc_render_target = unsafe { d2d_factory.CreateDCRenderTarget(&target_props)? };
+        unsafe { dc_render_target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE) };
+        Ok(Self {
+            dwrite_factory,
+            dc_render_target,
+            text_format_cache: HashMap::new(),
+        })
+    }
+
+    unsafe fn text_format(&mut self, font_size_scaled: i32) -> windows::core::Result<IDWriteTextFormat> {
+        if let Some(format) = self.text_format_cache.get(&font_size_scaled) {
+            return Ok(format.clone());
+        }
+        let format = unsafe {
+            self.dwrite_factory.CreateTextFormat(
+                w!("Microsoft YaHei"),
+                None::<&IDWriteFontCollection>,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                font_size_scaled.max(1) as f32,
+                w!("zh-cn"),
+            )?
+        };
+        unsafe {
+            let _ = format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            let _ = format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            let _ = format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        }
+        self.text_format_cache.insert(font_size_scaled, format.clone());
+        Ok(format)
+    }
+
+    unsafe fn create_layout(
+        &mut self,
+        text: &[u16],
+        font_size_scaled: i32,
+        width: f32,
+        height: f32,
+    ) -> windows::core::Result<IDWriteTextLayout> {
+        let text = trim_utf16_nul(text);
+        let format = unsafe { self.text_format(font_size_scaled)? };
+        unsafe {
+            self.dwrite_factory.CreateTextLayout(
+                text,
+                &format,
+                width.max(1.0),
+                height.max(1.0),
+            )
+        }
+    }
+}
+
+fn trim_utf16_nul(text: &[u16]) -> &[u16] {
+    if text.last().copied() == Some(0) {
+        &text[..text.len().saturating_sub(1)]
+    } else {
+        text
+    }
+}
+
+fn rect_to_d2d(rect: &RECT) -> D2D_RECT_F {
+    D2D_RECT_F {
+        left: rect.left as f32,
+        top: rect.top as f32,
+        right: rect.right as f32,
+        bottom: rect.bottom as f32,
+    }
+}
+
+fn rounded_rect_to_d2d(rect: &RECT, radius: f32) -> D2D1_ROUNDED_RECT {
+    D2D1_ROUNDED_RECT {
+        rect: rect_to_d2d(rect),
+        radiusX: radius,
+        radiusY: radius,
+    }
+}
+
+fn d2d_color(rgb: u32, alpha: f32) -> D2D1_COLOR_F {
+    D2D1_COLOR_F {
+        r: ((rgb >> 16) & 0xFF) as f32 / 255.0,
+        g: ((rgb >> 8) & 0xFF) as f32 / 255.0,
+        b: (rgb & 0xFF) as f32 / 255.0,
+        a: alpha.clamp(0.0, 1.0),
+    }
+}
+
+fn lerp_d2d_color(from: D2D1_COLOR_F, to: D2D1_COLOR_F, t: f32) -> D2D1_COLOR_F {
+    let t = t.clamp(0.0, 1.0);
+    D2D1_COLOR_F {
+        r: from.r + (to.r - from.r) * t,
+        g: from.g + (to.g - from.g) * t,
+        b: from.b + (to.b - from.b) * t,
+        a: from.a + (to.a - from.a) * t,
+    }
+}
+
+fn hit_test_text_x(layout: &IDWriteTextLayout, pos: u32, trailing: bool) -> Option<f32> {
+    let mut x = 0.0f32;
+    let mut y = 0.0f32;
+    let mut metrics = DWRITE_HIT_TEST_METRICS::default();
+    unsafe {
+        layout
+            .HitTestTextPosition(pos, trailing, &mut x, &mut y, &mut metrics)
+            .ok()?;
+    }
+    Some(x)
+}
+
+fn progress_cluster_phase(text: &[u16], progress: f32) -> Option<f32> {
+    let text = trim_utf16_nul(text);
+    if text.is_empty() {
+        return None;
+    }
+    let progress = progress.clamp(0.0, 1.0);
+    let decoded = String::from_utf16_lossy(text);
+    let graphemes: Vec<&str> = UnicodeSegmentation::graphemes(decoded.as_str(), true).collect();
+    if graphemes.is_empty() {
+        return None;
+    }
+
+    let exact = (graphemes.len() as f32) * progress;
+    let highlighted = exact.floor() as usize;
+    if highlighted >= graphemes.len() {
+        return Some(1.0);
+    }
+
+    let phase = exact - highlighted as f32;
+    Some(phase * phase * (3.0 - 2.0 * phase))
+}
+
+fn progress_clip_end_x(layout: &IDWriteTextLayout, text: &[u16], progress: f32) -> Option<f32> {
+    let text = trim_utf16_nul(text);
+    if text.is_empty() {
+        return None;
+    }
+    let progress = progress.clamp(0.0, 1.0);
+    let decoded = String::from_utf16_lossy(text);
+    let graphemes: Vec<&str> = UnicodeSegmentation::graphemes(decoded.as_str(), true).collect();
+    if graphemes.is_empty() {
+        return None;
+    }
+
+    let exact = (graphemes.len() as f32) * progress;
+    let highlighted = exact.floor() as usize;
+    let current_t = exact - highlighted as f32;
+    if highlighted >= graphemes.len() {
+        return None;
+    }
+
+    let mut utf16_idx = 0usize;
+    for (cluster_idx, grapheme) in graphemes.iter().enumerate() {
+        let len = grapheme.encode_utf16().count();
+        if cluster_idx == highlighted {
+            let start = utf16_idx as u32;
+            let end = (utf16_idx + len) as u32;
+            let start_x = hit_test_text_x(layout, start, false)?;
+            let end_x = hit_test_text_x(layout, end, false)
+                .or_else(|| hit_test_text_x(layout, end.saturating_sub(1), true))?;
+            let eased = current_t * current_t * (3.0 - 2.0 * current_t);
+            return Some(start_x + (end_x - start_x) * eased);
+        }
+        utf16_idx += len;
+    }
+
+    None
+}
+
+fn karaoke_progress_from_words(words: &[DesktopLyricWord], visual_time: f32, fallback: f32) -> f32 {
+    let valid: Vec<&DesktopLyricWord> = words
+        .iter()
+        .filter(|word| !word.text.is_empty() && word.end > word.start)
+        .collect();
+    if valid.is_empty() {
+        return fallback.clamp(0.0, 1.0);
+    }
+
+    let first_start = valid[0].start;
+    let last_end = valid[valid.len() - 1].end;
+    if visual_time <= first_start {
+        return 0.0;
+    }
+    if visual_time >= last_end {
+        return 1.0;
+    }
+
+    let total_units: usize = valid
+        .iter()
+        .map(|word| UnicodeSegmentation::graphemes(word.text.as_str(), true).count())
+        .sum();
+    if total_units == 0 {
+        return fallback.clamp(0.0, 1.0);
+    }
+
+    let mut passed_units = 0.0f32;
+    for word in valid {
+        let units = UnicodeSegmentation::graphemes(word.text.as_str(), true).count() as f32;
+        if visual_time >= word.end {
+            passed_units += units;
+            continue;
+        }
+        if visual_time > word.start {
+            let local = ((visual_time - word.start) / (word.end - word.start)).clamp(0.0, 1.0);
+            passed_units += units * local;
+        }
+        break;
+    }
+
+    (passed_units / total_units as f32).clamp(0.0, 1.0)
+}
+
+fn draw_d2d_lyric_line(
+    state: &mut Direct2DState,
+    text: &[u16],
+    rect: RECT,
+    font_size_scaled: i32,
+    scale: i32,
+    marquee_start_ms: i64,
+    text_color: D2D1_COLOR_F,
+    highlight_color: D2D1_COLOR_F,
+    base_brush: &ID2D1SolidColorBrush,
+    highlight_brush: &ID2D1SolidColorBrush,
+    clip_progress: f32,
+    color_progress: f32,
+    line_duration_ms: Option<i64>,
+) -> Option<bool> {
+    let text_w = measure_text_width_dwrite_with_state(
+        state,
+        text,
+        rect.bottom - rect.top,
+        font_size_scaled,
+    )
+    .unwrap_or_else(|| (rect.right - rect.left).max(1));
+    let avail_w = (rect.right - rect.left).max(1);
+    let base_speed = (MARQUEE_SPEED_PX_PER_SEC * scale / 96).max(12) as i64;
+    let max_scroll = (text_w - avail_w).max(0);
+    let (hold_ms, speed) = if max_scroll > 0 {
+        if let Some(duration) = line_duration_ms {
+            // 动态计算：确保在行结束前滚完
+            let hold = if duration <= 1200 { 100i64 } else if duration <= 2500 { 200 } else { 400.min(duration / 4) };
+            let budget = (duration - hold).max(200);
+            let needed = ((max_scroll as i64 * 1000 + budget - 1) / budget).max(base_speed);
+            (hold, needed)
+        } else {
+            (900i64, base_speed)
+        }
+    } else {
+        (900i64, base_speed)
+    };
+    let elapsed = (now_ms() - marquee_start_ms).max(0);
+    let offset = if elapsed <= hold_ms {
+        0
+    } else {
+        (((elapsed - hold_ms) * speed) / 1000).min(max_scroll as i64) as i32
+    };
+    let should_animate = offset < max_scroll;
+    let draw_rect = if text_w <= avail_w {
+        let left = rect.left + (avail_w - text_w) / 2;
+        RECT { left, top: rect.top, right: left + text_w, bottom: rect.bottom }
+    } else {
+        RECT {
+            left: rect.left - offset,
+            top: rect.top,
+            right: rect.left - offset + text_w,
+            bottom: rect.bottom,
+        }
+    };
+    let width = (draw_rect.right - draw_rect.left).max(1) as f32;
+    let height = (draw_rect.bottom - draw_rect.top).max(1) as f32;
+    let origin = Vector2 { X: draw_rect.left as f32, Y: draw_rect.top as f32 };
+
+    // 单个字符时不使用 clip 方式，直接用颜色插值过渡
+    let decoded = String::from_utf16_lossy(trim_utf16_nul(text));
+    let grapheme_count = UnicodeSegmentation::graphemes(decoded.as_str(), true).count();
+    if grapheme_count <= 1 {
+        let t = clip_progress.clamp(0.0, 1.0);
+        let blended = lerp_d2d_color(text_color, highlight_color, t);
+        let brush = unsafe {
+            state.dc_render_target.CreateSolidColorBrush(&blended, None).ok()?
+        };
+        let layout = unsafe { state.create_layout(text, font_size_scaled, width, height).ok()? };
+        unsafe {
+            state.dc_render_target.DrawTextLayout(origin, &layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+        }
+        return Some(should_animate);
+    }
+
+    let base_layout = unsafe { state.create_layout(text, font_size_scaled, width, height).ok()? };
+    let overlay_layout = unsafe { state.create_layout(text, font_size_scaled, width, height).ok()? };
+    unsafe {
+        state.dc_render_target.DrawTextLayout(origin, &base_layout, base_brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+    }
+
+    let current_phase = progress_cluster_phase(text, color_progress).unwrap_or(color_progress);
+    let mut current_color = lerp_d2d_color(text_color, highlight_color, current_phase);
+    current_color.a = (current_color.a * (0.35 + 0.65 * current_phase)).clamp(0.0, 1.0);
+    let current_brush = unsafe {
+        state
+            .dc_render_target
+            .CreateSolidColorBrush(&current_color, None)
+            .ok()?
+    };
+    apply_progress_effects(
+        &overlay_layout,
+        text,
+        color_progress,
+        base_brush,
+        &current_brush,
+        highlight_brush,
+    );
+    if let Some(clip_x) = progress_clip_end_x(&overlay_layout, text, clip_progress) {
+        let clip = D2D_RECT_F {
+            left: draw_rect.left as f32,
+            top: draw_rect.top as f32,
+            right: (draw_rect.left as f32 + clip_x).min(draw_rect.right as f32),
+            bottom: draw_rect.bottom as f32,
+        };
+        unsafe {
+            state.dc_render_target.PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            state.dc_render_target.DrawTextLayout(origin, &overlay_layout, base_brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+            state.dc_render_target.PopAxisAlignedClip();
+        }
+    } else {
+        unsafe {
+            state.dc_render_target.DrawTextLayout(origin, &overlay_layout, base_brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+        }
+    }
+
+    Some(should_animate)
+}
+
+
+
+fn render_lyrics_d2d_frame(
+    _hwnd: HWND,
+    hdc_mem: windows::Win32::Graphics::Gdi::HDC,
+    client_rect: &RECT,
+    scale: i32,
+    is_hovered: bool,
+    is_locked: bool,
+    current_line: &str,
+    sub_line: &str,
+    font_size: i32,
+    preset: ColorPreset,
+    fade_alpha: f32,
+    marquee_start_ms: i64,
+    _lyric_progress: f32,
+    smooth_lyric_progress: f32,
+    line_duration_ms: Option<i64>,
+) -> Option<bool> {
+    let mut should_animate = false;
+    D2D_STATE.with(|cell| {
+        let mut state_ref = cell.borrow_mut();
+        if state_ref.is_none() {
+            let state = unsafe { Direct2DState::new().ok()? };
+            *state_ref = Some(state);
+        }
+        let state = state_ref.as_mut()?;
+        unsafe {
+            state.dc_render_target.BindDC(hdc_mem, client_rect).ok()?;
+            state.dc_render_target.BeginDraw();
+            state.dc_render_target.Clear(None);
+
+            let font_size_scaled = font_size * scale / 96;
+            let has_sub = !sub_line.is_empty();
+            let layout = build_lyrics_layout(client_rect, scale, has_sub);
+            let corner_radius = (16 * scale / 96) as f32;
+            let strip_radius = (10 * scale / 96) as f32;
+
+            if is_hovered {
+                let hover_color = d2d_color(0xE0E0E0, preset.hover_bg_alpha as f32 / 255.0);
+                let hover_brush = state.dc_render_target.CreateSolidColorBrush(&hover_color, None).ok()?;
+                let bg_rect = D2D1_ROUNDED_RECT {
+                    rect: rect_to_d2d(client_rect),
+                    radiusX: corner_radius,
+                    radiusY: corner_radius,
+                };
+                state.dc_render_target.FillRoundedRectangle(&bg_rect, &hover_brush);
+
+                let btn_text_format = state
+                    .dwrite_factory
+                    .CreateTextFormat(
+                        w!("Segoe MDL2 Assets"),
+                        None::<&IDWriteFontCollection>,
+                        DWRITE_FONT_WEIGHT_NORMAL,
+                        DWRITE_FONT_STYLE_NORMAL,
+                        DWRITE_FONT_STRETCH_NORMAL,
+                        (18 * scale / 96).max(1) as f32,
+                        w!("zh-cn"),
+                    )
+                    .ok()?;
+                let _ = btn_text_format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                let _ = btn_text_format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                let _ = btn_text_format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+
+                let close_rect = layout.close_rect;
+                let lock_rect = layout.lock_rect;
+                if !is_locked {
+                    let close_bg = d2d_color(0xE53935, 0.16);
+                    let close_brush = state.dc_render_target.CreateSolidColorBrush(&close_bg, None).ok()?;
+                    let close_round = rounded_rect_to_d2d(&close_rect, strip_radius);
+                    state.dc_render_target.FillRoundedRectangle(&close_round, &close_brush);
+                }
+                let lock_bg = if is_locked { d2d_color(0xDDEFFF, 0.16) } else { d2d_color(0xDDEFFF, 0.10) };
+                let lock_brush = state.dc_render_target.CreateSolidColorBrush(&lock_bg, None).ok()?;
+                let lock_round = rounded_rect_to_d2d(&lock_rect, strip_radius);
+                state.dc_render_target.FillRoundedRectangle(&lock_round, &lock_brush);
+
+                let icon_color = if is_locked { d2d_color(0x1E88E5, 1.0) } else { d2d_color(0xE53935, 1.0) };
+                let icon_brush = state.dc_render_target.CreateSolidColorBrush(&icon_color, None).ok()?;
+                if !is_locked {
+                    state.dc_render_target.DrawText(
+                        &[0xE711],
+                        &btn_text_format,
+                        &rect_to_d2d(&close_rect),
+                        &icon_brush,
+                        D2D1_DRAW_TEXT_OPTIONS_NONE,
+                        DWRITE_MEASURING_MODE_NATURAL,
+                    );
+                }
+                state.dc_render_target.DrawText(
+                    &[if is_locked { 0xE72E } else { 0xE785 }],
+                    &btn_text_format,
+                    &rect_to_d2d(&lock_rect),
+                    &icon_brush,
+                    D2D1_DRAW_TEXT_OPTIONS_NONE,
+                    DWRITE_MEASURING_MODE_NATURAL,
+                );
+            }
+
+            if !current_line.is_empty() {
+                let text_color = d2d_color(preset.text_color, fade_alpha);
+                let highlight_color = d2d_color(preset.highlight_color, fade_alpha);
+                let base_brush = state.dc_render_target.CreateSolidColorBrush(&text_color, None).ok()?;
+                let highlight_brush = state.dc_render_target.CreateSolidColorBrush(&highlight_color, None).ok()?;
+                let current_vec: Vec<u16> = current_line.encode_utf16().collect();
+                let sub_vec: Vec<u16> = sub_line.encode_utf16().collect();
+                let current = trim_utf16_nul(&current_vec);
+                let sub = trim_utf16_nul(&sub_vec);
+                if sub.is_empty() {
+                    should_animate |= draw_d2d_lyric_line(
+                        state,
+                        current,
+                        layout.text_rect,
+                        font_size_scaled,
+                        scale,
+                        marquee_start_ms,
+                        text_color,
+                        highlight_color,
+                        &base_brush,
+                        &highlight_brush,
+                        smooth_lyric_progress,
+                        smooth_lyric_progress,
+                        line_duration_ms,
+                    )?;
+                } else {
+                    for (text, rect) in [(current, layout.upper_rect), (sub, layout.lower_rect)] {
+                        should_animate |= draw_d2d_lyric_line(
+                            state,
+                            text,
+                            rect,
+                            font_size_scaled,
+                            scale,
+                            marquee_start_ms,
+                            text_color,
+                            highlight_color,
+                            &base_brush,
+                            &highlight_brush,
+                            smooth_lyric_progress,
+                            smooth_lyric_progress,
+                            line_duration_ms,
+                        )?;
+                    }
+                }
+            }
+
+            state.dc_render_target.EndDraw(None, None).ok()?;
+        }
+        Some(should_animate)
+    })
+}
+
+
+
+
+static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+
+pub struct DesktopLyricsManager {
+    initialized: bool,
+}
+
 unsafe impl Send for DesktopLyricsManager {}
 unsafe impl Sync for DesktopLyricsManager {}
 
 impl DesktopLyricsManager {
-    /// 创建新的桌面歌词管理器
     pub fn new() -> Self {
-        Self {
-            hwnd: 0,
-            current_lyric: String::new(),
-            is_visible: false,
-            font: 0,
-            bg_brush: 0,
-        }
+        Self { initialized: false }
     }
 
-    /// 初始化桌面歌词窗口
-    pub fn initialize(&mut self) -> Result<(), String> {
-        if self.hwnd != 0 {
+    pub fn initialize(&mut self, app_handle: tauri::AppHandle) -> Result<(), String> {
+        if self.initialized {
             return Ok(());
         }
 
-        unsafe {
-            let instance = GetModuleHandleW(None)
-                .map_err(|e| format!("Failed to get module handle: {e}"))?;
+        let _ = APP_HANDLE.set(app_handle);
 
-            // 注册窗口类
-            let class_name = w!("DesktopLyricsWindow");
-            let wc = WNDCLASSW {
-                style: CS_HREDRAW | CS_VREDRAW,
-                lpfnWndProc: Some(window_proc),
-                cbClsExtra: 0,
-                cbWndExtra: 0,
-                hInstance: instance.into(),
-                hIcon: Default::default(),
-                hCursor: Default::default(),
-                hbrBackground: HBRUSH::default(),
-                lpszMenuName: PCWSTR::null(),
-                lpszClassName: class_name,
+        let shared_state = SHARED_STATE.get_or_init(|| {
+            Arc::new(Mutex::new(SharedLyricState {
+                current_line: String::new(),
+                sub_line: String::new(),
+                prev_line: String::new(),
+                prev_sub_line: String::new(),
+                current_words: Vec::new(),
+                font_size: 28,
+                is_locked: true,
+                is_hovered: false,
+                is_playing: false,
+                color_preset: PRESET_DARK,
+                fade_alpha: 1.0,
+                fade_pending: false,
+                marquee_active: false,
+                marquee_start_ms: 0,
+                visual_time: 0.0,
+                target_time: 0.0,
+                visual_time_last_ms: now_ms(),
+                lyric_progress: 0.0,
+                smooth_lyric_progress: 0.0,
+                render_pending: false,
+            }))
+        });
+
+        let state_for_thread = shared_state.clone();
+
+        std::thread::Builder::new()
+            .name("desktop-lyrics".to_string())
+            .spawn(move || {
+                run_message_loop(state_for_thread);
+            })
+            .map_err(|e| format!("Failed to spawn desktop lyrics thread: {e}"))?;
+
+        for _ in 0..50 {
+            if LYRICS_HWND.get().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        self.initialized = true;
+        log::info!("Desktop lyrics window thread started");
+        Ok(())
+    }
+
+    pub fn update_lyric(
+        &self,
+        current_line: &str,
+        sub_line: &str,
+        progress: f32,
+        words: Vec<DesktopLyricWord>,
+        current_time: f32,
+        is_playing: bool,
+    ) -> Result<(), String> {
+        let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
+        let progress = progress.clamp(0.0, 1.0);
+        let current_time = current_time.max(0.0);
+        {
+            let mut guard = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+            let text_changed = guard.current_line != current_line || guard.sub_line != sub_line;
+            let words_changed = guard.current_words != words;
+            if !text_changed && !words_changed && guard.is_playing == is_playing {
+                let progress_delta = (guard.lyric_progress - progress).abs();
+                let time_delta = (guard.target_time - current_time).abs();
+                if progress_delta < 0.0008 && time_delta < 0.02 {
+                    return Ok(());
+                }
+            }
+            if text_changed {
+                guard.prev_line = guard.current_line.clone();
+                guard.prev_sub_line = guard.sub_line.clone();
+                guard.current_line = current_line.to_string();
+                guard.sub_line = sub_line.to_string();
+                guard.marquee_start_ms = now_ms();
+                if !guard.prev_line.is_empty() || !guard.prev_sub_line.is_empty() {
+                    guard.fade_alpha = 0.0;
+                    guard.fade_pending = true;
+                }
+            }
+            if words_changed {
+                guard.current_words = words;
+            }
+            guard.is_playing = is_playing;
+            guard.target_time = current_time;
+            guard.visual_time = if (guard.visual_time - current_time).abs() > 0.5 {
+                current_time
+            } else {
+                guard.visual_time
             };
-
-            if RegisterClassW(&wc) == 0 {
-                return Err("Failed to register window class".to_string());
-            }
-
-            // 创建窗口
-            let hwnd = CreateWindowExW(
-                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                class_name,
-                w!("Desktop Lyrics"),
-                WS_POPUP,
-                10,  // 左下角 x
-                0,   // 临时 y，稍后调整
-                800, // 宽度
-                60,  // 高度
-                None,
-                None,
-                Some(instance.into()),
-                None,
-            )
-            .map_err(|e| format!("Failed to create window: {e}"))?;
-
-            // 设置窗口透明度
-            SetLayeredWindowAttributes(hwnd, COLORREF(0), 230, LWA_ALPHA)
-                .map_err(|e| format!("Failed to set window attributes: {e}"))?;
-
-            // 创建字体
-            let font = CreateFontW(
-                24,                // 高度
-                0,                 // 宽度
-                0,                 // 倾斜角度
-                0,                 // 基线角度
-                FW_NORMAL.0 as i32, // 粗细
-                0,                 // 斜体
-                0,                 // 下划线
-                0,                 // 删除线
-                FONT_CHARSET(1),   // 字符集 (DEFAULT_CHARSET)
-                FONT_OUTPUT_PRECISION(0), // 输出精度
-                FONT_CLIP_PRECISION(0),   // 裁剪精度
-                FONT_QUALITY(5),   // 质量 (CLEARTYPE_QUALITY)
-                0,                 // 间距和字体族
-                w!("Microsoft YaHei"), // 字体名称
-            );
-
-            // 创建背景画刷（半透明黑色）
-            let bg_brush = CreateSolidBrush(COLORREF(0x00000000));
-
-            self.hwnd = hwnd.0 as isize;
-            self.font = font.0 as isize;
-            self.bg_brush = bg_brush.0 as isize;
-
-            // 调整窗口位置到屏幕左下角
-            self.position_window()?;
-
-            log::info!("Desktop lyrics window initialized");
-            Ok(())
+            guard.visual_time_last_ms = now_ms();
+            guard.lyric_progress = progress;
+            guard.render_pending = true;
         }
+        post_update()
     }
 
-    /// 调整窗口位置到屏幕左下角
-    fn position_window(&self) -> Result<(), String> {
-        unsafe {
-            // 获取任务栏高度（假设40像素）
-            let taskbar_height = 40;
-            let screen_height = windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(
-                windows::Win32::UI::WindowsAndMessaging::SM_CYSCREEN,
-            );
-
-            let y = screen_height - 60 - taskbar_height;
-
-            SetWindowPos(
-                HWND(self.hwnd as *mut _),
-                Some(HWND_TOPMOST),
-                10,
-                y,
-                800,
-                60,
-                SWP_NOACTIVATE,
-            )
-            .map_err(|e| format!("Failed to position window: {e}"))?;
-
-            Ok(())
-        }
-    }
-
-    /// 更新歌词文本
-    pub fn update_lyric(&mut self, lyric: &str) -> Result<(), String> {
-        self.current_lyric = lyric.to_string();
-        // 窗口会在下次 WM_PAINT 消息时自动重绘
-        Ok(())
-    }
-
-    /// 显示歌词窗口
-    pub fn show(&mut self) -> Result<(), String> {
-        if self.hwnd == 0 {
-            self.initialize()?;
-        }
-
-        unsafe {
-            ShowWindow(HWND(self.hwnd as *mut _), SW_SHOWNOACTIVATE);
-        }
-
-        self.is_visible = true;
-        Ok(())
-    }
-
-    /// 隐藏歌词窗口
-    pub fn hide(&mut self) -> Result<(), String> {
-        if self.hwnd != 0 {
+    pub fn show(&self) -> Result<(), String> {
+        let hwnd = get_hwnd();
+        if hwnd != 0 {
             unsafe {
-                ShowWindow(HWND(self.hwnd as *mut _), SW_HIDE);
+                let _ = ShowWindow(HWND(hwnd as *mut _), SW_SHOWNOACTIVATE);
+                let _ = SetWindowPos(
+                    HWND(hwnd as *mut _),
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SET_WINDOW_POS_FLAGS(0x0001 | 0x0002),
+                );
             }
         }
-
-        self.is_visible = false;
         Ok(())
     }
 
-    /// 获取当前歌词
-    pub fn get_current_lyric(&self) -> &str {
-        &self.current_lyric
+    pub fn hide(&self) -> Result<(), String> {
+        let hwnd = get_hwnd();
+        if hwnd != 0 {
+            unsafe {
+                let _ = ShowWindow(HWND(hwnd as *mut _), SW_HIDE);
+            }
+        }
+        Ok(())
     }
 
-    /// 获取窗口句柄
-    pub fn get_hwnd(&self) -> HWND {
-        HWND(self.hwnd as *mut _)
+    pub fn set_locked(&self, locked: bool) -> Result<(), String> {
+        let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
+        {
+            let mut guard = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+            guard.is_locked = locked;
+            guard.render_pending = true;
+        }
+
+        let hwnd = get_hwnd();
+        if hwnd != 0 {
+            unsafe {
+                let style = GetWindowLongPtrW(HWND(hwnd as *mut _), GWL_EXSTYLE);
+                let transparent_bit = WS_EX_TRANSPARENT.0 as isize;
+                let new_style = style & !transparent_bit;
+                SetWindowLongPtrW(HWND(hwnd as *mut _), GWL_EXSTYLE, new_style);
+                let _ = InvalidateRect(Some(HWND(hwnd as *mut _)), None, true);
+            }
+        }
+        Ok(())
     }
 
-    /// 获取字体句柄
-    pub fn get_font(&self) -> HFONT {
-        HFONT(self.font as *mut _)
+    pub fn set_font_size(&self, size: i32) -> Result<(), String> {
+        let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
+        {
+            let mut guard = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+            guard.font_size = size;
+            guard.render_pending = true;
+        }
+
+        let hwnd = get_hwnd();
+        if hwnd != 0 {
+            resize_window_for_font(HWND(hwnd as *mut _), size);
+        }
+
+        post_update()
     }
 
-    /// 获取背景画刷
-    pub fn get_bg_brush(&self) -> HBRUSH {
-        HBRUSH(self.bg_brush as *mut _)
+    pub fn set_color_preset(&self, preset_name: &str) -> Result<(), String> {
+        let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
+        {
+            let mut guard = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+            guard.color_preset = match preset_name {
+                "light" => PRESET_LIGHT,
+                "blue" => PRESET_BLUE,
+                "pink" => PRESET_PINK,
+                "orange" => PRESET_ORANGE,
+                "green" => PRESET_GREEN,
+                _ => PRESET_DARK,
+            };
+            guard.render_pending = true;
+        }
+        post_update()
     }
 
-    /// 是否可见
     pub fn is_visible(&self) -> bool {
-        self.is_visible
-    }
-}
-
-impl Drop for DesktopLyricsManager {
-    fn drop(&mut self) {
-        unsafe {
-            if self.hwnd != 0 {
-                let _ = DestroyWindow(HWND(self.hwnd as *mut _));
-            }
-            if self.font != 0 {
-                let _ = DeleteObject(HGDIOBJ(self.font as *mut _));
-            }
-            if self.bg_brush != 0 {
-                let _ = DeleteObject(HGDIOBJ(self.bg_brush as *mut _));
-            }
+        let hwnd = get_hwnd();
+        if hwnd != 0 {
+            unsafe { IsWindowVisible(HWND(hwnd as *mut _)).as_bool() }
+        } else {
+            false
         }
     }
 }
 
-/// 窗口过程
+fn get_hwnd() -> isize {
+    LYRICS_HWND.get().copied().unwrap_or(0)
+}
+
+fn post_update() -> Result<(), String> {
+    let hwnd = get_hwnd();
+    if hwnd != 0 {
+        unsafe {
+            let _ = PostMessageW(
+                Some(HWND(hwnd as *mut _)),
+                WM_DL_UPDATE,
+                WPARAM(0),
+                LPARAM(0),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn get_close_btn_rect(window_rect: &RECT, scale: i32) -> RECT {
+    let btn = CLOSE_BTN_SIZE * scale / 96;
+    let margin = CLOSE_BTN_MARGIN * scale / 96;
+    let spacing = 8 * scale / 96;
+    let w = window_rect.right - window_rect.left;
+    // Two buttons side by side, centered horizontally at top
+    let total_w = btn * 2 + spacing;
+    let start_x = (w - total_w) / 2;
+    RECT {
+        left: start_x + btn + spacing,
+        top: margin,
+        right: start_x + total_w,
+        bottom: margin + btn,
+    }
+}
+
+fn get_lock_btn_rect(window_rect: &RECT, scale: i32) -> RECT {
+    let btn = CLOSE_BTN_SIZE * scale / 96;
+    let margin = CLOSE_BTN_MARGIN * scale / 96;
+    let spacing = 8 * scale / 96;
+    let w = window_rect.right - window_rect.left;
+    let total_w = btn * 2 + spacing;
+    let start_x = (w - total_w) / 2;
+    RECT {
+        left: start_x,
+        top: margin,
+        right: start_x + btn,
+        bottom: margin + btn,
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LyricsLayout {
+    close_rect: RECT,
+    lock_rect: RECT,
+    text_rect: RECT,
+    upper_rect: RECT,
+    lower_rect: RECT,
+}
+
+fn desired_window_height(scale: i32, font_size: i32) -> i32 {
+    let btn = CLOSE_BTN_SIZE * scale / 96;
+    let margin = CLOSE_BTN_MARGIN * scale / 96;
+    let padding = 8 * scale / 96;
+    let top_offset = btn + margin + padding;
+    let bottom_padding = 14 * scale / 96;
+    let line_spacing = 8 * scale / 96;
+    let font_size_scaled = (font_size * scale / 96).max(18 * scale / 96);
+
+    // 濮嬬粓棰勭暀鍙岃姝岃瘝楂樺害锛岄伩鍏嶆瓕璇?缈昏瘧鍒囨崲鏃剁獥鍙ｆ姈鍔紝涔熼伩鍏嶅ぇ瀛椾綋琚鍓€?
+    let content_h = font_size_scaled * 2 + line_spacing;
+    (top_offset + content_h + bottom_padding).max(150 * scale / 96)
+}
+
+fn resize_window_for_font(hwnd: HWND, font_size: i32) {
+    unsafe {
+        let dpi = get_dpi_for_window(hwnd);
+        let scale = dpi as i32;
+        let new_h = desired_window_height(scale, font_size);
+
+        let mut rect = RECT::default();
+        let _ = GetWindowRect(hwnd, &mut rect);
+        let current_w = rect.right - rect.left;
+        let current_h = rect.bottom - rect.top;
+        if current_w <= 0 || (current_h - new_h).abs() <= 1 {
+            return;
+        }
+
+        // 淇濇寔搴曢儴浣嶇疆涓嶅彉锛屽彧鏍规嵁瀛椾綋澶у皬璋冩暣楂樺害銆?
+        let new_y = rect.bottom - new_h;
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            rect.left,
+            new_y,
+            current_w,
+            new_h,
+            SET_WINDOW_POS_FLAGS(0),
+        );
+    }
+}
+
+fn build_lyrics_layout(client_rect: &RECT, scale: i32, dual_line: bool) -> LyricsLayout {
+    let close_rect = get_close_btn_rect(client_rect, scale);
+    let lock_rect = get_lock_btn_rect(client_rect, scale);
+    let padding = 8 * scale / 96;
+    let btn_bottom = close_rect.bottom;
+    let mut text_rect = *client_rect;
+    text_rect.left += padding;
+    text_rect.right -= padding;
+    text_rect.top = btn_bottom + padding;
+    text_rect.bottom -= padding;
+
+    let mut upper_rect = text_rect;
+    let mut lower_rect = text_rect;
+    if dual_line {
+        let h = text_rect.bottom - text_rect.top;
+        let line_h = h / 2;
+        upper_rect.bottom = text_rect.top + line_h;
+        lower_rect.top = upper_rect.bottom;
+    }
+
+    LyricsLayout { close_rect, lock_rect, text_rect, upper_rect, lower_rect }
+}
+
+fn apply_progress_effects(
+    layout: &IDWriteTextLayout,
+    text: &[u16],
+    progress: f32,
+    base_brush: &ID2D1SolidColorBrush,
+    current_brush: &ID2D1SolidColorBrush,
+    highlight_brush: &ID2D1SolidColorBrush,
+) {
+    let text = trim_utf16_nul(text);
+    if text.is_empty() {
+        return;
+    }
+    let progress = progress.clamp(0.0, 1.0);
+    let decoded = String::from_utf16_lossy(text);
+    let graphemes: Vec<&str> = UnicodeSegmentation::graphemes(decoded.as_str(), true).collect();
+    if graphemes.is_empty() {
+        return;
+    }
+
+    let exact = (graphemes.len() as f32) * progress;
+    let highlighted = exact.floor() as usize;
+    let current_t = exact - highlighted as f32;
+    let mut utf16_idx = 0usize;
+    for (cluster_idx, grapheme) in graphemes.iter().enumerate() {
+        let len = grapheme.encode_utf16().count();
+        let range = DWRITE_TEXT_RANGE {
+            startPosition: utf16_idx as u32,
+            length: len as u32,
+        };
+        let brush = if cluster_idx < highlighted {
+            highlight_brush
+        } else if cluster_idx == highlighted && current_t > 0.0 {
+            current_brush
+        } else {
+            base_brush
+        };
+        let _ = unsafe { layout.SetDrawingEffect(brush, range) };
+        utf16_idx += len;
+    }
+}
+
+fn point_in_rect(x: i32, y: i32, rect: &RECT) -> bool {
+    x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn measure_text_width_dwrite_with_state(
+    state: &mut Direct2DState,
+    text: &[u16],
+    height: i32,
+    font_size_scaled: i32,
+) -> Option<i32> {
+    let text = trim_utf16_nul(text);
+    if text.is_empty() {
+        return Some(0);
+    }
+    let layout = unsafe {
+        state
+            .create_layout(text, font_size_scaled, 100_000.0, height.max(1) as f32)
+            .ok()?
+    };
+    let mut metrics = DWRITE_TEXT_METRICS::default();
+    unsafe { layout.GetMetrics(&mut metrics).ok()? };
+    Some(metrics.widthIncludingTrailingWhitespace.ceil().max(0.0) as i32)
+}
+
+fn get_cached_font(font_size_scaled: i32) -> HFONT {
+    let cache = FONT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(mut guard) = cache.lock() {
+        if let Some(font) = guard.get(&font_size_scaled).copied() {
+            return HFONT(font as *mut core::ffi::c_void);
+        }
+
+        let font = unsafe {
+            CreateFontW(
+                font_size_scaled, 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0,
+                FONT_CHARSET(1), FONT_OUTPUT_PRECISION(0), FONT_CLIP_PRECISION(0), FONT_QUALITY(6), 0,
+                w!("Microsoft YaHei"),
+            )
+        };
+        guard.insert(font_size_scaled, font.0 as usize);
+        font
+    } else {
+        unsafe {
+            CreateFontW(
+                font_size_scaled, 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0,
+                FONT_CHARSET(1), FONT_OUTPUT_PRECISION(0), FONT_CLIP_PRECISION(0), FONT_QUALITY(6), 0,
+                w!("Microsoft YaHei"),
+            )
+        }
+    }
+}
+
+unsafe fn render_lyrics(hwnd: HWND) {
+    unsafe {
+    let mut window_rect = RECT::default();
+    let _ = GetWindowRect(hwnd, &mut window_rect);
+    let mut client_rect = RECT::default();
+    let _ = GetClientRect(hwnd, &mut client_rect);
+    let w = client_rect.right - client_rect.left;
+    let h = client_rect.bottom - client_rect.top;
+    if w <= 0 || h <= 0 {
+        return;
+    }
+
+    let dpi = get_dpi_for_window(hwnd);
+    let scale = dpi as i32;
+
+    let (is_hovered, is_locked, current_line, sub_line, current_words, is_playing, font_size, preset, mut fade_alpha, fade_pending, render_pending, marquee_start_ms, lyric_progress, mut smooth_lyric_progress, mut visual_time, target_time, visual_time_last_ms) = {
+        if let Some(state) = SHARED_STATE.get() {
+            if let Ok(guard) = state.lock() {
+                (
+                    guard.is_hovered,
+                    guard.is_locked,
+                    guard.current_line.clone(),
+                    guard.sub_line.clone(),
+                    guard.current_words.clone(),
+                    guard.is_playing,
+                    guard.font_size,
+                    guard.color_preset,
+                    guard.fade_alpha,
+                    guard.fade_pending,
+                    guard.render_pending,
+                    guard.marquee_start_ms,
+                    guard.lyric_progress,
+                    guard.smooth_lyric_progress,
+                    guard.visual_time,
+                    guard.target_time,
+                    guard.visual_time_last_ms,
+                )
+            } else {
+                return;
+            }
+        } else {
+            return;
+        }
+    };
+
+    let now = now_ms();
+    let delta = ((now - visual_time_last_ms).max(0) as f32 / 1000.0).min(0.1);
+    if is_playing {
+        let diff = visual_time - target_time;
+        if diff.abs() > 0.25 {
+            visual_time = target_time;
+        } else if diff.abs() > 0.15 {
+            let speed = (1.0 - diff * 2.0).clamp(0.5, 1.5);
+            visual_time += delta * speed;
+        } else {
+            visual_time += delta;
+        }
+    } else {
+        visual_time = target_time;
+    }
+    if let Some(state) = SHARED_STATE.get() {
+        if let Ok(mut guard) = state.try_lock() {
+            guard.visual_time = visual_time;
+            guard.visual_time_last_ms = now;
+        }
+    }
+
+    let display_progress = karaoke_progress_from_words(&current_words, visual_time, lyric_progress);
+    if current_words.is_empty() {
+        let progress_delta = (display_progress - smooth_lyric_progress).abs();
+        if progress_delta > 0.0001 {
+            smooth_lyric_progress += (display_progress - smooth_lyric_progress) * 0.42;
+        } else {
+            smooth_lyric_progress = display_progress;
+        }
+    } else {
+        smooth_lyric_progress = display_progress;
+    }
+    if let Some(state) = SHARED_STATE.get() {
+        if let Ok(mut guard) = state.try_lock() {
+            guard.smooth_lyric_progress = smooth_lyric_progress;
+        }
+    }
+
+    if fade_pending {
+        fade_alpha = (fade_alpha + 0.06).min(1.0);
+        let done = fade_alpha >= 1.0;
+        if let Some(state) = SHARED_STATE.get() {
+            if let Ok(mut guard) = state.lock() {
+                guard.fade_alpha = fade_alpha;
+                if done {
+                    guard.fade_pending = false;
+                    guard.prev_line.clear();
+                    guard.prev_sub_line.clear();
+                }
+            }
+        }
+        if !done {
+            let _ = InvalidateRect(Some(hwnd), None, false);
+        }
+    }
+
+    if !render_pending && !fade_pending && !is_hovered && !current_line.is_empty() && !sub_line.is_empty() {
+        // 浠嶅厑璁稿悗缁枃瀛?缈昏瘧鍙樺寲瑙﹀彂娓叉煋锛屼絾閬垮厤绌洪棽鏃堕噸澶嶈蛋鏁村抚鍚堟垚銆?
+    }
+
+    let current_empty = current_line.is_empty();
+    let sub_empty = sub_line.is_empty();
+    let bmi = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: w,
+            biHeight: -h,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: 0,
+            biSizeImage: 0,
+            biXPelsPerMeter: 0,
+            biYPelsPerMeter: 0,
+            biClrUsed: 0,
+            biClrImportant: 0,
+        },
+        bmiColors: [RGBQUAD {
+            rgbBlue: 0,
+            rgbGreen: 0,
+            rgbRed: 0,
+            rgbReserved: 0,
+        }],
+    };
+
+    let mut p_bits: *mut core::ffi::c_void = std::ptr::null_mut();
+    let h_bitmap = match CreateDIBSection(None, &bmi, DIB_RGB_COLORS, &mut p_bits, None, 0) {
+        Ok(h) => h,
+        Err(e) => {
+            log::error!("Desktop lyrics: CreateDIBSection failed: {e}");
+            return;
+        }
+    };
+
+    if p_bits.is_null() {
+        let _ = DeleteObject(HGDIOBJ(h_bitmap.0));
+        return;
+    }
+
+    let hdc_mem = CreateCompatibleDC(None);
+    let old_bitmap = SelectObject(hdc_mem, HGDIOBJ(h_bitmap.0));
+
+    let layout = build_lyrics_layout(&client_rect, scale, !sub_empty);
+    let _close_rect = layout.close_rect;
+    let _lock_rect = layout.lock_rect;
+    let _text_rect = layout.text_rect;
+    let _bg_alpha = preset.hover_bg_alpha;
+
+    SetBkMode(hdc_mem, TRANSPARENT);
+
+    let font_size_scaled = font_size * scale / 96;
+    let _font = get_cached_font(font_size_scaled);
+
+    let _has_text = !current_empty || !sub_empty;
+    let _marquee_now = now_ms();
+    let current_words_animating = is_playing && !current_words.is_empty();
+    let display_progress = karaoke_progress_from_words(&current_words, visual_time, lyric_progress);
+    let line_duration_ms = current_words
+        .iter()
+        .filter(|w| !w.text.is_empty() && w.end > w.start)
+        .map(|w| w.end)
+        .reduce(f32::max)
+        .map(|end| {
+            let start = current_words.iter()
+                .filter(|w| !w.text.is_empty() && w.end > w.start)
+                .map(|w| w.start)
+                .reduce(f32::min)
+                .unwrap_or(end);
+            ((end - start).max(0.0) * 1000.0) as i64
+        });
+    let d2d_should_animate_scroll = render_lyrics_d2d_frame(
+        hwnd,
+        hdc_mem,
+        &client_rect,
+        scale,
+        is_hovered,
+        is_locked,
+        &current_line,
+        &sub_line,
+        font_size,
+        preset,
+        fade_alpha,
+        marquee_start_ms,
+        display_progress,
+        smooth_lyric_progress,
+        line_duration_ms,
+    )
+    .unwrap_or(false);
+    let should_animate_scroll = current_words_animating || d2d_should_animate_scroll;
+
+    let pt_dst = POINT { x: window_rect.left, y: window_rect.top };
+    let pt_src = POINT { x: 0, y: 0 };
+    let sz = SIZE { cx: w, cy: h };
+    let blend = BLENDFUNCTION {
+        BlendOp: 0,
+        BlendFlags: 0,
+        SourceConstantAlpha: 255,
+        AlphaFormat: 1,
+    };
+    let _ = UpdateLayeredWindow(
+        hwnd,
+        None,
+        Some(&pt_dst),
+        Some(&sz),
+        Some(hdc_mem),
+        Some(&pt_src),
+        COLORREF(0),
+        Some(&blend),
+        ULW_ALPHA,
+    );
+
+    if let Some(state) = SHARED_STATE.get() {
+        if let Ok(mut guard) = state.try_lock() {
+            guard.marquee_active = should_animate_scroll;
+            guard.render_pending = false;
+        }
+    }
+
+    let _ = SelectObject(hdc_mem, old_bitmap);
+    let _ = DeleteObject(HGDIOBJ(h_bitmap.0));
+    let _ = DeleteDC(hdc_mem);
+
+    }
+}
+
+fn run_message_loop(_state: Arc<Mutex<SharedLyricState>>) {
+    unsafe {
+        let _ = set_thread_dpi_awareness_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        let com_initialized = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
+
+        let instance = match GetModuleHandleW(None) {
+            Ok(h) => h,
+            Err(e) => {
+                log::error!("Desktop lyrics: Failed to get module handle: {e}");
+                if com_initialized {
+                    CoUninitialize();
+                }
+                return;
+            }
+        };
+
+        let class_name = w!("DesktopLyricsWnd");
+
+        let wc = WNDCLASSW {
+            style: CS_HREDRAW | CS_VREDRAW,
+            lpfnWndProc: Some(window_proc),
+            cbClsExtra: 0,
+            cbWndExtra: 0,
+            hInstance: instance.into(),
+            hIcon: Default::default(),
+            hCursor: Default::default(),
+            hbrBackground: HBRUSH::default(),
+            lpszMenuName: PCWSTR::null(),
+            lpszClassName: class_name,
+        };
+
+        if RegisterClassW(&wc) == 0 {
+            log::error!("Desktop lyrics: Failed to register window class");
+            return;
+        }
+
+        let screen_w = windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(
+            windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN,
+        );
+
+        let mut work_area = RECT {
+            left: 0,
+            top: 0,
+            right: screen_w,
+            bottom: 0,
+        };
+
+        let _ = windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
+            windows::Win32::UI::WindowsAndMessaging::SPI_GETWORKAREA,
+            0,
+            Some(&mut work_area as *mut RECT as *mut _),
+            windows::Win32::UI::WindowsAndMessaging::SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
+
+        let window_w = (screen_w as f32 * 0.55).min(1200.0).max(600.0) as i32;
+        let initial_font_size = SHARED_STATE
+            .get()
+            .and_then(|state| state.try_lock().ok().map(|guard| guard.font_size))
+            .unwrap_or(28);
+        let dpi_scale = 96;
+        let window_h = desired_window_height(dpi_scale, initial_font_size);
+        let x = ((work_area.right - work_area.left) - window_w) / 2 + work_area.left;
+        let y = work_area.bottom - window_h - 10;
+
+        let hwnd = match CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+                | WS_EX_TRANSPARENT,
+            class_name,
+            w!("Desktop Lyrics"),
+            WS_POPUP,
+            x,
+            y,
+            window_w,
+            window_h,
+            None,
+            None,
+            Some(instance.into()),
+            None,
+        ) {
+            Ok(h) => h,
+            Err(e) => {
+                log::error!("Desktop lyrics: Failed to create window: {e}");
+                return;
+            }
+        };
+
+        let _ = LYRICS_HWND.set(hwnd.0 as isize);
+
+        // 鍚姩瀹氭椂鍣細16ms 妫€娴嬩竴娆★紝浣嗗彧鏈夋粴鍔?娣″叆/鎮诞鍙樺寲鏃舵墠閲嶇粯
+        let _ = SetTimer(Some(hwnd), HOVER_TIMER_ID, 16, None);
+
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+
+        if com_initialized {
+            CoUninitialize();
+        }
+        log::info!("Desktop lyrics message loop exited");
+    }
+}
+
 unsafe extern "system" fn window_proc(
     hwnd: HWND,
     msg: u32,
@@ -242,57 +1468,176 @@ unsafe extern "system" fn window_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match msg {
+        WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => unsafe {
             let mut ps = PAINTSTRUCT::default();
-            let hdc = BeginPaint(hwnd, &mut ps);
+            let _ = BeginPaint(hwnd, &mut ps);
+            render_lyrics(hwnd);
+            let _ = EndPaint(hwnd, &ps);
+            LRESULT(0)
+        },
+        WM_DL_UPDATE => unsafe {
+            let _ = InvalidateRect(Some(hwnd), None, false);
+            LRESULT(0)
+        },
+        WM_SIZE => unsafe {
+            let _ = InvalidateRect(Some(hwnd), None, false);
+            LRESULT(0)
+        },
+        WM_TIMER => unsafe {
+            if wparam.0 == HOVER_TIMER_ID {
+                let mut pt = POINT::default();
+                let _ = GetCursorPos(&mut pt);
+                let mut rect = RECT::default();
+                let _ = GetWindowRect(hwnd, &mut rect);
 
-            if let Some(manager) = DESKTOP_LYRICS_MANAGER.get() {
-                // 在窗口回调中尽量避免阻塞：尝试获取锁，失败则跳过绘制
-                if let Ok(guard) = manager.try_lock() {
-                    // 设置背景透明
-                    SetBkMode(hdc, TRANSPARENT);
+                let is_inside = pt.x >= rect.left && pt.x < rect.right && pt.y >= rect.top && pt.y < rect.bottom;
 
-                    // 设置文字颜色（白色）
-                    SetTextColor(hdc, COLORREF(0x00FFFFFF));
-
-                    // 选择字体（仅当字体句柄有效时）
-                    let mut old_font = HGDIOBJ::default();
-                    if guard.get_font().0 != std::ptr::null_mut() {
-                        old_font = windows::Win32::Graphics::Gdi::SelectObject(
-                            hdc,
-                            HGDIOBJ(guard.get_font().0 as *mut _),
-                        );
+                if let Some(state) = SHARED_STATE.get() {
+                    if let Ok(mut guard) = state.try_lock() {
+                        let progress_animating =
+                            (guard.lyric_progress - guard.smooth_lyric_progress).abs() > 0.0001;
+                        let word_animating = guard.is_playing && !guard.current_words.is_empty();
+                        let should_redraw = guard.is_hovered != is_inside
+                            || guard.marquee_active
+                            || guard.fade_pending
+                            || progress_animating
+                            || word_animating;
+                        if guard.is_hovered != is_inside {
+                            guard.is_hovered = is_inside;
+                        }
+                        if should_redraw {
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
                     }
-
-                    // 获取客户区
-                    let mut rect = RECT::default();
-                    let _ = GetClientRect(hwnd, &mut rect);
-
-                    // 绘制文字 - 必须保证以 NUL 结尾
-                    let mut text: Vec<u16> = guard.get_current_lyric().encode_utf16().collect();
-                    text.push(0);
-
-                    // 使用 DrawTextW 绘制 UTF-16 字符串（windows-rs 提供接收 &mut [u16] 的重载）
-                    let _ = windows::Win32::Graphics::Gdi::DrawTextW(
-                        hdc,
-                        &mut text,
-                        &mut rect,
-                        windows::Win32::Graphics::Gdi::DT_CENTER
-                            | windows::Win32::Graphics::Gdi::DT_VCENTER
-                            | windows::Win32::Graphics::Gdi::DT_SINGLELINE,
-                    );
-
-                    // 恢复旧字体（如果存在）
-                    if old_font.0 != std::ptr::null_mut() {
-                        windows::Win32::Graphics::Gdi::SelectObject(hdc, old_font);
+                }
+            }
+            LRESULT(0)
+        },
+        WM_DPICHANGED => unsafe {
+            let rect = &*(lparam.0 as *const RECT);
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+                SET_WINDOW_POS_FLAGS(0),
+            );
+            LRESULT(0)
+        },
+        WM_MOUSEMOVE => unsafe {
+            // 褰撻潪閿佸畾妯″紡鏃讹紝WM_MOUSEMOVE 涔熻兘姝ｅ父宸ヤ綔
+            if let Some(state) = SHARED_STATE.get() {
+                if let Ok(mut guard) = state.try_lock() {
+                    if !guard.is_hovered {
+                        guard.is_hovered = true;
+                        let _ = InvalidateRect(Some(hwnd), None, true);
                     }
                 }
             }
 
-            EndPaint(hwnd, &ps);
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        },
+        WM_LBUTTONUP => unsafe {
+            let x = (lparam.0 & 0xFFFF) as i16 as i32;
+            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
+            let mut rect = RECT::default();
+            let _ = GetClientRect(hwnd, &mut rect);
+            let dpi = get_dpi_for_window(hwnd);
+            let close_rect = get_close_btn_rect(&rect, dpi as i32);
+            let lock_rect = get_lock_btn_rect(&rect, dpi as i32);
+
+            let is_locked = SHARED_STATE
+                .get()
+                .and_then(|state| state.try_lock().ok().map(|guard| guard.is_locked))
+                .unwrap_or(false);
+
+            if !is_locked && point_in_rect(x, y, &close_rect) {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                if let Some(state) = SHARED_STATE.get() {
+                    if let Ok(mut guard) = state.try_lock() {
+                        guard.is_hovered = false;
+                    }
+                }
+                if let Some(app) = APP_HANDLE.get() {
+                    let _ = app.emit("desktop-lyrics-closed", ());
+                }
+            } else if point_in_rect(x, y, &lock_rect) {
+                if let Some(state) = SHARED_STATE.get() {
+                    if let Ok(mut guard) = state.try_lock() {
+                        let new_locked = !guard.is_locked;
+                        guard.is_locked = new_locked;
+
+                        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                        let transparent_bit = WS_EX_TRANSPARENT.0 as isize;
+                        let new_style = style & !transparent_bit;
+                        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
+                        let _ = InvalidateRect(Some(hwnd), None, true);
+
+                        if let Some(app) = APP_HANDLE.get() {
+                            let _ = app.emit("desktop-lyrics-lock-changed", new_locked);
+                        }
+                    }
+                }
+            }
+            LRESULT(0)
+        },
+        WM_MOUSELEAVE => unsafe {
+            if let Some(state) = SHARED_STATE.get() {
+                if let Ok(mut guard) = state.try_lock() {
+                    guard.is_hovered = false;
+                }
+            }
+            let _ = InvalidateRect(Some(hwnd), None, true);
+            LRESULT(0)
+        },
+        WM_NCHITTEST => unsafe {
+            if let Some(state) = SHARED_STATE.get() {
+                if let Ok(guard) = state.try_lock() {
+                    let x = (lparam.0 & 0xFFFF) as i16 as i32;
+                    let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
+                    let mut rect = RECT::default();
+                    let _ = GetClientRect(hwnd, &mut rect);
+                    let dpi = get_dpi_for_window(hwnd);
+
+                    let mut screen_pt = POINT { x, y };
+                    let _ = ScreenToClient(hwnd, &mut screen_pt);
+
+                    let close_rect = get_close_btn_rect(&rect, dpi as i32);
+                    let lock_rect = get_lock_btn_rect(&rect, dpi as i32);
+
+                    if guard.is_locked {
+                        if point_in_rect(screen_pt.x, screen_pt.y, &lock_rect) {
+                            return LRESULT(HTCLIENT as isize);
+                        }
+                        return LRESULT(HTTRANSPARENT as isize);
+                    }
+
+                    if point_in_rect(screen_pt.x, screen_pt.y, &close_rect) || point_in_rect(screen_pt.x, screen_pt.y, &lock_rect) {
+                        return LRESULT(HTCLIENT as isize);
+                    }
+
+                    let edge = (RESIZE_EDGE_WIDTH * dpi as i32 / 96).max(4);
+                    if screen_pt.x < edge {
+                        return LRESULT(HTLEFT as isize);
+                    }
+                    if screen_pt.x >= rect.right - edge {
+                        return LRESULT(HTRIGHT as isize);
+                    }
+
+                    return LRESULT(HTCAPTION as isize);
+                }
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        },
+        WM_CLOSE => unsafe {
+            let _ = ShowWindow(hwnd, SW_HIDE);
             LRESULT(0)
         },
         WM_DESTROY => unsafe {
+            let _ = KillTimer(Some(hwnd), HOVER_TIMER_ID);
             PostQuitMessage(0);
             LRESULT(0)
         },
@@ -300,45 +1645,68 @@ unsafe extern "system" fn window_proc(
     }
 }
 
-/// 获取全局桌面歌词管理器
+static DESKTOP_LYRICS_MANAGER: OnceLock<Arc<Mutex<DesktopLyricsManager>>> = OnceLock::new();
+
 pub fn get_desktop_lyrics_manager() -> Arc<Mutex<DesktopLyricsManager>> {
     DESKTOP_LYRICS_MANAGER
         .get_or_init(|| Arc::new(Mutex::new(DesktopLyricsManager::new())))
         .clone()
 }
 
-/// 初始化桌面歌词
-pub fn init_desktop_lyrics() -> Result<(), String> {
+#[command]
+pub fn show_desktop_lyrics(app: tauri::AppHandle) -> Result<(), String> {
     let manager = get_desktop_lyrics_manager();
-    let mut guard = manager
-        .lock()
-        .map_err(|e| format!("Failed to lock desktop lyrics manager: {e}"))?;
-    guard.initialize()
-}
-
-/// 更新桌面歌词
-pub fn update_desktop_lyric(lyric: &str) -> Result<(), String> {
-    let manager = get_desktop_lyrics_manager();
-    let mut guard = manager
-        .lock()
-        .map_err(|e| format!("Failed to lock desktop lyrics manager: {e}"))?;
-    guard.update_lyric(lyric)
-}
-
-/// 显示桌面歌词
-pub fn show_desktop_lyrics() -> Result<(), String> {
-    let manager = get_desktop_lyrics_manager();
-    let mut guard = manager
-        .lock()
-        .map_err(|e| format!("Failed to lock desktop lyrics manager: {e}"))?;
+    let mut guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
+    guard.initialize(app)?;
     guard.show()
 }
 
-/// 隐藏桌面歌词
+#[command]
 pub fn hide_desktop_lyrics() -> Result<(), String> {
     let manager = get_desktop_lyrics_manager();
-    let mut guard = manager
-        .lock()
-        .map_err(|e| format!("Failed to lock desktop lyrics manager: {e}"))?;
+    let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard.hide()
+}
+
+#[command]
+pub fn update_desktop_lyric(
+    current_line: String,
+    sub_line: String,
+    progress: f32,
+    words: Vec<DesktopLyricWord>,
+    current_time: f32,
+    is_playing: bool,
+) -> Result<(), String> {
+    let manager = get_desktop_lyrics_manager();
+    let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
+    guard.update_lyric(&current_line, &sub_line, progress, words, current_time, is_playing)
+}
+
+#[command]
+pub fn set_desktop_lyrics_locked(locked: bool) -> Result<(), String> {
+    let manager = get_desktop_lyrics_manager();
+    let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
+    guard.set_locked(locked)
+}
+
+#[command]
+pub fn set_desktop_lyrics_font_size(size: i32) -> Result<(), String> {
+    let manager = get_desktop_lyrics_manager();
+    let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
+    guard.set_font_size(size)
+}
+
+#[command]
+pub fn set_desktop_lyrics_color_preset(preset: String) -> Result<(), String> {
+    let manager = get_desktop_lyrics_manager();
+    let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
+    guard.set_color_preset(&preset)
+}
+
+
+#[command]
+pub fn is_desktop_lyrics_visible() -> Result<bool, String> {
+    let manager = get_desktop_lyrics_manager();
+    let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
+    Ok(guard.is_visible())
 }

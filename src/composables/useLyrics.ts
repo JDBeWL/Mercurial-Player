@@ -242,8 +242,8 @@ export function useLyrics() {
       
       // 应用歌词偏移
       const offset = playerStore.lyricsOffset || 0
-      const adjustedTime = currentTime + 0.05 - offset
-      
+      const adjustedTime = currentTime - offset
+
       // 二分查找当前歌词索引
       let l = 0, r = lyrics.value.length - 1, idx = -1
       while (l <= r) {

@@ -198,11 +198,17 @@ export class LyricsParser {
         return words
       }
       const enWords = parseKaraoke(group.texts.orig)
+      const plainText = group.texts.orig.replace(/{.*?}/g, '')
+      // 没有 karaoke 标记时，生成覆盖整行的虚拟 word
+      const finalWords = enWords.length > 0 ? enWords
+        : (plainText.length > 0 && group.endTime > group.startTime
+          ? [{ text: plainText, start: group.startTime, end: group.endTime }]
+          : [])
       result.push({
         time: group.startTime,
-        texts: [group.texts.orig.replace(/{.*?}/g, ''), group.texts.ts.replace(/{.*?}/g, '')],
-        words: enWords,
-        karaoke: enWords.length > 0 ? { fullText: group.texts.orig, timings: [] } : null
+        texts: [plainText, group.texts.ts.replace(/{.*?}/g, '')],
+        words: finalWords,
+        karaoke: finalWords.length > 0 ? { fullText: group.texts.orig, timings: [] } : null
       })
     })
     return result.sort((a, b) => a.time - b.time)

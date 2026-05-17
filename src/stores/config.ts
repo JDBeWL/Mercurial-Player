@@ -11,6 +11,7 @@ import type {
   PlaylistConfig,
   GeneralConfig,
   LyricsConfig,
+  DesktopLyricsConfig,
   UIConfig,
   AudioConfig,
   VisualizerConfig,
@@ -134,6 +135,12 @@ export const useConfigStore = defineStore('config', {
       lyricsAlignment: 'center',
       lyricsFontFamily: 'Roboto',
       lyricsStyle: 'modern',
+      desktopLyrics: {
+        enabled: false,
+        locked: true,
+        fontSize: 28,
+        colorPreset: 'dark' as const,
+      },
     },
 
     // UI设置
@@ -352,13 +359,21 @@ export const useConfigStore = defineStore('config', {
           onlineSource: 'netease',
           lyricsAlignment: 'center',
           lyricsFontFamily: 'Roboto',
-          lyricsStyle: 'modern'
+          lyricsStyle: 'modern',
+          desktopLyrics: {
+            enabled: false,
+            locked: true,
+            fontSize: 28,
+          },
         }
       } else {
         if (!configToSave.lyrics.lyricsAlignment) configToSave.lyrics.lyricsAlignment = 'center'
         if (!configToSave.lyrics.lyricsFontFamily) configToSave.lyrics.lyricsFontFamily = 'Roboto'
         if (!configToSave.lyrics.lyricsStyle) configToSave.lyrics.lyricsStyle = 'modern'
         if (configToSave.lyrics.onlineSource === undefined) configToSave.lyrics.onlineSource = 'netease'
+        if (!configToSave.lyrics.desktopLyrics) {
+          configToSave.lyrics.desktopLyrics = { enabled: false, locked: true, fontSize: 28, colorPreset: 'dark' as const }
+        }
       }
 
       // 主存储：plugin-store
@@ -488,6 +503,17 @@ export const useConfigStore = defineStore('config', {
 
     setLyricsConfig(config: Partial<LyricsConfig>): void {
       this.lyrics = { ...this.lyrics, ...config }
+      this._markDirty()
+      if (this.general.autoSaveConfig && !this._isInitializing) {
+        this.saveConfig()
+      }
+    },
+
+    setDesktopLyricsConfig(config: Partial<DesktopLyricsConfig>): void {
+      if (!this.lyrics.desktopLyrics) {
+        this.lyrics.desktopLyrics = { enabled: false, locked: true, fontSize: 28, colorPreset: 'dark' as const }
+      }
+      this.lyrics.desktopLyrics = { ...this.lyrics.desktopLyrics, ...config }
       this._markDirty()
       if (this.general.autoSaveConfig && !this._isInitializing) {
         this.saveConfig()

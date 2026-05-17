@@ -116,7 +116,6 @@
         </div>
         <div class="cache-size-control">
           <input
-            ref="cacheSliderRef"
             type="range"
             min="1024"
             max="8192"
@@ -124,6 +123,7 @@
             v-model.number="coverCacheSizeMb"
             @input="handleCacheSizeChange"
             class="cache-slider"
+            :style="cacheSliderStyle"
           />
           <span class="cache-size-value">{{ formatCacheSize(coverCacheSizeMb) }}</span>
         </div>
@@ -180,8 +180,6 @@ import logger from '../../utils/logger'
 import MD3Select from '../MD3Select.vue'
 import { invoke } from '@tauri-apps/api/core'
 
-const cacheSliderRef = ref<HTMLInputElement | null>(null)
-
 const configStore = useConfigStore()
 
 const languageOptions = computed(() => [
@@ -193,6 +191,16 @@ const coverCacheSizeMb = computed({
   get: () => configStore.general.coverCacheSizeMb || 1024,
   set: (value: number) => {
     configStore.general.coverCacheSizeMb = value
+  }
+})
+
+const cacheSliderStyle = computed(() => {
+  const min = 1024
+  const max = 8192
+  const value = coverCacheSizeMb.value
+  const percentage = ((value - min) / (max - min)) * 100
+  return {
+    background: `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`
   }
 })
 
@@ -291,20 +299,7 @@ const handleLanguageChange = async () => {
   }
 }
 
-const updateSliderBackground = () => {
-  if (!cacheSliderRef.value) return
-  
-  const slider = cacheSliderRef.value
-  const min = parseInt(slider.min)
-  const max = parseInt(slider.max)
-  const value = parseInt(slider.value)
-  const percentage = ((value - min) / (max - min)) * 100
-  
-  slider.style.background = `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`
-}
-
 const handleCacheSizeChange = async () => {
-  updateSliderBackground()
   await saveConfig()
 }
 
@@ -373,7 +368,6 @@ const clearMetadataCache = async () => {
 }
 
 onMounted(() => {
-  updateSliderBackground()
   loadMetadataCacheStats()
   loadTempDirPath()
 })

@@ -2796,7 +2796,7 @@ dependencies = [
 
 [[package]]
 name = "mercurial-player"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -2829,10 +2829,12 @@ dependencies = [
  "tauri-plugin-store",
  "tauri-plugin-updater",
  "tokio",
+ "unicode-segmentation",
  "urlencoding",
  "walkdir",
  "wasapi",
  "windows 0.61.3",
+ "windows-numerics 0.2.0",
  "winreg 0.52.0",
 ]
 
