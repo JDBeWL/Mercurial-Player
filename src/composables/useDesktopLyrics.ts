@@ -263,17 +263,15 @@ export function useDesktopLyrics() {
   if (!isInitialized) {
     isInitialized = true
 
-    const unlistenClosed = listen('desktop-lyrics-closed', () => {
+    listen('desktop-lyrics-closed', () => {
       logger.info('Desktop lyrics closed from window button')
       configStore.setDesktopLyricsConfig({ enabled: false })
-    })
-    unlistenFns.push(unlistenClosed)
+    }).then(unlisten => unlistenFns.push(unlisten))
 
-    const unlistenLockChanged = listen<boolean>('desktop-lyrics-lock-changed', (event) => {
+    listen<boolean>('desktop-lyrics-lock-changed', (event) => {
       logger.info('Desktop lyrics lock changed:', event.payload)
       configStore.setDesktopLyricsConfig({ locked: event.payload })
-    })
-    unlistenFns.push(unlistenLockChanged)
+    }).then(unlisten => unlistenFns.push(unlisten))
 
     const stopWatchLyricIndex = watch(
       () => playerStore.currentLyricIndex,
