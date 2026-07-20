@@ -242,6 +242,11 @@ export const useConfigStore = defineStore('config', {
         if (configResult.success && configResult.data) {
           configData = configResult.data
           logger.info('Configuration loaded from backend ConfigManager')
+          // lastSession 仅由后端管理 (避免 plugin-store 副本过期),
+          // 迁移到 plugin-store 时剥离该字段
+          if ('lastSession' in configData) {
+            delete configData.lastSession
+          }
           // 首次迁移：写入 plugin-store 以便后续直接使用
           try {
             const store = await getStore()
@@ -251,6 +256,12 @@ export const useConfigStore = defineStore('config', {
           } catch (err) {
             logger.warn('Failed to migrate config to plugin-store:', err)
           }
+        }
+      } else {
+        // 从 plugin-store 加载时也剥离 lastSession (历史遗留数据),
+        // 保证该字段只由后端 save_last_session 命令管理
+        if ('lastSession' in configData) {
+          delete configData.lastSession
         }
       }
 
@@ -561,7 +572,7 @@ export const useConfigStore = defineStore('config', {
         this.ui.miniMode = newMode
       } catch (error) {
         logger.error('Failed to toggle mini mode:', error)
-        this.ui.miniMode = !this.ui.miniMode
+        // invoke 失败时不修改状态，因为 try 块中尚未修改
       }
     }
   }

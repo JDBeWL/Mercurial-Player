@@ -1,6 +1,7 @@
 //! 音频设备监听模块
 //!
-//! 监听音频设备的连接和断开事件，并在设备断开时自动切换到其他可用设备。
+//! 监听音频设备的连接和断开事件、设备断开时自动切换到其他可用设备，
+//! 以及系统默认输出设备变化（包括无插拔时用户在系统设置中主动切换）时跟随切换。
 
 use cpal::traits::HostTrait;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -95,6 +96,7 @@ fn monitor_device_changes(
 ) {
     let host = cpal::default_host();
     let mut previous_devices = get_device_names(&host);
+    let mut previous_default = get_default_device_name(&host);
 
     while is_running.load(Ordering::SeqCst) {
         thread::sleep(Duration::from_secs(1));
@@ -148,20 +150,27 @@ fn monitor_device_changes(
                     event_type: "device-added".to_string(),
                     device_name: Some(device_name.clone()),
                 });
+            }
+        }
 
-                // 检查新添加的设备是否为系统默认设备
-                if let Some(default_device) = host.default_output_device() {
-                    if let Some(default_name) = get_device_friendly_name(&default_device) {
-                        if default_name == *device_name {
-                            log::info!("New device is system default, switching to: {device_name}");
+        // 检查系统默认设备变化（无插拔时用户在系统设置中主动切换、
+        // 或新设备插入导致默认设备自动变更，都会走到这里）
+        let current_default = get_default_device_name(&host);
+        if current_default != previous_default {
+            let old_default = previous_default.take();
+            previous_default = current_default.clone();
 
-                            // 发送自动切换到默认设备的事件
-                            let _ = app.emit("device-default-changed", DeviceChangeEvent {
-                                event_type: "device-default-changed".to_string(),
-                                device_name: Some(device_name.clone()),
-                            });
-                        }
-                    }
+            // 仅当应用当前使用的设备是旧默认设备（即正在跟随系统默认输出）时，
+            // 才跟随系统切换到新默认设备，避免打断用户手动指定的设备
+            if let Some(new_default) = current_default {
+                let is_following_default = old_default.as_deref() == Some(current_device_name.as_str());
+                if is_following_default && new_default != current_device_name {
+                    log::info!("System default device changed to: {new_default}, following");
+
+                    let _ = app.emit("device-default-changed", DeviceChangeEvent {
+                        event_type: "device-default-changed".to_string(),
+                        device_name: Some(new_default),
+                    });
                 }
             }
         }
@@ -180,6 +189,12 @@ fn get_device_names(host: &cpal::Host) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// 获取系统默认输出设备名称
+fn get_default_device_name(host: &cpal::Host) -> Option<String> {
+    host.default_output_device()
+        .and_then(|device| get_device_friendly_name(&device))
 }
 
 /// 查找备用设备

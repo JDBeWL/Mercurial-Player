@@ -758,6 +758,11 @@ fn decode_and_push_to_wasapi(
     // 精确计算最大输出缓冲区大小
     let max_output_frames = ((chunk_size as f64 * resample_ratio).ceil() as usize).max(chunk_size);
     let mut output_buffer: Vec<f32> = Vec::with_capacity(max_output_frames * target_ch as usize);
+    // 复用 interleaved 缓冲区,避免每帧堆分配
+    let samples_needed = chunk_size * src_ch as usize;
+    let mut interleaved: Vec<f32> = Vec::with_capacity(samples_needed);
+    // 通道转换用复用缓冲区
+    let mut converted_buffer: Vec<f32> = Vec::with_capacity(max_output_frames * target_ch as usize);
     
     // 播放位置追踪
     let mut last_position_emit_time: u64 = 0;
@@ -782,8 +787,8 @@ fn decode_and_push_to_wasapi(
         if stop_flag.load(Ordering::SeqCst) || thread_id_ref.load(Ordering::SeqCst) != my_id || wasapi.lock().unwrap().is_none() { break; }
         for ch in &mut input_frames { ch.clear(); }
 
-        let samples_needed = chunk_size * src_ch as usize;
-        let mut interleaved = Vec::with_capacity(samples_needed);
+        // 复用 interleaved 缓冲区
+        interleaved.clear();
         let mut eof = false;
         for _ in 0..samples_needed {
             if let Some(s) = source.next() { interleaved.push(s); }
@@ -814,8 +819,9 @@ fn decode_and_push_to_wasapi(
             }
         }
 
-        // 处理重采样
-        let output_frames: Vec<Vec<f32>> = if let Some(ref mut r) = resampler {
+        // 处理重采样 - 用 Cow 避免成功路径的 clone
+        use std::borrow::Cow;
+        let output_frames: Cow<'_, [Vec<f32>]> = if let Some(ref mut r) = resampler {
             let actual = input_frames[0].len();
             if actual < chunk_size && !eof {
                 // 非EOF情况下填充到chunk_size
@@ -827,14 +833,22 @@ fn decode_and_push_to_wasapi(
                         last_sample * fade
                     }));
                 }
-                r.process(&input_frames, None).unwrap_or_else(|_| input_frames.clone())
+                match r.process(&input_frames, None) {
+                    Ok(out) => Cow::Owned(out),
+                    Err(_) => Cow::Borrowed(&input_frames),
+                }
             } else if eof && actual < chunk_size {
-                // EOF情况下 - 直接复制剩余数据
-                input_frames.clone()
+                // EOF情况下 - 直接借用 input_frames,避免 clone
+                Cow::Borrowed(&input_frames)
             } else {
-                r.process(&input_frames, None).unwrap_or_else(|_| input_frames.clone())
+                match r.process(&input_frames, None) {
+                    Ok(out) => Cow::Owned(out),
+                    Err(_) => Cow::Borrowed(&input_frames),
+                }
             }
-        } else { input_frames.clone() };
+        } else {
+            Cow::Borrowed(&input_frames)
+        };
 
         // 交错输出帧
         output_buffer.clear();
@@ -845,28 +859,30 @@ fn decode_and_push_to_wasapi(
             }
         }
 
-        // 通道转换：使用当前实际通道数（重采样后仍是src_ch通道）
+        // 通道转换:使用复用缓冲区,避免 clone
+        // current_ch 是重采样后实际声道数
         let current_ch = output_frames.len() as u16;
-        let final_out: Vec<f32> = if current_ch != target_ch {
-            convert_channels(&output_buffer, current_ch, target_ch)
+        let final_out: &[f32] = if current_ch != target_ch {
+            convert_channels_into(&output_buffer, current_ch, target_ch, &mut converted_buffer);
+            &converted_buffer
         } else {
-            output_buffer.clone()
+            &output_buffer
         };
 
         if !final_out.is_empty() {
-            // 等待缓冲区有空间（防止解码过快导致内存无限增长）
+            // 等待缓冲区有空间 (Condvar 等待,被 WASAPI 消费线程唤醒)
+            // 缓冲区容量约为 target_sr * target_ch * 4 秒,保持在 2 秒以下
+            let max_buffer = target_sr as usize * target_ch as usize * 2;
             loop {
                 if stop_flag.load(Ordering::SeqCst) || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
-                let buf_size = wasapi.lock().unwrap().as_ref().map_or(0, |p| p.get_buffer_size());
-                // 缓冲区容量约为 target_sr * target_ch * 4秒，保持在2秒以下
-                let max_buffer = target_sr as usize * target_ch as usize * 2;
-                if buf_size < max_buffer { break; }
+                // 用 condvar 等待 50ms 超时,期间 WASAPI 消费端 notify 会唤醒本线程
+                let has_space = wasapi.lock().unwrap().as_ref().map_or(true, |p| p.wait_for_buffer_space(max_buffer, Duration::from_millis(50)));
+                if has_space { break; }
                 // 等待时继续发送播放位置
                 emit_position(&mut last_position_emit_time);
-                std::thread::sleep(Duration::from_millis(10));
             }
             if stop_flag.load(Ordering::SeqCst) || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
-            
+
             if let Some(ref p) = *wasapi.lock().unwrap() {
                 if p.push_samples(final_out).is_err() { break; }
             }
@@ -885,7 +901,9 @@ fn decode_and_push_to_wasapi(
             }
             break;
         }
-        std::thread::sleep(Duration::from_micros(500));
+        // 让出 CPU 给其他线程 (主要给消费线程),避免 100% 占用
+        // 但用更短的时间,因为已经被 condvar 同步过
+        std::thread::yield_now();
     }
 }
 
@@ -938,19 +956,25 @@ fn downmix_surround_to_stereo(samples: &[f32], src_ch: usize, frame: usize) -> (
     )
 }
 
-fn convert_channels(samples: &[f32], src_ch: u16, target_ch: u16) -> Vec<f32> {
-    if src_ch == target_ch { return samples.to_vec(); }
+/// 通道转换(in-place 版本):写入预分配缓冲区,避免每帧堆分配。
+/// `out` 会被 clear 并填充结果。
+fn convert_channels_into(samples: &[f32], src_ch: u16, target_ch: u16, out: &mut Vec<f32>) {
+    out.clear();
+    if src_ch == target_ch {
+        out.extend_from_slice(samples);
+        return;
+    }
     let (src, tgt) = (src_ch as usize, target_ch as usize);
     let frames = samples.len() / src;
-    let mut out = Vec::with_capacity(frames * tgt);
-    
+    out.reserve(frames * tgt);
+
     for f in 0..frames {
         let start = f * src;
         match (src, tgt) {
-            (1, 2) => { 
-                let s = samples[start]; 
-                out.push(s); 
-                out.push(s); 
+            (1, 2) => {
+                let s = samples[start];
+                out.push(s);
+                out.push(s);
             }
             (2, 1) => {
                 out.push((samples[start] + samples[start + 1]) / 2.0);
@@ -962,14 +986,13 @@ fn convert_channels(samples: &[f32], src_ch: u16, target_ch: u16) -> Vec<f32> {
                 out.push(right);
             }
             _ => {
-                // 其他情况：简单截取或填充
+                // 其他情况:简单截取或填充
                 for ch in 0..tgt {
                     out.push(if ch < src { samples[start + ch] } else { samples[start] });
                 }
             }
         }
     }
-    out
 }
 
 /// Seek共享模式

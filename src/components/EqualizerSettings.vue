@@ -495,7 +495,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   height: 4px;
-  background-color: var(--md-sys-color-surface-container-highest);
+  background-color: var(--md-sys-color-surface-variant);
   border-radius: 2px;
 }
 
@@ -518,6 +518,9 @@ onUnmounted(() => {
   transform: translate(-50%, -50%);
   transition: transform 0.1s ease, box-shadow 0.1s ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  /* 显式覆盖全局 .slider-thumb 的 opacity: 0，
+     让滑柄默认可见，而不是仅在 hover 时才显示 */
+  opacity: 1;
 }
 
 .slider.horizontal:hover .slider-thumb {
@@ -588,7 +591,11 @@ onUnmounted(() => {
   left: 50%;
   transform: translateX(-50%);
   width: 4px;
-  background-color: var(--md-sys-color-surface-container-highest);
+  /* 显式覆盖全局 .slider-track 的 height: 4px，
+     否则 top+bottom+height 会过度约束导致 bottom 被忽略，
+     轨道只剩 4px 高度且位于顶部，看起来不可见 */
+  height: auto;
+  background-color: var(--md-sys-color-surface-variant);
   border-radius: 2px;
 }
 
@@ -599,7 +606,6 @@ onUnmounted(() => {
   transform: translateX(-50%);
   width: 4px;
   background-color: var(--md-sys-color-primary);
-  border-radius: 2px;
   transition: height 0.05s ease-out;
 }
 
@@ -613,6 +619,9 @@ onUnmounted(() => {
   transform: translate(-50%, 50%);
   transition: transform 0.1s ease, box-shadow 0.1s ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  /* 显式覆盖全局 .slider-thumb 的 opacity: 0，
+     让滑柄默认可见，而不是仅在 hover 时才显示 */
+  opacity: 1;
 }
 
 .slider.vertical:hover .slider-thumb {

@@ -1,6 +1,6 @@
 [package]
 name = "mercurial-player"
-version = "1.2.1"
+version = "1.2.2"
 description = "A music player by JDBeWL"
 authors = ["jdbEwl"]
 license = "GPL-3.0"
@@ -20,14 +20,13 @@ rodio = { version = "0.22", default-features = false, features = ["playback"] }
 cpal = "0.17"
 dirs = "6"
 walkdir = "2"
-lofty = "0.22"
-base64 = "0.22"
+lofty = "0.24"
 # 启用Symphonia所有格式和编解码器
-symphonia = { version = "0.5", features = ["all", "opt-simd"] }
+symphonia = { version = "0.6", features = ["all"] }
 rubato = "0.15"
 rayon = "1"
 spectrum-analyzer = "1.7"
-tantivy = "0.25"
+tantivy = "0.26"
 log = "0.4"
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2.7"
@@ -40,12 +39,6 @@ tauri-plugin-store = "2.4"
 tauri-plugin-global-shortcut = "2.3"
 
 crossbeam-channel = "0.5"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
-futures = "0.3"
-urlencoding = "2"
-aes = "0.8"
-md5 = "0.7"
-sha2 = "0.10"
 display-info = "0.5"
 unicode-segmentation = "1"
 

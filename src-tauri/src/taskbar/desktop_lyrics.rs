@@ -853,7 +853,11 @@ impl DesktopLyricsManager {
             unsafe {
                 let style = GetWindowLongPtrW(HWND(hwnd as *mut _), GWL_EXSTYLE);
                 let transparent_bit = WS_EX_TRANSPARENT.0 as isize;
-                let new_style = style & !transparent_bit;
+                let new_style = if locked {
+                    style | transparent_bit
+                } else {
+                    style & !transparent_bit
+                };
                 SetWindowLongPtrW(HWND(hwnd as *mut _), GWL_EXSTYLE, new_style);
                 let _ = InvalidateRect(Some(HWND(hwnd as *mut _)), None, true);
             }
@@ -1509,6 +1513,30 @@ unsafe extern "system" fn window_proc(
                         if should_redraw {
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
+
+                        // 锁定状态下：光标悬停在解锁按钮上时临时移除穿透样式使其可点击，
+                        // 移开后恢复穿透。WS_EX_TRANSPARENT 对整个窗口生效，无法只让按钮
+                        // 区域接收点击，因此通过定时器轮询光标位置按区域动态切换。
+                        if guard.is_locked {
+                            let dpi = get_dpi_for_window(hwnd);
+                            let mut client_rect = RECT::default();
+                            let _ = GetClientRect(hwnd, &mut client_rect);
+                            let lock_rect = get_lock_btn_rect(&client_rect, dpi as i32);
+                            // WS_POPUP 窗口客户区原点即窗口原点，换算为屏幕坐标
+                            let on_lock_btn = pt.x >= rect.left + lock_rect.left
+                                && pt.x < rect.left + lock_rect.right
+                                && pt.y >= rect.top + lock_rect.top
+                                && pt.y < rect.top + lock_rect.bottom;
+
+                            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                            let transparent_bit = WS_EX_TRANSPARENT.0 as isize;
+                            let has_transparent = style & transparent_bit != 0;
+                            if on_lock_btn && has_transparent {
+                                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style & !transparent_bit);
+                            } else if !on_lock_btn && !has_transparent {
+                                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | transparent_bit);
+                            }
+                        }
                     }
                 }
             }
@@ -1572,7 +1600,11 @@ unsafe extern "system" fn window_proc(
 
                         let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
                         let transparent_bit = WS_EX_TRANSPARENT.0 as isize;
-                        let new_style = style & !transparent_bit;
+                        let new_style = if new_locked {
+                            style | transparent_bit
+                        } else {
+                            style & !transparent_bit
+                        };
                         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
                         let _ = InvalidateRect(Some(hwnd), None, true);
 

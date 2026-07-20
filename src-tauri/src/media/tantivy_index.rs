@@ -252,7 +252,7 @@ impl TantivyIndexManager {
             .map_err(|e| format!("解析查询失败: {e}"))?;
 
         let top_docs = searcher
-            .search(&parsed_query, &TopDocs::with_limit(limit))
+            .search(&parsed_query, &TopDocs::with_limit(limit).order_by_score())
             .map_err(|e| format!("搜索失败: {e}"))?;
 
         let mut results = Vec::new();

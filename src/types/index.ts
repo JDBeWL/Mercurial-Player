@@ -133,6 +133,62 @@ export interface VisualizerConfig {
   detectedRefreshRate?: number
 }
 
+/**
+ * 上次播放会话信息 (用于启动恢复)
+ * 文件大小+修改时间用于启动时检测文件是否被替换
+ */
+export interface LastSession {
+  trackPath: string
+  trackTitle: string
+  trackArtist: string
+  durationSecs: number
+  positionSecs: number
+  playlistName?: string | null
+  trackIndexInPlaylist?: number | null
+  fileSize: number
+  fileMtime: number
+  savedAt: number
+  /** 播放队列快照 (恢复 player.playlist) */
+  playlistTracks?: TrackSnapshot[]
+}
+
+/**
+ * 曲目元数据快照 (用于 last_session 持久化播放队列)
+ * 不含 coverPath (按需加载)
+ */
+export interface TrackSnapshot {
+  path: string
+  title?: string | null
+  artist?: string | null
+  album?: string | null
+  duration?: number | null
+  bitrate?: number | null
+  sampleRate?: number | null
+  channels?: number | null
+  bitDepth?: number | null
+  format?: string | null
+}
+
+/**
+ * 启动恢复结果
+ * - resumed=true 时其他字段填充曲目信息
+ * - status 用于前端日志/调试,可能值: no_session / expired / not_found /
+ *   metadata_unreadable / resumed / resumed_replaced / playback_failed: <err>
+ */
+export interface ResumeResult {
+  resumed: boolean
+  trackPath?: string | null
+  trackTitle?: string | null
+  trackArtist?: string | null
+  durationSecs?: number | null
+  positionSecs?: number | null
+  playlistName?: string | null
+  trackIndexInPlaylist?: number | null
+  /** 播放队列快照 (用于恢复 player.playlist) */
+  playlistTracks: TrackSnapshot[]
+  status: string
+}
+
 export interface AppConfig {
   musicDirectories: string[]
   directoryScan: DirectoryScanConfig
@@ -143,6 +199,8 @@ export interface AppConfig {
   ui: UIConfig
   audio: AudioConfig
   visualizer: VisualizerConfig
+  /** 上次播放会话 (启动恢复用) */
+  lastSession?: LastSession | null
 }
 
 // ============ 错误处理类型 ============

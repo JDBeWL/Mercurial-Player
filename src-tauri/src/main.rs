@@ -211,7 +211,19 @@ fn main() {
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                // dev: Debug (含 debug!, 不含 trace!); release: Info
+                // 关键: 关闭 wasapi crate 的 trace 日志,避免 WASAPI 消费线程被 I/O 阻塞导致音频毛刺
+                .level(if cfg!(debug_assertions) {
+                    log::LevelFilter::Debug
+                } else {
+                    log::LevelFilter::Info
+                })
+                .level_for("wasapi", log::LevelFilter::Warn)
+                .level_for("symphonia", log::LevelFilter::Info)
+                .build()
+        )
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
@@ -282,6 +294,10 @@ fn main() {
             audio::commands::get_exclusive_mode,
             audio::commands::set_target_fps,
             audio::commands::set_vertical_sync,
+            // 上次播放会话恢复命令
+            audio::commands::resume_last_session,
+            audio::commands::save_last_session,
+            audio::commands::clear_last_session,
             // EQ 均衡器命令
             equalizer::commands::get_eq_bands,
             equalizer::commands::get_eq_settings,

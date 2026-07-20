@@ -494,8 +494,12 @@ watch(currentTrackIndex, (newIndex, oldIndex) => {
     transitionDirection.value = 'next';
   } else if (newIndex === (oldIndex - 1 + playlistLength) % playlistLength) {
     transitionDirection.value = 'prev';
+  } else if (newIndex > oldIndex) {
+    transitionDirection.value = 'next'; // 播放列表向后跳选，与"下一首"动画一致
+  } else if (newIndex < oldIndex) {
+    transitionDirection.value = 'prev'; // 播放列表向前跳选，与"上一首"动画一致
   } else {
-    transitionDirection.value = null; // 其他情况不进行处理
+    transitionDirection.value = null; // 同一首歌不处理
   }
 });
 
@@ -550,6 +554,14 @@ onMounted(async () => {
 
   // 初始化音频播放器
   await playerStore.initAudio()
+
+  // 尝试恢复上次播放会话 (启动时根据 last_session 校验并恢复)
+  // 失败静默忽略 (用户选择不弹提示)
+  try {
+    await playerStore.resumeLastSession()
+  } catch (error) {
+    logger.warn('Failed to resume last session:', error)
+  }
 
   // 获取屏幕刷新率并设置到后端，用于动态调整FFT计算频率
   try {

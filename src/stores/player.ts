@@ -8,7 +8,8 @@ import logger from '../utils/logger'
 import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
 import { classifyAudioInvokeError } from '../utils/audioErrorClassifier'
 import { useConfigStore } from './config'
-import type { Track, AudioInfo, LyricLine, RepeatMode, CacheItem } from '@/types'
+import { useMusicLibraryStore } from './musicLibrary'
+import type { Track, AudioInfo, LyricLine, RepeatMode, CacheItem, ResumeResult, TrackSnapshot } from '@/types'
 
 /**
  * 简单的LRU缓存实现
@@ -211,12 +212,20 @@ export const usePlayerStore = defineStore('player', {
       return state.playlist.findIndex(track => track.path === state.currentTrack!.path)
     },
     hasNextTrack: (state): boolean => {
-      if (!state.currentTrack) return false
-      return state.playlist.length > 0
+      if (!state.currentTrack || state.playlist.length <= 1) return false
+      // 列表循环、单曲循环、随机模式下，手动切换总是可以
+      if (state.repeatMode === 'list' || state.repeatMode === 'track' || state.isShuffle) return true
+      // 顺序播放：检查是否在最后一首
+      const idx = state.playlist.findIndex(t => t.path === state.currentTrack!.path)
+      return idx >= 0 && idx < state.playlist.length - 1
     },
     hasPreviousTrack: (state): boolean => {
-      if (!state.currentTrack) return false
-      return state.playlist.length > 0
+      if (!state.currentTrack || state.playlist.length <= 1) return false
+      // 列表循环、单曲循环、随机模式下，手动切换总是可以
+      if (state.repeatMode === 'list' || state.repeatMode === 'track' || state.isShuffle) return true
+      // 顺序播放：检查是否在第一首
+      const idx = state.playlist.findIndex(t => t.path === state.currentTrack!.path)
+      return idx > 0
     },
     currentLyric: (state): LyricLine | null => {
       if (!state.lyrics || state.currentLyricIndex < 0 || state.currentLyricIndex >= state.lyrics.length) {
@@ -362,6 +371,189 @@ export const usePlayerStore = defineStore('player', {
         })
       } catch (err) {
         logger.error('Failed to setup position listener:', err)
+      }
+    },
+
+    /**
+     * 立即保存 last_session (无节流,用于 pause/切曲/关闭等关键节点)
+     *
+     * 不在 playback-position 事件中写入,避免播放期间频繁写盘。
+     * 仅在以下场景触发:
+     * - pause():暂停时立即保存
+     * - playTrack():切曲前保存上一曲的最后位置
+     * - cleanup():关闭窗口前 await 保存
+     * 风险:程序崩溃/断电时丢失自上次关键节点以来的进度。
+     */
+    async _saveLastSessionNow(): Promise<void> {
+      if (!this.currentTrack || this._isDestroyed) return
+      const track = this.currentTrack
+      // 从 musicLibraryStore 获取当前播放列表名 (用于启动恢复)
+      let playlistName: string | null = null
+      let trackIndexInPlaylist: number | null = null
+      try {
+        const musicLibraryStore = useMusicLibraryStore()
+        if (musicLibraryStore.currentPlaylist) {
+          playlistName = musicLibraryStore.currentPlaylist.name
+          const idx = musicLibraryStore.currentPlaylist.files.findIndex(
+            f => f.path === track.path
+          )
+          if (idx >= 0) trackIndexInPlaylist = idx
+        }
+      } catch (err) {
+        logger.debug('Failed to get current playlist name:', err)
+      }
+      // 提取 player.playlist 的元数据快照 (不依赖 musicLibrary 缓存)
+      // 这样启动恢复时即使 musicLibrary 还没加载,也能直接重建 player.playlist
+      const playlistTracks: TrackSnapshot[] = this.playlist.map(t => ({
+        path: t.path,
+        title: t.title ?? null,
+        artist: t.artist ?? null,
+        album: t.album ?? null,
+        duration: t.duration ?? null,
+        bitrate: t.bitrate ?? null,
+        sampleRate: t.sampleRate ?? null,
+        channels: t.channels ?? null,
+        bitDepth: t.bitDepth ?? null,
+        format: t.format ?? null,
+      }))
+      try {
+        await invoke('save_last_session', {
+          trackPath: track.path,
+          trackTitle: track.title || track.displayTitle || track.name || '',
+          trackArtist: track.artist || track.displayArtist || '',
+          durationSecs: this.duration || 0,
+          positionSecs: this.currentTime,
+          playlistName,
+          trackIndexInPlaylist,
+          playlistTracks,
+        })
+      } catch (err) {
+        logger.debug('Failed to save last session:', err)
+      }
+    },
+
+    /**
+     * 启动时调用 - 尝试恢复上次播放会话
+     *
+     * 行为:
+     * - resumed=true: 后端已加载文件并暂停在 position,前端设置 UI 状态
+     *   (currentTrack/duration/currentTime/audioInfo/playlist),isPlaying=false 保持暂停
+     * - resumed=false 且 status='not_found': 文件不存在,从播放列表移除该路径
+     * - 其他 false 状态: 静默忽略,无需 UI 反馈
+     */
+    async resumeLastSession(): Promise<ResumeResult | null> {
+      try {
+        const result = await invoke<ResumeResult>('resume_last_session')
+        if (result.resumed && result.trackPath) {
+          const trackPath = result.trackPath
+
+          // 1. 用返回的 playlistTracks 直接构造 player.playlist
+          //    不依赖 musicLibrary 缓存是否加载,保证恢复后播放列表完整
+          const playlistTracks = result.playlistTracks ?? []
+          const playlist: Track[] = playlistTracks.map(s => ({
+            path: s.path,
+            title: s.title ?? undefined,
+            artist: s.artist ?? undefined,
+            album: s.album ?? undefined,
+            displayTitle: s.title ?? undefined,
+            displayArtist: s.artist ?? undefined,
+            duration: s.duration ?? undefined,
+            bitrate: s.bitrate ?? null,
+            sampleRate: s.sampleRate ?? null,
+            channels: s.channels ?? null,
+            bitDepth: s.bitDepth ?? null,
+            format: s.format ?? null,
+          }))
+          this.playlist = playlist
+
+          // 2. 在 playlist 中查找当前曲目 (含完整元数据: bitrate/sampleRate 等)
+          let matchedTrack: Track | null = playlist.find(t => t.path === trackPath) ?? null
+
+          // 3. 如果 playlistTracks 为空或没找到,用 lastSession 快照构造一个最小 Track
+          if (!matchedTrack) {
+            matchedTrack = {
+              path: trackPath,
+              title: result.trackTitle || undefined,
+              artist: result.trackArtist || undefined,
+              displayTitle: result.trackTitle || undefined,
+              displayArtist: result.trackArtist || undefined,
+              duration: result.durationSecs ?? undefined,
+            }
+            // 当前曲目不在 playlistTracks 中,把它加到 playlist 末尾
+            this.playlist.push(matchedTrack)
+          }
+
+          // 4. 尝试同步 musicLibrary 的 currentPlaylist (让 UI 高亮,但不依赖它)
+          if (result.playlistName) {
+            try {
+              const musicLibraryStore = useMusicLibraryStore()
+              if (musicLibraryStore.playlists.length === 0) {
+                await musicLibraryStore.loadPlaylistsFromCache()
+              }
+              const mlPlaylist = musicLibraryStore.playlists.find(
+                p => p.name === result.playlistName
+              )
+              if (mlPlaylist) {
+                musicLibraryStore.selectPlaylist(mlPlaylist)
+                // selectPlaylist 会清空 currentFile,设置回匹配的曲目让 UI 正确高亮
+                const mlTrack = mlPlaylist.files.find(t => t.path === trackPath)
+                if (mlTrack) {
+                  musicLibraryStore.setCurrentFile(mlTrack)
+                  // 如果 musicLibrary 中的曲目有更完整的元数据 (比如 coverPath 已加载),用它
+                  if (mlTrack.bitrate && !matchedTrack.bitrate) {
+                    matchedTrack = mlTrack
+                  }
+                }
+              }
+            } catch (err) {
+              logger.warn('Failed to sync musicLibrary playlist for resume:', err)
+            }
+          }
+
+          // 5. 触发元数据缓存和封面预加载 (与 loadPlaylist 一致)
+          if (this._cacheAbortController) {
+            this._cacheAbortController.abort()
+          }
+          this._cachePlaylistMetadata(this.playlist)
+          this._loadPlaylistCovers(this.playlist)
+
+          // 6. 设置播放状态 (currentTrack/audioInfo/duration/currentTime)
+          this.currentTrack = matchedTrack
+          this.duration = matchedTrack.duration ?? result.durationSecs ?? 0
+          this.currentTime = result.positionSecs ?? 0
+          // 从 matchedTrack 提取完整音频元数据 (bitrate/sampleRate/channels/bitDepth/format)
+          this.audioInfo = {
+            bitrate: matchedTrack.bitrate || null,
+            sampleRate: matchedTrack.sampleRate || null,
+            channels: matchedTrack.channels || null,
+            bitDepth: matchedTrack.bitDepth || null,
+            format: matchedTrack.format || null,
+          }
+          // 保持暂停状态 - 用户主动点播放才会开始
+          this.isPlaying = false
+          this._updateTaskbarState()
+          logger.info(`Resumed last session (paused): ${trackPath} @ ${result.positionSecs}s (${result.status}), playlist=${playlist.length} tracks`)
+
+          // 7. 加载当前曲目封面 (异步,不阻塞恢复)
+          invoke<string | null>('get_track_cover_path', { path: trackPath })
+            .then(coverPath => {
+              if (this.currentTrack && this.currentTrack.path === trackPath && coverPath) {
+                this.currentTrack.coverPath = coverPath
+              }
+            })
+            .catch(err => logger.debug('Failed to load cover for resumed track:', err))
+        } else if (result.status === 'not_found' && result.trackPath) {
+          // 静默处理:从当前播放列表移除该文件 (用户选择)
+          const idx = this.playlist.findIndex(t => t.path === result.trackPath)
+          if (idx >= 0) {
+            this.playlist.splice(idx, 1)
+            logger.info(`Removed missing track from playlist: ${result.trackPath}`)
+          }
+        }
+        return result
+      } catch (err) {
+        logger.error('Failed to resume last session:', err)
+        return null
       }
     },
 
@@ -566,6 +758,12 @@ export const usePlayerStore = defineStore('player', {
     async playTrack(track: Track): Promise<void> {
       if (this._isDestroyed || !track || this._isLoading) return
 
+      // 切曲前保存上一曲的最后位置 (无节流,确保切换瞬间记录最新)
+      // 只在确实在切曲 (currentTrack 存在且不是同一首) 时才保存
+      if (this.currentTrack && this.currentTrack.path !== track.path) {
+        void this._saveLastSessionNow()
+      }
+
       const requestId = ++this._playRequestId
       this._activePlayRequestId = requestId
 
@@ -732,6 +930,8 @@ export const usePlayerStore = defineStore('player', {
           this.isPlaying = false
           this.stopStatusPolling()
           this._updateTaskbarState()
+          // 暂停时立即保存 last_session (无节流)
+          void this._saveLastSessionNow()
         })
         .catch(err => logger.error("Failed to pause:", err))
     },
@@ -781,9 +981,10 @@ export const usePlayerStore = defineStore('player', {
       if (this._isDestroyed || !this.currentTrack) return
 
       const endedTrackPath = this.currentTrack.path
-      invoke('pause_track').catch(err => logger.debug('pause on ended:', err))
+      await invoke('pause_track').catch(err => logger.debug('pause on ended:', err))
 
-      if (!this.currentTrack || this.currentTrack.path !== endedTrackPath) {
+      // 在 await 期间，用户可能已经手动切换了曲目，需要检测过时事件
+      if (this._isDestroyed || !this.currentTrack || this.currentTrack.path !== endedTrackPath) {
         logger.debug('Ignore stale ended event because current track already changed')
         return
       }
@@ -905,13 +1106,15 @@ export const usePlayerStore = defineStore('player', {
     seek(time: number): void {
       if (!this.currentTrack) return
 
+      const wasPlaying = this.isPlaying
       const newTime = Math.max(0, Math.min(time, this.duration))
 
       invoke('seek_track', { time: newTime })
         .then(() => {
           this.currentTime = newTime
-          if (!this.isPlaying) {
-            this.resume()
+          if (!wasPlaying) {
+            // 后端 seek 总是 play，如果之前是暂停状态需要重新暂停
+            invoke('pause_track').catch(err => logger.error("Failed to pause after seek:", err))
           }
         })
         .catch(err => logger.error("Failed to seek:", err))
@@ -1053,8 +1256,10 @@ export const usePlayerStore = defineStore('player', {
         // 如果曲目已存在，先移除它
         this.playlist.splice(existingIndex, 1)
         
-        // 如果移除的位置在当前曲目之前，需要调整插入位置
-        const adjustedIndex = existingIndex < currentIndex ? currentIndex : currentIndex + 1
+        // 移除后当前曲目的实际索引可能已偏移，需要重新计算
+        const adjustedCurrentIndex = existingIndex < currentIndex ? currentIndex - 1 : currentIndex
+        // 插入到当前曲目之后
+        const adjustedIndex = adjustedCurrentIndex + 1
         this.playlist.splice(adjustedIndex, 0, track)
         logger.info('Moved existing track to next position:', track.path)
       } else {
@@ -1239,6 +1444,14 @@ export const usePlayerStore = defineStore('player', {
 
     // --- 清理 ---
     async cleanup(): Promise<void> {
+      // 关闭前同步保存 last_session (await 确保 IPC 调用完成)
+      if (this.currentTrack) {
+        try {
+          await this._saveLastSessionNow()
+        } catch (err) {
+          logger.debug('Failed to save last session on cleanup:', err)
+        }
+      }
       this._isDestroyed = true
       this._isInitializing = false
       this._initPromise = null

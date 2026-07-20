@@ -24,7 +24,64 @@ pub struct AppConfig {
     /// 歌词设置
     #[serde(default)]
     pub lyrics: LyricsConfig,
+    /// 上次播放会话 (用于启动恢复)
+    #[serde(default)]
+    pub last_session: Option<LastSession>,
 }
+
+/// 上次播放会话信息
+///
+/// 启动时通过 L1 (文件存在) + L2 (size+mtime 一致) 校验,
+/// 通过则恢复到 position_secs;文件不存在则从播放列表移除并清除本字段
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LastSession {
+    /// 曲目文件路径
+    pub track_path: String,
+    /// 曲目标题 (UI 显示)
+    pub track_title: String,
+    /// 曲目艺术家 (UI 显示)
+    pub track_artist: String,
+    /// 曲目时长 (秒, UI 显示)
+    pub duration_secs: f32,
+    /// 上次播放位置 (秒)
+    pub position_secs: f32,
+    /// 所在播放列表名 (用于上下首导航), None 表示无对应播放列表
+    pub playlist_name: Option<String>,
+    /// 在播放列表中的索引 (用于上下首导航)
+    pub track_index_in_playlist: Option<usize>,
+    /// 文件大小 (字节,L2 校验)
+    pub file_size: u64,
+    /// 文件最后修改时间 (Unix 秒,L2 校验)
+    pub file_mtime: u64,
+    /// 本记录保存时间 (Unix 秒,30 天过期)
+    pub saved_at: u64,
+    /// 播放队列快照 (用于恢复 player.playlist, 不依赖 musicLibrary 缓存)
+    /// 保存所有曲元的元数据,恢复时直接构造 Track[]
+    #[serde(default)]
+    pub playlist_tracks: Vec<TrackSnapshot>,
+}
+
+/// 曲目元数据快照 (用于 last_session 恢复播放队列)
+///
+/// 只保存 UI 显示和导航需要的字段,不保存 coverPath (按需加载)
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackSnapshot {
+    pub path: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub duration: Option<f32>,
+    pub bitrate: Option<u32>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u8>,
+    pub bit_depth: Option<u8>,
+    pub format: Option<String>,
+}
+
+/// last_session 过期时间 (30 天)
+pub const LAST_SESSION_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
 
 /// 子目录扫描配置
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -162,6 +219,7 @@ impl Default for AppConfig {
             general: GeneralConfig::default(),
             audio: AudioConfig::default(),
             lyrics: LyricsConfig::default(),
+            last_session: None,
         }
     }
 }

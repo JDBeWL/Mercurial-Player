@@ -10,13 +10,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use symphonia::core::audio::AudioBufferRef;
-use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::audio::GenericAudioBufferRef;
+use symphonia::core::codecs::audio::AudioDecoderOptions;
+use symphonia::core::codecs::CodecParameters;
 use symphonia::core::errors::Error;
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::{FormatOptions, TrackType};
+use symphonia::core::formats::probe::Hint;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
+use symphonia::core::units::Timestamp;
 
 #[derive(Debug, PartialEq, Eq)]
 enum DecoderState {
@@ -265,7 +267,7 @@ pub struct SymphoniaDecoder {
     state: DecoderState,
     buffer: AudioBuffer,
     scratch_buffer: Vec<f32>,
-    decoder: Option<Box<dyn symphonia::core::codecs::Decoder>>,
+    decoder: Option<Box<dyn symphonia::core::codecs::audio::AudioDecoder>>,
     format: Option<Box<dyn symphonia::core::formats::FormatReader>>,
     track_id: Option<u32>,
     current_sample: u64,
@@ -282,14 +284,13 @@ impl SymphoniaDecoder {
         let mss = MediaSourceStream::new(Box::new(file.try_clone().map_err(|e| e.to_string())?), Default::default());
         let mut hint = Hint::new();
         if let Some(ext) = Path::new(path).extension().and_then(|s| s.to_str()) { hint.with_extension(ext); }
-        let mut fmt_opts: FormatOptions = Default::default();
-        fmt_opts.enable_gapless = true;
-        let probed = symphonia::default::get_probe().format(&hint, mss, &fmt_opts, &MetadataOptions::default()).map_err(|e| format!("Failed to probe format: {e}"))?;
-        let format = probed.format;
-        let track = format.tracks().iter().find(|t| t.codec_params.codec != CODEC_TYPE_NULL).ok_or("No audio track found")?;
-        let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
-        let source_channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(2) as u16;
-        let total_duration = track.codec_params.n_frames.and_then(|n| track.codec_params.sample_rate.map(|sr| Duration::from_secs_f64(n as f64 / sr as f64)));
+        let fmt_opts: FormatOptions = Default::default();
+        let format = symphonia::default::get_probe().probe(&hint, mss, fmt_opts, MetadataOptions::default()).map_err(|e| format!("Failed to probe format: {e}"))?;
+        let track = format.default_track(TrackType::Audio).ok_or("No audio track found")?;
+        let audio_params = track.codec_params.as_ref().and_then(CodecParameters::audio).ok_or("No audio codec parameters")?;
+        let sample_rate = audio_params.sample_rate.unwrap_or(44100);
+        let source_channels = audio_params.channels.as_ref().map(|c| c.count()).unwrap_or(2) as u16;
+        let total_duration = track.num_frames.and_then(|n| audio_params.sample_rate.map(|sr| Duration::from_secs_f64(n as f64 / sr as f64)));
         let buffer_duration_ms = buffer_duration_ms.unwrap_or(if sample_rate <= 48000 { 500 } else { 400 });
         let target_channels = 2u16;
         let buffer_size = calculate_buffer_size(sample_rate, target_channels, buffer_duration_ms);
@@ -411,7 +412,7 @@ impl SymphoniaDecoder {
         self.current_sample = target_ts;
         self.buffer.clear();
         if let (Some(format), Some(decoder)) = (&mut self.format, &mut self.decoder) {
-            let seek_to = symphonia::core::formats::SeekTo::TimeStamp { ts: target_ts, track_id: self.track_id.unwrap() };
+            let seek_to = symphonia::core::formats::SeekTo::Timestamp { ts: Timestamp::new(target_ts as i64), track_id: self.track_id.unwrap() };
             match format.seek(symphonia::core::formats::SeekMode::Accurate, seek_to) {
                 Ok(_) => { decoder.reset(); self.state = DecoderState::Ready; Ok(()) }
                 Err(e) => { self.current_sample = 0; self.state = DecoderState::Uninitialized; Err(format!("Seek failed: {e:?}")) }
@@ -424,15 +425,16 @@ impl SymphoniaDecoder {
         let mss = MediaSourceStream::new(Box::new(file.try_clone().map_err(|e| e.to_string())?), Default::default());
         let mut hint = Hint::new();
         if let Some(ext) = Path::new(&self.path).extension().and_then(|s| s.to_str()) { hint.with_extension(ext); }
-        let mut fmt_opts: FormatOptions = Default::default();
-        fmt_opts.enable_gapless = true;
-        let probed = symphonia::default::get_probe().format(&hint, mss, &fmt_opts, &MetadataOptions::default()).map_err(|e| format!("Failed to probe format: {e}"))?;
-        let mut format = probed.format;
-        let track = format.tracks().iter().find(|t| t.codec_params.codec != CODEC_TYPE_NULL).ok_or("No audio track found")?;
+        let fmt_opts: FormatOptions = Default::default();
+        let mut format = symphonia::default::get_probe().probe(&hint, mss, fmt_opts, MetadataOptions::default()).map_err(|e| format!("Failed to probe format: {e}"))?;
+        let track = format.default_track(TrackType::Audio).ok_or("No audio track found")?;
         let track_id = track.id;
-        let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default()).map_err(|e| format!("Failed to create decoder: {e}"))?;
+        let audio_params = track.codec_params.as_ref().and_then(CodecParameters::audio).ok_or("No audio codec parameters")?.clone();
+        let mut dec_opts = AudioDecoderOptions::default();
+        dec_opts.gapless = true;
+        let mut decoder = symphonia::default::get_codecs().make_audio_decoder(&audio_params, &dec_opts).map_err(|e| format!("Failed to create decoder: {e}"))?;
         if self.current_sample > 0 {
-            let seek_to = symphonia::core::formats::SeekTo::TimeStamp { ts: self.current_sample, track_id };
+            let seek_to = symphonia::core::formats::SeekTo::Timestamp { ts: Timestamp::new(self.current_sample as i64), track_id };
             if format.seek(symphonia::core::formats::SeekMode::Accurate, seek_to).is_ok() { decoder.reset(); } else { self.current_sample = 0; }
         }
         self.format = Some(format); self.decoder = Some(decoder); self.track_id = Some(track_id); self.state = DecoderState::Ready;
@@ -450,12 +452,13 @@ impl SymphoniaDecoder {
 
         while self.buffer.remaining() < target_fill && decoded_packets < 50 {
             let packet = match format.next_packet() {
-                Ok(p) => p,
+                Ok(Some(p)) => p,
+                Ok(None) => { self.state = DecoderState::EndOfStream; break; }
                 Err(Error::ResetRequired) => { decoder.reset(); continue; }
                 Err(Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => { self.state = DecoderState::EndOfStream; break; }
                 Err(e) => { self.state = DecoderState::Error(format!("Read packet error: {e}")); return Err(format!("Read packet error: {e}")); }
             };
-            if packet.track_id() != track_id { continue; }
+            if packet.track_id != track_id { continue; }
             match decoder.decode(&packet) {
                 Ok(decoded) => { 
                     self.scratch_buffer.clear(); 
@@ -471,69 +474,29 @@ impl SymphoniaDecoder {
         Ok(())
     }
 
-    fn convert_audio_buffer(audio_buf: AudioBufferRef, samples: &mut Vec<f32>, channel_map: &Option<Vec<usize>>, src_channels: usize) {
+    fn convert_audio_buffer(audio_buf: GenericAudioBufferRef<'_>, samples: &mut Vec<f32>, channel_map: &Option<Vec<usize>>, src_channels: usize) {
         let frames = audio_buf.frames();
-        let channels = audio_buf.spec().channels.count();
+        let channels = audio_buf.spec().channels().count();
         
         // 如果需要混音（多声道到立体声）
         let needs_downmix = channel_map.is_some() && src_channels > 2;
         let target_ch = if needs_downmix { 2 } else { channels };
         samples.reserve(frames * target_ch);
 
-        match audio_buf {
-            AudioBufferRef::F32(buf) => { 
-                let p = buf.planes(); 
-                Self::copy_planes_with_downmix(p.planes(), samples, frames, channels, needs_downmix, |s| *s); 
-            }
-            AudioBufferRef::S16(buf) => { 
-                let p = buf.planes(); 
-                Self::copy_planes_with_downmix(p.planes(), samples, frames, channels, needs_downmix, |s| (*s as f32) / 32768.0); 
-            }
-            AudioBufferRef::U8(buf) => { 
-                let p = buf.planes(); 
-                Self::copy_planes_with_downmix(p.planes(), samples, frames, channels, needs_downmix, |s| (*s as f32 - 128.0) / 128.0); 
-            }
-            AudioBufferRef::S32(buf) => { 
-                let p = buf.planes(); 
-                Self::copy_planes_with_downmix(p.planes(), samples, frames, channels, needs_downmix, |s| (*s as f32) / 2_147_483_648.0); 
-            }
-            AudioBufferRef::S24(buf) => { 
-                let p = buf.planes(); 
-                Self::copy_planes_with_downmix(p.planes(), samples, frames, channels, needs_downmix, |s| (s.inner() as f32) / 8_388_608.0); 
-            }
-            _ => eprintln!("Unsupported audio buffer format"),
-        }
-    }
-
-    #[inline(always)]
-    fn copy_planes_with_downmix<T, F>(planes: &[&[T]], out: &mut Vec<f32>, frames: usize, src_ch: usize, needs_downmix: bool, conv: F) 
-    where 
-        T: Copy, 
-        F: Fn(&T) -> f32 
-    {
-        if needs_downmix && src_ch > 2 {
-            // 先转换所有声道到 f32
-            let mut float_planes: Vec<Vec<f32>> = Vec::with_capacity(src_ch);
-            for ch in 0..src_ch {
-                float_planes.push(planes[ch].iter().map(|s| conv(s)).collect());
-            }
-            
-            // 创建引用切片
-            let float_refs: Vec<&[f32]> = float_planes.iter().map(|v| v.as_slice()).collect();
-            
-            // 使用专业混音算法
+        if needs_downmix && src_channels > 2 {
+            // 0.6 API: 直接复制为 planar f32 (每个声道一个 Vec)
+            // 替代 0.5 的手动 match AudioBufferRef::F32/S16/U8/S32/S24
+            let mut planes: Vec<Vec<f32>> = Vec::with_capacity(src_channels);
+            audio_buf.copy_to_vecs_planar(&mut planes);
+            let plane_refs: Vec<&[f32]> = planes.iter().map(|v| v.as_slice()).collect();
             for i in 0..frames {
-                let (left, right) = Self::downmix_to_stereo(&float_refs, i, src_ch);
-                out.push(left);
-                out.push(right);
+                let (left, right) = Self::downmix_to_stereo(&plane_refs, i, src_channels);
+                samples.push(left);
+                samples.push(right);
             }
         } else {
-            // 直接复制（单声道或立体声）
-            for i in 0..frames { 
-                for ch in 0..src_ch { 
-                    out.push(conv(&planes[ch][i])); 
-                } 
-            }
+            // 0.6 API: 直接复制为交错 f32,自动做样本格式转换
+            audio_buf.copy_to_vec_interleaved(samples);
         }
     }
 }

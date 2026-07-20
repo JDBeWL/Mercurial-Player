@@ -9,6 +9,9 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      ignored: ['**/src-tauri/target/**']
+    },
   },
   envPrefix: ['VITE_', 'TAURI_'],
   // 生产构建时移除 console 和 debugger

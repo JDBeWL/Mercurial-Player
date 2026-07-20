@@ -169,11 +169,27 @@ impl WasapiExclusivePlayback {
         self.command_tx.send(AudioCommand::SetVolume(vol)).map_err(|e| format!("Failed to send volume command: {e}"))
     }
 
-    pub fn push_samples(&self, samples: Vec<f32>) -> Result<(), String> {
+    pub fn push_samples(&self, samples: &[f32]) -> Result<(), String> {
         let (buffer, cvar) = &*self.sample_buffer;
-        buffer.lock().unwrap().extend(samples);
+        buffer.lock().unwrap().extend(samples.iter().copied());
         cvar.notify_one();
         Ok(())
+    }
+
+    /// 等待缓冲区水位低于 `max_samples`。
+    /// 返回 true 表示有空间可以 push,false 表示超时或被唤醒时仍满。
+    /// WASAPI 消费线程每次消费后会 notify_one,因此生产者会被及时唤醒。
+    pub fn wait_for_buffer_space(&self, max_samples: usize, timeout: Duration) -> bool {
+        let (buffer, cvar) = &*self.sample_buffer;
+        let guard = buffer.lock().unwrap();
+        if guard.len() < max_samples {
+            return true;
+        }
+        // 已满时等待,直到条件为 false (有空间) 或超时
+        let (guard, _) = cvar
+            .wait_timeout_while(guard, timeout, |buf| buf.len() >= max_samples)
+            .unwrap_or_else(|e| e.into_inner());
+        guard.len() < max_samples
     }
 
     pub fn clear_buffer(&self) -> Result<(), String> {
@@ -408,7 +424,7 @@ fn process_audio_output(
             if let Ok(frames_available) = client.get_available_space_in_frames() {
                 if frames_available > 0 {
                     let samples_needed = frames_available as usize * current_channels as usize;
-                    let (buffer, _) = &**sample_buffer;
+                    let (buffer, cvar) = &**sample_buffer;
                     let mut buf = buffer.lock().unwrap();
 
                     // 检测缓冲区欠载
@@ -427,7 +443,9 @@ fn process_audio_output(
                         log::warn!("WASAPI buffer underrun: {}/{} samples", underrun_count, samples_needed);
                     }
 
+                    // 释放锁并通知等待的生产者 (有空间了)
                     drop(buf);
+                    cvar.notify_one();
 
                     let output_bytes = convert_samples_to_bytes(&output_samples, current_bits, current_sample_type_is_float);
 

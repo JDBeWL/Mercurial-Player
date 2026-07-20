@@ -7,6 +7,7 @@ pub mod decoder;
 pub mod device;
 pub mod device_monitor;
 pub mod playback;
+pub mod session;
 
 #[cfg(windows)]
 pub mod wasapi;
