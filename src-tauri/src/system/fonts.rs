@@ -69,7 +69,7 @@ fn get_macos_fonts() -> Result<Vec<String>, String> {
         return Err("system_profiler command failed".to_string());
     }
     
-    let json_str = String::from_utf8_lossy(&output.stdout);
+    let _json_str = String::from_utf8_lossy(&output.stdout);
     
     // 简单解析 JSON（实际项目中应使用 serde_json）
     let mut fonts = HashSet::new();

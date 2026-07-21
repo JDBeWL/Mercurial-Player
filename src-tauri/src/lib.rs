@@ -29,6 +29,46 @@ use std::sync::{Arc, Mutex};
 #[cfg(not(windows))]
 pub struct Placeholder;
 
+#[cfg(not(windows))]
+impl Placeholder {
+    /// 占位方法,非 Windows 平台调用 WASAPI 方法时返回错误
+    pub fn stop(&self) -> Result<(), String> {
+        Err("WASAPI not available on non-Windows".to_string())
+    }
+
+    pub fn clear_buffer(&self) -> Result<(), String> {
+        Err("WASAPI not available on non-Windows".to_string())
+    }
+
+    pub fn pause(&self) -> Result<(), String> {
+        Err("WASAPI not available on non-Windows".to_string())
+    }
+
+    pub fn resume(&self) -> Result<(), String> {
+        Err("WASAPI not available on non-Windows".to_string())
+    }
+
+    pub fn pause_no_fade(&self) -> Result<(), String> {
+        Err("WASAPI not available on non-Windows".to_string())
+    }
+
+    pub fn resume_no_fade(&self) -> Result<(), String> {
+        Err("WASAPI not available on non-Windows".to_string())
+    }
+
+    pub fn stop_with_fade_out(&self, _duration_ms: u32) -> Result<(), String> {
+        Err("WASAPI not available on non-Windows".to_string())
+    }
+
+    pub fn pause_with_fade_out(&self, _duration_ms: u32) -> Result<(), String> {
+        Err("WASAPI not available on non-Windows".to_string())
+    }
+
+    pub fn resume_with_fade_in(&self, _duration_ms: u32) -> Result<(), String> {
+        Err("WASAPI not available on non-Windows".to_string())
+    }
+}
+
 /// 播放器状态
 ///
 /// 包含音频播放所需的所有状态信息
