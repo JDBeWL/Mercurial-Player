@@ -22,7 +22,7 @@ use audio::DeviceMonitor;
 use config::ConfigManager;
 use equalizer::{Equalizer, GlobalEqualizer};
 
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 /// 非 Windows 平台的占位类型
@@ -70,6 +70,10 @@ pub struct PlayerState {
     pub target_fps: Arc<AtomicU64>,
     /// 是否启用垂直同步（启用后FFT频率与屏幕刷新率同步）
     pub enable_vertical_sync: Arc<AtomicBool>,
+    /// 共享模式淡入淡出代际计数器(每次新的 fade 操作递增,用于取消陈旧的 fade 线程)
+    pub fade_generation: Arc<AtomicU32>,
+    /// 是否启用淡入淡出(运行时读取,避免每次访问配置文件)
+    pub fade_enabled: Arc<AtomicBool>,
 }
 
 

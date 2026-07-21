@@ -33,13 +33,13 @@ static INDEX_MANAGER: Mutex<Option<Arc<Mutex<TantivyIndexManager>>>> = Mutex::ne
 fn get_index_manager() -> Result<Arc<Mutex<TantivyIndexManager>>, String> {
     if let Ok(lock) = INDEX_MANAGER.lock() {
         if let Some(manager) = lock.as_ref() {
-            return Ok(manager.clone());
+            return Ok(Arc::clone(manager));
         }
     }
 
     let manager = Arc::new(Mutex::new(TantivyIndexManager::new()?));
     if let Ok(mut lock) = INDEX_MANAGER.lock() {
-        *lock = Some(manager.clone());
+        *lock = Some(Arc::clone(&manager));
     }
     Ok(manager)
 }

@@ -158,7 +158,7 @@ fn monitor_device_changes(
         let current_default = get_default_device_name(&host);
         if current_default != previous_default {
             let old_default = previous_default.take();
-            previous_default = current_default.clone();
+            previous_default.clone_from(&current_default);
 
             // 仅当应用当前使用的设备是旧默认设备（即正在跟随系统默认输出）时，
             // 才跟随系统切换到新默认设备，避免打断用户手动指定的设备

@@ -508,8 +508,8 @@ const handleBeforeUnload = async () => {
   await configStore.flushPendingSave()
   // 清理播放器资源（包括全局快捷键）
   await playerStore.cleanup()
-  // 清理插件管理器（保存所有插件存储）
-  pluginManager.cleanup()
+  // 清理插件管理器（停用所有插件、保存存储、清理沙箱）
+  await pluginManager.cleanup()
 }
 
 onMounted(async () => {

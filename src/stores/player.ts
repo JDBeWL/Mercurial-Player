@@ -135,6 +135,12 @@ interface PlayerState {
   _cacheAbortController: AbortController | null
   /** 用于清理 nextTrack 定时器 */
   _nextTrackTimeoutId: ReturnType<typeof setTimeout> | null
+  /** shuffle 模式下,Knuth 洗牌后的播放索引序列 (空数组表示未生成) */
+  _shuffleOrder: number[]
+  /** 当前在 _shuffleOrder 中的位置 (-1 表示未定位) */
+  _shufflePosition: number
+  /** 历史栈:记录已播放过的索引,用于 previousTrack 真正回到上一首 */
+  _shuffleHistory: number[]
 }
 
 
@@ -204,6 +210,10 @@ export const usePlayerStore = defineStore('player', {
     _lastDeviceSwitchTarget: null,
     _cacheAbortController: null,
     _nextTrackTimeoutId: null,
+    // shuffle 状态: 空数组表示未生成洗牌顺序
+    _shuffleOrder: [],
+    _shufflePosition: -1,
+    _shuffleHistory: [],
   }),
 
   getters: {
@@ -212,20 +222,14 @@ export const usePlayerStore = defineStore('player', {
       return state.playlist.findIndex(track => track.path === state.currentTrack!.path)
     },
     hasNextTrack: (state): boolean => {
+      // 手动切换应总是允许,与循环模式无关;自动结束行为由 _onEnded 处理
       if (!state.currentTrack || state.playlist.length <= 1) return false
-      // 列表循环、单曲循环、随机模式下，手动切换总是可以
-      if (state.repeatMode === 'list' || state.repeatMode === 'track' || state.isShuffle) return true
-      // 顺序播放：检查是否在最后一首
-      const idx = state.playlist.findIndex(t => t.path === state.currentTrack!.path)
-      return idx >= 0 && idx < state.playlist.length - 1
+      return true
     },
     hasPreviousTrack: (state): boolean => {
+      // 手动切换应总是允许,与循环模式无关
       if (!state.currentTrack || state.playlist.length <= 1) return false
-      // 列表循环、单曲循环、随机模式下，手动切换总是可以
-      if (state.repeatMode === 'list' || state.repeatMode === 'track' || state.isShuffle) return true
-      // 顺序播放：检查是否在第一首
-      const idx = state.playlist.findIndex(t => t.path === state.currentTrack!.path)
-      return idx > 0
+      return true
     },
     currentLyric: (state): LyricLine | null => {
       if (!state.lyrics || state.currentLyricIndex < 0 || state.currentLyricIndex >= state.lyrics.length) {
@@ -824,6 +828,20 @@ export const usePlayerStore = defineStore('player', {
       this.lastTrackIndex = this.currentTrackIndex
       this.currentTrack = resolvedTrack
 
+      // shuffle 模式下,用户手动切曲时同步 _shufflePosition 到新曲目在 _shuffleOrder 中的位置
+      // 如果新曲目不在 _shuffleOrder 中 (顺序失效/外部触发),则作废顺序,下次 nextTrack 时重新生成
+      if (this.isShuffle && this._shuffleOrder.length > 0) {
+        const newIdx = this.currentTrackIndex
+        const pos = this._shuffleOrder.indexOf(newIdx)
+        if (pos >= 0) {
+          this._shufflePosition = pos
+        } else {
+          // 顺序已失效,作废等待下次懒生成
+          this._shuffleOrder = []
+          this._shufflePosition = -1
+        }
+      }
+
       // 按需加载封面路径（如果还没有）
       if (!resolvedTrack.coverPath) {
         logger.debug('Loading cover for track:', resolvedPath)
@@ -991,6 +1009,18 @@ export const usePlayerStore = defineStore('player', {
 
       if (this.repeatMode === 'track') {
         await this.playTrack(this.currentTrack)
+      } else if (this.isShuffle) {
+        // shuffle 模式: 顺序播放且一轮已播完时停止,否则沿 _shuffleOrder 前进
+        const isShuffleOrderValid = this._isShuffleOrderValid()
+        const isAtEnd = isShuffleOrderValid && this._shufflePosition >= this._shuffleOrder.length - 1
+        if (this.repeatMode === 'none' && isAtEnd) {
+          this.isPlaying = false
+          this.stopStatusPolling()
+          this.currentTime = this.duration
+          invoke('pause_track').catch(err => logger.debug('pause after shuffle ended:', err))
+        } else {
+          await this.nextTrack()
+        }
       } else if (this.repeatMode === 'list') {
         const nextIndex = (this.currentTrackIndex + 1) % this.playlist.length
         await this.playTrack(this.playlist[nextIndex])
@@ -1063,14 +1093,27 @@ export const usePlayerStore = defineStore('player', {
     async nextTrack(): Promise<void> {
       if (!this.currentTrack || this._isLoading) return
 
+      // 单曲循环由 _onEnded 处理,手动 next 走下一首
       let nextIndex: number
       if (this.isShuffle) {
         if (this.playlist.length <= 1) {
           nextIndex = 0
         } else {
-          do {
-            nextIndex = Math.floor(Math.random() * this.playlist.length)
-          } while (nextIndex === this.currentTrackIndex)
+          // 懒生成:第一次或顺序失效时重新洗牌
+          if (!this._isShuffleOrderValid()) {
+            this._regenerateShuffleOrder()
+          }
+          // 走到末尾:重新洗牌继续 (手动触发时不应停止,自动结束的停止逻辑由 _onEnded 处理)
+          if (this._shufflePosition >= this._shuffleOrder.length - 1) {
+            this._regenerateShuffleOrder()
+            nextIndex = this._shuffleOrder[0]
+            this._shufflePosition = 0
+          } else {
+            this._shufflePosition++
+            nextIndex = this._shuffleOrder[this._shufflePosition]
+          }
+          // 记入历史栈,用于 previousTrack 回溯
+          this._shuffleHistory.push(this.currentTrackIndex)
         }
       } else {
         nextIndex = (this.currentTrackIndex + 1) % this.playlist.length
@@ -1086,10 +1129,24 @@ export const usePlayerStore = defineStore('player', {
       if (this.isShuffle) {
         if (this.playlist.length <= 1) {
           prevIndex = 0
+        } else if (this._shuffleHistory.length > 0) {
+          // 优先从历史栈弹出,真正回到上一首
+          prevIndex = this._shuffleHistory.pop()!
+          // 同步调整 _shufflePosition
+          if (this._shufflePosition > 0) this._shufflePosition--
         } else {
-          do {
-            prevIndex = Math.floor(Math.random() * this.playlist.length)
-          } while (prevIndex === this.currentTrackIndex)
+          // 历史栈空:走到洗牌序列上一首,如果已在起点则重新洗牌取最后一首
+          if (!this._isShuffleOrderValid()) {
+            this._regenerateShuffleOrder()
+          }
+          if (this._shufflePosition > 0) {
+            this._shufflePosition--
+            prevIndex = this._shuffleOrder[this._shufflePosition]
+          } else {
+            // 在起点之前:回绕到序列末尾
+            this._shufflePosition = this._shuffleOrder.length - 1
+            prevIndex = this._shuffleOrder[this._shufflePosition]
+          }
         }
       } else {
         prevIndex = this.currentTrackIndex - 1
@@ -1180,7 +1237,66 @@ export const usePlayerStore = defineStore('player', {
       this.isShuffle = !this.isShuffle
       if (this.isShuffle) {
         this.repeatMode = 'none'
+        // 立即生成洗牌顺序,以当前曲目为起点
+        this._regenerateShuffleOrder()
+        this._shuffleHistory = []
+      } else {
+        // 关闭 shuffle 时作废洗牌顺序,但保留历史栈以便恢复
+        this._shuffleOrder = []
+        this._shufflePosition = -1
       }
+    },
+
+    /**
+     * 用 Knuth (Fisher-Yates-Knuth) 算法生成洗牌顺序
+     * 算法: 从后往前遍历 [n-1..1], 每次从 [0..i] 中随机取一个与 i 交换
+     * 时间复杂度 O(n), 空间 O(n), 保证 n! 种排列等概率出现
+     *
+     * 以当前曲目为起点: 把当前 index 放到序列第 0 位,只对剩余 n-1 首洗牌
+     */
+    _regenerateShuffleOrder(): void {
+      const n = this.playlist.length
+      if (n === 0) {
+        this._shuffleOrder = []
+        this._shufflePosition = -1
+        return
+      }
+
+      // 1. 生成 [0, 1, ..., n-1]
+      const order = Array.from({ length: n }, (_, i) => i)
+
+      // 2. Knuth shuffle: for i = n-1 downto 1, swap(order[i], order[rand(0..i)])
+      for (let i = n - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        const tmp = order[i]
+        order[i] = order[j]
+        order[j] = tmp
+      }
+
+      // 3. 以当前曲目为起点:把 currentTrackIndex 移到第 0 位
+      const cur = this.currentTrackIndex
+      if (cur >= 0 && cur < n) {
+        const curPos = order.indexOf(cur)
+        if (curPos > 0) {
+          // 把当前位置与第 0 位交换
+          const tmp = order[0]
+          order[0] = order[curPos]
+          order[curPos] = tmp
+        }
+      }
+
+      this._shuffleOrder = order
+      this._shufflePosition = 0
+    },
+
+    /**
+     * 校验洗牌顺序是否仍然有效
+     * 失效条件: 序列长度与当前 playlist 不一致 (playlist 变化/重置)
+     */
+    _isShuffleOrderValid(): boolean {
+      return this._shuffleOrder.length === this.playlist.length &&
+        this._shuffleOrder.length > 0 &&
+        this._shufflePosition >= 0
     },
 
     // --- 歌词偏移 ---
@@ -1302,6 +1418,10 @@ export const usePlayerStore = defineStore('player', {
       }
 
       this.playlist = playlist
+      // playlist 变化,作废 shuffle 顺序与历史栈
+      this._shuffleOrder = []
+      this._shufflePosition = -1
+      this._shuffleHistory = []
       if (playlist && playlist.length > 0) {
         const firstTrack = playlist[0]
         this.currentTrack = firstTrack

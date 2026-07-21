@@ -16,17 +16,14 @@ pub mod desktop_lyrics;
 
 /// 播放状态枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum PlaybackState {
     /// 正在播放
     Playing,
     /// 已暂停
     Paused,
     /// 已停止
+    #[default]
     Stopped,
 }
 
-impl Default for PlaybackState {
-    fn default() -> Self {
-        Self::Stopped
-    }
-}

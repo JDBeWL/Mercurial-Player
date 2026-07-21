@@ -184,6 +184,8 @@
     "refreshDevices": "刷新设备列表",
     "exclusiveModeRestartRequired": "独占模式设置已更改，需要重启应用程序才能生效",
     "exclusiveModeRestartHint": "请关闭并重新打开应用程序以应用新的音频模式设置",
+    "fadeEnabled": "淡入淡出",
+    "fadeEnabledDesc": "切歌时平滑过渡、暂停/恢复时消除爆音",
     "equalizer": "EQ 均衡器",
     "enableEq": "启用均衡器",
     "eqPreset": "预设",

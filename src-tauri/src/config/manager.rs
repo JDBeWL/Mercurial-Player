@@ -8,6 +8,7 @@ use std::path::Path;
 /// 应用程序配置数据结构
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub struct AppConfig {
     /// 音乐目录列表
     pub music_directories: Vec<String>,
@@ -148,6 +149,9 @@ pub struct AudioConfig {
     pub exclusive_mode: bool,
     #[serde(default = "default_volume")]
     pub volume: f32,
+    /// 是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音)
+    #[serde(default = "default_true")]
+    pub fade_enabled: bool,
 }
 
 /// 歌词设置
@@ -209,20 +213,6 @@ const fn default_volume() -> f32 {
     0.5
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            music_directories: Vec::new(),
-            directory_scan: DirectoryScanConfig::default(),
-            title_extraction: TitleExtractionConfig::default(),
-            playlist: PlaylistConfig::default(),
-            general: GeneralConfig::default(),
-            audio: AudioConfig::default(),
-            lyrics: LyricsConfig::default(),
-            last_session: None,
-        }
-    }
-}
 
 impl Default for DirectoryScanConfig {
     fn default() -> Self {
@@ -283,6 +273,7 @@ impl Default for AudioConfig {
         Self {
             exclusive_mode: false,
             volume: default_volume(),
+            fade_enabled: true,
         }
     }
 }
@@ -345,12 +336,12 @@ impl ConfigManager {
 
         if !Path::new(&default_config_path).exists() {
             log::info!("创建默认配置文件: {default_config_path}");
-            self.save_config_to_file(&AppConfig::default(), &default_config_path)?;
+            Self::save_config_to_file(&AppConfig::default(), &default_config_path)?;
         }
 
         if !Path::new(&user_config_path).exists() {
             log::info!("创建用户配置文件: {user_config_path}");
-            self.save_config_to_file(&AppConfig::default(), &user_config_path)?;
+            Self::save_config_to_file(&AppConfig::default(), &user_config_path)?;
         }
 
         Ok(())
@@ -361,14 +352,14 @@ impl ConfigManager {
 
         let user_config_path = self.get_user_config_path();
         if Path::new(&user_config_path).exists() {
-            if let Ok(config) = self.load_config_from_file(&user_config_path) {
+            if let Ok(config) = Self::load_config_from_file(&user_config_path) {
                 log::info!("Loaded user configuration from: {user_config_path}");
                 return Ok(config);
             }
         }
 
         let default_config_path = self.get_default_config_path();
-        self.load_config_from_file(&default_config_path).or_else(|_| {
+        Self::load_config_from_file(&default_config_path).or_else(|_| {
             log::info!("Creating default configuration");
             let default_config = AppConfig::default();
             let _ = self.save_default_config(&default_config);
@@ -376,30 +367,30 @@ impl ConfigManager {
         })
     }
 
-    fn load_config_from_file(&self, file_path: &str) -> Result<AppConfig, String> {
+    fn load_config_from_file(file_path: &str) -> Result<AppConfig, String> {
         let content = std::fs::read_to_string(file_path).map_err(|e| format!("Failed to read config file: {e}"))?;
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse config file: {e}"))
     }
 
     pub fn save_config(&self, config: &AppConfig) -> Result<(), String> {
-        self.save_config_to_file(config, &self.get_user_config_path())
+        Self::save_config_to_file(config, &self.get_user_config_path())
     }
 
     pub fn save_default_config(&self, config: &AppConfig) -> Result<(), String> {
-        self.save_config_to_file(config, &self.get_default_config_path())
+        Self::save_config_to_file(config, &self.get_default_config_path())
     }
 
-    fn save_config_to_file(&self, config: &AppConfig, file_path: &str) -> Result<(), String> {
+    fn save_config_to_file(config: &AppConfig, file_path: &str) -> Result<(), String> {
         let content = serde_json::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {e}"))?;
         std::fs::write(file_path, content).map_err(|e| format!("Failed to write config file: {e}"))
     }
 
     pub fn export_config(&self, config: &AppConfig, export_path: &str) -> Result<(), String> {
-        self.save_config_to_file(config, export_path)
+        Self::save_config_to_file(config, export_path)
     }
 
     pub fn import_config(&self, import_path: &str) -> Result<AppConfig, String> {
-        self.load_config_from_file(import_path)
+        Self::load_config_from_file(import_path)
     }
 
     pub fn reset_config(&self) -> Result<AppConfig, String> {

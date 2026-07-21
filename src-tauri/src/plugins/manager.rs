@@ -128,10 +128,10 @@ pub fn install_plugin_from_path(source_path: &str) -> Result<String, String> {
 /// 卸载插件
 pub fn uninstall_plugin(plugin_id: &str) -> Result<(), String> {
     let plugins_dir = get_plugins_dir()?;
-    let plugin_dir = plugins_dir.join(plugin_id);
-    
-    if plugin_dir.exists() {
-        fs::remove_dir_all(&plugin_dir)
+    let target_dir = plugins_dir.join(plugin_id);
+
+    if target_dir.exists() {
+        fs::remove_dir_all(&target_dir)
             .map_err(|e| format!("无法删除插件: {e}"))?;
     }
     

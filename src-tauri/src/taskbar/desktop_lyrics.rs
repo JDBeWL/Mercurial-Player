@@ -59,7 +59,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, DispatchMessageW,
     UpdateLayeredWindow, SetTimer, KillTimer,
     CS_HREDRAW, CS_VREDRAW, GWL_EXSTYLE, HWND_TOPMOST, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT,
-    HTTRANSPARENT,
+    HTTRANSPARENT, HICON, HCURSOR,
     ULW_ALPHA, MSG, SET_WINDOW_POS_FLAGS, SW_HIDE, SW_SHOWNOACTIVATE,
     WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_LBUTTONUP, WM_MOUSEMOVE,
     WM_NCHITTEST, WM_PAINT, WM_SIZE, WM_USER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
@@ -104,38 +104,38 @@ struct ColorPreset {
 }
 
 const PRESET_DARK: ColorPreset = ColorPreset {
-    text_color: 0x00000000,
-    highlight_color: 0x0000A8E8,
+    text_color: 0x00_00_00_00,
+    highlight_color: 0x00_00_A8_E8,
     hover_bg_alpha: 180,
 };
 
 const PRESET_LIGHT: ColorPreset = ColorPreset {
-    text_color: 0x00FFFFFF,
-    highlight_color: 0x00FBC02D,
+    text_color: 0x00_FF_FF_FF,
+    highlight_color: 0x00_FB_C0_2D,
     hover_bg_alpha: 180,
 };
 
 const PRESET_BLUE: ColorPreset = ColorPreset {
-    text_color: 0x0003A9F4,
-    highlight_color: 0x004FC3F7,
+    text_color: 0x00_03_A9_F4,
+    highlight_color: 0x00_4F_C3_F7,
     hover_bg_alpha: 180,
 };
 
 const PRESET_PINK: ColorPreset = ColorPreset {
-    text_color: 0x00E91E63,
-    highlight_color: 0x00FF80AB,
+    text_color: 0x00_E9_1E_63,
+    highlight_color: 0x00_FF_80_AB,
     hover_bg_alpha: 180,
 };
 
 const PRESET_ORANGE: ColorPreset = ColorPreset {
-    text_color: 0x00FF9800,
-    highlight_color: 0x00FFB74D,
+    text_color: 0x00_FF_98_00,
+    highlight_color: 0x00_FF_B7_4D,
     hover_bg_alpha: 180,
 };
 
 const PRESET_GREEN: ColorPreset = ColorPreset {
-    text_color: 0x004CAF50,
-    highlight_color: 0x0069F0AE,
+    text_color: 0x00_4C_AF_50,
+    highlight_color: 0x00_69_F0_AE,
     hover_bg_alpha: 180,
 };
 
@@ -207,7 +207,7 @@ impl Direct2DState {
             usage: D2D1_RENDER_TARGET_USAGE_NONE,
             minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
         };
-        let dc_render_target = unsafe { d2d_factory.CreateDCRenderTarget(&target_props)? };
+        let dc_render_target = unsafe { d2d_factory.CreateDCRenderTarget(&raw const target_props)? };
         unsafe { dc_render_target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE) };
         Ok(Self {
             dwrite_factory,
@@ -310,7 +310,7 @@ fn hit_test_text_x(layout: &IDWriteTextLayout, pos: u32, trailing: bool) -> Opti
     let mut metrics = DWRITE_HIT_TEST_METRICS::default();
     unsafe {
         layout
-            .HitTestTextPosition(pos, trailing, &mut x, &mut y, &mut metrics)
+            .HitTestTextPosition(pos, trailing, &raw mut x, &raw mut y, &raw mut metrics)
             .ok()?;
     }
     Some(x)
@@ -485,7 +485,7 @@ fn draw_d2d_lyric_line(
         let t = clip_progress.clamp(0.0, 1.0);
         let blended = lerp_d2d_color(text_color, highlight_color, t);
         let brush = unsafe {
-            state.dc_render_target.CreateSolidColorBrush(&blended, None).ok()?
+            state.dc_render_target.CreateSolidColorBrush(&raw const blended, None).ok()?
         };
         let layout = unsafe { state.create_layout(text, font_size_scaled, width, height).ok()? };
         unsafe {
@@ -506,7 +506,7 @@ fn draw_d2d_lyric_line(
     let current_brush = unsafe {
         state
             .dc_render_target
-            .CreateSolidColorBrush(&current_color, None)
+            .CreateSolidColorBrush(&raw const current_color, None)
             .ok()?
     };
     apply_progress_effects(
@@ -525,7 +525,7 @@ fn draw_d2d_lyric_line(
             bottom: draw_rect.bottom as f32,
         };
         unsafe {
-            state.dc_render_target.PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            state.dc_render_target.PushAxisAlignedClip(&raw const clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             state.dc_render_target.DrawTextLayout(origin, &overlay_layout, base_brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
             state.dc_render_target.PopAxisAlignedClip();
         }
@@ -577,14 +577,14 @@ fn render_lyrics_d2d_frame(
             let strip_radius = (10 * scale / 96) as f32;
 
             if is_hovered {
-                let hover_color = d2d_color(0xE0E0E0, preset.hover_bg_alpha as f32 / 255.0);
-                let hover_brush = state.dc_render_target.CreateSolidColorBrush(&hover_color, None).ok()?;
+                let hover_color = d2d_color(0xE0_E0_E0, preset.hover_bg_alpha as f32 / 255.0);
+                let hover_brush = state.dc_render_target.CreateSolidColorBrush(&raw const hover_color, None).ok()?;
                 let bg_rect = D2D1_ROUNDED_RECT {
                     rect: rect_to_d2d(client_rect),
                     radiusX: corner_radius,
                     radiusY: corner_radius,
                 };
-                state.dc_render_target.FillRoundedRectangle(&bg_rect, &hover_brush);
+                state.dc_render_target.FillRoundedRectangle(&raw const bg_rect, &hover_brush);
 
                 let btn_text_format = state
                     .dwrite_factory
@@ -605,18 +605,18 @@ fn render_lyrics_d2d_frame(
                 let close_rect = layout.close_rect;
                 let lock_rect = layout.lock_rect;
                 if !is_locked {
-                    let close_bg = d2d_color(0xE53935, 0.16);
-                    let close_brush = state.dc_render_target.CreateSolidColorBrush(&close_bg, None).ok()?;
+                    let close_bg = d2d_color(0xE5_39_35, 0.16);
+                    let close_brush = state.dc_render_target.CreateSolidColorBrush(&raw const close_bg, None).ok()?;
                     let close_round = rounded_rect_to_d2d(&close_rect, strip_radius);
-                    state.dc_render_target.FillRoundedRectangle(&close_round, &close_brush);
+                    state.dc_render_target.FillRoundedRectangle(&raw const close_round, &close_brush);
                 }
-                let lock_bg = if is_locked { d2d_color(0xDDEFFF, 0.16) } else { d2d_color(0xDDEFFF, 0.10) };
-                let lock_brush = state.dc_render_target.CreateSolidColorBrush(&lock_bg, None).ok()?;
+                let lock_bg = if is_locked { d2d_color(0xDD_EF_FF, 0.16) } else { d2d_color(0xDD_EF_FF, 0.10) };
+                let lock_brush = state.dc_render_target.CreateSolidColorBrush(&raw const lock_bg, None).ok()?;
                 let lock_round = rounded_rect_to_d2d(&lock_rect, strip_radius);
-                state.dc_render_target.FillRoundedRectangle(&lock_round, &lock_brush);
+                state.dc_render_target.FillRoundedRectangle(&raw const lock_round, &lock_brush);
 
-                let icon_color = if is_locked { d2d_color(0x1E88E5, 1.0) } else { d2d_color(0xE53935, 1.0) };
-                let icon_brush = state.dc_render_target.CreateSolidColorBrush(&icon_color, None).ok()?;
+                let icon_color = if is_locked { d2d_color(0x1E_88_E5, 1.0) } else { d2d_color(0xE5_39_35, 1.0) };
+                let icon_brush = state.dc_render_target.CreateSolidColorBrush(&raw const icon_color, None).ok()?;
                 if !is_locked {
                     state.dc_render_target.DrawText(
                         &[0xE711],
@@ -640,8 +640,8 @@ fn render_lyrics_d2d_frame(
             if !current_line.is_empty() {
                 let text_color = d2d_color(preset.text_color, fade_alpha);
                 let highlight_color = d2d_color(preset.highlight_color, fade_alpha);
-                let base_brush = state.dc_render_target.CreateSolidColorBrush(&text_color, None).ok()?;
-                let highlight_brush = state.dc_render_target.CreateSolidColorBrush(&highlight_color, None).ok()?;
+                let base_brush = state.dc_render_target.CreateSolidColorBrush(&raw const text_color, None).ok()?;
+                let highlight_brush = state.dc_render_target.CreateSolidColorBrush(&raw const highlight_color, None).ok()?;
                 let current_vec: Vec<u16> = current_line.encode_utf16().collect();
                 let sub_vec: Vec<u16> = sub_line.encode_utf16().collect();
                 let current = trim_utf16_nul(&current_vec);
@@ -702,6 +702,12 @@ pub struct DesktopLyricsManager {
 unsafe impl Send for DesktopLyricsManager {}
 unsafe impl Sync for DesktopLyricsManager {}
 
+impl Default for DesktopLyricsManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DesktopLyricsManager {
     pub fn new() -> Self {
         Self { initialized: false }
@@ -739,7 +745,7 @@ impl DesktopLyricsManager {
             }))
         });
 
-        let state_for_thread = shared_state.clone();
+        let state_for_thread = Arc::clone(shared_state);
 
         std::thread::Builder::new()
             .name("desktop-lyrics".to_string())
@@ -784,8 +790,12 @@ impl DesktopLyricsManager {
                 }
             }
             if text_changed {
-                guard.prev_line = guard.current_line.clone();
-                guard.prev_sub_line = guard.sub_line.clone();
+                // 注意:不能用 clone_from,因为 guard.prev_line 和 guard.current_line 都借用了 guard
+                // 会触发 mutable + immutable borrow 冲突
+                let prev = guard.current_line.clone();
+                let prev_sub = guard.sub_line.clone();
+                guard.prev_line = prev;
+                guard.prev_sub_line = prev_sub;
                 guard.current_line = current_line.to_string();
                 guard.sub_line = sub_line.to_string();
                 guard.marquee_start_ms = now_ms();
@@ -808,7 +818,8 @@ impl DesktopLyricsManager {
             guard.lyric_progress = progress;
             guard.render_pending = true;
         }
-        post_update()
+        post_update();
+        Ok(())
     }
 
     pub fn show(&self) -> Result<(), String> {
@@ -878,7 +889,8 @@ impl DesktopLyricsManager {
             resize_window_for_font(HWND(hwnd as *mut _), size);
         }
 
-        post_update()
+        post_update();
+        Ok(())
     }
 
     pub fn set_color_preset(&self, preset_name: &str) -> Result<(), String> {
@@ -895,7 +907,8 @@ impl DesktopLyricsManager {
             };
             guard.render_pending = true;
         }
-        post_update()
+        post_update();
+        Ok(())
     }
 
     pub fn is_visible(&self) -> bool {
@@ -912,7 +925,7 @@ fn get_hwnd() -> isize {
     LYRICS_HWND.get().copied().unwrap_or(0)
 }
 
-fn post_update() -> Result<(), String> {
+fn post_update() {
     let hwnd = get_hwnd();
     if hwnd != 0 {
         unsafe {
@@ -924,7 +937,6 @@ fn post_update() -> Result<(), String> {
             );
         }
     }
-    Ok(())
 }
 
 fn get_close_btn_rect(window_rect: &RECT, scale: i32) -> RECT {
@@ -988,7 +1000,7 @@ fn resize_window_for_font(hwnd: HWND, font_size: i32) {
         let new_h = desired_window_height(scale, font_size);
 
         let mut rect = RECT::default();
-        let _ = GetWindowRect(hwnd, &mut rect);
+        let _ = GetWindowRect(hwnd, &raw mut rect);
         let current_w = rect.right - rect.left;
         let current_h = rect.bottom - rect.top;
         if current_w <= 0 || (current_h - new_h).abs() <= 1 {
@@ -1100,7 +1112,7 @@ fn measure_text_width_dwrite_with_state(
             .ok()?
     };
     let mut metrics = DWRITE_TEXT_METRICS::default();
-    unsafe { layout.GetMetrics(&mut metrics).ok()? };
+    unsafe { layout.GetMetrics(&raw mut metrics).ok()? };
     Some(metrics.widthIncludingTrailingWhitespace.ceil().max(0.0) as i32)
 }
 
@@ -1134,9 +1146,9 @@ fn get_cached_font(font_size_scaled: i32) -> HFONT {
 unsafe fn render_lyrics(hwnd: HWND) {
     unsafe {
     let mut window_rect = RECT::default();
-    let _ = GetWindowRect(hwnd, &mut window_rect);
+    let _ = GetWindowRect(hwnd, &raw mut window_rect);
     let mut client_rect = RECT::default();
-    let _ = GetClientRect(hwnd, &mut client_rect);
+    let _ = GetClientRect(hwnd, &raw mut client_rect);
     let w = client_rect.right - client_rect.left;
     let h = client_rect.bottom - client_rect.top;
     if w <= 0 || h <= 0 {
@@ -1237,8 +1249,6 @@ unsafe fn render_lyrics(hwnd: HWND) {
         // 浠嶅厑璁稿悗缁枃瀛?缈昏瘧鍙樺寲瑙﹀彂娓叉煋锛屼絾閬垮厤绌洪棽鏃堕噸澶嶈蛋鏁村抚鍚堟垚銆?
     }
 
-    let current_empty = current_line.is_empty();
-    let sub_empty = sub_line.is_empty();
     let bmi = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
             biSize: size_of::<BITMAPINFOHEADER>() as u32,
@@ -1262,7 +1272,7 @@ unsafe fn render_lyrics(hwnd: HWND) {
     };
 
     let mut p_bits: *mut core::ffi::c_void = std::ptr::null_mut();
-    let h_bitmap = match CreateDIBSection(None, &bmi, DIB_RGB_COLORS, &mut p_bits, None, 0) {
+    let h_bitmap = match CreateDIBSection(None, &raw const bmi, DIB_RGB_COLORS, &raw mut p_bits, None, 0) {
         Ok(h) => h,
         Err(e) => {
             log::error!("Desktop lyrics: CreateDIBSection failed: {e}");
@@ -1278,19 +1288,12 @@ unsafe fn render_lyrics(hwnd: HWND) {
     let hdc_mem = CreateCompatibleDC(None);
     let old_bitmap = SelectObject(hdc_mem, HGDIOBJ(h_bitmap.0));
 
-    let layout = build_lyrics_layout(&client_rect, scale, !sub_empty);
-    let _close_rect = layout.close_rect;
-    let _lock_rect = layout.lock_rect;
-    let _text_rect = layout.text_rect;
-    let _bg_alpha = preset.hover_bg_alpha;
-
     SetBkMode(hdc_mem, TRANSPARENT);
 
     let font_size_scaled = font_size * scale / 96;
-    let _font = get_cached_font(font_size_scaled);
+    // 调用 get_cached_font 是为了预热字体缓存(有副作用),返回值未使用
+    let _ = get_cached_font(font_size_scaled);
 
-    let _has_text = !current_empty || !sub_empty;
-    let _marquee_now = now_ms();
     let current_words_animating = is_playing && !current_words.is_empty();
     let display_progress = karaoke_progress_from_words(&current_words, visual_time, lyric_progress);
     let line_duration_ms = current_words
@@ -1338,12 +1341,12 @@ unsafe fn render_lyrics(hwnd: HWND) {
     let _ = UpdateLayeredWindow(
         hwnd,
         None,
-        Some(&pt_dst),
-        Some(&sz),
+        Some(&raw const pt_dst),
+        Some(&raw const sz),
         Some(hdc_mem),
-        Some(&pt_src),
+        Some(&raw const pt_src),
         COLORREF(0),
-        Some(&blend),
+        Some(&raw const blend),
         ULW_ALPHA,
     );
 
@@ -1385,14 +1388,14 @@ fn run_message_loop(_state: Arc<Mutex<SharedLyricState>>) {
             cbClsExtra: 0,
             cbWndExtra: 0,
             hInstance: instance.into(),
-            hIcon: Default::default(),
-            hCursor: Default::default(),
+            hIcon: HICON::default(),
+            hCursor: HCURSOR::default(),
             hbrBackground: HBRUSH::default(),
             lpszMenuName: PCWSTR::null(),
             lpszClassName: class_name,
         };
 
-        if RegisterClassW(&wc) == 0 {
+        if RegisterClassW(&raw const wc) == 0 {
             log::error!("Desktop lyrics: Failed to register window class");
             return;
         }
@@ -1411,11 +1414,11 @@ fn run_message_loop(_state: Arc<Mutex<SharedLyricState>>) {
         let _ = windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
             windows::Win32::UI::WindowsAndMessaging::SPI_GETWORKAREA,
             0,
-            Some(&mut work_area as *mut RECT as *mut _),
+            Some((&raw mut work_area).cast()),
             windows::Win32::UI::WindowsAndMessaging::SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
         );
 
-        let window_w = (screen_w as f32 * 0.55).min(1200.0).max(600.0) as i32;
+        let window_w = (screen_w as f32 * 0.55).clamp(600.0, 1200.0) as i32;
         let initial_font_size = SHARED_STATE
             .get()
             .and_then(|state| state.try_lock().ok().map(|guard| guard.font_size))
@@ -1453,9 +1456,9 @@ fn run_message_loop(_state: Arc<Mutex<SharedLyricState>>) {
         let _ = SetTimer(Some(hwnd), HOVER_TIMER_ID, 16, None);
 
         let mut msg = MSG::default();
-        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            let _ = TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+        while GetMessageW(&raw mut msg, None, 0, 0).as_bool() {
+            let _ = TranslateMessage(&raw const msg);
+            DispatchMessageW(&raw const msg);
         }
 
         if com_initialized {
@@ -1475,9 +1478,9 @@ unsafe extern "system" fn window_proc(
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => unsafe {
             let mut ps = PAINTSTRUCT::default();
-            let _ = BeginPaint(hwnd, &mut ps);
+            let _ = BeginPaint(hwnd, &raw mut ps);
             render_lyrics(hwnd);
-            let _ = EndPaint(hwnd, &ps);
+            let _ = EndPaint(hwnd, &raw const ps);
             LRESULT(0)
         },
         WM_DL_UPDATE => unsafe {
@@ -1491,9 +1494,9 @@ unsafe extern "system" fn window_proc(
         WM_TIMER => unsafe {
             if wparam.0 == HOVER_TIMER_ID {
                 let mut pt = POINT::default();
-                let _ = GetCursorPos(&mut pt);
+                let _ = GetCursorPos(&raw mut pt);
                 let mut rect = RECT::default();
-                let _ = GetWindowRect(hwnd, &mut rect);
+                let _ = GetWindowRect(hwnd, &raw mut rect);
 
                 let is_inside = pt.x >= rect.left && pt.x < rect.right && pt.y >= rect.top && pt.y < rect.bottom;
 
@@ -1520,7 +1523,7 @@ unsafe extern "system" fn window_proc(
                         if guard.is_locked {
                             let dpi = get_dpi_for_window(hwnd);
                             let mut client_rect = RECT::default();
-                            let _ = GetClientRect(hwnd, &mut client_rect);
+                            let _ = GetClientRect(hwnd, &raw mut client_rect);
                             let lock_rect = get_lock_btn_rect(&client_rect, dpi as i32);
                             // WS_POPUP 窗口客户区原点即窗口原点，换算为屏幕坐标
                             let on_lock_btn = pt.x >= rect.left + lock_rect.left
@@ -1572,7 +1575,7 @@ unsafe extern "system" fn window_proc(
             let x = (lparam.0 & 0xFFFF) as i16 as i32;
             let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
             let mut rect = RECT::default();
-            let _ = GetClientRect(hwnd, &mut rect);
+            let _ = GetClientRect(hwnd, &raw mut rect);
             let dpi = get_dpi_for_window(hwnd);
             let close_rect = get_close_btn_rect(&rect, dpi as i32);
             let lock_rect = get_lock_btn_rect(&rect, dpi as i32);
@@ -1631,11 +1634,11 @@ unsafe extern "system" fn window_proc(
                     let x = (lparam.0 & 0xFFFF) as i16 as i32;
                     let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
                     let mut rect = RECT::default();
-                    let _ = GetClientRect(hwnd, &mut rect);
+                    let _ = GetClientRect(hwnd, &raw mut rect);
                     let dpi = get_dpi_for_window(hwnd);
 
                     let mut screen_pt = POINT { x, y };
-                    let _ = ScreenToClient(hwnd, &mut screen_pt);
+                    let _ = ScreenToClient(hwnd, &raw mut screen_pt);
 
                     let close_rect = get_close_btn_rect(&rect, dpi as i32);
                     let lock_rect = get_lock_btn_rect(&rect, dpi as i32);
@@ -1680,9 +1683,8 @@ unsafe extern "system" fn window_proc(
 static DESKTOP_LYRICS_MANAGER: OnceLock<Arc<Mutex<DesktopLyricsManager>>> = OnceLock::new();
 
 pub fn get_desktop_lyrics_manager() -> Arc<Mutex<DesktopLyricsManager>> {
-    DESKTOP_LYRICS_MANAGER
-        .get_or_init(|| Arc::new(Mutex::new(DesktopLyricsManager::new())))
-        .clone()
+    Arc::clone(DESKTOP_LYRICS_MANAGER
+        .get_or_init(|| Arc::new(Mutex::new(DesktopLyricsManager::new()))))
 }
 
 #[command]

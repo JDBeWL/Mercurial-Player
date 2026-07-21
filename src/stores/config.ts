@@ -153,7 +153,8 @@ export const useConfigStore = defineStore('config', {
     // 音频设置
     audio: {
       exclusiveMode: false,
-      volume: 0.5
+      volume: 0.5,
+      fadeEnabled: true,
     },
 
     // 可视化设置

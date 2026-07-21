@@ -184,6 +184,8 @@
     "refreshDevices": "Refresh Device List",
     "exclusiveModeRestartRequired": "Exclusive mode setting changed. Restart required to take effect",
     "exclusiveModeRestartHint": "Please close and reopen the application to apply the new audio mode settings",
+    "fadeEnabled": "Fade In/Out",
+    "fadeEnabledDesc": "Smooth transition on track change, eliminate click on pause/resume",
     "equalizer": "Equalizer",
     "enableEq": "Enable Equalizer",
     "eqPreset": "Preset",

@@ -14,7 +14,6 @@ use crate::equalizer::{EqSettings, EQ_BAND_COUNT};
 use crate::AppState;
 use rodio::Source;
 use spectrum_analyzer::scaling::divide_by_N_sqrt;
-use spectrum_analyzer::windows::hann_window;
 use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
 use std::fs::File;
 use std::io::BufReader;
@@ -91,6 +90,16 @@ fn db_to_linear_fast(db: f32) -> f32 {
 /// 批量处理块大小（对齐到SIMD友好的边界）
 const BATCH_SIZE: usize = 64;
 
+/// 预计算 Hann 窗口(避免每次 FFT 都堆分配)
+/// 公式: hann[i] = 0.5 - 0.5 * cos(2π * i / N)
+fn precompute_hann_window(size: usize) -> Vec<f32> {
+    let n = size as f32;
+    (0..size).map(|i| {
+        let angle = 2.0 * std::f32::consts::PI * (i as f32) / n;
+        0.5 - 0.5 * angle.cos()
+    }).collect()
+}
+
 #[derive(Debug, serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaybackStatus {
@@ -145,9 +154,16 @@ fn emit_playback_position(app: &AppHandle, position: f32) -> Result<(), Box<dyn 
 // ============================================================================
 
 /// 批量EQ处理器
+///
+/// 性能优化要点:
+/// 1. states 采用扁平布局 `[channel][band]` (channel × EQ_BAND_COUNT),避免双层 Vec 解引用
+/// 2. 三个处理阶段(preamp/biquad/soft_clip)合并为单次循环,提升 cache 局部性
+/// 3. i % channels 在 channels=2 时编译器会优化为位运算,无需手动展开
 struct BatchEqProcessor {
     coefficients: Vec<crate::equalizer::BiquadCoefficients>,
-    states: Vec<Vec<crate::equalizer::BiquadState>>,
+    /// 扁平布局: states[channel * EQ_BAND_COUNT + band]
+    /// 这样同一 channel 的所有 band 状态在内存中连续,提升 cache 命中率
+    states: Vec<crate::equalizer::BiquadState>,
     sample_rate: f32,
     channels: usize,
     cached_enabled: bool,
@@ -156,11 +172,13 @@ struct BatchEqProcessor {
 
 impl BatchEqProcessor {
     fn new(sample_rate: u32, channels: u16) -> Self {
+        let channels = channels as usize;
         Self {
             coefficients: vec![crate::equalizer::BiquadCoefficients::default(); EQ_BAND_COUNT],
-            states: vec![vec![crate::equalizer::BiquadState::default(); channels as usize]; EQ_BAND_COUNT],
+            // 扁平数组: channels × EQ_BAND_COUNT,一次性分配,提升 cache 局部性
+            states: vec![crate::equalizer::BiquadState::default(); channels * EQ_BAND_COUNT],
             sample_rate: sample_rate as f32,
-            channels: channels as usize,
+            channels,
             cached_enabled: false,
             cached_preamp_multiplier: 1.0,
         }
@@ -171,7 +189,7 @@ impl BatchEqProcessor {
         self.cached_enabled = settings.enabled;
         // 使用查找表获取preamp乘数
         self.cached_preamp_multiplier = db_to_linear_fast(settings.preamp);
-        
+
         if settings.enabled {
             self.update_coefficients(settings);
         }
@@ -184,29 +202,32 @@ impl BatchEqProcessor {
         }
     }
 
-    /// 批量处理采样（更高效）
+    /// 批量处理采样 - 合并三阶段循环为单次遍历,提升 cache 局部性
     #[inline]
     fn process_batch(&mut self, samples: &mut [f32]) {
         if !self.cached_enabled { return; }
-        
+
         let preamp = self.cached_preamp_multiplier;
         let channels = self.channels;
-        
-        // 应用preamp（向量化友好的循环）
-        for sample in samples.iter_mut() {
+        let band_count = EQ_BAND_COUNT;
+
+        // 单次循环完成 preamp + biquad + soft_clip,提升 cache 局部性
+        // 注: i % channels 在 channels=2 时编译器优化为 i & 1,无取模开销
+        for (i, sample) in samples.iter_mut().enumerate() {
+            let channel = i % channels;
+            let state_base = channel * band_count;
+
+            // 1. preamp
             *sample *= preamp;
-        }
-        
-        // 逐频段处理
-        for (band, coeffs) in self.coefficients.iter().enumerate() {
-            for (i, sample) in samples.iter_mut().enumerate() {
-                let channel = i % channels;
-                *sample = self.states[band][channel].process(*sample, coeffs);
+
+            // 2. 逐频段 biquad 处理(使用扁平 states 数组,连续内存访问)
+            for band in 0..band_count {
+                let coeffs = &self.coefficients[band];
+                let state = &mut self.states[state_base + band];
+                *sample = state.process(*sample, coeffs);
             }
-        }
-        
-        // 批量软削波
-        for sample in samples.iter_mut() {
+
+            // 3. 软削波
             *sample = soft_clip_fast(*sample);
         }
     }
@@ -226,13 +247,14 @@ pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     eq_processor: BatchEqProcessor,
     eq_update_counter: u32,
     fft_buffer: Vec<f32>,
+    /// 预计算的 Hann 窗口(按 fft_size 一次预计算,避免每次 FFT 堆分配)
+    hann_window: Vec<f32>,
     spectrum_buffer: Vec<f32>,
     samples_played: u64,
     sample_rate: u32,
     channels: u16,
     fft_size: usize,
-    // 批量处理缓冲区
-    pending_samples: Vec<f32>,
+    // 批量处理缓冲区:直接存 EQ 处理后的采样,避免原始采样的中间拷贝
     pending_processed: Vec<f32>,
     pending_index: usize,
     // EOF标志 - 用于发送track-ended事件
@@ -253,7 +275,7 @@ const fn calculate_fft_size(sample_rate: u32) -> usize {
     match sample_rate {
         0..=32000 => 1024,      // ≤32kHz: 1024 样本
         32001..=64000 => 2048,  // 44.1k/48k: 2048 样本
-        64001..=128000 => 4096, // 88.2k/96k: 4096 样本
+        64001..=128_000 => 4096, // 88.2k/96k: 4096 样本
         _ => 8192,              // 176.4k/192k/384k: 8192 样本
     }
 }
@@ -275,12 +297,12 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             eq_processor: BatchEqProcessor::new(sr, ch),
             eq_update_counter: 0,
             fft_buffer: vec![0.0; fft_size],
+            hann_window: precompute_hann_window(fft_size),
             spectrum_buffer: vec![0.0; 128],
             samples_played: 0,
             sample_rate: sr,
             channels: ch,
             fft_size,
-            pending_samples: Vec::with_capacity(BATCH_SIZE),
             pending_processed: Vec::with_capacity(BATCH_SIZE),
             pending_index: 0,
             eof_sent: false,
@@ -308,22 +330,22 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
     /// 批量从输入源读取采样并处理
     #[inline]
     fn refill_batch(&mut self) -> bool {
-        self.pending_samples.clear();
+        self.pending_processed.clear();
         self.pending_index = 0;
-        
-        // 批量读取
+
+        // 批量读取 - 直接写入 pending_processed,避免中间 clone
         for _ in 0..BATCH_SIZE {
             if let Some(sample) = self.input.next() {
-                self.pending_samples.push(sample);
+                self.pending_processed.push(sample);
             } else {
                 break;
             }
         }
-        
-        if self.pending_samples.is_empty() {
+
+        if self.pending_processed.is_empty() {
             return false;
         }
-        
+
         // 更新EQ设置（每批次检查一次，而不是每512采样）
         self.eq_update_counter += 1;
         if self.eq_update_counter >= 8 { // 每8批次 = 512采样
@@ -332,11 +354,10 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
                 self.eq_processor.update_settings(&s);
             }
         }
-        
-        // 批量EQ处理
-        self.pending_processed = self.pending_samples.clone();
+
+        // 批量EQ处理(原地处理,无 clone)
         self.eq_processor.process_batch(&mut self.pending_processed);
-        
+
         true
     }
 }
@@ -399,13 +420,10 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         // 根据垂直同步设置决定FFT频率
         let enable_vsync = self.enable_vertical_sync.load(Ordering::Relaxed);
         let target_fps = self.target_fps.load(Ordering::Relaxed).max(1);
-        let fft_interval_ms = if enable_vsync {
-            // 垂直同步开启：使用屏幕刷新率同步
-            1000 / target_fps
-        } else {
-            // 垂直同步关闭：使用目标帧率
-            1000 / target_fps
-        };
+        // 当前实现中垂直同步和目标帧率使用相同算法(1000/fps)
+        // 保留 enable_vsync 标志供未来扩展真实屏幕刷新率读取
+        let _ = enable_vsync;
+        let fft_interval_ms = 1000 / target_fps;
         
         // 限制FFT计算和发送频率
         if now - last_fft >= fft_interval_ms {
@@ -424,10 +442,13 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         if let Ok(mut spec) = self.spectrum_data.try_lock() {
             // 复用预分配的缓冲区
             self.fft_buffer[..self.fft_size].copy_from_slice(&self.buffer[..self.fft_size]);
-            let hann = hann_window(&self.fft_buffer);
-            
+            // 手动应用预计算的 Hann 窗口(避免 hann_window() 每次堆分配 Vec)
+            for i in 0..self.fft_size {
+                self.fft_buffer[i] *= self.hann_window[i];
+            }
+
             if let Ok(spectrum) = samples_fft_to_spectrum(
-                &hann,
+                &self.fft_buffer,
                 self.sample_rate,
                 FrequencyLimit::Range(20.0, 20000.0),
                 Some(&divide_by_N_sqrt),
@@ -488,6 +509,8 @@ impl<I: Source<Item = f32> + Send> Source for VisualizationSource<I> {
 /// 播放音轨（共享模式）
 pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, position: Option<f32>) -> Result<(), String> {
     let player = &state.player;
+    // 取消任何正在进行的淡入淡出,防止其 on_complete(pause) 在新歌播放后执行
+    player.fade_generation.fetch_add(1, Ordering::SeqCst);
     {
         let player_lock = player.sink.lock().unwrap();
         // 直接停止，不做淡出（淡出会阻塞主线程）
@@ -565,12 +588,27 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
     let new_thread_id = player.decode_thread_id.fetch_add(1, Ordering::SeqCst) + 1;
     {
         if let Some(ref wasapi) = *player.wasapi_player.lock().unwrap() {
-            let _ = wasapi.stop();
+            // 切歌淡出:50ms 平滑过渡到静音,消除 audible click
+            // 音频线程内部完成淡出后会自动 stop_stream + clear_buffer
+            // fade 禁用时直接 stop + clear_buffer
+            if player.fade_enabled.load(Ordering::SeqCst) {
+                let _ = wasapi.stop_with_fade_out(50);
+            } else {
+                let _ = wasapi.stop();
+                let _ = wasapi.clear_buffer();
+            }
+        }
+    }
+    // fade 启用时等待淡出完成(50ms) + 旧解码线程退出(20ms buffer)
+    // fade 禁用时只等旧解码线程退出
+    let wait_ms = if player.fade_enabled.load(Ordering::SeqCst) { 70 } else { 50 };
+    std::thread::sleep(Duration::from_millis(wait_ms));
+    // 兜底:确保缓冲区被清空(防止淡出未完成的极端情况)
+    {
+        if let Some(ref wasapi) = *player.wasapi_player.lock().unwrap() {
             let _ = wasapi.clear_buffer();
         }
     }
-    // 使用更短的等待时间，并在后台线程中处理
-    std::thread::sleep(Duration::from_millis(50));
     player.decode_thread_stop.store(false, Ordering::SeqCst);
     std::sync::atomic::fence(Ordering::SeqCst);
 
@@ -607,7 +645,7 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
     std::thread::spawn(move || {
         thread_started_clone.store(true, Ordering::SeqCst);
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            decode_and_push_to_wasapi(source, wasapi_clone, waveform, spectrum, app_clone, stop_flag, thread_id, new_thread_id, src_sr, src_ch.get(), target_sr, target_ch, eq_settings, start_pos)
+            decode_and_push_to_wasapi(source, wasapi_clone, waveform, spectrum, app_clone, stop_flag, thread_id, new_thread_id, src_sr, src_ch.get(), target_sr, target_ch, eq_settings, start_pos);
         }));
     });
 
@@ -649,7 +687,7 @@ const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
     match sample_rate {
         0..=32000 => 512,       // ≤32kHz
         32001..=64000 => 1024,  // 44.1k/48k
-        64001..=128000 => 2048, // 88.2k/96k
+        64001..=128_000 => 2048, // 88.2k/96k
         _ => 4096,              // 176.4k/192k/384k
     }
 }
@@ -727,7 +765,8 @@ fn decode_and_push_to_wasapi(
     eq_settings: Arc<RwLock<EqSettings>>,
     start_position: f32,
 ) {
-    use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+    use rubato::{Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+    use audioadapter_buffers::direct::SequentialSliceOfVecs;
     if stop_flag.load(Ordering::SeqCst) || thread_id_ref.load(Ordering::SeqCst) != my_id { return; }
 
     let mut eq_proc = EqProcessor::new(src_sr, src_ch);
@@ -738,19 +777,19 @@ fn decode_and_push_to_wasapi(
     let chunk_size = calculate_decode_chunk_size(src_sr);
     let resample_ratio = target_sr as f64 / src_sr as f64;
     let mut eq_update_counter: u32 = 0;
-    let mut resampler: Option<SincFixedIn<f32>> = if need_resample {
-        SincFixedIn::<f32>::new(
+    let mut resampler: Option<Async<f32>> = if need_resample {
+        // rubato 4.0: 用 builder 模式构造 SincInterpolationParameters
+        let params = SincInterpolationParameters::new(128, WindowFunction::BlackmanHarris2)
+            .f_cutoff(0.925)
+            .interpolation(SincInterpolationType::Linear)
+            .oversampling_factor(128);
+        Async::<f32>::new_sinc(
             resample_ratio,
             2.0,
-            SincInterpolationParameters {
-                sinc_len: 128,
-                f_cutoff: 0.925,
-                interpolation: SincInterpolationType::Linear,
-                oversampling_factor: 128,
-                window: WindowFunction::BlackmanHarris2,
-            },
+            &params,
             chunk_size,
             src_ch as usize,
+            FixedAsync::Input,
         ).ok()
     } else { None };
 
@@ -758,6 +797,10 @@ fn decode_and_push_to_wasapi(
     // 精确计算最大输出缓冲区大小
     let max_output_frames = ((chunk_size as f64 * resample_ratio).ceil() as usize).max(chunk_size);
     let mut output_buffer: Vec<f32> = Vec::with_capacity(max_output_frames * target_ch as usize);
+    // rubato 4.0: 预分配输出帧 buffer (复用,避免每次循环堆分配)
+    // 每通道预留 max_output_frames + chunk_size 作为安全余量 (rubato 启动延迟可能导致首帧输出更多)
+    let output_frames_capacity = max_output_frames + chunk_size;
+    let mut output_frames_resampled: Vec<Vec<f32>> = vec![Vec::with_capacity(output_frames_capacity); src_ch as usize];
     // 复用 interleaved 缓冲区,避免每帧堆分配
     let samples_needed = chunk_size * src_ch as usize;
     let mut interleaved: Vec<f32> = Vec::with_capacity(samples_needed);
@@ -812,8 +855,8 @@ fn decode_and_push_to_wasapi(
         }
 
         if eq_proc.is_enabled() {
-            for ch in 0..src_ch as usize {
-                for s in &mut input_frames[ch] {
+            for (ch, frame) in input_frames.iter_mut().enumerate() {
+                for s in frame.iter_mut() {
                     *s = eq_proc.process_sample_cached(*s, ch);
                 }
             }
@@ -833,16 +876,50 @@ fn decode_and_push_to_wasapi(
                         last_sample * fade
                     }));
                 }
-                match r.process(&input_frames, None) {
-                    Ok(out) => Cow::Owned(out),
+                // rubato 4.0: 用 SequentialSliceOfVecs adapter 包装输入输出
+                match SequentialSliceOfVecs::new(&input_frames, src_ch as usize, chunk_size) {
+                    Ok(input_adapter) => {
+                        // 清空并预分配输出 buffer
+                        for ch in &mut output_frames_resampled { ch.clear(); ch.resize(output_frames_capacity, 0.0); }
+                        match SequentialSliceOfVecs::new_mut(&mut output_frames_resampled, src_ch as usize, output_frames_capacity) {
+                            Ok(mut output_adapter) => {
+                                let indexing = Indexing::new();
+                                match r.process_into_buffer(&input_adapter, &mut output_adapter, Some(&indexing)) {
+                                    Ok((_in_used, out_written)) => {
+                                        for ch in &mut output_frames_resampled { ch.truncate(out_written); }
+                                        Cow::Owned(output_frames_resampled.clone())
+                                    }
+                                    Err(_) => Cow::Borrowed(&input_frames),
+                                }
+                            }
+                            Err(_) => Cow::Borrowed(&input_frames),
+                        }
+                    }
                     Err(_) => Cow::Borrowed(&input_frames),
                 }
             } else if eof && actual < chunk_size {
                 // EOF情况下 - 直接借用 input_frames,避免 clone
                 Cow::Borrowed(&input_frames)
             } else {
-                match r.process(&input_frames, None) {
-                    Ok(out) => Cow::Owned(out),
+                // rubato 4.0: 正常路径
+                let frames_in = input_frames[0].len();
+                match SequentialSliceOfVecs::new(&input_frames, src_ch as usize, frames_in) {
+                    Ok(input_adapter) => {
+                        for ch in &mut output_frames_resampled { ch.clear(); ch.resize(output_frames_capacity, 0.0); }
+                        match SequentialSliceOfVecs::new_mut(&mut output_frames_resampled, src_ch as usize, output_frames_capacity) {
+                            Ok(mut output_adapter) => {
+                                let indexing = Indexing::new();
+                                match r.process_into_buffer(&input_adapter, &mut output_adapter, Some(&indexing)) {
+                                    Ok((_in_used, out_written)) => {
+                                        for ch in &mut output_frames_resampled { ch.truncate(out_written); }
+                                        Cow::Owned(output_frames_resampled.clone())
+                                    }
+                                    Err(_) => Cow::Borrowed(&input_frames),
+                                }
+                            }
+                            Err(_) => Cow::Borrowed(&input_frames),
+                        }
+                    }
                     Err(_) => Cow::Borrowed(&input_frames),
                 }
             }
@@ -862,11 +939,11 @@ fn decode_and_push_to_wasapi(
         // 通道转换:使用复用缓冲区,避免 clone
         // current_ch 是重采样后实际声道数
         let current_ch = output_frames.len() as u16;
-        let final_out: &[f32] = if current_ch != target_ch {
+        let final_out: &[f32] = if current_ch == target_ch {
+            &output_buffer
+        } else {
             convert_channels_into(&output_buffer, current_ch, target_ch, &mut converted_buffer);
             &converted_buffer
-        } else {
-            &output_buffer
         };
 
         if !final_out.is_empty() {
@@ -876,7 +953,7 @@ fn decode_and_push_to_wasapi(
             loop {
                 if stop_flag.load(Ordering::SeqCst) || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
                 // 用 condvar 等待 50ms 超时,期间 WASAPI 消费端 notify 会唤醒本线程
-                let has_space = wasapi.lock().unwrap().as_ref().map_or(true, |p| p.wait_for_buffer_space(max_buffer, Duration::from_millis(50)));
+                let has_space = wasapi.lock().unwrap().as_ref().is_none_or(|p| p.wait_for_buffer_space(max_buffer, Duration::from_millis(50)));
                 if has_space { break; }
                 // 等待时继续发送播放位置
                 emit_position(&mut last_position_emit_time);
@@ -957,7 +1034,7 @@ fn downmix_surround_to_stereo(samples: &[f32], src_ch: usize, frame: usize) -> (
 }
 
 /// 通道转换(in-place 版本):写入预分配缓冲区,避免每帧堆分配。
-/// `out` 会被 clear 并填充结果。
+/// out 会被 clear 并填充结果。
 fn convert_channels_into(samples: &[f32], src_ch: u16, target_ch: u16, out: &mut Vec<f32>) {
     out.clear();
     if src_ch == target_ch {
@@ -977,9 +1054,9 @@ fn convert_channels_into(samples: &[f32], src_ch: u16, target_ch: u16, out: &mut
                 out.push(s);
             }
             (2, 1) => {
-                out.push((samples[start] + samples[start + 1]) / 2.0);
+                out.push(f32::midpoint(samples[start], samples[start + 1]));
             }
-            (6, 2) | (8, 2) => {
+            (6 | 8, 2) => {
                 // 5.1/7.1到立体声的专业混音
                 let (left, right) = downmix_surround_to_stereo(samples, src, f);
                 out.push(left);
@@ -998,6 +1075,8 @@ fn convert_channels_into(samples: &[f32], src_ch: u16, target_ch: u16, out: &mut
 /// Seek共享模式
 pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, time: f32) -> Result<(), String> {
     let player = &state.player;
+    // 取消任何正在进行的淡入淡出,防止其 on_complete(pause) 在 seek 后执行
+    player.fade_generation.fetch_add(1, Ordering::SeqCst);
     let eq_settings = state.equalizer.get_settings_handle();
     let mut decoder = SymphoniaDecoder::new(path).map_err(|e| format!("Failed to create decoder: {e}"))?;
     decoder.seek(Duration::from_secs_f32(time))?;
@@ -1067,7 +1146,7 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
             guard
                 .as_ref()
                 .map(|wasapi| wasapi.get_state() == PlaybackState::Playing)
-                .ok_or("WASAPI player not initialized".to_string())?
+                .ok_or_else(|| "WASAPI player not initialized".to_string())?
         }
         #[cfg(not(windows))]
         {
@@ -1104,7 +1183,7 @@ pub fn check_track_finished(state: &State<AppState>) -> Result<bool, String> {
                 .map_err(|_| "Failed to acquire WASAPI player lock".to_string())?;
             let wasapi = guard
                 .as_ref()
-                .ok_or("WASAPI player not initialized".to_string())?;
+                .ok_or_else(|| "WASAPI player not initialized".to_string())?;
             Ok(wasapi.get_state() == PlaybackState::Stopped)
         }
         #[cfg(not(windows))]

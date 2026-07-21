@@ -1,20 +1,20 @@
 <template>
   <div class="mini-player" data-tauri-drag-region>
     <!-- 背景模糊封面 -->
-    <div class="background-cover" :style="{ backgroundImage: currentTrackCover }"></div>
-    <div class="background-overlay"></div>
+    <div class="background-cover" data-tauri-drag-region :style="{ backgroundImage: currentTrackCover }"></div>
+    <div class="background-overlay" data-tauri-drag-region></div>
 
     <!-- 主要内容 -->
     <div class="content-container" data-tauri-drag-region>
       <!-- 左侧：封面 -->
       <div class="cover-container" data-tauri-drag-region>
-        <div class="cover" :style="{ backgroundImage: currentTrackCover }">
-          <div v-if="!currentTrack || !currentTrack.coverPath" class="cover-placeholder">
+        <div class="cover" data-tauri-drag-region :style="{ backgroundImage: currentTrackCover }">
+          <div v-if="!currentTrack || !currentTrack.coverPath" class="cover-placeholder" data-tauri-drag-region>
             <span class="material-symbols-rounded">album</span>
           </div>
         </div>
         <!-- 悬浮遮罩：恢复按钮 -->
-        <div class="cover-overlay" @click="exitMiniMode" :title="$t('common.close') || '恢复主界面'">
+        <div class="cover-overlay" data-tauri-drag-region="false" @click="exitMiniMode" :title="$t('common.close') || '恢复主界面'">
           <span class="material-symbols-rounded">open_in_full</span>
         </div>
       </div>
@@ -23,21 +23,21 @@
       <div class="info-controls" data-tauri-drag-region>
         <!-- 歌曲信息 -->
         <div class="track-info" data-tauri-drag-region>
-          <div class="track-title" :title="getTrackTitle(currentTrack, $t('player.noTrack'))">{{ getTrackTitle(currentTrack, $t('player.noTrack')) }}</div>
-          <div class="track-artist" :title="getTrackArtist(currentTrack, '')">{{ getTrackArtist(currentTrack, '') }}</div>
+          <div class="track-title" data-tauri-drag-region :title="getTrackTitle(currentTrack, $t('player.noTrack'))">{{ getTrackTitle(currentTrack, $t('player.noTrack')) }}</div>
+          <div class="track-artist" data-tauri-drag-region :title="getTrackArtist(currentTrack, '')">{{ getTrackArtist(currentTrack, '') }}</div>
         </div>
 
-        <!-- 控制按钮 -->
-        <div class="controls">
-          <button class="icon-button small" @click="playerStore.previousTrack" :disabled="!playerStore.hasPreviousTrack">
+        <!-- 控制按钮：容器可拖拽，按钮本身不可拖拽 -->
+        <div class="controls" data-tauri-drag-region>
+          <button class="icon-button small" data-tauri-drag-region="false" @click="playerStore.previousTrack" :disabled="!playerStore.hasPreviousTrack">
             <span class="material-symbols-rounded">skip_previous</span>
           </button>
-          
-          <button class="icon-button play-pause" @click="playerStore.togglePlay">
+
+          <button class="icon-button play-pause" data-tauri-drag-region="false" @click="playerStore.togglePlay">
             <span class="material-symbols-rounded filled">{{ playerStore.isPlaying ? 'pause' : 'play_arrow' }}</span>
           </button>
-          
-          <button class="icon-button small" @click="playerStore.nextTrack" :disabled="!playerStore.hasNextTrack">
+
+          <button class="icon-button small" data-tauri-drag-region="false" @click="playerStore.nextTrack" :disabled="!playerStore.hasNextTrack">
             <span class="material-symbols-rounded">skip_next</span>
           </button>
         </div>
@@ -45,7 +45,7 @@
     </div>
 
     <!-- 底部进度条 -->
-    <div class="progress-bar-container" 
+    <div class="progress-bar-container" data-tauri-drag-region="false"
          @mousedown="startSeeking"
          @mousemove="handleSeekMove"
          @mouseup="endSeeking"

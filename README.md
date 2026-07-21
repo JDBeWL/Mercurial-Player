@@ -1,50 +1,67 @@
-![light-virtview-pic](/RISE-pink-light-virtview-ass.png)
-![dark-modlyrics-pic](/ツキノカメ-blue-dark-modlyrics-ass.png)
-![light-classic-pic](/BUZZ_CUTZ-blue-light-classiclyrics-lrc.png)
+<div align="center" style="font-size: 24px; font-weight: bold;">
+   いつも 不器用な私の番だから<br/>
+   现在 该总是很笨拙的我出场了<br/>
+   笑って 初めて言えたことだから<br/>
+   笑一个 因为是一开始就说好的<br/>
+   いつか ゴミのような過去も愛したい<br/>
+   总有一天 想去爱垃圾一样的过去<br/>
+   だって 私はわたしさ トラッシュライフ<br/>
+   因为我就是我 垃圾人生
+</div>
 
-> 这是一款基于Tauri v2开发的音乐播放器，专注于高质量音频输出与极致的歌词显示体验。
+![light-virtview-pic](/Calling-pink-dark-virtview-ass.png)
+![light-modlyrics-pic](/TRASH_LIFE-blue-light-modlryris.png)
 
-> *注意：部分功能（如WASAPI独占模式）正处于开发阶段，可能存在不稳定性。*
->
-> *没有引入FFmpeg到项目中，如果文件头没有对应的特征头将解不开文件，比如0x8400前面全是没有用的数据还封装成aac格式让人迷惑的ADTS流或者用LOAS封装的神必流。*
+<h3 align="center">
+   一款基于TauriVue + TypeScript + Rust开发的音乐播放器。
+</h3>
+
+<p align="center">
+  <a href="https://skillicons.dev">
+    <img src="https://skillicons.dev/icons?i=vite,vue,rust,tauri,typescript" />
+  </a>
+</p>
 
 # 功能特性
 
 ## 音频播放
-- [x] 支持格式：MP3、FLAC、WAV（8/16/24/32位）的解码（AAC、OGG、M4A的格式没有严格测试）
-- [x] 使用Symphonia作为解码器
-- [x] 支持自动切换输出设备
-- [x] WASAPI独占模式（抢设备会重复去抢到独占模式，如果失败多次抛出错误，Windows下的直接访问音频设备，尽量避免混音给音频带来的影响）
-- [x] 高采样率支持
-- [x] 高质量重采样
+- [x] 支持格式：Symphonia支持什么就支持什么
+- [x] 支持的播放方式：共享模式下面使用rodio(rodio已内部使用Symphonia解码)，在Windows平台上特殊支持WASAPI独占模式访问
+- [x] 切换设备：支持在断开，手动切换下自动切换输出设备，WASAPI独占模式也能通过监听事件实现在共享模式和独占模式的切换，不需要切换下一首，无论是在播放中还是没有播放情况下这个功能基本可用。（未长时间测试）
+- [x] 高采样率支持：Roboto能提供什么样的重采样就大概有什么采样
+- [x] EQ均衡器
+- [x] 淡入淡出：切歌时平滑过渡（独占模式50ms淡出），pause/resume消除爆音（30ms淡入淡出）
+- [x] WASAPI独占模式音频加速解码：Windows下的WASAPI独占模式下特殊支持SIMD处理部分数据，如果不支持会fallback到SSE2加速。在不支持软件模拟的ARM64环境下，或者还有不支持SSE2的64位的桌面X86处理器平台在支持WASAPI且能驱动这个WebView2的Windows环境中（~~按道理任何x86_64的CPU都应该支持这个SSE2吧，如果有当我什么都没说~~），这种情况将fallback到不加速
 
 ## 歌词功能
 - [x] 多格式支持：LRC、ASS
 - [x] 自动加载：根据音频文件名自动查找匹配的歌词文件
-- [x] 在线歌词：从网易云音乐Web API获取歌词（这个会再改改但是基本能用）
-- [x] 歌词样式：现代风格/经典风格
+- [x] 在线歌词：从网易云音乐Web API获取歌词
+- [x] 歌词样式：支持传统的播放器的滚动歌词和一种更加消耗资源的滚动歌词显示方式
 - [x] 歌词对齐：左/中/右
 - [x] 歌词偏移
 - [x] 点击歌词跳转
 - [x] 卡拉OK逐字高亮（ASS格式）
 - [x] 双语歌词显示
+- [x] 桌面歌词
 
 ## 播放控制
 - [x] 播放/暂停/上一首/下一首
 - [x] 进度条拖动跳转
 - [x] 音量调节
 - [x] 单曲循环/列表循环
-- [x] 随机播放
+- [x] 随机播放（Knuth Shuffle‌）
 
 ## 可视化
-- [x] 实时FFT频谱（共享模式下可用）
-- [x] 60fps的动画
+- [x] 实时FFT频谱
+- [x] 动画帧率理论无上限
+- [x] 垂直同步支持
 - [x] 歌词/可视化视图切换
 
 ## 播放列表
 - [x] 文件夹扫描
 - [x] 子目录扫描
-- [x] 元数据读取（封面、标题、艺术家）
+- [x] 元数据读取（单次采样精度、比特率、封面、标题、艺术家）
 - [x] 按文件夹创建播放列表
 - [x] 批量元数据获取优化
 
@@ -68,6 +85,7 @@
 ## 其他
 - [x] 可以在任务栏控制播放（但是必须要先有播放列表）
 - [x] 更好的字体显示
+- [x] 简化图标字体集
 
 # 技术栈
 
@@ -76,27 +94,28 @@
 |------|------|
 | Vue | ^3.5.33 |
 | Vite | ^8.0.10 |
-| Pinia | ^2.1.6 |
-| Vue I18n | ^9.14.5 |
+| Pinia | ^4.0.2 |
+| Vue I18n | ^11.4.6 |
 | Sass | ^1.99.0 |
 | TypeScript | ^6.0.3 |
-| Tauri API | ^2.10.1 |
+| Tauri API | ^2.11.1 |
 | @vitejs/plugin-vue | ^6.0.6 |
 | Vitest | ^4.1.5 |
 | esbuild | ^0.28.0 |
+| @material/material-color-utilities | ^0.4.0 |
 
 ## 后端 (Rust)
 | 技术 | 版本 | 说明 |
 |------|------|------|
 | Rust | 1.92+ |
-| Tauri | 2.10 |
-| Symphonia | 0.5 | 音频解码器 |
+| Tauri | 2.11 |
+| Symphonia | 0.6 | 音频解码器 |
 | Rodio | 0.22 | 音频播放引擎 |
 | CPAL | 0.17 |
-| WASAPI | 0.22 | Windows独占模式音频 |
-| Windows API | 0.61 | Win32 API绑定 |
-| Rubato | 0.15 | 音频重采样 |
-| Lofty | 0.22 | 音频元数据读取 |
+| WASAPI | 0.23 | Windows独占模式音频 |
+| Windows API | 0.62 | Win32 API绑定 |
+| Rubato | 4.0 | 音频重采样 |
+| Lofty | 0.24 | 音频元数据读取 |
 | Tokio | 1.x |
 | Reqwest | 0.12 |
 | Spectrum Analyzer | 1.7 | 频谱分析 |
@@ -105,7 +124,7 @@
 
 ## 环境要求
 
-1. **Node.js** - 推荐v18+
+1. **Node.js** - 推荐v24+
 2. **Rust** - 需要1.92或更高版本
    - Windows: 访问 [rustup.rs](https://rustup.rs/) 下载安装
    - 安装后运行 `rustup update` 确保版本最新

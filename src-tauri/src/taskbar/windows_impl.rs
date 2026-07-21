@@ -12,7 +12,7 @@ use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, BITMAPINFO,
-    BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, RGBQUAD,
 };
 use windows::Win32::UI::Shell::{
     ITaskbarList3, TaskbarList, THUMBBUTTON, THUMBBUTTONMASK, THB_BITMAP,
@@ -44,6 +44,7 @@ pub struct TaskbarManager {
 
 /// 任务栏按钮图标
 #[allow(clippy::struct_field_names)] // 图标字段使用 _icon 后缀是合理的命名
+#[derive(Default)]
 struct TaskbarIcons {
     prev_icon: Option<HICON>,
     play_icon: Option<HICON>,
@@ -51,16 +52,6 @@ struct TaskbarIcons {
     next_icon: Option<HICON>,
 }
 
-impl Default for TaskbarIcons {
-    fn default() -> Self {
-        Self {
-            prev_icon: None,
-            play_icon: None,
-            pause_icon: None,
-            next_icon: None,
-        }
-    }
-}
 
 impl Drop for TaskbarIcons {
     fn drop(&mut self) {
@@ -382,7 +373,7 @@ where
                 biClrUsed: 0,
                 biClrImportant: 0,
             },
-            bmiColors: [Default::default()],
+            bmiColors: [RGBQUAD::default()],
         };
 
         let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
@@ -460,7 +451,7 @@ where
                 biClrUsed: 0,
                 biClrImportant: 0,
             },
-            bmiColors: [Default::default()],
+            bmiColors: [RGBQUAD::default()],
         };
 
         let mut mask_bits: *mut std::ffi::c_void = std::ptr::null_mut();

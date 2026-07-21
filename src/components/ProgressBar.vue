@@ -11,7 +11,7 @@
         <div class="progress-bar-fill" :style="{ width: `${displayPercent}%` }"></div>
         <div class="progress-bar-handle" :style="{ left: `${displayPercent}%` }"></div>
         <!-- 悬停/拖动时间提示 - 跟随真实滑柄位置 -->
-        <div v-if="isHovering || isDragging" class="hover-time-tooltip" :style="{ left: `${displayPercent}%` }">
+        <div v-if="isHovering || isDragging" class="hover-time-tooltip" :style="{ left: `clamp(var(--tooltip-half-width), ${displayPercent}%, calc(100% - var(--tooltip-half-width)))` }">
           {{ formatTime(displayTime) }} / {{ formatTime(playerStore.duration) }}
         </div>
       </div>
@@ -235,6 +235,8 @@ onUnmounted(() => {
 .hover-time-tooltip {
   position: absolute;
   top: -28px;
+  /* tooltip 半宽,用于 clamp 边界处理;内容约 80px,半宽约 40px,留余量取 45px */
+  --tooltip-half-width: 45px;
   transform: translateX(-50%) scaleY(0.5);
   transform-origin: center bottom;
   background-color: var(--md-sys-color-inverse-surface);

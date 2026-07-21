@@ -125,6 +125,8 @@ export interface UIConfig {
 export interface AudioConfig {
   exclusiveMode: boolean
   volume: number
+  /** 是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音) */
+  fadeEnabled: boolean
 }
 
 export interface VisualizerConfig {

@@ -16,7 +16,7 @@ use symphonia::core::codecs::CodecParameters;
 use symphonia::core::errors::Error;
 use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::formats::probe::Hint;
-use symphonia::core::io::MediaSourceStream;
+use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::units::Timestamp;
 
@@ -281,10 +281,10 @@ impl SymphoniaDecoder {
 
     pub fn new_with_buffer_duration(path: &str, buffer_duration_ms: Option<u32>) -> Result<Self, String> {
         let file = File::open(path).map_err(|e| e.to_string())?;
-        let mss = MediaSourceStream::new(Box::new(file.try_clone().map_err(|e| e.to_string())?), Default::default());
+        let mss = MediaSourceStream::new(Box::new(file.try_clone().map_err(|e| e.to_string())?), MediaSourceStreamOptions::default());
         let mut hint = Hint::new();
         if let Some(ext) = Path::new(path).extension().and_then(|s| s.to_str()) { hint.with_extension(ext); }
-        let fmt_opts: FormatOptions = Default::default();
+        let fmt_opts: FormatOptions = FormatOptions::default();
         let format = symphonia::default::get_probe().probe(&hint, mss, fmt_opts, MetadataOptions::default()).map_err(|e| format!("Failed to probe format: {e}"))?;
         let track = format.default_track(TrackType::Audio).ok_or("No audio track found")?;
         let audio_params = track.codec_params.as_ref().and_then(CodecParameters::audio).ok_or("No audio codec parameters")?;
@@ -349,9 +349,8 @@ impl SymphoniaDecoder {
             }
             n if n > 2 => {
                 // 其他多声道格式，简单混合额外声道
-                for ch in 2..src_channels {
-                    let sample = planes[ch][frame];
-                    let mix = 0.5 / (src_channels - 2) as f32;
+                let mix = 0.5 / (src_channels - 2) as f32;
+                for sample in planes[2..src_channels].iter().map(|p| p[frame]) {
                     left += sample * mix;
                     right += sample * mix;
                 }
@@ -422,10 +421,10 @@ impl SymphoniaDecoder {
 
     fn initialize_decoder(&mut self) -> Result<(), String> {
         let file = File::open(&self.path).map_err(|e| e.to_string())?;
-        let mss = MediaSourceStream::new(Box::new(file.try_clone().map_err(|e| e.to_string())?), Default::default());
+        let mss = MediaSourceStream::new(Box::new(file.try_clone().map_err(|e| e.to_string())?), MediaSourceStreamOptions::default());
         let mut hint = Hint::new();
         if let Some(ext) = Path::new(&self.path).extension().and_then(|s| s.to_str()) { hint.with_extension(ext); }
-        let fmt_opts: FormatOptions = Default::default();
+        let fmt_opts: FormatOptions = FormatOptions::default();
         let mut format = symphonia::default::get_probe().probe(&hint, mss, fmt_opts, MetadataOptions::default()).map_err(|e| format!("Failed to probe format: {e}"))?;
         let track = format.default_track(TrackType::Audio).ok_or("No audio track found")?;
         let track_id = track.id;
@@ -460,21 +459,21 @@ impl SymphoniaDecoder {
             };
             if packet.track_id != track_id { continue; }
             match decoder.decode(&packet) {
-                Ok(decoded) => { 
-                    self.scratch_buffer.clear(); 
-                    Self::convert_audio_buffer(decoded, &mut self.scratch_buffer, &self.channel_map, self.source_channels as usize); 
+                Ok(decoded_packet) => {
+                    self.scratch_buffer.clear();
+                    Self::convert_audio_buffer(decoded_packet, &mut self.scratch_buffer, self.channel_map.as_ref(), self.source_channels as usize);
                     self.buffer.append(&self.scratch_buffer); 
                     decoded_packets += 1; 
                 }
                 Err(Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => { self.state = DecoderState::EndOfStream; break; }
-                Err(Error::DecodeError(_)) => continue,
+                Err(Error::DecodeError(_)) => {}
                 Err(e) => { self.state = DecoderState::Error(format!("Decode error: {e}")); return Err(format!("Decode error: {e}")); }
             }
         }
         Ok(())
     }
 
-    fn convert_audio_buffer(audio_buf: GenericAudioBufferRef<'_>, samples: &mut Vec<f32>, channel_map: &Option<Vec<usize>>, src_channels: usize) {
+    fn convert_audio_buffer(audio_buf: GenericAudioBufferRef<'_>, samples: &mut Vec<f32>, channel_map: Option<&Vec<usize>>, src_channels: usize) {
         let frames = audio_buf.frames();
         let channels = audio_buf.spec().channels().count();
         

@@ -72,7 +72,7 @@ fn load_metadata_cache() -> MetadataCache {
                     }
                 }
                 Err(e) => {
-                    log::warn!("加载元数据缓存失败: {}, 将重新创建", e);
+                    log::warn!("加载元数据缓存失败: {e}, 将重新创建");
                     MetadataCache {
                         version: CACHE_VERSION,
                         entries: std::collections::HashMap::new(),
@@ -81,7 +81,7 @@ fn load_metadata_cache() -> MetadataCache {
             }
         }
         Err(e) => {
-            log::warn!("读取元数据缓存文件失败: {}, 将重新创建", e);
+            log::warn!("读取元数据缓存文件失败: {e}, 将重新创建");
             MetadataCache {
                 version: CACHE_VERSION,
                 entries: std::collections::HashMap::new(),
@@ -124,11 +124,11 @@ pub fn get_metadata_from_cache(path: &str) -> Option<TrackMetadata> {
     // 检查文件是否被修改
     let current_modified = get_file_modified_time(Path::new(path))?;
     if current_modified != cached.modified_time {
-        log::debug!("文件已修改，缓存失效: {}", path);
+        log::debug!("文件已修改，缓存失效: {path}");
         return None;
     }
     
-    log::debug!("缓存命中: {}", path);
+    log::debug!("缓存命中: {path}");
     
     Some(cached.metadata.clone())
 }
@@ -138,9 +138,9 @@ pub fn save_metadata_to_cache(path: &str, metadata: &TrackMetadata) {
     save_metadata_to_memory_cache(path, metadata);
     
     if let Err(e) = flush_memory_cache() {
-        log::warn!("保存元数据缓存到磁盘失败: {}", e);
+        log::warn!("保存元数据缓存到磁盘失败: {e}");
     } else {
-        log::debug!("元数据已缓存: {}", path);
+        log::debug!("元数据已缓存: {path}");
     }
 }
 
@@ -156,7 +156,7 @@ pub fn clean_metadata_cache() -> Result<usize, String> {
     
     if removed_count > 0 {
         save_metadata_cache(&cache)?;
-        log::info!("清理了 {} 个无效的元数据缓存条目", removed_count);
+        log::info!("清理了 {removed_count} 个无效的元数据缓存条目");
     }
     
     Ok(removed_count)
@@ -232,7 +232,7 @@ pub fn save_metadata_to_memory_cache(path: &str, metadata: &TrackMetadata) {
             }
             if let Some(cache) = lock.as_mut() {
                 cache.entries.insert(path.to_string(), cached);
-                log::debug!("元数据已加入内存缓存: {}", path);
+                log::debug!("元数据已加入内存缓存: {path}");
             }
         }
     }
@@ -353,7 +353,7 @@ fn clean_expired_cache_files() -> Result<usize, String> {
                         if file_age > CACHE_EXPIRE_SECONDS {
                             if fs::remove_file(&path).is_ok() {
                                 cleaned_count += 1;
-                                log::debug!("删除过期缓存文件: {:?}", path);
+                                log::debug!("删除过期缓存文件: {}", path.display());
                             }
                         }
                     }
@@ -363,7 +363,7 @@ fn clean_expired_cache_files() -> Result<usize, String> {
     }
 
     if cleaned_count > 0 {
-        log::info!("清理了 {} 个过期缓存文件", cleaned_count);
+        log::info!("清理了 {cleaned_count} 个过期缓存文件");
     }
 
     Ok(cleaned_count)
@@ -404,7 +404,7 @@ fn get_cache_files_sorted() -> Result<Vec<CacheFileInfo>, String> {
     }
 
     // 按最后访问时间排序，最旧的在前
-    files.sort_by(|a, b| a.last_accessed.cmp(&b.last_accessed));
+    files.sort_by_key(|a| a.last_accessed);
 
     Ok(files)
 }
@@ -421,12 +421,12 @@ fn clean_cache_by_size(max_cache_size_mb: u64) -> Result<usize, String> {
         if fs::remove_file(&file.path).is_ok() {
             total_size = total_size.saturating_sub(file.size);
             cleaned_count += 1;
-            log::debug!("删除缓存文件以控制大小: {:?}", file.path);
+            log::debug!("删除缓存文件以控制大小: {}", file.path.display());
         }
     }
 
     if cleaned_count > 0 {
-        log::info!("清理了 {} 个缓存文件以控制大小", cleaned_count);
+        log::info!("清理了 {cleaned_count} 个缓存文件以控制大小");
     }
 
     Ok(cleaned_count)
@@ -439,10 +439,10 @@ fn clean_cache_by_size(max_cache_size_mb: u64) -> Result<usize, String> {
 /// 2. 删除超出大小限制的文件（默认 1GB，可配置）
 ///
 /// # Arguments
-/// * `max_cache_size_mb` - 最大缓存大小（单位：MB），如果为 None 则使用默认值 1GB
+/// * max_cache_size_mb - 最大缓存大小（单位：MB），如果为 None 则使用默认值 1GB
 pub fn clean_cover_cache(max_cache_size_mb: Option<u64>) -> Result<usize, String> {
     let max_size = max_cache_size_mb.unwrap_or(DEFAULT_MAX_CACHE_SIZE_MB);
-    log::info!("开始清理封面缓存（最大大小: {}MB）...", max_size);
+    log::info!("开始清理封面缓存（最大大小: {max_size}MB）...");
     
     let mut total_cleaned = 0;
     
@@ -453,7 +453,7 @@ pub fn clean_cover_cache(max_cache_size_mb: Option<u64>) -> Result<usize, String
     total_cleaned += clean_cache_by_size(max_size).unwrap_or(0);
     
     if total_cleaned > 0 {
-        log::info!("封面缓存清理完成，共删除 {} 个文件", total_cleaned);
+        log::info!("封面缓存清理完成，共删除 {total_cleaned} 个文件");
     } else {
         log::debug!("封面缓存无需清理");
     }
@@ -489,14 +489,14 @@ fn get_cover_cache_path(_audio_path: &Path, picture: &Picture) -> Result<PathBuf
 
 fn extract_cover_to_cache(audio_path: &Path, picture: &Picture) -> Result<String, String> {
     let cache_file = get_cover_cache_path(audio_path, picture)?;
-    log::debug!("Cache file path: {:?}", cache_file);
+    log::debug!("Cache file path: {}", cache_file.display());
 
-    if !cache_file.exists() {
+    if cache_file.exists() {
+        log::debug!("Cache file already exists");
+    } else {
         log::debug!("Cache file does not exist, writing new file");
         fs::write(&cache_file, picture.data()).map_err(|e| format!("写入封面缓存失败: {e}"))?;
         log::debug!("Cache file written successfully");
-    } else {
-        log::debug!("Cache file already exists");
     }
 
     Ok(cache_file.to_string_lossy().to_string())
@@ -509,7 +509,7 @@ fn extract_cover_to_cache(audio_path: &Path, picture: &Picture) -> Result<String
 pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> {
     // 首先尝试从缓存获取
     if let Some(cached) = get_metadata_from_cache(path) {
-        log::debug!("使用缓存的元数据: {}", path);
+        log::debug!("使用缓存的元数据: {path}");
         return Ok(cached);
     }
     
@@ -526,17 +526,16 @@ pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> 
 pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, String> {
     // 首先尝试从缓存获取
     if let Some(mut cached) = get_metadata_from_cache(path) {
-        log::debug!("使用缓存的元数据: {}", path);
+        log::debug!("使用缓存的元数据: {path}");
         
         // 如果缓存中已有封面路径且封面文件存在，直接返回
         if let Some(ref cover_path) = cached.cover_path {
             if Path::new(cover_path).exists() {
-                log::debug!("缓存的封面文件存在，直接使用: {}", cover_path);
+                log::debug!("缓存的封面文件存在，直接使用: {cover_path}");
                 return Ok(cached);
-            } else {
-                log::debug!("缓存的封面文件不存在，需要重新提取: {}", cover_path);
-                cached.cover_path = None;
             }
+            log::debug!("缓存的封面文件不存在，需要重新提取: {cover_path}");
+            cached.cover_path = None;
         }
         
         // 缓存中没有封面或封面文件不存在，补充提取封面
@@ -624,7 +623,7 @@ fn get_track_metadata_with_options(path: &str, include_cover: bool) -> Result<Tr
 /// 获取音频封面缓存路径（按需提取）
 pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, String> {
     let file_path = Path::new(path);
-    log::debug!("Getting cover for: {}", path);
+    log::debug!("Getting cover for: {path}");
     
     let tagged_file = Probe::open(file_path)
         .map_err(|e| format!("无法打开文件: {e}"))?
@@ -635,14 +634,14 @@ pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, Strin
     log::debug!("Primary tag exists: {}", primary_tag.is_some());
     
     let has_picture = primary_tag.map(|tag| !tag.pictures().is_empty()).unwrap_or(false);
-    log::debug!("Has picture: {}", has_picture);
+    log::debug!("Has picture: {has_picture}");
 
     let cover = primary_tag
         .and_then(|tag| tag.pictures().first())
         .map(|picture| extract_cover_to_cache(file_path, picture))
         .transpose()?;
 
-    log::debug!("Cover result: {:?}", cover);
+    log::debug!("Cover result: {cover:?}");
     Ok(cover)
 }
 

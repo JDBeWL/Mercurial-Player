@@ -477,15 +477,16 @@ ThemeSelector { -webkit-app-region: no-drag; }
    Layout: Navigation & Window
    ========================================= */
 .nav-bar {
-  display: flex; 
-  align-items: center; 
+  display: flex;
+  align-items: center;
   justify-content: space-between;
-  padding: 8px 16px; 
+  padding: 8px 16px;
   height: 48px;
   background-color: var(--md-sys-color-surface-container-low);
-  z-index: 100; 
-  transition: background-color var(--transition-normal) var(--ease-in-out); 
-  -webkit-app-region: drag;
+  z-index: 100;
+  transition: background-color var(--transition-normal) var(--ease-in-out);
+  /* 拖拽由 Tauri 的 data-tauri-drag-region 机制处理，避免 -webkit-app-region: drag
+     在合成器层级创建屏幕 drag mask，导致浮层（如播放列表关闭按钮）也触发拖拽 */
 }
 
 .nav-left, .nav-right { display: flex; align-items: center; }

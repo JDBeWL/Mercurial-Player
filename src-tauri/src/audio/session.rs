@@ -1,12 +1,12 @@
 //! 上次播放会话恢复
 //!
-//! 启动时根据配置中的 `last_session` 进行校验并恢复:
-//! - L1: 文件存在 (`Path::exists`)
+//! 启动时根据配置中的 last_session 进行校验并恢复:
+//! - L1: 文件存在 (Path::exists)
 //! - L2: 文件大小 + 修改时间一致 (检测被替换)
 //!
 //! 文件不存在: 静默清除记录 (前端负责从播放列表移除)
 //! 文件被替换: 视为新文件,从 0 开始播放
-//! 全部通过: 恢复到 `position_secs`
+//! 全部通过: 恢复到 position_secs
 
 use crate::config::manager::{LastSession, TrackSnapshot, LAST_SESSION_MAX_AGE_SECS};
 use crate::AppState;
@@ -133,29 +133,26 @@ pub fn try_resume_last_session(
     }
 
     // L2: 文件大小 + 修改时间校验 (检测文件被替换)
-    let (actual_size, actual_mtime) = match get_file_metadata(&session.track_path) {
-        Some(meta) => meta,
-        None => {
-            // 文件存在但无法读取 metadata (权限问题等)
-            // 视为不可用,清除记录
-            log::warn!(
-                "Failed to read file metadata for last session: {}",
-                session.track_path
-            );
-            let _ = state.config_manager.save_config(&config);
-            return Ok(ResumeResult {
-                resumed: false,
-                track_path: Some(session.track_path),
-                track_title: Some(session.track_title),
-                track_artist: Some(session.track_artist),
-                duration_secs: Some(session.duration_secs),
-                position_secs: None,
-                playlist_name: session.playlist_name,
-                track_index_in_playlist: session.track_index_in_playlist,
-                playlist_tracks: session.playlist_tracks,
-                status: "metadata_unreadable".to_string(),
-            });
-        }
+    let (actual_size, actual_mtime) = if let Some(meta) = get_file_metadata(&session.track_path) { meta } else {
+        // 文件存在但无法读取 metadata (权限问题等)
+        // 视为不可用,清除记录
+        log::warn!(
+            "Failed to read file metadata for last session: {}",
+            session.track_path
+        );
+        let _ = state.config_manager.save_config(&config);
+        return Ok(ResumeResult {
+            resumed: false,
+            track_path: Some(session.track_path),
+            track_title: Some(session.track_title),
+            track_artist: Some(session.track_artist),
+            duration_secs: Some(session.duration_secs),
+            position_secs: None,
+            playlist_name: session.playlist_name,
+            track_index_in_playlist: session.track_index_in_playlist,
+            playlist_tracks: session.playlist_tracks,
+            status: "metadata_unreadable".to_string(),
+        });
     };
 
     let file_replaced =
@@ -176,7 +173,7 @@ pub fn try_resume_last_session(
     };
 
     // 更新 session 中的位置和文件元数据,然后写回配置 (保持记录新鲜)
-    let mut updated_session = session.clone();
+    let mut updated_session = session;
     updated_session.position_secs = resume_position;
     updated_session.file_size = actual_size;
     updated_session.file_mtime = actual_mtime;
@@ -309,12 +306,9 @@ pub fn save_last_session(
 ) -> Result<(), String> {
     // L2 校验需要文件大小和修改时间
     // 如果文件不存在或无法读取,则不保存 (避免无效记录)
-    let (file_size, file_mtime) = match get_file_metadata(&track_path) {
-        Some(meta) => meta,
-        None => {
-            log::warn!("Cannot save last session: file metadata unreadable for {track_path}");
-            return Ok(()); // 不视为错误,只是不保存
-        }
+    let (file_size, file_mtime) = if let Some(meta) = get_file_metadata(&track_path) { meta } else {
+        log::warn!("Cannot save last session: file metadata unreadable for {track_path}");
+        return Ok(()); // 不视为错误,只是不保存
     };
 
     let now = now_secs();

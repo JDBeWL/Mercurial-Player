@@ -394,14 +394,37 @@ class PluginManager {
 
   /**
    * 清理插件管理器
+   *
+   * 完整资源释放流程:
+   * 1. 停止 player watcher
+   * 2. 逐个停用所有 active 插件(触发插件的 deactivate、沙箱 cleanup、扩展清理)
+   * 3. 清理所有事件监听器
+   * 4. 强制保存所有插件存储
    */
-  cleanup(): void {
+  async cleanup(): Promise<void> {
     if (this._playerWatcherStop) {
       this._playerWatcherStop()
       this._playerWatcherStop = null
     }
-    
-    // 强制保存所有插件存储
+
+    // 停用所有 active 插件(顺序执行,避免并发资源竞争)
+    // 收集 active 插件 id 后再调用 deactivate,避免迭代时修改 Map
+    const activePluginIds = Array.from(this.plugins.values())
+      .filter(p => p.state === PluginState.ACTIVE)
+      .map(p => p.id)
+
+    for (const pluginId of activePluginIds) {
+      try {
+        await this.deactivate(pluginId)
+      } catch (error) {
+        logger.error(`清理时停用插件 ${pluginId} 失败:`, error)
+      }
+    }
+
+    // 清理所有残留的事件监听器(防止 deactivate 遗漏)
+    this.eventListeners.clear()
+
+    // 强制保存所有插件存储(覆盖未在 deactivate 中处理的场景)
     for (const [pluginId, storage] of this.storage) {
       try {
         const flushMethod = (storage as Record<string, unknown>)._flush

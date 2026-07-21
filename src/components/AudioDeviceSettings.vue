@@ -77,6 +77,22 @@
         <span class="material-symbols-rounded">info</span>
         <p>{{ $t('config.exclusiveModeWarning') }}</p>
       </div>
+
+      <!-- 淡入淡出开关 -->
+      <div class="option-item" @click="toggleFadeEnabled()">
+        <div class="option-label">
+          <span class="material-symbols-rounded">graphic_eq</span>
+          <div class="option-text">
+            <h4>{{ $t('config.fadeEnabled') }}</h4>
+            <p>{{ $t('config.fadeEnabledDesc') }}</p>
+          </div>
+        </div>
+        <div class="option-control">
+          <div class="switch" :class="{ 'active': fadeEnabled }">
+            <div class="switch-handle"></div>
+          </div>
+        </div>
+      </div>
     </div>
     
     <div v-if="loading" class="loading-state">
@@ -129,6 +145,7 @@ const loading = ref(false);
 const error = ref(null);
 const restartRequired = ref(false);
 const useExclusiveMode = ref(false);
+const fadeEnabled = ref(true);
 const currentPlatform = ref('unknown');
 
 // 平台检测
@@ -237,6 +254,19 @@ const toggleExclusiveMode = async () => {
   }
 };
 
+// 切换淡入淡出
+const toggleFadeEnabled = async () => {
+  const newValue = !fadeEnabled.value;
+  try {
+    await invoke('set_fade_enabled', { enabled: newValue });
+    fadeEnabled.value = newValue;
+    configStore.setAudioConfig({ fadeEnabled: newValue });
+  } catch (err) {
+    logger.error('Failed to toggle fade enabled:', err);
+    error.value = err.message || 'Failed to toggle fade';
+  }
+};
+
 // 刷新设备列表
 const refreshDevices = () => {
   fetchAudioDevices();
@@ -262,6 +292,18 @@ onMounted(async () => {
     } catch (err) {
       logger.warn('Failed to get exclusive mode from backend:', err);
       useExclusiveMode.value = false;
+    }
+  }
+
+  // 加载淡入淡出设置
+  if (configStore.audio?.fadeEnabled !== undefined) {
+    fadeEnabled.value = configStore.audio.fadeEnabled;
+  } else {
+    try {
+      fadeEnabled.value = await invoke('get_fade_enabled') ?? true;
+    } catch (err) {
+      logger.warn('Failed to get fade enabled from backend:', err);
+      fadeEnabled.value = true;
     }
   }
 

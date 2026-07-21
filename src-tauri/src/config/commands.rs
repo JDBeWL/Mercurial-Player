@@ -30,7 +30,7 @@ fn is_path_safe(path: &str) -> Result<(), String> {
         ];
         for pattern in &forbidden {
             if path_str.contains(pattern) {
-                return Err(format!("安全限制：不允许添加系统敏感目录"));
+                return Err("安全限制：不允许添加系统敏感目录".to_string());
             }
         }
     }

@@ -145,7 +145,7 @@ pub fn get_screen_refresh_rate() -> Result<u32, String> {
                 let refresh_rate = display.frequency;
                 if refresh_rate > 0.0 {
                     let rate = refresh_rate.round() as u32;
-                    log::info!("Detected screen refresh rate: {} Hz", rate);
+                    log::info!("Detected screen refresh rate: {rate} Hz");
                     return Ok(rate);
                 }
             }

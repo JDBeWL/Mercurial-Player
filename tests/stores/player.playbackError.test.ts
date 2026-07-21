@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { describe, it, beforeEach, expect, vi, afterEach } from 'vitest'
 
 vi.mock('@tauri-apps/api/core', () => ({

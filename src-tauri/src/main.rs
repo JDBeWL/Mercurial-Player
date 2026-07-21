@@ -40,7 +40,7 @@ use mercurial_player::taskbar;
 
 use cpal::traits::HostTrait;
 use rodio::stream::{MixerDeviceSink, DeviceSinkBuilder};
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 /// 跨平台的播放器类型别名
@@ -72,12 +72,12 @@ fn main() {
     }
 
     // 从配置加载独占模式设置
-    let exclusive_mode_enabled = config_manager
+    let (exclusive_mode_enabled, fade_enabled) = config_manager
         .load_config()
-        .map(|c| c.audio.exclusive_mode)
-        .unwrap_or(false);
+        .map(|c| (c.audio.exclusive_mode, c.audio.fade_enabled))
+        .unwrap_or((false, true));
 
-    log::info!("Loaded exclusive mode from config: {exclusive_mode_enabled}");
+    log::info!("Loaded exclusive mode from config: {exclusive_mode_enabled}, fade enabled: {fade_enabled}");
 
     // 根据独占模式设置创建播放器
     let (sink, output_stream, wasapi_player) = {
@@ -123,6 +123,8 @@ fn main() {
             device_monitor: Arc::new(Mutex::new(DeviceMonitor::new(device_name))),
             target_fps: Arc::new(AtomicU64::new(60)), // 默认60fps
             enable_vertical_sync: Arc::new(AtomicBool::new(false)), // 默认关闭垂直同步
+            fade_generation: Arc::new(AtomicU32::new(0)),
+            fade_enabled: Arc::new(AtomicBool::new(fade_enabled)),
         },
         config_manager,
         equalizer: GlobalEqualizer::new(),
@@ -160,11 +162,11 @@ fn main() {
                 match metadata::clean_cover_cache(max_cache_size_mb) {
                     Ok(count) => {
                         if count > 0 {
-                            log::info!("应用启动时清理了 {} 个封面缓存文件", count);
+                            log::info!("应用启动时清理了 {count} 个封面缓存文件");
                         }
                     }
                     Err(e) => {
-                        log::warn!("清理封面缓存失败: {}", e);
+                        log::warn!("清理封面缓存失败: {e}");
                     }
                 }
             }
@@ -294,6 +296,8 @@ fn main() {
             audio::commands::get_exclusive_mode,
             audio::commands::set_target_fps,
             audio::commands::set_vertical_sync,
+            audio::commands::set_fade_enabled,
+            audio::commands::get_fade_enabled,
             // 上次播放会话恢复命令
             audio::commands::resume_last_session,
             audio::commands::save_last_session,

@@ -13,8 +13,62 @@ use super::wasapi::WasapiExclusivePlayback;
 
 use crate::AppState;
 use cpal::traits::HostTrait;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::{command, AppHandle, State};
+
+// ============================================================================
+// 共享模式淡入淡出辅助
+// ============================================================================
+
+/// 共享模式淡入淡出步数(30ms 总时长 / 3ms 每步 = 10 步)
+const FADE_STEPS: u32 = 10;
+const FADE_STEP_MS: u64 = 3;
+
+/// 启动共享模式 fade 线程(后台执行,立即返回)
+/// 递增代际计数器以取消之前未完成的 fade 线程
+/// `direction`: 正数 = 淡入(0→target), 负数 = 淡出(target→0)
+/// `on_complete`: fade 完成后执行的闭包(在 fade 线程中调用)
+/// 注:on_complete 在持锁状态下执行,且执行前会再次检查代际,
+/// 防止 fade-out 的 pause() 在 resume 的 play() 之后执行的竞态
+fn spawn_shared_fade(
+    sink: Arc<std::sync::Mutex<rodio::Player>>,
+    target_volume: f32,
+    direction: i32,
+    fade_generation: Arc<AtomicU32>,
+    on_complete: Box<dyn FnOnce(&rodio::Player) + Send>,
+) {
+    use std::thread;
+    let fade_gen = fade_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    thread::spawn(move || {
+        for i in 1..=FADE_STEPS {
+            // 检查是否被新的 fade 操作取消
+            if fade_generation.load(Ordering::SeqCst) != fade_gen {
+                return;
+            }
+            let progress = i as f32 / FADE_STEPS as f32;
+            let vol = if direction >= 0 {
+                target_volume * progress
+            } else {
+                target_volume * (1.0 - progress)
+            };
+            if let Ok(p) = sink.lock() {
+                p.set_volume(vol);
+            } else {
+                return;
+            }
+            thread::sleep(Duration::from_millis(FADE_STEP_MS));
+        }
+        // 持锁 + 代际双重检查,确保 on_complete 不会被取消后的操作覆盖
+        if let Ok(p) = sink.lock() {
+            if fade_generation.load(Ordering::SeqCst) != fade_gen {
+                return;
+            }
+            on_complete(&p);
+        }
+    });
+}
 
 // ============================================================================
 // 播放控制命令
@@ -70,7 +124,13 @@ pub fn pause_track(state: State<AppState>) -> Result<(), String> {
                 .lock()
                 .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
             if let Some(ref wasapi) = *guard {
-                wasapi.pause()?;
+                // 独占模式:wasapi.pause()/resume() 内部已实现淡入淡出
+                // 若 fade 禁用,则使用不带 fade 的方法立即暂停/恢复
+                if state.player.fade_enabled.load(Ordering::SeqCst) {
+                    wasapi.pause()?;
+                } else {
+                    wasapi.pause_no_fade()?;
+                }
             } else {
                 return Err("WASAPI player not initialized".to_string());
             }
@@ -80,12 +140,30 @@ pub fn pause_track(state: State<AppState>) -> Result<(), String> {
             return Err("Exclusive mode is only supported on Windows".to_string());
         }
     } else {
-        let player = state
-            .player
-            .sink
-            .lock()
-            .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
-        player.pause();
+        // 共享模式:fade 启用时启动淡出线程,否则直接 pause
+        if state.player.fade_enabled.load(Ordering::SeqCst) {
+            let target_vol = *state
+                .player
+                .target_volume
+                .lock()
+                .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
+            spawn_shared_fade(
+                Arc::clone(&state.player.sink),
+                target_vol,
+                -1,
+                Arc::clone(&state.player.fade_generation),
+                Box::new(|p| p.pause()),
+            );
+        } else {
+            // fade 禁用:取消任何残留的 fade 线程,直接 pause
+            state.player.fade_generation.fetch_add(1, Ordering::SeqCst);
+            let player = state
+                .player
+                .sink
+                .lock()
+                .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
+            player.pause();
+        }
     }
 
     Ok(())
@@ -109,7 +187,11 @@ pub fn resume_track(state: State<AppState>) -> Result<(), String> {
                 .lock()
                 .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
             if let Some(ref wasapi) = *guard {
-                wasapi.resume()?;
+                if state.player.fade_enabled.load(Ordering::SeqCst) {
+                    wasapi.resume()?;
+                } else {
+                    wasapi.resume_no_fade()?;
+                }
             } else {
                 return Err("WASAPI player not initialized".to_string());
             }
@@ -119,12 +201,40 @@ pub fn resume_track(state: State<AppState>) -> Result<(), String> {
             return Err("Exclusive mode is only supported on Windows".to_string());
         }
     } else {
+        // 共享模式:fade 启用时先取消正在进行的 fade,再将音量设为 0,立即 play(),然后启动淡入线程
+        // fade 禁用时直接 play()(取消残留 fade 线程以防其 pause() 把新播放暂停)
+        state.player.fade_generation.fetch_add(1, Ordering::SeqCst);
         let player = state
             .player
             .sink
             .lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
-        player.play();
+        if state.player.fade_enabled.load(Ordering::SeqCst) {
+            player.set_volume(0.0);
+            player.play();
+            drop(player);
+            let target_vol = *state
+                .player
+                .target_volume
+                .lock()
+                .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
+            spawn_shared_fade(
+                Arc::clone(&state.player.sink),
+                target_vol,
+                1,
+                Arc::clone(&state.player.fade_generation),
+                Box::new(|_| {}),
+            );
+        } else {
+            // fade 禁用:恢复目标音量并直接 play
+            let target_vol = *state
+                .player
+                .target_volume
+                .lock()
+                .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
+            player.set_volume(target_vol);
+            player.play();
+        }
     }
 
     Ok(())
@@ -144,6 +254,8 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), String> {
             .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
         *target_vol = volume;
     }
+    // 取消任何正在进行的淡入淡出,避免 fade 线程覆盖用户新设置的音量
+    state.player.fade_generation.fetch_add(1, Ordering::SeqCst);
 
     // 用 lock() 阻塞等待:用户拖动音量滑块时不应失败,即使热切换期间也只需等几十毫秒
     let exclusive_mode = state
@@ -269,10 +381,10 @@ fn switch_to_wasapi_exclusive(
         let old_player = state.player.sink.lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
         old_player.stop();
-        let path = state.player.current_path.lock()
+        
+        state.player.current_path.lock()
             .map_err(|e| format!("Failed to acquire current path lock: {e}"))?
-            .clone();
-        path
+            .clone()
     };
 
     // 2. 停止旧的 cpal sink (从共享模式切换过来的场景)
@@ -393,7 +505,7 @@ fn switch_to_shared_mode(
         host.output_devices()
             .map_err(|e| format!("Failed to get output devices: {e}"))?
             .find(|d| super::device::get_device_friendly_name(d).is_some_and(|n| n == device_name))
-            .ok_or(format!("Audio device not found: {device_name}"))
+            .ok_or_else(|| format!("Audio device not found: {device_name}"))
     };
 
     // 4. 尝试打开新的 cpal/rodio stream (带重试)
@@ -664,14 +776,31 @@ pub fn set_target_fps(state: State<AppState>, fps: u32) -> Result<(), String> {
     }
     // 限制最大刷新率为 240fps，防止过高频率
     let clamped_fps = fps.min(240);
-    state.player.target_fps.store(clamped_fps as u64, std::sync::atomic::Ordering::Relaxed);
-    log::info!("Target FPS set to {}", clamped_fps);
+    state.player.target_fps.store(clamped_fps as u64, Ordering::Relaxed);
+    log::info!("Target FPS set to {clamped_fps}");
     Ok(())
 }
 
 #[command]
 pub fn set_vertical_sync(state: State<AppState>, enabled: bool) -> Result<(), String> {
-    state.player.enable_vertical_sync.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    state.player.enable_vertical_sync.store(enabled, Ordering::Relaxed);
     log::info!("Vertical sync {}", if enabled { "enabled" } else { "disabled" });
     Ok(())
+}
+
+/// 设置是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音)
+/// 立即生效,无需重启
+#[command]
+pub fn set_fade_enabled(state: State<AppState>, enabled: bool) -> Result<(), String> {
+    state.player.fade_enabled.store(enabled, Ordering::SeqCst);
+    // 取消任何正在进行的 fade 线程,防止禁用 fade 后残留线程执行 on_complete
+    state.player.fade_generation.fetch_add(1, Ordering::SeqCst);
+    log::info!("Fade {}", if enabled { "enabled" } else { "disabled" });
+    Ok(())
+}
+
+/// 获取当前是否启用淡入淡出
+#[command]
+pub fn get_fade_enabled(state: State<AppState>) -> Result<bool, String> {
+    Ok(state.player.fade_enabled.load(Ordering::SeqCst))
 }
