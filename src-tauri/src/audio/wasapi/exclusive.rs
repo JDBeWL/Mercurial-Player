@@ -786,8 +786,15 @@ fn initialize_exclusive_device(device_name: Option<&str>) -> Result<(wasapi::Aud
     ))
 }
 
-/// 将 f32 采样转换为指定格式的字节,写入复用 buffer(零分配)
-fn convert_samples_to_bytes_into(samples: &[f32], bits: u16, is_float: bool, out: &mut Vec<u8>) {
+/// SIMD 加速的样本转换模块
+///
+/// 使用 AVX2/FMA + SSE2 intrinsics 加速 f32 → i16/i32 字节转换
+/// 因为 SIMD intrinsics 必须 unsafe,这里统一在模块级别 allow unsafe_code
+/// 该 allow 仅限此模块,不影响其他代码的 unsafe_code 审查
+#[allow(unsafe_code)]
+mod simd_convert {
+    /// 将 f32 采样转换为指定格式的字节,写入复用 buffer(零分配)
+    pub fn convert_samples_to_bytes_into(samples: &[f32], bits: u16, is_float: bool, out: &mut Vec<u8>) {
     // 预先计算所需容量,避免多次扩容
     let bytes_per_sample = match bits {
         16 => 2,
@@ -887,7 +894,7 @@ fn convert_samples_to_bytes_into(samples: &[f32], bits: u16, is_float: bool, out
 #[target_feature(enable = "avx2,fma")]
 #[allow(unsafe_op_in_unsafe_fn)] // 整个函数由 target_feature 限定为 unsafe,内联 unsafe 块冗余
 #[allow(clippy::wildcard_imports)] // SIMD intrinsics 数量多,逐个导入冗长
-unsafe fn f32_to_i16_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
+pub(super) unsafe fn f32_to_i16_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
     use core::arch::x86_64::*;
 
     let one = _mm256_set1_ps(1.0);
@@ -934,7 +941,7 @@ unsafe fn f32_to_i16_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
 #[target_feature(enable = "avx2,fma")]
 #[allow(unsafe_op_in_unsafe_fn)]
 #[allow(clippy::wildcard_imports)]
-unsafe fn f32_to_i32_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
+pub(super) unsafe fn f32_to_i32_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
     use core::arch::x86_64::*;
 
     let one = _mm256_set1_ps(1.0);
@@ -977,7 +984,7 @@ unsafe fn f32_to_i32_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
 #[target_feature(enable = "sse2")]
 #[allow(unsafe_op_in_unsafe_fn)]
 #[allow(clippy::wildcard_imports)]
-unsafe fn f32_to_i16_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
+pub(super) unsafe fn f32_to_i16_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
     use core::arch::x86_64::*;
 
     let one = _mm_set1_ps(1.0);
@@ -1016,7 +1023,7 @@ unsafe fn f32_to_i16_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
 #[target_feature(enable = "sse2")]
 #[allow(unsafe_op_in_unsafe_fn)]
 #[allow(clippy::wildcard_imports)]
-unsafe fn f32_to_i32_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
+pub(super) unsafe fn f32_to_i32_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
     use core::arch::x86_64::*;
 
     let one = _mm_set1_ps(1.0);
@@ -1047,9 +1054,15 @@ unsafe fn f32_to_i32_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
     }
 }
 
+// 模块关闭:使用 simd_convert::convert_samples_to_bytes_into 访问
+}
+
+pub use simd_convert::convert_samples_to_bytes_into;
+
 #[cfg(test)]
 mod simd_tests {
     use super::*;
+    use super::simd_convert::*;
 
     /// 验证 AVX2 路径与标量路径产生相同字节流(允许 i32 路径 1 LSB 差异)
     /// 样本总数对齐到 16 的倍数,确保 SSE2(chunk=8) 和 AVX2(chunk=16)

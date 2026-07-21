@@ -1,4 +1,4 @@
-<div align="center" style="font-size: 24px; font-weight: bold;">
+<h1 align="center" style="font-size: 24px; font-weight: bold;">
    いつも 不器用な私の番だから<br/>
    现在 该总是很笨拙的我出场了<br/>
    笑って 初めて言えたことだから<br/>
@@ -7,13 +7,13 @@
    总有一天 想去爱垃圾一样的过去<br/>
    だって 私はわたしさ トラッシュライフ<br/>
    因为我就是我 垃圾人生
-</div>
+</h1>
 
 ![light-virtview-pic](/Calling-pink-dark-virtview-ass.png)
 ![light-modlyrics-pic](/TRASH_LIFE-blue-light-modlryris.png)
 
 <h3 align="center">
-   一款基于TauriVue + TypeScript + Rust开发的音乐播放器。
+   是基于Tauri开发的音乐播放器。
 </h3>
 
 <p align="center">
