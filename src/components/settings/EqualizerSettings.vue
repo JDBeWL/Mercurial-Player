@@ -43,7 +43,7 @@
         <label class="section-label">{{ $t('config.preamp') || '前置增益' }}</label>
         <span class="preamp-value">{{ preamp > 0 ? '+' : '' }}{{ preamp.toFixed(1) }} dB</span>
       </div>
-      <div 
+      <div
         class="slider horizontal"
         :class="{ disabled: !enabled, dragging: preampDragging }"
         ref="preampSlider"
@@ -62,10 +62,10 @@
       <div class="bands-container">
         <div v-for="(band, index) in bands" :key="index" class="band-control">
           <div class="band-value">{{ gains[index] > 0 ? '+' : '' }}{{ gains[index].toFixed(1) }}</div>
-          <div 
+          <div
             class="slider vertical"
             :class="{ disabled: !enabled, dragging: bandDragging === index }"
-            :ref="el => bandSliders[index] = el"
+            :ref="el => bandSliders[index] = el as HTMLElement"
             @mousedown="(e) => startBandDrag(e, index)"
             @click="(e) => handleBandClick(e, index)"
           >
@@ -80,33 +80,55 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import logger from '../utils/logger';
+import logger from '../../utils/logger';
+
+// EQ 频段信息(由后端 get_eq_bands 返回)
+interface EqBandInfo {
+  index: number
+  frequency: number
+  label: string
+}
+
+// EQ 设置(由后端 get_eq_settings 返回)
+interface EqSettings {
+  enabled: boolean
+  gains: number[]
+  preamp: number
+}
+
+// EQ 预设(由后端 get_eq_presets 返回)
+interface EqPreset {
+  name: string
+  gains: number[]
+}
 
 // 状态
-const enabled = ref(false);
-const preamp = ref(0);
-const gains = ref([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-const bands = ref([]);
-const presets = ref([]);
-const currentPreset = ref('Flat');
+const enabled = ref<boolean>(false);
+const preamp = ref<number>(0);
+const gains = ref<number[]>([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+const bands = ref<EqBandInfo[]>([]);
+const presets = ref<EqPreset[]>([]);
+const currentPreset = ref<string>('Flat');
 
 // 滑块引用
-const preampSlider = ref(null);
-const bandSliders = ref([]);
+const preampSlider = ref<HTMLElement | null>(null);
+// 模板中使用函数式 ref 绑定,el 类型为 Element | ComponentPublicInstance | null,
+// 使用 unknown[] 存储以兼容该联合类型,读取时断言为 HTMLElement
+const bandSliders = ref<unknown[]>([]);
 
 // 拖拽状态
-const preampDragging = ref(false);
-const bandDragging = ref(-1);
+const preampDragging = ref<boolean>(false);
+const bandDragging = ref<number>(-1);
 
 // 增益范围
 const MIN_GAIN = -8;
 const MAX_GAIN = 8;
 
 // 预设名称映射
-const presetLabels = {
+const presetLabels: Record<string, string> = {
   'Bass Boost': '低音增强',
   'Treble Boost': '高音增强',
   'Vocal': '人声',
@@ -118,33 +140,33 @@ const presetLabels = {
   'Acoustic': '原声'
 };
 
-const getPresetLabel = (name) => presetLabels[name] || name;
+const getPresetLabel = (name: string): string => presetLabels[name] || name;
 
 // 计算前置增益百分比 (0-100)
-const preampPercent = computed(() => {
+const preampPercent = computed<number>(() => {
   return ((preamp.value - MIN_GAIN) / (MAX_GAIN - MIN_GAIN)) * 100;
 });
 
 // 计算频段增益百分比
-const getBandPercent = (index) => {
+const getBandPercent = (index: number): number => {
   return ((gains.value[index] - MIN_GAIN) / (MAX_GAIN - MIN_GAIN)) * 100;
 };
 
 // 加载 EQ 设置
-const loadSettings = async () => {
+const loadSettings = async (): Promise<void> => {
   try {
     const [bandsData, settings, presetsData] = await Promise.all([
-      invoke('get_eq_bands'),
-      invoke('get_eq_settings'),
-      invoke('get_eq_presets')
+      invoke<EqBandInfo[]>('get_eq_bands'),
+      invoke<EqSettings>('get_eq_settings'),
+      invoke<EqPreset[]>('get_eq_presets')
     ]);
-    
+
     bands.value = bandsData;
     enabled.value = settings.enabled;
     preamp.value = settings.preamp;
     gains.value = settings.gains;
     presets.value = presetsData;
-    
+
     detectCurrentPreset();
   } catch (error) {
     logger.error('Failed to load EQ settings:', error);
@@ -152,7 +174,7 @@ const loadSettings = async () => {
 };
 
 // 检测当前预设
-const detectCurrentPreset = () => {
+const detectCurrentPreset = (): void => {
   for (const preset of presets.value) {
     const match = preset.gains.every((g, i) => Math.abs(g - gains.value[i]) < 0.1);
     if (match) {
@@ -164,7 +186,7 @@ const detectCurrentPreset = () => {
 };
 
 // 切换启用状态
-const toggleEnabled = async () => {
+const toggleEnabled = async (): Promise<void> => {
   try {
     await invoke('set_eq_enabled', { enabled: !enabled.value });
     enabled.value = !enabled.value;
@@ -174,39 +196,39 @@ const toggleEnabled = async () => {
 };
 
 // 前置增益滑块处理
-const handlePreampClick = (e) => {
+const handlePreampClick = (e: MouseEvent): void => {
   if (!enabled.value || !preampSlider.value) return;
-  updatePreampFromEvent(e);
+  void updatePreampFromEvent(e);
 };
 
-const startPreampDrag = (e) => {
+const startPreampDrag = (e: MouseEvent): void => {
   if (!enabled.value) return;
   preampDragging.value = true;
-  updatePreampFromEvent(e);
-  
+  void updatePreampFromEvent(e);
+
   document.addEventListener('mousemove', onPreampDrag);
   document.addEventListener('mouseup', stopPreampDrag);
 };
 
-const onPreampDrag = (e) => {
+const onPreampDrag = (e: MouseEvent): void => {
   if (!preampDragging.value) return;
-  updatePreampFromEvent(e);
+  void updatePreampFromEvent(e);
 };
 
-const stopPreampDrag = () => {
+const stopPreampDrag = (): void => {
   preampDragging.value = false;
   document.removeEventListener('mousemove', onPreampDrag);
   document.removeEventListener('mouseup', stopPreampDrag);
 };
 
-const updatePreampFromEvent = async (e) => {
+const updatePreampFromEvent = async (e: MouseEvent): Promise<void> => {
   if (!preampSlider.value) return;
-  
+
   const rect = preampSlider.value.getBoundingClientRect();
   const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN);
   const roundedValue = Math.round(newValue * 2) / 2; // 四舍五入到 0.5
-  
+
   try {
     await invoke('set_eq_preamp', { preamp: roundedValue });
     preamp.value = roundedValue;
@@ -216,41 +238,41 @@ const updatePreampFromEvent = async (e) => {
 };
 
 // 频段滑块处理
-const handleBandClick = (e, index) => {
+const handleBandClick = (e: MouseEvent, index: number): void => {
   if (!enabled.value) return;
-  updateBandFromEvent(e, index);
+  void updateBandFromEvent(e, index);
 };
 
-const startBandDrag = (e, index) => {
+const startBandDrag = (e: MouseEvent, index: number): void => {
   if (!enabled.value) return;
   bandDragging.value = index;
-  updateBandFromEvent(e, index);
-  
-  const onDrag = (ev) => {
+  void updateBandFromEvent(e, index);
+
+  const onDrag = (ev: MouseEvent): void => {
     if (bandDragging.value !== index) return;
-    updateBandFromEvent(ev, index);
+    void updateBandFromEvent(ev, index);
   };
-  
-  const stopDrag = () => {
+
+  const stopDrag = (): void => {
     bandDragging.value = -1;
     document.removeEventListener('mousemove', onDrag);
     document.removeEventListener('mouseup', stopDrag);
   };
-  
+
   document.addEventListener('mousemove', onDrag);
   document.addEventListener('mouseup', stopDrag);
 };
 
-const updateBandFromEvent = async (e, index) => {
-  const slider = bandSliders.value[index];
+const updateBandFromEvent = async (e: MouseEvent, index: number): Promise<void> => {
+  const slider = bandSliders.value[index] as HTMLElement | null;
   if (!slider) return;
-  
+
   const rect = slider.getBoundingClientRect();
   // 垂直滑块：从底部计算
   const percent = Math.max(0, Math.min(1, (rect.bottom - e.clientY) / rect.height));
   const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN);
   const roundedValue = Math.round(newValue * 2) / 2;
-  
+
   try {
     await invoke('set_eq_band_gain', { band: index, gain: roundedValue });
     gains.value[index] = roundedValue;
@@ -261,7 +283,7 @@ const updateBandFromEvent = async (e, index) => {
 };
 
 // 应用预设
-const applyPreset = async (preset) => {
+const applyPreset = async (preset: EqPreset): Promise<void> => {
   try {
     await invoke('apply_eq_preset', { presetName: preset.name });
     gains.value = [...preset.gains];
@@ -272,7 +294,7 @@ const applyPreset = async (preset) => {
 };
 
 // 重置 EQ
-const resetEq = async () => {
+const resetEq = async (): Promise<void> => {
   try {
     await invoke('reset_eq');
     await loadSettings();
@@ -282,7 +304,7 @@ const resetEq = async () => {
 };
 
 onMounted(() => {
-  loadSettings();
+  void loadSettings();
 });
 
 onUnmounted(() => {
@@ -640,30 +662,30 @@ onUnmounted(() => {
     gap: 4px;
     padding: 16px 8px;
   }
-  
+
   .band-control {
     min-width: 28px;
   }
-  
+
   .slider.vertical {
     height: 100px;
     width: 20px;
   }
-  
+
   .slider.vertical .slider-thumb {
     width: 14px;
     height: 14px;
   }
-  
+
   .band-value,
   .band-label {
     font-size: 10px;
   }
-  
+
   .preset-chips {
     gap: 6px;
   }
-  
+
   .preset-chip {
     padding: 6px 12px;
     font-size: 12px;

@@ -80,19 +80,20 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { pluginManager, PluginState, loadAllPlugins } from '../../plugins'
+import type { Plugin, PluginStateType } from '../../plugins/pluginManager'
 import logger from '../../utils/logger'
 import { useErrorNotification } from '../../composables/useErrorNotification'
 
 const { showError } = useErrorNotification()
 
-const plugins = computed(() => pluginManager.getAllPlugins())
+const plugins = computed<Plugin[]>(() => pluginManager.getAllPlugins())
 
-const getStateText = (state) => {
-  const texts = {
+const getStateText = (state: PluginStateType): string => {
+  const texts: Partial<Record<PluginStateType, string>> = {
     [PluginState.ACTIVE]: '运行中',
     [PluginState.INACTIVE]: '未激活',
     [PluginState.ERROR]: '错误',
@@ -101,38 +102,41 @@ const getStateText = (state) => {
   return texts[state] || state
 }
 
-const activatePlugin = async (pluginId) => {
+const activatePlugin = async (pluginId: string): Promise<void> => {
   try {
     await pluginManager.activate(pluginId)
     showError('插件已激活', 'info')
   } catch (error) {
     logger.error('激活插件失败:', error)
-    showError(`激活失败: ${error.message}`, 'error')
+    const msg = error instanceof Error ? error.message : String(error)
+    showError(`激活失败: ${msg}`, 'error')
   }
 }
 
-const deactivatePlugin = async (pluginId) => {
+const deactivatePlugin = async (pluginId: string): Promise<void> => {
   try {
     await pluginManager.deactivate(pluginId)
     showError('插件已停用', 'info')
   } catch (error) {
     logger.error('停用插件失败:', error)
-    showError(`停用失败: ${error.message}`, 'error')
+    const msg = error instanceof Error ? error.message : String(error)
+    showError(`停用失败: ${msg}`, 'error')
   }
 }
 
-const uninstallPlugin = async (pluginId) => {
+const uninstallPlugin = async (pluginId: string): Promise<void> => {
   try {
     await pluginManager.uninstall(pluginId)
     await invoke('uninstall_plugin', { pluginId })
     showError('插件已卸载', 'info')
   } catch (error) {
     logger.error('卸载插件失败:', error)
-    showError(`卸载失败: ${error.message}`, 'error')
+    const msg = error instanceof Error ? error.message : String(error)
+    showError(`卸载失败: ${msg}`, 'error')
   }
 }
 
-const openPluginsFolder = async () => {
+const openPluginsFolder = async (): Promise<void> => {
   try {
     await invoke('open_plugins_directory')
   } catch (error) {
@@ -141,7 +145,7 @@ const openPluginsFolder = async () => {
   }
 }
 
-const refreshPlugins = async () => {
+const refreshPlugins = async (): Promise<void> => {
   try {
     // 先停用所有非内置插件
     const currentPlugins = pluginManager.getAllPlugins()
@@ -155,13 +159,14 @@ const refreshPlugins = async () => {
         }
       }
     }
-    
+
     // 重新加载所有插件
     await loadAllPlugins()
     showError('插件列表已刷新', 'info')
   } catch (error) {
     logger.error('刷新插件失败:', error)
-    showError(`刷新失败: ${error.message}`, 'error')
+    const msg = error instanceof Error ? error.message : String(error)
+    showError(`刷新失败: ${msg}`, 'error')
   }
 }
 

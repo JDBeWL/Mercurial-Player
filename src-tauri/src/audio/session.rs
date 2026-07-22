@@ -185,6 +185,7 @@ pub fn try_resume_last_session(
     // 根据 exclusive_mode 标志派发到对应路径
     let exclusive_mode = state
         .player
+        .output
         .exclusive_mode
         .lock()
         .map(|g| *g)
@@ -254,6 +255,7 @@ pub fn try_resume_last_session(
 fn pause_playback(state: &State<AppState>) -> Result<(), String> {
     let exclusive_mode = state
         .player
+        .output
         .exclusive_mode
         .lock()
         .map(|g| *g)
@@ -264,6 +266,7 @@ fn pause_playback(state: &State<AppState>) -> Result<(), String> {
         {
             let guard = state
                 .player
+                .output
                 .wasapi_player
                 .lock()
                 .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
@@ -281,6 +284,7 @@ fn pause_playback(state: &State<AppState>) -> Result<(), String> {
     } else {
         let player = state
             .player
+            .output
             .sink
             .lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;

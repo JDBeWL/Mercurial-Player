@@ -65,26 +65,36 @@
   </div>
 </template>
 
-<script setup>
-import { ref, computed, watch, shallowRef, onMounted, onUnmounted, nextTick } from 'vue'
+<script setup lang="ts">
+import { ref, computed, watch, shallowRef, onMounted, onUnmounted, nextTick, type WatchStopHandle } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
 import FileUtils from '../utils/fileUtils'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import type { Track } from '../types'
 
-const emit = defineEmits(['close'])
+// 处理后的 track 类型 (扩展自 Track, 添加缓存字段)
+interface ProcessedTrack extends Track {
+  cachedTitle: string
+  cachedArtist: string
+  coverUrl?: string
+}
+
+const emit = defineEmits<{
+  (e: 'close'): void
+}>()
 
 const playerStore = usePlayerStore()
 const { playlist, currentTrack } = storeToRefs(playerStore)
 
 // 滚动容器引用
-const scrollContainer = ref(null)
+const scrollContainer = ref<HTMLElement | null>(null)
 
 // 滚动状态检测（用于禁用滚动时的 hover 效果）
 const isScrolling = ref(false)
-let scrollTimeout = null
+let scrollTimeout: ReturnType<typeof setTimeout> | null = null
 
-const handleScroll = () => {
+const handleScroll = (): void => {
   isScrolling.value = true
   if (scrollTimeout) clearTimeout(scrollTimeout)
   scrollTimeout = setTimeout(() => {
@@ -94,15 +104,15 @@ const handleScroll = () => {
 }
 
 // 关闭处理
-const handleClose = () => {
+const handleClose = (): void => {
   emit('close')
 }
 
 // ===== 核心优化：用简单的 computed 替代 Map 遍历 =====
 // 只追踪当前曲目的 path，O(1) 而非 O(N)
-const currentPath = computed(() => currentTrack.value?.path || null)
+const currentPath = computed<string | null>(() => currentTrack.value?.path || null)
 
-const playTrack = (track) => {
+const playTrack = (track: Track): void => {
   if (playerStore.currentTrack?.path === track.path && !playerStore.isPlaying) {
     playerStore.resume()
   } else {
@@ -110,50 +120,28 @@ const playTrack = (track) => {
   }
 }
 
-const pauseTrack = () => {
+const pauseTrack = (): void => {
   playerStore.pause()
 }
 
-// 创建标题/艺术家缓存
-const MAX_CACHE_SIZE = 1000
-const titleCache = new Map()
-const artistCache = new Map()
-
-const cleanupCache = (cache) => {
-  if (cache.size > MAX_CACHE_SIZE) {
-    const entriesToDelete = Array.from(cache.keys()).slice(0, cache.size - MAX_CACHE_SIZE)
-    entriesToDelete.forEach(key => cache.delete(key))
-  }
+// 标题/艺术家显示:简单的 || 链式调用,无需缓存
+// (之前的 Map 缓存与 useTrackInfo.processedTracks 功能重叠,且 1000 条 Map 占用额外内存)
+const getTrackTitle = (track: Track): string => {
+  return track.displayTitle || track.title || FileUtils.getFileName(track.path)
 }
 
-const getTrackTitle = (track) => {
-  if (titleCache.has(track.path)) {
-    return titleCache.get(track.path)
-  }
-  const title = track.displayTitle || track.title || FileUtils.getFileName(track.path)
-  titleCache.set(track.path, title)
-  cleanupCache(titleCache)
-  return title
-}
-
-const getTrackArtist = (track) => {
-  if (artistCache.has(track.path)) {
-    return artistCache.get(track.path)
-  }
-  const artist = track.displayArtist || track.artist || ''
-  artistCache.set(track.path, artist)
-  cleanupCache(artistCache)
-  return artist
+const getTrackArtist = (track: Track): string => {
+  return track.displayArtist || track.artist || ''
 }
 
 // ===== 核心优化：processedPlaylist 使用路径索引实现增量更新 =====
-const processedPlaylist = shallowRef([])
+const processedPlaylist = shallowRef<ProcessedTrack[]>([])
 
 // 用于快速查找已处理过的 track（path -> processedTrack 索引）
-let processedMap = new Map()
+let processedMap = new Map<string, ProcessedTrack>()
 
 // 构建单个 processed track 对象
-const buildProcessedTrack = (track) => ({
+const buildProcessedTrack = (track: Track): ProcessedTrack => ({
   ...track,
   cachedTitle: getTrackTitle(track),
   cachedArtist: getTrackArtist(track),
@@ -161,7 +149,7 @@ const buildProcessedTrack = (track) => ({
 })
 
 // 处理播放列表：增量更新，只重建变化的部分
-const processPlaylist = () => {
+const processPlaylist = (): void => {
   const raw = playlist.value
   if (raw.length === 0) {
     processedPlaylist.value = []
@@ -169,8 +157,8 @@ const processPlaylist = () => {
     return
   }
 
-  const newProcessedMap = new Map()
-  const result = new Array(raw.length)
+  const newProcessedMap = new Map<string, ProcessedTrack>()
+  const result = new Array<ProcessedTrack>(raw.length)
   let changed = false
 
   for (let i = 0; i < raw.length; i++) {
@@ -203,10 +191,10 @@ const stopWatchPlaylist = watch(playlist, processPlaylist, { immediate: true, de
 // 使用一个轻量的 coverVersion 计数器，由 store 的 _loadPlaylistCovers 完成后递增
 // 但由于 store 的 cover 加载是通过直接修改 track.coverPath 实现的（mutation），
 // 我们需要一个轻量的轮询方式来检测 coverPath 变化
-let coverCheckTimer = null
+let coverCheckTimer: ReturnType<typeof setInterval> | null = null
 let lastCoverSnapshot = ''
 
-const checkCoverUpdates = () => {
+const checkCoverUpdates = (): void => {
   // 只在有播放列表时检查
   if (playlist.value.length === 0) return
 
@@ -232,12 +220,12 @@ const checkCoverUpdates = () => {
 
 // 使用低频率的定时器来检测 cover 变化（2秒一次，而非每帧）
 // 只在组件存活期间运行
-const startCoverCheck = () => {
+const startCoverCheck = (): void => {
   // 初始延迟后开始检查，给 store 的 _loadPlaylistCovers 时间开始工作
   coverCheckTimer = setInterval(checkCoverUpdates, 2000)
 }
 
-const stopCoverCheck = () => {
+const stopCoverCheck = (): void => {
   if (coverCheckTimer) {
     clearInterval(coverCheckTimer)
     coverCheckTimer = null
@@ -245,10 +233,10 @@ const stopCoverCheck = () => {
 }
 
 // 滚动到当前播放的歌曲
-const scrollToCurrentTrack = () => {
+const scrollToCurrentTrack = (): void => {
   if (!currentTrack.value || processedPlaylist.value.length === 0 || !scrollContainer.value) return
 
-  const currentIndex = processedPlaylist.value.findIndex(t => t.path === currentTrack.value.path)
+  const currentIndex = processedPlaylist.value.findIndex(t => t.path === currentTrack.value!.path)
   if (currentIndex === -1) return
 
   nextTick(() => {
@@ -265,7 +253,7 @@ const scrollToCurrentTrack = () => {
 
 // 组件挂载时滚动到当前歌曲 & 启动 cover 检测
 let hasScrolledOnMount = false
-let stopWatchScrollOnMount = null
+let stopWatchScrollOnMount: WatchStopHandle | null = null
 
 onMounted(() => {
   startCoverCheck()
@@ -296,12 +284,10 @@ onUnmounted(() => {
   processedMap.clear()
   processedMap = new Map()
   processedPlaylist.value = []
-  titleCache.clear()
-  artistCache.clear()
 })
 
 // 通过路径删除音轨
-const removeTrackByPath = (path) => {
+const removeTrackByPath = (path: string): void => {
   playerStore.removeTrack(path)
 }
 </script>

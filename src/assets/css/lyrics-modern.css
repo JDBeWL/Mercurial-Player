@@ -18,13 +18,15 @@
 
     transform-origin: var(--align-origin, left center);
 
-    /* filter: blur(0.8px); */
-    will-change: transform, opacity, filter;
-
     transition:
         opacity 0.25s cubic-bezier(0.33, 1, 0.68, 1),
         transform 0.25s cubic-bezier(0.33, 1, 0.68, 1),
         filter 0.25s linear;
+}
+
+/* will-change 仅应用于 active 行,避免所有歌词行都被提升为独立 GPU 合成层 */
+.lyrics-style-modern .lyrics.active {
+    will-change: transform, opacity, filter;
 }
 
 /* 暗色模式 */

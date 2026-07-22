@@ -184,21 +184,21 @@ pub fn open_external_url(state: State<AppState>, url: String) -> Result<(), Stri
         .unwrap_or_else(|_| {
             vec![
                 "github.com".to_string(),
-                "www.github.com".to_string(),
-                "api.github.com".to_string(),
+                "github.io".to_string(),
                 "tauri.app".to_string(),
-                "www.tauri.app".to_string(),
                 "vuejs.org".to_string(),
-                "www.vuejs.org".to_string(),
+                "intlify.dev".to_string(),
                 "docs.rs".to_string(),
                 "gnu.org".to_string(),
-                "www.gnu.org".to_string(),
+                "vitejs.dev".to_string(),
+                "typescriptlang.org".to_string(),
+                "vitest.dev".to_string(),
             ]
         });
 
     if !allowed_hosts
         .iter()
-        .any(|allowed| allowed.eq_ignore_ascii_case(&host))
+        .any(|allowed| host.eq_ignore_ascii_case(allowed) || host.ends_with(&format!(".{allowed}").to_lowercase()))
     {
         return Err(format!("Host not allowed: {host}"));
     }

@@ -36,45 +36,44 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
-const props = defineProps({
-  modelValue: {
-    type: [String, Number],
-    required: true
-  },
-  options: {
-    type: Array,
-    required: true,
-    validator: (options) => {
-      return options.every(opt => opt.value !== undefined && opt.label !== undefined)
-    }
-  },
-  placeholder: {
-    type: String,
-    default: ''
-  }
+// MD3Select 选项类型
+interface SelectOption {
+  value: string | number
+  label: string
+}
+
+const props = withDefaults(defineProps<{
+  modelValue: string | number
+  options: SelectOption[]
+  placeholder?: string
+}>(), {
+  placeholder: ''
 })
 
-const emit = defineEmits(['update:modelValue', 'change'])
+const emit = defineEmits<{
+  'update:modelValue': [value: string | number]
+  'change': [value: string | number]
+}>()
 
-const isOpen = ref(false)
-const isFocused = ref(false)
-const triggerRef = ref(null)
-const wrapperRef = ref(null)
-const instanceId = ref(
+const isOpen = ref<boolean>(false)
+const isFocused = ref<boolean>(false)
+const triggerRef = ref<HTMLElement | null>(null)
+const wrapperRef = ref<HTMLElement | null>(null)
+const instanceId = ref<string>(
   (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
     ? crypto.randomUUID()
     : `md3sel_${Math.random().toString(36).slice(2)}`
 )
 
-const displayValue = computed(() => {
+const displayValue = computed<string>(() => {
   const selectedOption = props.options.find(opt => opt.value === props.modelValue)
   return selectedOption ? selectedOption.label : props.placeholder
 })
 
-const toggleDropdown = () => {
+const toggleDropdown = (): void => {
   if (isOpen.value) {
     close()
     return
@@ -85,24 +84,24 @@ const toggleDropdown = () => {
   isOpen.value = true
 }
 
-const selectOption = (value) => {
+const selectOption = (value: string | number): void => {
   emit('update:modelValue', value)
   emit('change', value)
   close()
 }
 
-const handleFocus = () => {
+const handleFocus = (): void => {
   isFocused.value = true
 }
 
-const close = () => {
+const close = (): void => {
   isOpen.value = false
   isFocused.value = false
 }
 
-const handleClickOutside = (event) => {
+const handleClickOutside = (event: MouseEvent): void => {
   // 如果点到了别的下拉菜单/页面任意区域：关闭当前下拉
-  if (wrapperRef.value && !wrapperRef.value.contains(event.target)) {
+  if (wrapperRef.value && !wrapperRef.value.contains(event.target as Node)) {
     close()
     triggerRef.value?.blur?.()
   }
@@ -118,8 +117,9 @@ onUnmounted(() => {
   window.removeEventListener('md3-select-open', handleOtherSelectOpen)
 })
 
-const handleOtherSelectOpen = (event) => {
-  const otherId = event?.detail?.id
+const handleOtherSelectOpen = (event: Event): void => {
+  const customEvent = event as CustomEvent<{ id: string }>
+  const otherId = customEvent?.detail?.id
   if (otherId && otherId !== instanceId.value) {
     close()
   }

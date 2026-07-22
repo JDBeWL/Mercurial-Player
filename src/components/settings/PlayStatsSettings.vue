@@ -2,7 +2,7 @@
   <div class="tab-content">
     <div class="content-header">
       <h3>{{ $t('config.playStats') || '播放统计' }}</h3>
-      <button class="text-button danger" @click="clearStats" v-if="playStats?.totalPlays > 0">
+      <button class="text-button danger" @click="clearStats" v-if="playStats && playStats.totalPlays > 0">
         <span class="material-symbols-rounded">delete</span>
         清除数据
       </button>
@@ -79,41 +79,87 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { pluginManager } from '../../plugins'
 import { useErrorNotification } from '../../composables/useErrorNotification'
 import { usePlayerStore } from '../../stores/player'
+import type { Track } from '@/types'
 
 const { showError } = useErrorNotification()
 const playerStore = usePlayerStore()
 
-const playStats = ref(null)
-const mostPlayed = ref([])
-const recentPlayed = ref([])
-let refreshInterval = null
+// 播放统计概览(对应 playCount 插件 getStats 返回)
+interface PlayCountStats {
+  totalTracks: number
+  totalPlays: number
+  totalPlayTime: number
+  totalPlayTimeFormatted: string
+}
+
+// 最常播放条目(对应 getMostPlayed 返回)
+interface MostPlayedItem {
+  path: string
+  count: number
+  title?: string
+  artist?: string
+}
+
+// 播放历史条目(对应 getPlayHistory 返回)
+interface PlayHistoryEntry {
+  path: string
+  title: string
+  artist: string
+  timestamp: number
+}
+
+// 播放统计插件实例暴露的方法集合
+interface PlayCountPluginInstance {
+  getStats(): PlayCountStats
+  getMostPlayed(limit?: number): Array<{ path: string; count: number }>
+  getPlayHistory(limit?: number): PlayHistoryEntry[]
+  clearAllData(): void
+}
+
+// 由于 pluginManager.instances 是私有字段,此处通过类型断言访问
+interface PluginManagerWithInstances {
+  instances: Map<string, { instance: PlayCountPluginInstance }>
+}
+
+// 使用默认值初始化避免模板中 playStats?.totalPlays 产生 undefined 比较,
+// totalPlays 为 0 时模板会展示空状态,行为与原先 null 一致
+const playStats = ref<PlayCountStats>({
+  totalTracks: 0,
+  totalPlays: 0,
+  totalPlayTime: 0,
+  totalPlayTimeFormatted: '',
+})
+const mostPlayed = ref<MostPlayedItem[]>([])
+const recentPlayed = ref<PlayHistoryEntry[]>([])
+let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 // 刷新统计数据
-const refreshStats = async () => {
-  const playCountInstance = pluginManager.instances.get('builtin-play-count')
+const refreshStats = async (): Promise<void> => {
+  const playCountInstance = (pluginManager as unknown as PluginManagerWithInstances)
+    .instances.get('builtin-play-count')
   if (playCountInstance?.instance) {
     const instance = playCountInstance.instance
     playStats.value = instance.getStats()
-    
+
     // 获取最常播放并补充曲目信息
     const mostPlayedRaw = instance.getMostPlayed(10)
     mostPlayed.value = enrichTrackInfo(mostPlayedRaw)
-    
+
     // 获取最近播放
     recentPlayed.value = instance.getPlayHistory(20)
   }
 }
 
 // 补充曲目信息（从 player store 获取）
-const enrichTrackInfo = (tracks) => {
+const enrichTrackInfo = (tracks: Array<{ path: string; count: number }>): MostPlayedItem[] => {
   return tracks.map(item => {
     // 尝试从播放列表中找到对应的曲目信息
-    const track = playerStore.playlist.find(t => t.path === item.path)
+    const track = playerStore.playlist.find((t: Track) => t.path === item.path)
     if (track) {
       return {
         ...item,
@@ -131,7 +177,7 @@ const enrichTrackInfo = (tracks) => {
 }
 
 // 从路径提取文件名
-const extractFileName = (path) => {
+const extractFileName = (path: string): string => {
   if (!path) return '未知'
   const parts = path.replace(/\\/g, '/').split('/')
   const filename = parts[parts.length - 1]
@@ -139,11 +185,11 @@ const extractFileName = (path) => {
 }
 
 // 格式化时间
-const formatTime = (timestamp) => {
+const formatTime = (timestamp: number): string => {
   const date = new Date(timestamp)
   const now = new Date()
-  const diff = now - date
-  
+  const diff = now.getTime() - date.getTime()
+
   // 今天
   if (diff < 24 * 60 * 60 * 1000 && date.getDate() === now.getDate()) {
     return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
@@ -157,19 +203,20 @@ const formatTime = (timestamp) => {
 }
 
 // 清除统计数据
-const clearStats = () => {
-  const playCountInstance = pluginManager.instances.get('builtin-play-count')
+const clearStats = (): void => {
+  const playCountInstance = (pluginManager as unknown as PluginManagerWithInstances)
+    .instances.get('builtin-play-count')
   if (playCountInstance?.instance) {
     playCountInstance.instance.clearAllData()
-    refreshStats()
+    void refreshStats()
     showError('播放统计已清除', 'info')
   }
 }
 
 onMounted(async () => {
   // 内置插件已在 main.js 中加载
-  setTimeout(refreshStats, 100)
-  refreshInterval = setInterval(refreshStats, 5000)
+  setTimeout(() => { void refreshStats() }, 100)
+  refreshInterval = setInterval(() => { void refreshStats() }, 5000)
 })
 
 onUnmounted(() => {

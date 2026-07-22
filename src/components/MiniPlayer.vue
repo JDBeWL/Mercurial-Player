@@ -59,7 +59,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
@@ -78,11 +78,11 @@ const { getTrackTitle, getTrackArtist, watchTrack } = useTrackInfo()
 watchTrack(() => currentTrack.value)
 
 // 拖拽进度条相关状态
-const isDragging = ref(false)
-const dragPercentage = ref(0)
+const isDragging = ref<boolean>(false)
+const dragPercentage = ref<number>(0)
 
 // 计算属性
-const currentTrackCover = computed(() => {
+const currentTrackCover = computed<string>(() => {
   if (currentTrack.value && currentTrack.value.coverPath) {
     // 使用 convertFileSrc 将本地文件路径转换为可渲染的 URL
     return `url('${convertFileSrc(currentTrack.value.coverPath)}')`
@@ -92,20 +92,20 @@ const currentTrackCover = computed(() => {
 
 
 
-const progressPercentage = computed(() => {
+const progressPercentage = computed<number>(() => {
   if (isDragging.value) return dragPercentage.value
   if (!duration.value) return 0
   return (currentTime.value / duration.value) * 100
 })
 
 // 预览时间（拖拽时显示）
-const previewTime = computed(() => {
+const previewTime = computed<number>(() => {
   if (!duration.value) return 0
   return (dragPercentage.value / 100) * duration.value
 })
 
 // 格式化时间
-const formatTime = (seconds) => {
+const formatTime = (seconds: number): string => {
   if (!seconds || isNaN(seconds)) return '0:00'
   const mins = Math.floor(seconds / 60)
   const secs = Math.floor(seconds % 60)
@@ -113,27 +113,27 @@ const formatTime = (seconds) => {
 }
 
 // 方法
-const exitMiniMode = () => {
+const exitMiniMode = (): void => {
   configStore.toggleMiniMode()
 }
 
-const startSeeking = (e) => {
+const startSeeking = (e: MouseEvent): void => {
   isDragging.value = true
   updateDragPosition(e)
 }
 
-const handleSeekMove = (e) => {
+const handleSeekMove = (e: MouseEvent): void => {
   if (isDragging.value) {
     updateDragPosition(e)
   }
 }
 
-const endSeeking = (e) => {
+const endSeeking = (e: MouseEvent): void => {
   if (isDragging.value) {
     isDragging.value = false
     // 应用新的播放位置
     if (duration.value) {
-      const rect = e.currentTarget.getBoundingClientRect()
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
       const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width))
       const percentage = x / rect.width
       playerStore.seek(percentage * duration.value)
@@ -141,8 +141,8 @@ const endSeeking = (e) => {
   }
 }
 
-const updateDragPosition = (e) => {
-  const rect = e.currentTarget.getBoundingClientRect()
+const updateDragPosition = (e: MouseEvent): void => {
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
   const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width))
   dragPercentage.value = (x / rect.width) * 100
 }

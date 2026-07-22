@@ -116,8 +116,8 @@ Second subtitle`
 
   describe('stringify', () => {
     const lyrics = [
-      { time: 1, text: 'First' },
-      { time: 5.5, text: 'Second' },
+      { time: 1, text: 'First', texts: [] },
+      { time: 5.5, text: 'Second', texts: [] },
     ]
 
     it('should stringify to LRC', () => {
@@ -333,7 +333,7 @@ Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0,0,0,,Hello, World, Test`
 
   describe('stringifyASS', () => {
     it('should generate valid ASS format', () => {
-      const lyrics = [{ time: 1, text: 'Hello' }]
+      const lyrics = [{ time: 1, text: 'Hello', texts: [] }]
       const result = LyricsParser.stringifyASS(lyrics)
       
       expect(result).toContain('[Script Info]')
@@ -344,7 +344,7 @@ Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0,0,0,,Hello, World, Test`
     })
 
     it('should format time correctly', () => {
-      const lyrics = [{ time: 3661.5, text: 'Test' }] // 1:01:01.50
+      const lyrics = [{ time: 3661.5, text: 'Test', texts: [] }] // 1:01:01.50
       const result = LyricsParser.stringifyASS(lyrics)
       
       expect(result).toContain('1:01:01.50')

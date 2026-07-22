@@ -21,8 +21,6 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import './style.css'
-import './assets/css/lyrics-modern.css'
-import './assets/css/lyrics-classic.css'
 import i18n from './i18n'
 import logger from './utils/logger'
 import { setupThemeContrastValidation } from './utils/themeContrastValidator'
@@ -51,6 +49,26 @@ if (import.meta.env.PROD) {
   })
   logger.info('生产环境：已禁用右键菜单')
 }
+
+// 按需加载歌词样式 CSS:
+// 根据用户配置 (modern/classic) 只加载对应的一种样式,
+// 避免两种样式都被解析并常驻内存。
+// 注意: 此处需要 pinia 已初始化,故放在 app.mount 之后。
+import { useConfigStore } from './stores/config'
+async function loadLyricsStyleCss(): Promise<void> {
+  try {
+    const configStore = useConfigStore()
+    const style = configStore.lyrics?.lyricsStyle || 'modern'
+    if (style === 'classic') {
+      await import('./assets/css/lyrics-classic.css')
+    } else {
+      await import('./assets/css/lyrics-modern.css')
+    }
+  } catch (e) {
+    logger.error('加载歌词样式 CSS 失败:', e)
+  }
+}
+loadLyricsStyleCss()
 
 // 加载内置插件
 import { pluginManager } from './plugins'

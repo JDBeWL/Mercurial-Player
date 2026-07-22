@@ -510,22 +510,22 @@ impl<I: Source<Item = f32> + Send> Source for VisualizationSource<I> {
 pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, position: Option<f32>) -> Result<(), String> {
     let player = &state.player;
     // 取消任何正在进行的淡入淡出,防止其 on_complete(pause) 在新歌播放后执行
-    player.fade_generation.fetch_add(1, Ordering::SeqCst);
+    player.fade.generation.fetch_add(1, Ordering::SeqCst);
     {
-        let player_lock = player.sink.lock().unwrap();
+        let player_lock = player.output.sink.lock().unwrap();
         // 直接停止，不做淡出（淡出会阻塞主线程）
         // 新音源会有fade_in效果来平滑过渡
         player_lock.stop();
-        player_lock.set_volume(*player.target_volume.lock().unwrap());
+        player_lock.set_volume(*player.output.target_volume.lock().unwrap());
     }
-    *player.current_path.lock().unwrap() = Some(path.to_string());
-    *player.current_source.lock().unwrap() = None;
+    *player.track.current_path.lock().unwrap() = Some(path.to_string());
+    *player.track.current_source.lock().unwrap() = None;
     let (waveform, spectrum, eq_settings, target_fps, enable_vertical_sync) = (
-        Arc::clone(&player.waveform_data),
-        Arc::clone(&player.spectrum_data),
+        Arc::clone(&player.visualization.waveform_data),
+        Arc::clone(&player.visualization.spectrum_data),
         state.equalizer.get_settings_handle(),
-        Arc::clone(&player.target_fps),
-        Arc::clone(&player.enable_vertical_sync),
+        Arc::clone(&player.visualization.target_fps),
+        Arc::clone(&player.visualization.enable_vertical_sync),
     );
 
     let source: Box<dyn Source<Item = f32> + Send> = match SymphoniaDecoder::new(path) {
@@ -559,7 +559,7 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
     // 导致高采样率音频以错误的速率播放（降速）。
     // 解决方案：在 append 之前手动将 source 重采样到 mixer 的采样率。
     let resampled: Box<dyn Source<Item = f32> + Send> = {
-        let stream_guard = player.output_stream.lock().unwrap();
+        let stream_guard = player.output.output_stream.lock().unwrap();
         if let Some(ref mixer_sink) = *stream_guard {
             let mixer_sr = mixer_sink.config().sample_rate();
             let mixer_ch = mixer_sink.config().channel_count();
@@ -574,7 +574,7 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
         }
     };
 
-    let player_lock = player.sink.lock().unwrap();
+    let player_lock = player.output.sink.lock().unwrap();
     player_lock.append(resampled);
     player_lock.play();
     Ok(())
@@ -584,14 +584,14 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
 #[cfg(windows)]
 pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str, position: Option<f32>) -> Result<(), String> {
     let player = &state.player;
-    player.decode_thread_stop.store(true, Ordering::SeqCst);
-    let new_thread_id = player.decode_thread_id.fetch_add(1, Ordering::SeqCst) + 1;
+    player.decode.stop.store(true, Ordering::SeqCst);
+    let new_thread_id = player.decode.id.fetch_add(1, Ordering::SeqCst) + 1;
     {
-        if let Some(ref wasapi) = *player.wasapi_player.lock().unwrap() {
+        if let Some(ref wasapi) = *player.output.wasapi_player.lock().unwrap() {
             // 切歌淡出:50ms 平滑过渡到静音,消除 audible click
             // 音频线程内部完成淡出后会自动 stop_stream + clear_buffer
             // fade 禁用时直接 stop + clear_buffer
-            if player.fade_enabled.load(Ordering::SeqCst) {
+            if player.fade.enabled.load(Ordering::SeqCst) {
                 let _ = wasapi.stop_with_fade_out(50);
             } else {
                 let _ = wasapi.stop();
@@ -601,24 +601,24 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
     }
     // fade 启用时等待淡出完成(50ms) + 旧解码线程退出(20ms buffer)
     // fade 禁用时只等旧解码线程退出
-    let wait_ms = if player.fade_enabled.load(Ordering::SeqCst) { 70 } else { 50 };
+    let wait_ms = if player.fade.enabled.load(Ordering::SeqCst) { 70 } else { 50 };
     std::thread::sleep(Duration::from_millis(wait_ms));
     // 兜底:确保缓冲区被清空(防止淡出未完成的极端情况)
     {
-        if let Some(ref wasapi) = *player.wasapi_player.lock().unwrap() {
+        if let Some(ref wasapi) = *player.output.wasapi_player.lock().unwrap() {
             let _ = wasapi.clear_buffer();
         }
     }
-    player.decode_thread_stop.store(false, Ordering::SeqCst);
+    player.decode.stop.store(false, Ordering::SeqCst);
     std::sync::atomic::fence(Ordering::SeqCst);
 
     let (target_sr, target_ch) = {
-        let g = player.wasapi_player.lock().unwrap();
+        let g = player.output.wasapi_player.lock().unwrap();
         let wasapi = g.as_ref().ok_or("WASAPI player not initialized")?;
         (wasapi.get_sample_rate(), wasapi.get_channels())
     };
     if position.is_none() {
-        *player.current_path.lock().unwrap() = Some(path.to_string());
+        *player.track.current_path.lock().unwrap() = Some(path.to_string());
     }
     log::info!("WASAPI Exclusive: {path} @ {target_sr}Hz, {target_ch} ch");
 
@@ -631,11 +631,11 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
     let source = LockFreeSymphoniaSource::new(decoder);
     let start_pos = position.unwrap_or(0.0);
     let (wasapi_clone, waveform, spectrum, stop_flag, thread_id, eq_settings) = (
-        Arc::clone(&player.wasapi_player),
-        Arc::clone(&player.waveform_data),
-        Arc::clone(&player.spectrum_data),
-        Arc::clone(&player.decode_thread_stop),
-        Arc::clone(&player.decode_thread_id),
+        Arc::clone(&player.output.wasapi_player),
+        Arc::clone(&player.visualization.waveform_data),
+        Arc::clone(&player.visualization.spectrum_data),
+        Arc::clone(&player.decode.stop),
+        Arc::clone(&player.decode.id),
         state.equalizer.get_settings_handle(),
     );
     let app_clone = app.clone();
@@ -658,7 +658,7 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
     
     // 等待缓冲区有足够数据再开始播放，避免音频开头欠载
     {
-        if let Some(ref wasapi) = *player.wasapi_player.lock().unwrap() {
+        if let Some(ref wasapi) = *player.output.wasapi_player.lock().unwrap() {
             // 等待至少200ms的音频数据（约 1/5 秒）
             let min_buffer_samples = target_sr as usize * target_ch as usize / 5;
             let mut buffer_wait = 0;
@@ -1076,7 +1076,7 @@ fn convert_channels_into(samples: &[f32], src_ch: u16, target_ch: u16, out: &mut
 pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, time: f32) -> Result<(), String> {
     let player = &state.player;
     // 取消任何正在进行的淡入淡出,防止其 on_complete(pause) 在 seek 后执行
-    player.fade_generation.fetch_add(1, Ordering::SeqCst);
+    player.fade.generation.fetch_add(1, Ordering::SeqCst);
     let eq_settings = state.equalizer.get_settings_handle();
     let mut decoder = SymphoniaDecoder::new(path).map_err(|e| format!("Failed to create decoder: {e}"))?;
     decoder.seek(Duration::from_secs_f32(time))?;
@@ -1084,11 +1084,11 @@ pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, t
     let source: Box<dyn Source<Item = f32> + Send> = Box::new(
         VisualizationSource::new(
             LockFreeSymphoniaSource::new(decoder),
-            Arc::clone(&player.waveform_data),
-            Arc::clone(&player.spectrum_data),
+            Arc::clone(&player.visualization.waveform_data),
+            Arc::clone(&player.visualization.spectrum_data),
             Some(app.clone()),
-            Arc::clone(&player.target_fps),
-            Arc::clone(&player.enable_vertical_sync),
+            Arc::clone(&player.visualization.target_fps),
+            Arc::clone(&player.visualization.enable_vertical_sync),
         )
         .with_start_position(time)
         .with_eq_settings(eq_settings)
@@ -1097,7 +1097,7 @@ pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, t
 
     // 手动重采样到 mixer 采样率（同 play_track_shared 的修复）
     let resampled: Box<dyn Source<Item = f32> + Send> = {
-        let stream_guard = player.output_stream.lock().unwrap();
+        let stream_guard = player.output.output_stream.lock().unwrap();
         if let Some(ref mixer_sink) = *stream_guard {
             let mixer_sr = mixer_sink.config().sample_rate();
             let mixer_ch = mixer_sink.config().channel_count();
@@ -1108,12 +1108,12 @@ pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, t
     };
 
     {
-        let sink = player.sink.lock().unwrap();
+        let sink = player.output.sink.lock().unwrap();
         // 直接停止，不做阻塞的淡出
         sink.stop();
-        sink.set_volume(*player.target_volume.lock().unwrap());
+        sink.set_volume(*player.output.target_volume.lock().unwrap());
     }
-    let sink = player.sink.lock().unwrap();
+    let sink = player.output.sink.lock().unwrap();
     sink.append(resampled);
     sink.play();
     Ok(())
@@ -1123,6 +1123,7 @@ pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, t
 pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
     let volume = state
         .player
+        .output
         .target_volume
         .try_lock()
         .map(|g| *g)
@@ -1130,6 +1131,7 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
 
     let exclusive_mode = state
         .player
+        .output
         .exclusive_mode
         .try_lock()
         .map(|g| *g)
@@ -1140,6 +1142,7 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
         {
             let guard = state
                 .player
+                .output
                 .wasapi_player
                 .try_lock()
                 .map_err(|_| "Failed to acquire WASAPI player lock".to_string())?;
@@ -1155,6 +1158,7 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
     } else {
         let player = state
             .player
+            .output
             .sink
             .try_lock()
             .map_err(|_| "Failed to acquire player lock".to_string())?;
@@ -1168,6 +1172,7 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
 pub fn check_track_finished(state: &State<AppState>) -> Result<bool, String> {
     let exclusive_mode = state
         .player
+        .output
         .exclusive_mode
         .try_lock()
         .map(|g| *g)
@@ -1178,6 +1183,7 @@ pub fn check_track_finished(state: &State<AppState>) -> Result<bool, String> {
         {
             let guard = state
                 .player
+                .output
                 .wasapi_player
                 .try_lock()
                 .map_err(|_| "Failed to acquire WASAPI player lock".to_string())?;
@@ -1193,6 +1199,7 @@ pub fn check_track_finished(state: &State<AppState>) -> Result<bool, String> {
     } else {
         let player = state
             .player
+            .output
             .sink
             .try_lock()
             .map_err(|_| "Failed to acquire player lock".to_string())?;

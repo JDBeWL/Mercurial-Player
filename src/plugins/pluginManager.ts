@@ -4,10 +4,14 @@
  */
 
 import { reactive, markRaw, watch, type WatchStopHandle } from 'vue'
+import type { Track } from '@/types'
 import logger from '../utils/logger'
 import { createPluginAPI } from './pluginAPI'
 import { createPluginSandbox, type PluginSandbox } from './pluginSandbox'
 import { usePlayerStore } from '../stores/player'
+
+// 插件 API 使用的曲目类型(规范定义在 @/types,此处仅作 re-export 保持向后兼容)
+export type { Track } from '@/types'
 
 // 插件存储的 localStorage key 前缀
 const STORAGE_PREFIX = 'mercurial-plugin-storage-'
@@ -143,15 +147,11 @@ export interface PlayerState {
   isShuffle: boolean
 }
 
-export interface Track {
-  path: string
-  title?: string
-  artist?: string
-  album?: string
-  duration?: number
-  [key: string]: unknown
-}
-
+// 注意: LyricLine 与 Playlist 与 @/types 中的同名类型结构不同。
+// @/types 的版本是应用内部的规范定义(由 LRC/ASS 解析器产生);
+// 此处的版本是插件 API 契约,用于插件间歌词提供者交互与翻译支持,
+// 在 pluginAPI.ts 的 convertLyricLine / getPlaylists 中做显式格式转换。
+// 修改任一类型时需同步检查转换逻辑。
 export interface LyricLine {
   time: number
   texts: { text: string; translation?: string }[]

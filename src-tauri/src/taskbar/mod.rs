@@ -14,10 +14,12 @@ pub mod commands;
 #[cfg(windows)]
 pub mod desktop_lyrics;
 
-/// 播放状态枚举
+/// 任务栏播放状态枚举
+///
+/// 注意: 与 wasapi::PlaybackState 不同,此枚举仅用于任务栏按钮状态显示
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[derive(Default)]
-pub enum PlaybackState {
+pub enum TaskbarPlaybackState {
     /// 正在播放
     Playing,
     /// 已暂停

@@ -21,7 +21,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use mercurial_player::{
-    AppState, PlayerState, audio,
+    AppState, AudioOutputState, DecodeThreadState, FadeControl, PlayerState,
+    TrackState, VisualizationState, audio,
     config,
     config::ConfigManager,
     equalizer,
@@ -33,7 +34,7 @@ use mercurial_player::{
 use mercurial_player::audio::{WasapiExclusivePlayback, DeviceMonitor};
 
 #[cfg(not(windows))]
-use mercurial_player::audio::DeviceMonitor;
+use mercurial_player::{Placeholder, audio::DeviceMonitor};
 
 #[cfg(windows)]
 use mercurial_player::taskbar;
@@ -48,11 +49,6 @@ use std::sync::{Arc, Mutex};
 type PlatformPlayer = WasapiExclusivePlayback;
 #[cfg(not(windows))]
 type PlatformPlayer = Placeholder;
-
-/// 非 Windows 平台的占位类型
-#[cfg(not(windows))]
-#[derive(Debug)]
-struct Placeholder;
 
 fn main() {
     // 初始化 cpal host
@@ -91,40 +87,50 @@ fn main() {
     // 创建应用程序状态
     let app_state = AppState {
         player: PlayerState {
-            sink: Arc::new(Mutex::new(sink)),
-            output_stream: Arc::new(Mutex::new(Some(output_stream))),
-            current_source: Arc::new(Mutex::new(None)),
-            current_path: Arc::new(Mutex::new(None)),
-            target_volume: Arc::new(Mutex::new(1.0)),
-            current_device_name: Arc::new(Mutex::new(device_name.clone())),
-            exclusive_mode: Arc::new(Mutex::new(
-                exclusive_mode_enabled && {
+            output: AudioOutputState {
+                sink: Arc::new(Mutex::new(sink)),
+                output_stream: Arc::new(Mutex::new(Some(output_stream))),
+                target_volume: Arc::new(Mutex::new(1.0)),
+                current_device_name: Arc::new(Mutex::new(device_name.clone())),
+                exclusive_mode: Arc::new(Mutex::new(
+                    exclusive_mode_enabled && {
+                        #[cfg(windows)]
+                        { wasapi_player.is_some() }
+                        #[cfg(not(windows))]
+                        { false }
+                    },
+                )),
+                wasapi_player: {
                     #[cfg(windows)]
-                    { wasapi_player.is_some() }
+                    {
+                        Arc::new(Mutex::new(wasapi_player))
+                    }
                     #[cfg(not(windows))]
-                    { false }
+                    {
+                        Arc::new(Mutex::new(None))
+                    }
                 },
-            )),
-            waveform_data: Arc::new(Mutex::new(Vec::with_capacity(1024))),
-            spectrum_data: Arc::new(Mutex::new(vec![0.0; 128])),
-            wasapi_player: {
-                #[cfg(windows)]
-                {
-                    Arc::new(Mutex::new(wasapi_player))
-                }
-                #[cfg(not(windows))]
-                {
-                    Arc::new(Mutex::new(None))
-                }
             },
-            decode_thread_stop: Arc::new(AtomicBool::new(false)),
-            decode_thread_id: Arc::new(AtomicU64::new(0)),
+            track: TrackState {
+                current_source: Arc::new(Mutex::new(None)),
+                current_path: Arc::new(Mutex::new(None)),
+            },
+            visualization: VisualizationState {
+                waveform_data: Arc::new(Mutex::new(Vec::with_capacity(1024))),
+                spectrum_data: Arc::new(Mutex::new(vec![0.0; 128])),
+                target_fps: Arc::new(AtomicU64::new(60)), // 默认60fps
+                enable_vertical_sync: Arc::new(AtomicBool::new(false)), // 默认关闭垂直同步
+            },
+            decode: DecodeThreadState {
+                stop: Arc::new(AtomicBool::new(false)),
+                id: Arc::new(AtomicU64::new(0)),
+            },
             equalizer: Arc::new(Mutex::new(Equalizer::new(48000, 2))),
             device_monitor: Arc::new(Mutex::new(DeviceMonitor::new(device_name))),
-            target_fps: Arc::new(AtomicU64::new(60)), // 默认60fps
-            enable_vertical_sync: Arc::new(AtomicBool::new(false)), // 默认关闭垂直同步
-            fade_generation: Arc::new(AtomicU32::new(0)),
-            fade_enabled: Arc::new(AtomicBool::new(fade_enabled)),
+            fade: FadeControl {
+                generation: Arc::new(AtomicU32::new(0)),
+                enabled: Arc::new(AtomicBool::new(fade_enabled)),
+            },
         },
         config_manager,
         equalizer: GlobalEqualizer::new(),

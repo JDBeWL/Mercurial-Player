@@ -20,7 +20,7 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetSystemMetrics, HICON, SM_CXSMICON};
 
-use super::PlaybackState;
+use super::TaskbarPlaybackState;
 
 /// 缩略图按钮ID
 pub const BTN_PREVIOUS: u32 = 0;
@@ -38,7 +38,7 @@ pub struct TaskbarManager {
     taskbar_list: Option<ITaskbarList3>,
     hwnd: HWND,
     initialized: AtomicBool,
-    current_state: PlaybackState,
+    current_state: TaskbarPlaybackState,
     icons: TaskbarIcons,
 }
 
@@ -85,7 +85,7 @@ impl TaskbarManager {
             taskbar_list: None,
             hwnd: HWND::default(),
             initialized: AtomicBool::new(false),
-            current_state: PlaybackState::Stopped,
+            current_state: TaskbarPlaybackState::Stopped,
             icons: TaskbarIcons::default(),
         }
     }
@@ -190,7 +190,7 @@ impl TaskbarManager {
     }
 
     /// 更新播放/暂停按钮状态
-    pub fn update_playback_state(&mut self, state: PlaybackState) -> Result<(), String> {
+    pub fn update_playback_state(&mut self, state: TaskbarPlaybackState) -> Result<(), String> {
         if !self.initialized.load(Ordering::SeqCst) {
             return Err("Taskbar not initialized".to_string());
         }
@@ -207,8 +207,8 @@ impl TaskbarManager {
             .ok_or("TaskbarList not available")?;
 
         let (icon, tooltip) = match state {
-            PlaybackState::Playing => (self.icons.pause_icon, "暂停\0"),
-            PlaybackState::Paused | PlaybackState::Stopped => (self.icons.play_icon, "播放\0"),
+            TaskbarPlaybackState::Playing => (self.icons.pause_icon, "暂停\0"),
+            TaskbarPlaybackState::Paused | TaskbarPlaybackState::Stopped => (self.icons.play_icon, "播放\0"),
         };
 
         let tooltip_utf16: Vec<u16> = tooltip.encode_utf16().collect();
@@ -234,7 +234,7 @@ impl TaskbarManager {
     }
 
     /// 获取当前播放状态
-    pub fn get_state(&self) -> PlaybackState {
+    pub fn get_state(&self) -> TaskbarPlaybackState {
         self.current_state
     }
 }
@@ -510,7 +510,7 @@ pub fn init_taskbar(hwnd: isize) -> Result<(), String> {
 }
 
 /// 更新播放状态
-pub fn update_playback_state(state: PlaybackState) -> Result<(), String> {
+pub fn update_playback_state(state: TaskbarPlaybackState) -> Result<(), String> {
     let manager = get_taskbar_manager();
     let mut guard = manager
         .lock()

@@ -25,7 +25,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 import { useConfigStore } from '../../stores/config'
 import { useMusicLibraryStore } from '../../stores/musicLibrary'
@@ -39,17 +39,17 @@ const musicLibraryStore = useMusicLibraryStore()
 const musicDirectories = computed(() => configStore.musicDirectories)
 const { showError } = useErrorNotification()
 
-const addFolder = async () => {
+const addFolder = async (): Promise<void> => {
   try {
     const selected = await open({
       directory: true,
       multiple: false,
     })
-    if (selected && !musicDirectories.value.includes(selected)) {
-      const result = await invoke('add_music_directory', { path: selected })
+    if (typeof selected === 'string' && !musicDirectories.value.includes(selected)) {
+      const result = await invoke<string[]>('add_music_directory', { path: selected })
       configStore.musicDirectories = result
       musicLibraryStore.musicFolders = result
-      
+
       if (musicDirectories.value.length === 0) {
         setTimeout(async () => {
           await musicLibraryStore.refreshMusicFolders()
@@ -62,10 +62,10 @@ const addFolder = async () => {
   }
 }
 
-const removeFolder = async (index) => {
+const removeFolder = async (index: number): Promise<void> => {
   try {
     const pathToRemove = musicDirectories.value[index]
-    const result = await invoke('remove_music_directory', { path: pathToRemove })
+    const result = await invoke<string[]>('remove_music_directory', { path: pathToRemove })
     configStore.musicDirectories = result
     musicLibraryStore.musicFolders = result
   } catch (error) {

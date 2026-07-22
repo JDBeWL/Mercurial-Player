@@ -7,10 +7,10 @@
         {{ $t('config.refreshDevices') }}
       </button>
     </div>
-    
+
     <div class="device-list" v-if="audioDevices.length > 0">
-      <div 
-        v-for="device in audioDevices" 
+      <div
+        v-for="device in audioDevices"
         :key="device.name"
         class="device-item"
         :class="{ active: currentDevice?.name === device.name }"
@@ -59,7 +59,7 @@
           </div>
         </div>
       </div>
-      
+
       <!-- 平台不支持独占模式提示 -->
       <div v-if="!isWindowsPlatform" class="capability-notice platform-notice">
         <span class="material-symbols-rounded">desktop_windows</span>
@@ -94,12 +94,12 @@
         </div>
       </div>
     </div>
-    
+
     <div v-if="loading" class="loading-state">
       <div class="spinner"></div>
       <p>{{ $t('config.loadingDevices') }}</p>
     </div>
-    
+
     <div v-if="restartRequired" class="restart-notice">
       <span class="material-symbols-rounded">restart_alt</span>
       <div class="notice-content">
@@ -107,7 +107,7 @@
         <p class="notice-hint">{{ $t('config.exclusiveModeRestartHint') }}</p>
       </div>
     </div>
-    
+
     <div v-else-if="error" class="error-state">
       <span class="material-symbols-rounded">error</span>
       <p>{{ $t('config.deviceLoadError') }}: {{ error }}</p>
@@ -115,7 +115,7 @@
         {{ $t('config.retry') }}
       </button>
     </div>
-    
+
     <div v-if="audioDevices.length === 0 && !loading && !error" class="empty-state">
       <span class="material-symbols-rounded">speaker</span>
       <p>{{ $t('config.noAudioDevices') }}</p>
@@ -123,30 +123,38 @@
         {{ $t('config.refresh') }}
       </button>
     </div>
-    
+
 
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
-import { usePlayerStore } from '../stores/player';
-import { useConfigStore } from '../stores/config';
-import logger from '../utils/logger';
+import { usePlayerStore } from '../../stores/player';
+import { useConfigStore } from '../../stores/config';
+import logger from '../../utils/logger';
+
+// 音频设备类型
+interface AudioDevice {
+  name: string
+  isDefault: boolean
+  supportsExclusiveMode: boolean
+  audioModeStatus: string
+}
 
 const playerStore = usePlayerStore();
 const configStore = useConfigStore();
 
 // 状态管理
-const audioDevices = ref([]);
-const currentDevice = ref(null);
+const audioDevices = ref<AudioDevice[]>([]);
+const currentDevice = ref<AudioDevice | null>(null);
 const loading = ref(false);
-const error = ref(null);
+const error = ref<string | null>(null);
 const restartRequired = ref(false);
 const useExclusiveMode = ref(false);
 const fadeEnabled = ref(true);
-const currentPlatform = ref('unknown');
+const currentPlatform = ref<string>('unknown');
 
 // 平台检测
 const isWindowsPlatform = computed(() => {
@@ -154,52 +162,52 @@ const isWindowsPlatform = computed(() => {
 });
 
 // 获取音频设备列表
-const fetchAudioDevices = async () => {
+const fetchAudioDevices = async (): Promise<void> => {
   loading.value = true;
   error.value = null;
-  
+
   try {
-    const devices = await invoke('get_audio_devices');
+    const devices = await invoke<AudioDevice[]>('get_audio_devices');
     audioDevices.value = devices;
-    
+
     // 获取当前设备
-    const current = await invoke('get_current_audio_device');
+    const current = await invoke<AudioDevice>('get_current_audio_device');
     currentDevice.value = current;
   } catch (err) {
     logger.error('Failed to fetch audio devices:', err);
-    error.value = err.message || 'Unknown error';
+    error.value = err instanceof Error ? err.message : 'Unknown error';
   } finally {
     loading.value = false;
   }
 };
 
 // 选择并切换音频设备
-const selectDevice = async (device) => {
+const selectDevice = async (device: AudioDevice): Promise<void> => {
   if (currentDevice.value?.name === device.name) {
     return; // 已经是当前设备，无需切换
   }
-  
+
   loading.value = true;
   error.value = null;
-  
+
   try {
-    await invoke('set_audio_device', { 
+    await invoke('set_audio_device', {
       deviceName: device.name,
       currentTime: playerStore.currentTime,
     });
     currentDevice.value = device;
   } catch (err) {
     logger.error('Failed to set audio device:', err);
-    error.value = err.message || 'Unknown error';
+    error.value = err instanceof Error ? err.message : 'Unknown error';
   } finally {
     loading.value = false;
   }
 };
 
 // 检查是否需要重启以应用独占模式设置
-const checkRestartRequired = async () => {
+const checkRestartRequired = async (): Promise<void> => {
   try {
-    const activeExclusiveMode = await invoke('get_exclusive_mode');
+    const activeExclusiveMode = await invoke<boolean>('get_exclusive_mode');
     // 如果当前活跃状态与 store 中的意向状态不一致，则需要重启
     restartRequired.value = activeExclusiveMode !== useExclusiveMode.value;
   } catch (err) {
@@ -208,7 +216,7 @@ const checkRestartRequired = async () => {
 };
 
 // 切换独占模式
-const toggleExclusiveMode = async () => {
+const toggleExclusiveMode = async (): Promise<void> => {
   // 在非 Windows 平台上阻止启用独占模式
   if (!isWindowsPlatform.value && !useExclusiveMode.value) {
     logger.warn('Exclusive mode is only supported on Windows');
@@ -226,20 +234,20 @@ const toggleExclusiveMode = async () => {
       enabled: !useExclusiveMode.value,
       currentTime: playerStore.currentTime,
     });
-    
+
     // 如果成功返回（说明切换到了当前已生效的状态），更新状态并清除提示
     useExclusiveMode.value = !useExclusiveMode.value;
     restartRequired.value = false;
 
     // 重新获取当前设备信息以更新状态
     try {
-      const updatedDevice = await invoke('get_current_audio_device');
+      const updatedDevice = await invoke<AudioDevice>('get_current_audio_device');
       currentDevice.value = updatedDevice;
     } catch (deviceErr) {
       logger.error('Failed to update current device info:', deviceErr);
     }
   } catch (err) {
-    const errorMessage = err.message || err.toString() || '';
+    const errorMessage = err instanceof Error ? err.message : String(err);
 
     // 检查是否是需要重启的提示
     if (errorMessage.includes('RESTART_REQUIRED')) {
@@ -255,7 +263,7 @@ const toggleExclusiveMode = async () => {
 };
 
 // 切换淡入淡出
-const toggleFadeEnabled = async () => {
+const toggleFadeEnabled = async (): Promise<void> => {
   const newValue = !fadeEnabled.value;
   try {
     await invoke('set_fade_enabled', { enabled: newValue });
@@ -263,12 +271,12 @@ const toggleFadeEnabled = async () => {
     configStore.setAudioConfig({ fadeEnabled: newValue });
   } catch (err) {
     logger.error('Failed to toggle fade enabled:', err);
-    error.value = err.message || 'Failed to toggle fade';
+    error.value = err instanceof Error ? err.message : 'Failed to toggle fade';
   }
 };
 
 // 刷新设备列表
-const refreshDevices = () => {
+const refreshDevices = (): void => {
   fetchAudioDevices();
 };
 
@@ -276,7 +284,7 @@ const refreshDevices = () => {
 onMounted(async () => {
   // 获取平台信息
   try {
-    currentPlatform.value = await invoke('get_platform');
+    currentPlatform.value = await invoke<string>('get_platform');
     logger.debug('Detected platform:', currentPlatform.value);
   } catch (err) {
     logger.error('Failed to detect platform:', err);
@@ -288,7 +296,7 @@ onMounted(async () => {
     useExclusiveMode.value = configStore.audio.exclusiveMode;
   } else {
     try {
-      useExclusiveMode.value = await invoke('get_exclusive_mode') ?? false;
+      useExclusiveMode.value = await invoke<boolean>('get_exclusive_mode') ?? false;
     } catch (err) {
       logger.warn('Failed to get exclusive mode from backend:', err);
       useExclusiveMode.value = false;
@@ -300,7 +308,7 @@ onMounted(async () => {
     fadeEnabled.value = configStore.audio.fadeEnabled;
   } else {
     try {
-      fadeEnabled.value = await invoke('get_fade_enabled') ?? true;
+      fadeEnabled.value = await invoke<boolean>('get_fade_enabled') ?? true;
     } catch (err) {
       logger.warn('Failed to get fade enabled from backend:', err);
       fadeEnabled.value = true;
@@ -315,21 +323,21 @@ onMounted(async () => {
 
   // 获取当前设备信息
   try {
-    currentDevice.value = await invoke('get_current_audio_device');
+    currentDevice.value = await invoke<AudioDevice>('get_current_audio_device');
   } catch (err) {
     logger.error('Failed to get current audio device:', err);
   }
 });
 
 // 监听当前设备变化
-watch(currentDevice, (newDevice) => {
+watch(currentDevice, (newDevice: AudioDevice | null) => {
   if (newDevice) {
     logger.debug('Audio device changed to:', newDevice.name, 'Mode:', newDevice.audioModeStatus);
   }
 });
 
 // 保存配置
-watch(useExclusiveMode, (newValue) => {
+watch(useExclusiveMode, (newValue: boolean) => {
   configStore.setAudioConfig({ exclusiveMode: newValue });
 });
 </script>
@@ -726,7 +734,7 @@ watch(useExclusiveMode, (newValue) => {
   .device-name {
     max-width: 200px;
   }
-  
+
   .content-header {
     flex-direction: column;
     align-items: flex-start;

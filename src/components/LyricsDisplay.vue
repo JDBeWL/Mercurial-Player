@@ -21,15 +21,7 @@
                 <div class="lyrics-spacer-up"></div>
 
                 <div class="lyrics" v-for="(line, index) in lyrics" :key="index" :class="{ active: isActive(index) }"
-                    :style="{
-                        // 根据配置的对齐方式，动态调整缩放锚点 (左/中/右)，防止放大时位移
-                        '--align-origin': (configStore.lyrics?.lyricsAlignment || 'center') === 'right' ? 'right center' :
-                            (configStore.lyrics?.lyricsAlignment || 'center') === 'center' ? 'center center' :
-                                'left center',
-                        // 应用用户配置的字体和对齐
-                        textAlign: configStore.lyrics?.lyricsAlignment || 'center',
-                        fontFamily: configStore.lyrics?.lyricsFontFamily || 'Roboto'
-                    }" @click="handleLyricClick(line.time, index)">
+                    :style="lyricLineStyle" @click="handleLyricClick(line.time, index)">
                     <template v-if="line.karaoke && isActive(index)">
                         <div class="first-line karaoke-line"><span v-for="(word, idx) in line.words" :key="idx" class="karaoke-text"
                                 :class="{ 'active': isWordActive(word) }" :style="getKaraokeStyle(word)">{{ word.text }}</span></div>
@@ -77,50 +69,79 @@
     </div>
 </template>
 
-<script>
+<script lang="ts">
 import { usePlayerStore } from '@/stores/player';
 import { useConfigStore } from '@/stores/config';
-import { nextTick, ref, watch, onMounted, onUnmounted, computed } from 'vue';
+import { nextTick, ref, watch, onMounted, onUnmounted, computed, type CSSProperties } from 'vue';
 import { useLyrics } from '@/composables/useLyrics';
 import { pluginManager } from '@/plugins';
+import type { ActionButton } from '@/plugins/pluginManager';
 import logger from '@/utils/logger';
+import type { KaraokeWord } from '@/types';
 
 export default {
     name: "LyricsDisplay",
     setup() {
         const playerStore = usePlayerStore();
         const configStore = useConfigStore();
-        const containerRef = ref(null);
+        const containerRef = ref<HTMLElement | null>(null);
+
+        // 按需加载歌词样式 CSS:
+        // 监听 lyricsStyle 变化,首次切换到某样式时动态 import 对应 CSS。
+        // 已加载的 CSS 会常驻 DOM,但由于 .lyrics-style-modern / .lyrics-style-classic
+        // 选择器互斥,不会产生样式冲突。
+        const loadedLyricsStyles = new Set<string>();
+        const loadLyricsStyleCss = async (style: string | undefined): Promise<void> => {
+            const normalized = style || 'modern';
+            if (loadedLyricsStyles.has(normalized)) return;
+            loadedLyricsStyles.add(normalized);
+            try {
+                if (normalized === 'classic') {
+                    await import('@/assets/css/lyrics-classic.css');
+                } else {
+                    await import('@/assets/css/lyrics-modern.css');
+                }
+            } catch (e) {
+                logger.error('加载歌词样式 CSS 失败:', e);
+                loadedLyricsStyles.delete(normalized);  // 失败时允许重试
+            }
+        };
+        // 首次加载当前样式
+        loadLyricsStyleCss(configStore.lyrics?.lyricsStyle || 'modern');
+        // 监听样式切换
+        watch(() => configStore.lyrics?.lyricsStyle, (newStyle) => {
+            if (newStyle) loadLyricsStyleCss(newStyle);
+        });
 
         // 使用 composable
         const lyricsComposable = useLyrics();
         const { lyrics, loading, lyricsSource } = lyricsComposable;
-        
+
         // 本地高频 activeIndex，基于 visualTime 计算，避免滚动延迟
         const activeIndex = ref(-1);
-        
+
         // 是否有当前播放的曲目
         const hasCurrentTrack = computed(() => !!playerStore.currentTrack);
-        
+
         // 获取插件注册的操作按钮
         const actionButtons = computed(() => {
             return pluginManager.getExtensions('actionButtons')
                 .filter(btn => btn.location === 'lyrics')
         });
-        
+
         // 处理插件按钮点击
-        const handleActionButton = async (btn) => {
+        const handleActionButton = async (btn: ActionButton & { pluginId: string }): Promise<void> => {
             try {
                 await btn.action()
             } catch (error) {
                 logger.error('插件按钮执行失败:', error)
             }
         };
-        
+
         // 手动获取歌词状态
         const fetchingLyrics = ref(false);
-        
-        const handleFetchLyrics = async () => {
+
+        const handleFetchLyrics = async (): Promise<void> => {
             fetchingLyrics.value = true;
             try {
                 if (typeof lyricsComposable.fetchAndSaveLyrics === 'function') {
@@ -136,23 +157,23 @@ export default {
         // --- 视觉时间系统 ---
         const visualTime = ref(0);
         const isUserScroll = ref(false); // 标记用户是否正在交互
-        let rafId = null;
+        let rafId: number | null = null;
         let lastFrameTime = 0;
 
         // 启动高频时间循环（仅在播放时运行）
-        const startAnimationLoop = () => {
+        const startAnimationLoop = (): void => {
             if (rafId) return; // 防止重复启动
             lastFrameTime = 0; // 重置时间戳
             // 启动时先同步到真实时间
             visualTime.value = playerStore.currentTime;
-            
-            const animate = (timestamp) => {
+
+            const animate = (timestamp: number): void => {
                 if (!lastFrameTime) lastFrameTime = timestamp;
                 const deltaTime = Math.min((timestamp - lastFrameTime) / 1000, 0.1); // 限制最大 deltaTime 为 100ms
                 lastFrameTime = timestamp;
 
                 const realTime = playerStore.currentTime;
-                
+
                 // 播放中：基于帧间隔累加时间，并动态调整速度以消除漂移
                 const diff = visualTime.value - realTime; // 正值表示视觉领先，负值表示落后
 
@@ -173,15 +194,15 @@ export default {
             };
             rafId = requestAnimationFrame(animate);
         };
-        
+
         // 停止动画循环
-        const stopAnimationLoop = () => {
+        const stopAnimationLoop = (): void => {
             if (rafId) {
                 cancelAnimationFrame(rafId);
                 rafId = null;
             }
         };
-        
+
         // 监听播放状态，控制动画循环的启停
         watch(() => playerStore.isPlaying, (isPlaying) => {
             if (isPlaying) {
@@ -214,22 +235,22 @@ export default {
         // 使用节流来减少计算频率，避免每帧都触发响应式更新
         let lastCalcTime = 0;
         const CALC_INTERVAL = 50; // 每 50ms 计算一次，足够流畅且减少开销
-        
+
         watch(visualTime, (time) => {
             if (!lyrics.value.length) {
                 if (activeIndex.value !== -1) activeIndex.value = -1;
                 return;
             }
-            
+
             // 节流：避免每帧都计算
             const now = performance.now();
             if (now - lastCalcTime < CALC_INTERVAL) return;
             lastCalcTime = now;
-            
+
             // 应用歌词偏移
             const offset = playerStore.lyricsOffset || 0;
             const currentTime = time - offset;
-            
+
             // 二分查找当前歌词索引
             let l = 0, r = lyrics.value.length - 1, idx = -1;
             while (l <= r) {
@@ -241,17 +262,29 @@ export default {
                     r = mid - 1;
                 }
             }
-            
+
             if (idx !== activeIndex.value) {
                 activeIndex.value = idx;
                 playerStore.currentLyricIndex = idx; // 同步到 store
             }
         });
 
-        // --- 样式计算逻辑 ---
-        const isActive = (index) => index === activeIndex.value;
+        // 歌词行样式：将对齐方式、字体和缩放锚点合并为 computed,
+        // 避免在模板内联 style 中使用 CSS 自定义属性导致 vue-tsc 类型报错
+        const lyricLineStyle = computed<CSSProperties>(() => {
+            const alignment = (configStore.lyrics?.lyricsAlignment || 'center') as 'left' | 'center' | 'right';
+            return {
+                '--align-origin': alignment === 'right' ? 'right center' :
+                    alignment === 'center' ? 'center center' : 'left center',
+                textAlign: alignment,
+                fontFamily: configStore.lyrics?.lyricsFontFamily || 'Roboto'
+            };
+        });
 
-        const isWordActive = (word) => {
+        // --- 样式计算逻辑 ---
+        const isActive = (index: number): boolean => index === activeIndex.value;
+
+        const isWordActive = (word: KaraokeWord): boolean => {
             // 应用歌词偏移
             const offset = playerStore.lyricsOffset || 0;
             const t = visualTime.value - offset;
@@ -260,7 +293,7 @@ export default {
         };
 
         // 计算卡拉OK单词的填充进度 (0% - 100%)
-        const getKaraokeStyle = (word) => {
+        const getKaraokeStyle = (word: KaraokeWord): CSSProperties => {
             // 应用歌词偏移
             const offset = playerStore.lyricsOffset || 0;
             const t = visualTime.value - offset;
@@ -277,18 +310,18 @@ export default {
         // --- 滚动控制 ---
         const isAutoScrolling = ref(false); // 标记是否正在自动滚动
         const isHovering = ref(false);      // 标记鼠标是否悬停
-        let scrollTimeout = null;
+        let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 
-        const handleScroll = () => {
+        const handleScroll = (): void => {
              // 如果是自动滚动触发的事件，忽略
-             if (isAutoScrolling.value) return; 
-             
+             if (isAutoScrolling.value) return;
+
              // 只有当鼠标悬停在歌词区域时，才认为是用户的主动滚动
              if (!isHovering.value) return;
 
              // 用户手动滚动
              isUserScroll.value = true;
-             
+
              // 用户停止滚动 2.5s 后恢复自动跟随
              if (scrollTimeout) clearTimeout(scrollTimeout);
              scrollTimeout = setTimeout(() => {
@@ -296,48 +329,72 @@ export default {
              }, 2500);
         };
 
-        const scrollToActiveLyric = (immediate = false, isUserClick = false, targetIndex = -1) => {
+        const scrollToActiveLyric = (immediate = false, isUserClick = false, targetIndex = -1): void => {
             if (!containerRef.value) return;
-            
+
             const idx = targetIndex !== -1 ? targetIndex : activeIndex.value;
             // 如果索引无效或列表为空
             if (idx === -1 || !lyrics.value.length) return;
 
             const container = containerRef.value;
             // 直接通过索引查找元素，比 querySelector(".active") 更可靠
-            const lyricElements = container.querySelectorAll('.lyrics');
+            const lyricElements = container.querySelectorAll<HTMLElement>('.lyrics');
             if (!lyricElements || !lyricElements[idx]) return;
-            
+
             const activeEl = lyricElements[idx];
 
-            nextTick(() => {
+            // 计算目标滚动位置 (把 active 行中心放到容器中心)
+            const computeTargetScroll = (): number => {
                 const containerH = container.clientHeight;
                 const elTop = activeEl.offsetTop;
                 const elH = activeEl.clientHeight;
-                let targetScroll;
-                // 更加激进的滚动位置
                 const offsetRatio = 0.5;
-                targetScroll = elTop - (containerH * offsetRatio) + (elH / 2);
+                return Math.max(0, elTop - (containerH * offsetRatio) + (elH / 2));
+            };
 
-                targetScroll = Math.max(0, targetScroll);
-                
-                // 标记开始自动滚动，防止 handleScroll 误判
-                isAutoScrolling.value = true;
+            // 标记开始自动滚动，防止 handleScroll 误判
+            isAutoScrolling.value = true;
 
-                if (immediate || isUserClick) {
+            // 双阶段滚动策略:
+            // 经典模式 active 行 font-size 从 24px→32px (0.15s transition),
+            // 过渡期间 offsetTop/clientHeight 是中间值,直接读会导致定位不准
+            // (多行多句场景高度变化更大,偏差更明显)。
+            //
+            // 阶段 1 (nextTick): 立即用当前尺寸做预估滚动,让用户立即看到响应
+            // 阶段 2 (setTimeout 160ms): 等 font-size 过渡完成后,用稳定尺寸修正
+            //
+            // immediate/isUserClick 场景 (用户点击跳转): 只做一次立即滚动 (用稳定后的尺寸),
+            //   因为用户点击的行之前不是 active,立即读到的尺寸是稳定的 24px 状态,
+            //   但目标位置应该是 32px 状态,所以也等过渡完成
+            const FONT_SIZE_TRANSITION_MS = 160; // 0.15s + 10ms 余量
+
+            if (immediate || isUserClick) {
+                // 用户点击: 等 font-size 过渡完成后一次性滚到准确位置
+                setTimeout(() => {
+                    const targetScroll = computeTargetScroll();
                     container.style.scrollBehavior = 'auto';
                     container.scrollTop = targetScroll;
                     requestAnimationFrame(() => {
-                         container.style.scrollBehavior = 'smooth';
-                         // 稍作延迟释放标志
-                         setTimeout(() => isAutoScrolling.value = false, 100);
+                        container.style.scrollBehavior = 'smooth';
+                        setTimeout(() => isAutoScrolling.value = false, 100);
                     });
-                } else {
+                }, FONT_SIZE_TRANSITION_MS);
+            } else {
+                // 自动跟随: 立即预估滚动 + 过渡完成后修正
+                nextTick(() => {
+                    // 阶段 1: 立即用当前 (过渡中) 尺寸预估
+                    const estimatedScroll = computeTargetScroll();
                     container.style.scrollBehavior = 'smooth';
-                    container.scrollTop = targetScroll;
-                    setTimeout(() => isAutoScrolling.value = false, 500);
-                }
-            });
+                    container.scrollTop = estimatedScroll;
+
+                    // 阶段 2: 等 font-size 过渡完成后用稳定尺寸修正
+                    setTimeout(() => {
+                        const correctedScroll = computeTargetScroll();
+                        container.scrollTop = correctedScroll;
+                        setTimeout(() => isAutoScrolling.value = false, 500);
+                    }, FONT_SIZE_TRANSITION_MS);
+                });
+            }
         };
 
         // 监听 activeIndex 变化以滚动
@@ -358,17 +415,17 @@ export default {
         });
 
         // 用户点击歌词跳转
-        const handleLyricClick = async (time, index) => {
+        const handleLyricClick = async (time: number, index: number): Promise<void> => {
             if (time < 0) return;
-            
+
             // 点击跳转应打破用户滚动锁定，并强制执行
             isUserScroll.value = false;
             if (scrollTimeout) clearTimeout(scrollTimeout);
 
             await playerStore.seek(time);
-            
+
             visualTime.value = time;
-            const forceSync = () => { visualTime.value = playerStore.currentTime; };
+            const forceSync = (): void => { visualTime.value = playerStore.currentTime; };
             requestAnimationFrame(forceSync);
             requestAnimationFrame(() => requestAnimationFrame(forceSync));
 
@@ -377,18 +434,18 @@ export default {
         };
 
         // 保存 resize 处理函数引用，以便正确清理
-        const handleResize = () => scrollToActiveLyric(true);
+        const handleResize = (): void => scrollToActiveLyric(true);
 
         // 歌词偏移控制
-        const adjustOffset = (delta) => {
+        const adjustOffset = (delta: number): void => {
             playerStore.adjustLyricsOffset(delta);
         };
-        
-        const resetOffset = () => {
+
+        const resetOffset = (): void => {
             playerStore.resetLyricsOffset();
         };
-        
-        const formatOffset = (offset) => {
+
+        const formatOffset = (offset: number): string => {
             if (offset === 0) return '0s';
             const sign = offset > 0 ? '+' : '';
             return `${sign}${offset.toFixed(1)}s`;
@@ -418,7 +475,7 @@ export default {
             isActive, isWordActive, getKaraokeStyle, handleLyricClick,
             handleScroll, isHovering, fetchingLyrics, handleFetchLyrics,
             adjustOffset, resetOffset, formatOffset,
-            actionButtons, handleActionButton
+            actionButtons, handleActionButton, lyricLineStyle
         };
     }
 };

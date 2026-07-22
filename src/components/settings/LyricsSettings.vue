@@ -235,17 +235,18 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useConfigStore } from '../../stores/config'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 import logger from '../../utils/logger'
 import MD3Select from '../MD3Select.vue'
+import type { LyricsConfig, DesktopLyricsConfig, VisualizerConfig } from '@/types'
 
 const configStore = useConfigStore()
 const { t } = useI18n()
-const systemFonts = ref([])
+const systemFonts = ref<string[]>([])
 
 const fpsOptions = computed(() => [
   { value: 30, label: '30 FPS' },
@@ -275,7 +276,7 @@ const styleOptions = computed(() => [
   { value: 'classic', label: t('config.lyricsStyleClassic') }
 ])
 
-const visualizerConfig = computed({
+const visualizerConfig = computed<VisualizerConfig>({
   get: () => {
     if (!configStore.visualizer) {
       configStore.visualizer = {
@@ -286,7 +287,7 @@ const visualizerConfig = computed({
     }
     return configStore.visualizer
   },
-  set: (value) => {
+  set: (value: VisualizerConfig) => {
     configStore.visualizer = value
   }
 })
@@ -297,34 +298,34 @@ const currentRefreshRate = computed(() => {
 })
 
 // 检测屏幕刷新率
-const detectScreenRefreshRate = async () => {
+const detectScreenRefreshRate = async (): Promise<void> => {
   try {
     // 首先尝试从系统API获取刷新率
-    const systemRefreshRate = await invoke('get_screen_refresh_rate')
-    
+    const systemRefreshRate = await invoke<number>('get_screen_refresh_rate')
+
     if (systemRefreshRate && systemRefreshRate > 0) {
       // 使用系统检测到的刷新率
       visualizerConfig.value.detectedRefreshRate = systemRefreshRate
       configStore._markDirty()
-      
+
       logger.info(`Detected screen refresh rate from system: ${systemRefreshRate} Hz`)
-      
+
       // 如果垂直同步已开启，重新应用FPS（可能需要调整）
       if (visualizerConfig.value.enableVerticalSync) {
         await applyFpsBasedOnVsync()
       }
-      
+
       // 保存检测结果
       await saveConfig()
       return
     }
-    
+
     // 如果系统API失败，回退到requestAnimationFrame方法
     logger.info('System API failed, falling back to requestAnimationFrame detection')
     let frames = 0
     const start = performance.now()
-    
-    const measure = () => {
+
+    const measure = (): void => {
       frames++
       if (performance.now() - start < 1000) {
         requestAnimationFrame(measure)
@@ -332,14 +333,14 @@ const detectScreenRefreshRate = async () => {
         // 保存检测到的刷新率
         visualizerConfig.value.detectedRefreshRate = frames
         configStore._markDirty()
-        
+
         logger.info(`Detected screen refresh rate from RAF: ${frames} Hz`)
-        
+
         // 如果垂直同步已开启，重新应用FPS（可能需要调整）
         if (visualizerConfig.value.enableVerticalSync) {
           applyFpsBasedOnVsync()
         }
-        
+
         // 保存检测结果
         saveConfig()
       }
@@ -351,7 +352,7 @@ const detectScreenRefreshRate = async () => {
 }
 
 // 应用刷新率到后端
-const applyRefreshRate = async (fps) => {
+const applyRefreshRate = async (fps: number): Promise<void> => {
   try {
     await invoke('set_target_fps', { fps })
     logger.info(`Applied refresh rate: ${fps} FPS`)
@@ -361,7 +362,7 @@ const applyRefreshRate = async (fps) => {
 }
 
 // 处理 FPS 变化
-const handleFpsChange = async () => {
+const handleFpsChange = async (): Promise<void> => {
   try {
     // 应用正确的FPS设置（考虑垂直同步）
     await applyFpsBasedOnVsync()
@@ -373,14 +374,14 @@ const handleFpsChange = async () => {
 }
 
 // 切换垂直同步
-const toggleVerticalSync = async () => {
+const toggleVerticalSync = async (): Promise<void> => {
   visualizerConfig.value.enableVerticalSync = !visualizerConfig.value.enableVerticalSync
   try {
     await invoke('set_vertical_sync', { enabled: visualizerConfig.value.enableVerticalSync })
-    
+
     // 应用正确的FPS设置
     await applyFpsBasedOnVsync()
-    
+
     configStore._markDirty()
     await saveConfig()
   } catch (error) {
@@ -390,9 +391,9 @@ const toggleVerticalSync = async () => {
 }
 
 // 根据垂直同步状态应用FPS
-const applyFpsBasedOnVsync = async () => {
+const applyFpsBasedOnVsync = async (): Promise<void> => {
   let fpsToApply = visualizerConfig.value.targetFps
-  
+
   if (visualizerConfig.value.enableVerticalSync && visualizerConfig.value.detectedRefreshRate) {
     // 垂直同步开启：使用 min(目标帧率, 屏幕刷新率)
     fpsToApply = Math.min(visualizerConfig.value.targetFps, visualizerConfig.value.detectedRefreshRate)
@@ -401,11 +402,11 @@ const applyFpsBasedOnVsync = async () => {
     // 垂直同步关闭：使用目标帧率
     logger.info(`VSync disabled: using target FPS ${fpsToApply}`)
   }
-  
+
   await applyRefreshRate(fpsToApply)
 }
 
-const lyricsConfig = computed({
+const lyricsConfig = computed<LyricsConfig>({
   get: () => {
     // 确保 lyrics 配置存在且包含所有必需字段
     if (!configStore.lyrics) {
@@ -432,14 +433,14 @@ const lyricsConfig = computed({
     }
     return configStore.lyrics
   },
-  set: (value) => {
+  set: (value: LyricsConfig) => {
     configStore.lyrics = value
   }
 })
 
-const loadSystemFonts = async () => {
+const loadSystemFonts = async (): Promise<void> => {
   try {
-    const fonts = await invoke('get_system_fonts')
+    const fonts = await invoke<string[]>('get_system_fonts')
     // 过滤掉已经在默认列表中的字体
     const defaultFonts = ['Roboto', 'sans-serif', 'serif', 'monospace']
     systemFonts.value = fonts.filter(font => !defaultFonts.includes(font))
@@ -451,7 +452,7 @@ const loadSystemFonts = async () => {
   }
 }
 
-const saveConfig = async () => {
+const saveConfig = async (): Promise<void> => {
   try {
     await configStore.saveConfigNow()
   } catch (error) {
@@ -459,7 +460,7 @@ const saveConfig = async () => {
   }
 }
 
-const toggleSetting = async (key) => {
+const toggleSetting = async (key: 'enableOnlineFetch' | 'autoSaveOnlineLyrics' | 'preferTranslation'): Promise<void> => {
   // 确保 lyrics 配置存在
   if (!configStore.lyrics) {
     configStore.lyrics = {
@@ -476,14 +477,14 @@ const toggleSetting = async (key) => {
   await saveConfig()
 }
 
-const desktopLyricsConfig = computed({
+const desktopLyricsConfig = computed<DesktopLyricsConfig>({
   get: () => {
     if (!configStore.lyrics?.desktopLyrics) {
-      return { enabled: false, locked: true, fontSize: 28, colorPreset: 'dark' }
+      return { enabled: false, locked: true, fontSize: 28, colorPreset: 'dark' as const }
     }
     return configStore.lyrics.desktopLyrics
   },
-  set: (value) => {
+  set: (value: DesktopLyricsConfig) => {
     configStore.setDesktopLyricsConfig(value)
   }
 })
@@ -498,35 +499,35 @@ const fontSizeSliderStyle = computed(() => {
   }
 })
 
-const toggleDesktopLyrics = async () => {
+const toggleDesktopLyrics = async (): Promise<void> => {
   configStore.setDesktopLyricsConfig({ enabled: !desktopLyricsConfig.value.enabled })
   await saveConfig()
 }
 
-const toggleDesktopLyricsLock = async () => {
+const toggleDesktopLyricsLock = async (): Promise<void> => {
   configStore.setDesktopLyricsConfig({ locked: !desktopLyricsConfig.value.locked })
   await saveConfig()
 }
 
-const handleFontSizeChange = async (event) => {
-  const size = parseInt(event.target.value, 10)
+const handleFontSizeChange = async (event: Event): Promise<void> => {
+  const size = parseInt((event.target as HTMLInputElement).value, 10)
   configStore.setDesktopLyricsConfig({ fontSize: size })
   await saveConfig()
 }
 
-const setColorPreset = async (preset) => {
+const setColorPreset = async (preset: DesktopLyricsConfig['colorPreset']): Promise<void> => {
   configStore.setDesktopLyricsConfig({ colorPreset: preset })
   await saveConfig()
 }
 
 onMounted(() => {
   loadSystemFonts()
-  
+
   // 如果没有检测过刷新率，自动检测一次
   if (!visualizerConfig.value.detectedRefreshRate || visualizerConfig.value.detectedRefreshRate === 60) {
     detectScreenRefreshRate()
   }
-  
+
   // 确保后端的FPS设置与配置同步
   if (visualizerConfig.value.targetFps) {
     // 根据垂直同步状态应用正确的FPS
@@ -534,7 +535,7 @@ onMounted(() => {
       logger.error('Failed to sync FPS on mount:', error)
     })
   }
-  
+
   // 确保后端的垂直同步设置与配置同步
   if (visualizerConfig.value.enableVerticalSync !== undefined) {
     invoke('set_vertical_sync', { enabled: visualizerConfig.value.enableVerticalSync }).catch(error => {

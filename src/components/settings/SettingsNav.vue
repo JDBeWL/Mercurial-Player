@@ -22,19 +22,18 @@
   </nav>
 </template>
 
-<script setup>
-defineProps({
-  modelValue: {
-    type: String,
-    required: true
-  },
-  tabs: {
-    type: Array,
-    required: true
-  }
-})
+<script setup lang="ts">
+import type { SettingsTab } from '@/types'
 
-defineEmits(['update:modelValue', 'close'])
+defineProps<{
+  modelValue: string
+  tabs: SettingsTab[]
+}>()
+
+defineEmits<{
+  'update:modelValue': [value: string]
+  'close': []
+}>()
 </script>
 
 <style scoped>
@@ -65,6 +64,11 @@ defineEmits(['update:modelValue', 'close'])
   flex: 1;
   padding: 0 12px;
   overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.nav-items::-webkit-scrollbar {
+  display: none;
 }
 
 .nav-item {

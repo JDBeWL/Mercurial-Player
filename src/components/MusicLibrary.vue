@@ -142,7 +142,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useMusicLibraryStore } from '../stores/musicLibrary'
@@ -153,8 +153,25 @@ import { useI18n } from 'vue-i18n'
 import FileUtils from '../utils/fileUtils'
 import logger from '../utils/logger'
 import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
+import type { Track, Playlist, LibraryStats } from '../types'
 
-const emit = defineEmits(['close'])
+// 搜索结果类型（在 Track 基础上扩展文件夹信息）
+interface SearchResult extends Track {
+  folderPath?: string
+  folderName?: string
+}
+
+// 增强播放列表类型（带 UI 辅助字段）
+interface EnhancedPlaylist extends Playlist {
+  path?: string
+  subdirectoryCount: number
+  totalFiles: number
+  isAllSongsPlaylist: boolean
+}
+
+const emit = defineEmits<{
+  'close': []
+}>()
 const { t } = useI18n()
 
 const musicLibraryStore = useMusicLibraryStore()
@@ -163,15 +180,15 @@ const configStore = useConfigStore()
 
 
 // 关闭处理
-const handleClose = () => {
+const handleClose = (): void => {
   emit('close')
 }
 
 const { musicFolders, playlists } = storeToRefs(musicLibraryStore)
-const searchTerm = ref('')
-const searchResults = ref([])
-const isLoading = ref(false)
-const directoryStats = reactive({
+const searchTerm = ref<string>('')
+const searchResults = ref<SearchResult[]>([])
+const isLoading = ref<boolean>(false)
+const directoryStats = reactive<LibraryStats>({
   totalDirectories: 0,
   totalAudioFiles: 0,
   totalPlaylists: 0,
@@ -179,24 +196,24 @@ const directoryStats = reactive({
 })
 
 // 使用 shallowRef 缓存 enhancedPlaylists 结果，减少响应式开销
-const cachedEnhancedPlaylists = shallowRef([])
-const lastPlaylistsHash = ref('')
-const lastSortOrder = ref('')
+const cachedEnhancedPlaylists = shallowRef<EnhancedPlaylist[]>([])
+const lastPlaylistsHash = ref<string>('')
+const lastSortOrder = ref<string>('')
 
 // 计算播放列表的哈希值用于检测变化
-const getPlaylistsHash = () => {
+const getPlaylistsHash = (): string => {
   if (!playlists.value.length) return ''
   return playlists.value.map(p => `${p.name}:${p.files?.length || 0}`).join('|')
 }
 
 // 实际的计算逻辑
-const computeEnhancedPlaylists = () => {
+const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
   if (!playlists.value.length) return []
 
-  let allPlaylists = []
-  let allSongsFiles = []
-  const uniqueFiles = new Set()
-  
+  let allPlaylists: EnhancedPlaylist[] = []
+  let allSongsFiles: Track[] = []
+  const uniqueFiles = new Set<string>()
+
   // 检查是否有全部歌曲播放列表
   const hasAllSongsPlaylist = playlists.value.some(p => p.name === '全部歌曲')
 
@@ -234,7 +251,7 @@ const computeEnhancedPlaylists = () => {
       } else {
         playlistName = `${playlist.name} (${playlist.files.length} 首)`
       }
-      
+
       allPlaylists.push({
         ...playlist,
         totalFiles: playlist.files.length,
@@ -250,15 +267,15 @@ const computeEnhancedPlaylists = () => {
   return allPlaylists.sort((a, b) => {
     // 如果两个都是"全部歌曲"，则保持原始顺序
     if (a.isAllSongsPlaylist && b.isAllSongsPlaylist) return 0
-    
+
     // 如果一个是"全部歌曲"，则排在前面
     if (a.isAllSongsPlaylist) return -1
     if (b.isAllSongsPlaylist) return 1
-    
+
     // 如果两个都不是"全部歌曲"，则按名称排序
     const nameA = a.name.toLowerCase()
     const nameB = b.name.toLowerCase()
-    
+
     if (isAscOrder) {
       // A-Z order
       if (nameA < nameB) return -1
@@ -268,7 +285,7 @@ const computeEnhancedPlaylists = () => {
       if (nameA > nameB) return -1
       if (nameA < nameB) return 1
     }
-    
+
     return 0
   })
 }
@@ -279,7 +296,7 @@ watch(
   () => {
     const currentHash = getPlaylistsHash()
     const currentSortOrder = configStore.playlist.sortOrder
-    
+
     // 只有当播放列表或排序顺序真正变化时才重新计算
     if (currentHash !== lastPlaylistsHash.value || currentSortOrder !== lastSortOrder.value) {
       lastPlaylistsHash.value = currentHash
@@ -291,7 +308,7 @@ watch(
 )
 
 // 使用缓存的结果
-const enhancedPlaylists = computed(() => cachedEnhancedPlaylists.value)
+const enhancedPlaylists = computed<EnhancedPlaylist[]>(() => cachedEnhancedPlaylists.value)
 
 // 生命周期
 onMounted(async () => {
@@ -334,7 +351,7 @@ onMounted(async () => {
 })
 
 // 目录树管理
-const refreshDirectoryTrees = async () => {
+const refreshDirectoryTrees = async (): Promise<void> => {
   isLoading.value = true
   try {
     await musicLibraryStore.refreshMusicFolders()
@@ -348,7 +365,7 @@ const refreshDirectoryTrees = async () => {
 
 
 
-const calculateDirectoryStats = async () => {
+const calculateDirectoryStats = async (): Promise<void> => {
   if (!playlists.value.length) {
     Object.assign(directoryStats, {
       totalDirectories: 0,
@@ -358,12 +375,12 @@ const calculateDirectoryStats = async () => {
     })
     return
   }
-  
+
   let totalDirs = 0
   let totalFiles = 0
-  let allAudioFiles = new Set() // 使用Set来去重
-  let allDirectories = new Set() // 使用Set来去重目录
-  
+  let allAudioFiles = new Set<string>() // 使用Set来去重
+  let allDirectories = new Set<string>() // 使用Set来去重目录
+
   // 统计所有播放列表的实际文件和目录
   for (const playlist of playlists.value) {
     if (playlist.files) {
@@ -371,13 +388,13 @@ const calculateDirectoryStats = async () => {
     }
     if (playlist.name !== '全部歌曲' && playlist.files && playlist.files.length > 0) {
       // 如果不是"全部歌曲"，则添加到目录中
-      allDirectories.add(playlist.name); 
+      allDirectories.add(playlist.name);
     }
   }
-  
+
   totalFiles = allAudioFiles.size
   totalDirs = allDirectories.size
-  
+
   Object.assign(directoryStats, {
     totalDirectories: totalDirs,
     totalAudioFiles: totalFiles,
@@ -387,32 +404,32 @@ const calculateDirectoryStats = async () => {
 }
 
 // 搜索功能 - 添加防抖
-let searchTimeout = null
-const handleSearch = async () => {
+let searchTimeout: ReturnType<typeof setTimeout> | null = null
+const handleSearch = async (): Promise<void> => {
   // 清除之前的定时器
   if (searchTimeout) {
     clearTimeout(searchTimeout)
   }
-  
+
   if (!searchTerm.value.trim()) {
     searchResults.value = []
     return
   }
-  
+
   // 防抖：300ms 后执行搜索
   searchTimeout = setTimeout(() => {
     const lowerCaseSearchTerm = searchTerm.value.toLowerCase()
-    const uniqueResults = new Map() // 使用Map来去重
+    const uniqueResults = new Map<string, Track>() // 使用Map来去重
 
     for (const playlist of playlists.value) {
       if (playlist.files) {
-        const results = playlist.files.filter(file => 
+        const results = playlist.files.filter(file =>
           (file.title && file.title.toLowerCase().includes(lowerCaseSearchTerm)) ||
           (file.artist && file.artist.toLowerCase().includes(lowerCaseSearchTerm)) ||
           (file.album && file.album.toLowerCase().includes(lowerCaseSearchTerm)) ||
           (file.name && file.name.toLowerCase().includes(lowerCaseSearchTerm))
         )
-        
+
         // 去重
         for (const file of results) {
           if (!uniqueResults.has(file.path)) {
@@ -421,13 +438,13 @@ const handleSearch = async () => {
         }
       }
     }
-    
+
     // 根据配置排序
     const isAscOrder = configStore.playlist.sortOrder === 'asc'
     searchResults.value = Array.from(uniqueResults.values()).sort((a, b) => {
       const titleA = (a.title || a.name || '').toLowerCase()
       const titleB = (b.title || b.name || '').toLowerCase()
-      
+
       if (isAscOrder) {
         // A-Z order
         if (titleA < titleB) return -1
@@ -437,13 +454,13 @@ const handleSearch = async () => {
         if (titleA > titleB) return -1
         if (titleA < titleB) return 1
       }
-      
+
       return 0
     })
   }, 300)
 }
 
-const clearSearch = () => {
+const clearSearch = (): void => {
   searchTerm.value = ''
   searchResults.value = []
 }
@@ -451,28 +468,28 @@ const clearSearch = () => {
 
 
 // 播放控制
-const openFolderDialog = async () => {
+const openFolderDialog = async (): Promise<void> => {
   try {
     const selected = await FileUtils.selectFolder({
       title: '选择音乐文件夹'
     })
-    
+
     if (selected) {
       const result = await musicLibraryStore.addMusicFolder(selected)
       await calculateDirectoryStats()
       logger.info(result.message)
-      
+
       // 检查是否是初次添加音乐库
       if (musicLibraryStore.musicFolders.length === 1) {
         logger.info('初次添加音乐库，正在刷新配置和播放列表...')
-        
+
         // 初次添加音乐库时，主动加载配置（不重置当前 UI 视图，避免正在设置时被跳回）
         await configStore.loadConfig(false)
-        
+
         // 刷新音乐文件夹以生成播放列表
         await musicLibraryStore.refreshMusicFolders()
         await calculateDirectoryStats()
-        
+
         logger.info('初次音乐库配置和播放列表生成完成')
       }
     }
@@ -482,7 +499,7 @@ const openFolderDialog = async () => {
 }
 
 // 播放全部（当前显示的全部歌曲播放列表）
-const playAll = async () => {
+const playAll = async (): Promise<void> => {
   // 找到全部歌曲播放列表
   const allSongsPlaylist = enhancedPlaylists.value.find(p => p.isAllSongsPlaylist)
   if (allSongsPlaylist && allSongsPlaylist.files.length > 0) {
@@ -499,7 +516,7 @@ const playAll = async () => {
 }
 
 // 点击列表项时加载播放列表并解码但不播放
-const loadPlaylist = async (playlist) => {
+const loadPlaylist = async (playlist: EnhancedPlaylist): Promise<void> => {
   await playerStore.loadPlaylist(playlist.files)
   // 解码第一首音频但不播放
   if (playlist.files && playlist.files.length > 0) {
@@ -510,35 +527,35 @@ const loadPlaylist = async (playlist) => {
 }
 
 // 点击播放按钮时加载播放列表并立即播放第一首
-const playPlaylist = async (playlist) => {
+const playPlaylist = async (playlist: Playlist): Promise<void> => {
   await playerStore.loadPlaylist(playlist.files)
   playerStore.play()
   handleClose()
 }
 
-const toggleSortOrder = () => {
+const toggleSortOrder = (): void => {
   configStore.toggleSortOrder()
   // 重新刷新播放列表以应用新的排序
   refreshDirectoryTrees()
 }
 
-const playFile = (file) => {
-  const playlist = {
+const playFile = (file: SearchResult): void => {
+  const playlist: Playlist = {
     name: '搜索结果',
     files: [file]
   }
   playPlaylist(playlist)
 }
 
-const addFileNext = (file) => {
+const addFileNext = (file: SearchResult): void => {
   playerStore.addTrackNext(file)
   logger.info('Added track to play next:', file.displayTitle || file.name)
-  
+
   // 显示成功通知
   errorHandler.handle(
     new Error('Track added to play next'),
     {
-      type: ErrorType.PLAYBACK_ERROR,
+      type: (ErrorType as unknown as Record<string, ErrorType | undefined>)['PLAYBACK_ERROR'],
       severity: ErrorSeverity.LOW,
       context: { trackName: file.displayTitle || file.name },
       showToUser: true,

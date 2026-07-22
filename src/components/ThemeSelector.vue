@@ -75,19 +75,32 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useThemeStore } from '../stores/theme'
 import { useConfigStore } from '../stores/config'
 import logger from '../utils/logger'
 
+// 颜色分类类型
+interface ColorCategory {
+  id: string
+  name: string
+}
+
+// 颜色预设类型
+interface ColorPreset {
+  hex: string
+  name: string
+  category: string
+}
+
 const themeStore = useThemeStore()
 const configStore = useConfigStore()
-const showColorPicker = ref(false)
-const activeCategory = ref('all')
+const showColorPicker = ref<boolean>(false)
+const activeCategory = ref<string>('all')
 
 // 颜色分类
-const colorCategories = [
+const colorCategories: ColorCategory[] = [
   { id: 'all', name: '全部' },
   { id: 'blue', name: '蓝色系' },
   { id: 'purple', name: '紫色系' },
@@ -99,7 +112,7 @@ const colorCategories = [
 ]
 
 // 精选颜色预设（带名称和分类）- 使用用户直观可见的颜色
-const colorPresets = [
+const colorPresets: ColorPreset[] = [
   // 蓝色系 - 清新、专业、信任
   { hex: '#64B5F6', name: '天空蓝', category: 'blue' },
   { hex: '#42A5F5', name: '晴空蓝', category: 'blue' },
@@ -187,22 +200,22 @@ const colorPresets = [
 ]
 
 // 根据分类筛选颜色
-const filteredColors = computed(() => {
+const filteredColors = computed<ColorPreset[]>(() => {
   if (activeCategory.value === 'all') {
     return colorPresets
   }
   return colorPresets.filter(c => c.category === activeCategory.value)
 })
 
-const toggleColorPicker = () => {
+const toggleColorPicker = (): void => {
   showColorPicker.value = !showColorPicker.value
 }
 
 // 点击外部关闭
-const handleClickOutside = (event) => {
+const handleClickOutside = (event: MouseEvent): void => {
   const picker = document.querySelector('.color-picker')
   const button = document.querySelector('.theme-selector .icon-button')
-  if (picker && !picker.contains(event.target) && !button.contains(event.target)) {
+  if (picker && !picker.contains(event.target as Node) && !button!.contains(event.target as Node)) {
     showColorPicker.value = false
   }
 }
@@ -215,7 +228,7 @@ onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
 })
 
-const selectColor = async (color) => {
+const selectColor = async (color: string): Promise<void> => {
   themeStore.setPrimaryColor(color)
   
   // 自动保存配置到 user.json
@@ -229,8 +242,8 @@ const selectColor = async (color) => {
   }
 }
 
-const selectCustomColor = async (event) => {
-  themeStore.setPrimaryColor(event.target.value)
+const selectCustomColor = async (event: Event): Promise<void> => {
+  themeStore.setPrimaryColor((event.target as HTMLInputElement).value)
   
   // 自动保存配置到 user.json
   if (configStore.general.autoSaveConfig) {
@@ -243,8 +256,8 @@ const selectCustomColor = async (event) => {
   }
 }
 
-const onHexInput = async (event) => {
-  const value = event.target.value.trim()
+const onHexInput = async (event: Event): Promise<void> => {
+  const value = (event.target as HTMLInputElement).value.trim()
   // 验证 HEX 颜色格式
   if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
     themeStore.setPrimaryColor(value)

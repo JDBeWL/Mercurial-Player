@@ -77,7 +77,7 @@ fn spawn_shared_fade(
 #[command]
 pub fn get_waveform_data(state: State<AppState>) -> Result<Vec<f32>, String> {
     // 使用 try_lock 避免阻塞主线程
-    match state.player.waveform_data.try_lock() {
+    match state.player.visualization.waveform_data.try_lock() {
         Ok(data) => Ok(data.clone()),
         Err(_) => Ok(Vec::new()) // 锁被占用时返回空数据，避免阻塞
     }
@@ -86,7 +86,7 @@ pub fn get_waveform_data(state: State<AppState>) -> Result<Vec<f32>, String> {
 #[command]
 pub fn get_spectrum_data(state: State<AppState>) -> Result<Vec<f32>, String> {
     // 使用 try_lock 避免阻塞主线程
-    match state.player.spectrum_data.try_lock() {
+    match state.player.visualization.spectrum_data.try_lock() {
         Ok(data) => Ok(data.clone()),
         Err(_) => Ok(vec![0.0; 128]) // 锁被占用时返回默认数据，避免阻塞
     }
@@ -94,7 +94,7 @@ pub fn get_spectrum_data(state: State<AppState>) -> Result<Vec<f32>, String> {
 
 #[command]
 pub fn play_track(app: AppHandle, state: State<AppState>, path: String, position: Option<f32>) -> Result<(), String> {
-    let exclusive_mode = state.player.exclusive_mode.lock()
+    let exclusive_mode = state.player.output.exclusive_mode.lock()
         .map(|g| *g)
         .map_err(|e| format!("Failed to acquire exclusive mode lock: {e}"))?;
 
@@ -110,6 +110,7 @@ pub fn pause_track(state: State<AppState>) -> Result<(), String> {
     // 用 lock() 阻塞等待,避免热切换期间用户操作失败
     let exclusive_mode = state
         .player
+        .output
         .exclusive_mode
         .lock()
         .map(|g| *g)
@@ -120,13 +121,14 @@ pub fn pause_track(state: State<AppState>) -> Result<(), String> {
         {
             let guard = state
                 .player
+                .output
                 .wasapi_player
                 .lock()
                 .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
             if let Some(ref wasapi) = *guard {
                 // 独占模式:wasapi.pause()/resume() 内部已实现淡入淡出
                 // 若 fade 禁用,则使用不带 fade 的方法立即暂停/恢复
-                if state.player.fade_enabled.load(Ordering::SeqCst) {
+                if state.player.fade.enabled.load(Ordering::SeqCst) {
                     wasapi.pause()?;
                 } else {
                     wasapi.pause_no_fade()?;
@@ -141,24 +143,26 @@ pub fn pause_track(state: State<AppState>) -> Result<(), String> {
         }
     } else {
         // 共享模式:fade 启用时启动淡出线程,否则直接 pause
-        if state.player.fade_enabled.load(Ordering::SeqCst) {
+        if state.player.fade.enabled.load(Ordering::SeqCst) {
             let target_vol = *state
                 .player
+                .output
                 .target_volume
                 .lock()
                 .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
             spawn_shared_fade(
-                Arc::clone(&state.player.sink),
+                Arc::clone(&state.player.output.sink),
                 target_vol,
                 -1,
-                Arc::clone(&state.player.fade_generation),
+                Arc::clone(&state.player.fade.generation),
                 Box::new(|p| p.pause()),
             );
         } else {
             // fade 禁用:取消任何残留的 fade 线程,直接 pause
-            state.player.fade_generation.fetch_add(1, Ordering::SeqCst);
+            state.player.fade.generation.fetch_add(1, Ordering::SeqCst);
             let player = state
                 .player
+                .output
                 .sink
                 .lock()
                 .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
@@ -173,6 +177,7 @@ pub fn pause_track(state: State<AppState>) -> Result<(), String> {
 pub fn resume_track(state: State<AppState>) -> Result<(), String> {
     let exclusive_mode = state
         .player
+        .output
         .exclusive_mode
         .lock()
         .map(|g| *g)
@@ -183,11 +188,12 @@ pub fn resume_track(state: State<AppState>) -> Result<(), String> {
         {
             let guard = state
                 .player
+                .output
                 .wasapi_player
                 .lock()
                 .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
             if let Some(ref wasapi) = *guard {
-                if state.player.fade_enabled.load(Ordering::SeqCst) {
+                if state.player.fade.enabled.load(Ordering::SeqCst) {
                     wasapi.resume()?;
                 } else {
                     wasapi.resume_no_fade()?;
@@ -203,32 +209,35 @@ pub fn resume_track(state: State<AppState>) -> Result<(), String> {
     } else {
         // 共享模式:fade 启用时先取消正在进行的 fade,再将音量设为 0,立即 play(),然后启动淡入线程
         // fade 禁用时直接 play()(取消残留 fade 线程以防其 pause() 把新播放暂停)
-        state.player.fade_generation.fetch_add(1, Ordering::SeqCst);
+        state.player.fade.generation.fetch_add(1, Ordering::SeqCst);
         let player = state
             .player
+            .output
             .sink
             .lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
-        if state.player.fade_enabled.load(Ordering::SeqCst) {
+        if state.player.fade.enabled.load(Ordering::SeqCst) {
             player.set_volume(0.0);
             player.play();
             drop(player);
             let target_vol = *state
                 .player
+                .output
                 .target_volume
                 .lock()
                 .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
             spawn_shared_fade(
-                Arc::clone(&state.player.sink),
+                Arc::clone(&state.player.output.sink),
                 target_vol,
                 1,
-                Arc::clone(&state.player.fade_generation),
+                Arc::clone(&state.player.fade.generation),
                 Box::new(|_| {}),
             );
         } else {
             // fade 禁用:恢复目标音量并直接 play
             let target_vol = *state
                 .player
+                .output
                 .target_volume
                 .lock()
                 .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
@@ -249,17 +258,19 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), String> {
     {
         let mut target_vol = state
             .player
+            .output
             .target_volume
             .lock()
             .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
         *target_vol = volume;
     }
     // 取消任何正在进行的淡入淡出,避免 fade 线程覆盖用户新设置的音量
-    state.player.fade_generation.fetch_add(1, Ordering::SeqCst);
+    state.player.fade.generation.fetch_add(1, Ordering::SeqCst);
 
     // 用 lock() 阻塞等待:用户拖动音量滑块时不应失败,即使热切换期间也只需等几十毫秒
     let exclusive_mode = state
         .player
+        .output
         .exclusive_mode
         .lock()
         .map(|g| *g)
@@ -270,6 +281,7 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), String> {
         {
             let guard = state
                 .player
+                .output
                 .wasapi_player
                 .lock()
                 .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
@@ -286,6 +298,7 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), String> {
     } else {
         let player = state
             .player
+            .output
             .sink
             .lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
@@ -311,12 +324,12 @@ pub fn is_track_finished(state: State<AppState>) -> Result<bool, String> {
 #[command]
 pub fn seek_track(app: AppHandle, state: State<AppState>, time: f32) -> Result<(), String> {
     // 用 lock() 阻塞等待:用户拖动进度条时不应失败
-    let path = state.player.current_path.lock()
+    let path = state.player.track.current_path.lock()
         .map_err(|e| format!("Failed to acquire current path lock: {e}"))?
         .clone()
         .ok_or("No track currently loaded")?;
 
-    let exclusive_mode = state.player.exclusive_mode.lock()
+    let exclusive_mode = state.player.output.exclusive_mode.lock()
         .map(|g| *g)
         .map_err(|e| format!("Failed to acquire exclusive mode lock: {e}"))?;
 
@@ -346,7 +359,7 @@ pub fn set_audio_device(
     log::info!("Attempting to switch to audio device: {device_name}");
 
     // 用 lock() 阻塞等待:播放期间切换设备不应失败
-    let exclusive_mode = state.player.exclusive_mode.lock()
+    let exclusive_mode = state.player.output.exclusive_mode.lock()
         .map(|g| *g)
         .map_err(|e| format!("Failed to acquire exclusive mode lock: {e}"))?;
 
@@ -378,18 +391,18 @@ fn switch_to_wasapi_exclusive(
     // 1. 先记录当前播放路径 (在停止旧播放器前)
     // 用 lock() 阻塞等待:播放期间解码线程会周期性持有这些锁
     let current_path = {
-        let old_player = state.player.sink.lock()
+        let old_player = state.player.output.sink.lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
         old_player.stop();
         
-        state.player.current_path.lock()
+        state.player.track.current_path.lock()
             .map_err(|e| format!("Failed to acquire current path lock: {e}"))?
             .clone()
     };
 
     // 2. 停止旧的 cpal sink (从共享模式切换过来的场景)
     {
-        let player = state.player.sink.lock()
+        let player = state.player.output.sink.lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
         player.stop();
         player.clear();
@@ -398,7 +411,7 @@ fn switch_to_wasapi_exclusive(
     // 3. 确保旧的 WASAPI 播放器被正确清理
     // 用 lock() 阻塞等待:切换期间解码线程会周期性持有此锁
     {
-        let mut old_wasapi = state.player.wasapi_player.lock()
+        let mut old_wasapi = state.player.output.wasapi_player.lock()
             .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
         // take() 会获取所有权，drop 会自动清理线程和资源
         let _ = old_wasapi.take();
@@ -411,13 +424,13 @@ fn switch_to_wasapi_exclusive(
             log::info!("WASAPI Exclusive initialized: {actual_device_name} @ {sample_rate}Hz, {channels} channels");
 
             {
-                let mut wasapi_guard = state.player.wasapi_player.lock()
+                let mut wasapi_guard = state.player.output.wasapi_player.lock()
                     .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
                 *wasapi_guard = Some(wasapi_playback);
             }
 
             {
-                let mut device_name_guard = state.player.current_device_name.lock()
+                let mut device_name_guard = state.player.output.current_device_name.lock()
                     .map_err(|e| format!("Failed to acquire current device name lock: {e}"))?;
                 *device_name_guard = device_name.to_string();
             }
@@ -429,9 +442,9 @@ fn switch_to_wasapi_exclusive(
             if let Some(path) = current_path {
                 play_track_exclusive(app, state, &path, current_time)?;
                 // play_track_exclusive 不会读 target_volume,需要手动同步音量
-                let vol = *state.player.target_volume.lock()
+                let vol = *state.player.output.target_volume.lock()
                     .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
-                let wasapi_guard = state.player.wasapi_player.lock()
+                let wasapi_guard = state.player.output.wasapi_player.lock()
                     .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
                 if let Some(ref wasapi) = *wasapi_guard {
                     let _ = wasapi.set_volume(vol);
@@ -443,7 +456,7 @@ fn switch_to_wasapi_exclusive(
         }
         Err(e) => {
             log::error!("Failed to initialize WASAPI exclusive mode: {e}");
-            if let Ok(mut exclusive_mode_guard) = state.player.exclusive_mode.lock() {
+            if let Ok(mut exclusive_mode_guard) = state.player.output.exclusive_mode.lock() {
                 *exclusive_mode_guard = false;
             }
             Err(format!("Failed to initialize WASAPI exclusive mode: {e}. The device may be in use by another application."))
@@ -472,12 +485,12 @@ fn switch_to_shared_mode(
     // 1. 先记录当前播放状态和路径 (在停止旧播放器前)
     // 用 lock() 阻塞等待:播放期间解码线程会周期性持有这些锁,try_lock 会失败
     let (is_playing, volume, current_path) = {
-        let old_player = state.player.sink.lock()
+        let old_player = state.player.output.sink.lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
         let playing = !old_player.is_paused();
         let vol = old_player.volume();
         old_player.stop();
-        let current_path = state.player.current_path.lock()
+        let current_path = state.player.track.current_path.lock()
             .map_err(|e| format!("Failed to acquire current path lock: {e}"))?
             .clone();
         (playing, vol, current_path)
@@ -487,7 +500,7 @@ fn switch_to_shared_mode(
     // 必须在打开新的 cpal stream 之前完成,否则设备仍被独占模式占用
     // 用 lock() 阻塞等待:解码线程会周期性持有此锁调用 push_samples 等
     {
-        let mut wasapi_guard = state.player.wasapi_player.lock()
+        let mut wasapi_guard = state.player.output.wasapi_player.lock()
             .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
         if let Some(wasapi) = wasapi_guard.as_ref() {
             let _ = wasapi.stop();
@@ -557,7 +570,7 @@ fn switch_to_shared_mode(
     // 5. 替换播放器
     // 用 lock() 阻塞等待:确保热切换期间能成功替换播放器
     {
-        let mut player_guard = state.player.sink.lock()
+        let mut player_guard = state.player.output.sink.lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
         *player_guard = new_player;
         player_guard.set_volume(volume);
@@ -569,13 +582,13 @@ fn switch_to_shared_mode(
     }
 
     {
-        let mut output_stream_guard = state.player.output_stream.lock()
+        let mut output_stream_guard = state.player.output.output_stream.lock()
             .map_err(|e| format!("Failed to acquire output stream lock: {e}"))?;
         *output_stream_guard = Some(new_mixer_sink);
     }
 
     {
-        let mut device_name_guard = state.player.current_device_name.lock()
+        let mut device_name_guard = state.player.output.current_device_name.lock()
             .map_err(|e| format!("Failed to acquire current device name lock: {e}"))?;
         *device_name_guard = device_name.to_string();
     }
@@ -602,7 +615,7 @@ pub fn toggle_exclusive_mode(
     log::info!("Toggling exclusive mode: {enabled}");
 
     // 用 lock() 阻塞等待:用户切换独占模式时不应失败,即使播放期间
-    let prev_exclusive = state.player.exclusive_mode.lock()
+    let prev_exclusive = state.player.output.exclusive_mode.lock()
         .map(|g| *g)
         .map_err(|e| format!("Failed to acquire exclusive mode lock: {e}"))?;
     if prev_exclusive == enabled {
@@ -611,7 +624,7 @@ pub fn toggle_exclusive_mode(
     }
 
     // 获取当前设备名 (用于热切换)
-    let device_name = state.player.current_device_name.lock()
+    let device_name = state.player.output.current_device_name.lock()
         .map_err(|e| format!("Failed to acquire current device name lock: {e}"))?
         .clone();
     if device_name.is_empty() {
@@ -642,7 +655,7 @@ pub fn toggle_exclusive_mode(
         Ok(()) => {
             // 更新 exclusive_mode 标志 (必须成功,否则状态不一致)
             {
-                let mut guard = state.player.exclusive_mode.lock()
+                let mut guard = state.player.output.exclusive_mode.lock()
                     .map_err(|e| format!("Failed to acquire exclusive mode lock: {e}"))?;
                 *guard = enabled;
             }
@@ -667,14 +680,14 @@ pub fn toggle_exclusive_mode(
 
 #[command]
 pub fn get_exclusive_mode(state: State<AppState>) -> Result<bool, String> {
-    state.player.exclusive_mode.try_lock()
+    state.player.output.exclusive_mode.try_lock()
         .map(|g| *g)
         .map_err(|_| "Failed to acquire exclusive mode lock".to_string())
 }
 
 #[command]
 pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInfo, String> {
-    let current_device_name = state.player.current_device_name.try_lock()
+    let current_device_name = state.player.output.current_device_name.try_lock()
         .map_err(|_| "Failed to acquire current device name lock".to_string())?
         .clone();
 
@@ -692,7 +705,7 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
             false
         }
     };
-    let is_exclusive_mode = state.player.exclusive_mode.try_lock()
+    let is_exclusive_mode = state.player.output.exclusive_mode.try_lock()
         .map(|g| *g)
         .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
 
@@ -700,7 +713,7 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
         if is_exclusive_mode {
             #[cfg(windows)]
             {
-                let wasapi_active = state.player.wasapi_player.try_lock()
+                let wasapi_active = state.player.output.wasapi_player.try_lock()
                     .map(|g| g.is_some())
                     .unwrap_or(false);
                 if wasapi_active { "exclusive" } else { "standard" }
@@ -776,14 +789,14 @@ pub fn set_target_fps(state: State<AppState>, fps: u32) -> Result<(), String> {
     }
     // 限制最大刷新率为 240fps，防止过高频率
     let clamped_fps = fps.min(240);
-    state.player.target_fps.store(clamped_fps as u64, Ordering::Relaxed);
+    state.player.visualization.target_fps.store(clamped_fps as u64, Ordering::Relaxed);
     log::info!("Target FPS set to {clamped_fps}");
     Ok(())
 }
 
 #[command]
 pub fn set_vertical_sync(state: State<AppState>, enabled: bool) -> Result<(), String> {
-    state.player.enable_vertical_sync.store(enabled, Ordering::Relaxed);
+    state.player.visualization.enable_vertical_sync.store(enabled, Ordering::Relaxed);
     log::info!("Vertical sync {}", if enabled { "enabled" } else { "disabled" });
     Ok(())
 }
@@ -792,9 +805,9 @@ pub fn set_vertical_sync(state: State<AppState>, enabled: bool) -> Result<(), St
 /// 立即生效,无需重启
 #[command]
 pub fn set_fade_enabled(state: State<AppState>, enabled: bool) -> Result<(), String> {
-    state.player.fade_enabled.store(enabled, Ordering::SeqCst);
+    state.player.fade.enabled.store(enabled, Ordering::SeqCst);
     // 取消任何正在进行的 fade 线程,防止禁用 fade 后残留线程执行 on_complete
-    state.player.fade_generation.fetch_add(1, Ordering::SeqCst);
+    state.player.fade.generation.fetch_add(1, Ordering::SeqCst);
     log::info!("Fade {}", if enabled { "enabled" } else { "disabled" });
     Ok(())
 }
@@ -802,5 +815,5 @@ pub fn set_fade_enabled(state: State<AppState>, enabled: bool) -> Result<(), Str
 /// 获取当前是否启用淡入淡出
 #[command]
 pub fn get_fade_enabled(state: State<AppState>) -> Result<bool, String> {
-    Ok(state.player.fade_enabled.load(Ordering::SeqCst))
+    Ok(state.player.fade.enabled.load(Ordering::SeqCst))
 }

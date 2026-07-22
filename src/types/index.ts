@@ -31,7 +31,7 @@ export interface AudioInfo {
 export interface LyricLine {
   time: number
   text?: string
-  texts?: string[]
+  texts: string[]
   karaoke?: KaraokeData | null
   words?: KaraokeWord[]
 }
@@ -103,7 +103,7 @@ export interface LyricsConfig {
   autoSaveOnlineLyrics: boolean
   preferTranslation: boolean
   onlineSource: string
-  lyricsAlignment: string
+  lyricsAlignment: 'left' | 'center' | 'right'
   lyricsFontFamily: string
   lyricsStyle: string
   desktopLyrics?: DesktopLyricsConfig
@@ -314,6 +314,14 @@ export interface Plugin {
 export interface CacheItem<T> {
   value: T
   timestamp: number
+}
+
+// ============ 设置页类型 ============
+
+export interface SettingsTab {
+  id: string
+  icon: string
+  label: string
 }
 
 // ============ 统计类型 ============

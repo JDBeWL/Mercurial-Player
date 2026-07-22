@@ -235,7 +235,7 @@ export class LyricsParser {
           const seconds = parseInt(match[2])
           const milliseconds = match[3] ? parseInt(match[3].padEnd(3, '0').substring(0, 3)) : 0
           const time = minutes * 60 + seconds + milliseconds / 1000
-          lyrics.push({ time, text: textPart })
+          lyrics.push({ time, text: textPart, texts: [textPart] })
         }
       } else {
         const singleMatch = trimmedLine.match(timeRegex)
@@ -246,7 +246,7 @@ export class LyricsParser {
           const time = minutes * 60 + seconds + milliseconds / 1000
           const text = singleMatch[4].trim()
           if (text) {
-            lyrics.push({ time, text })
+            lyrics.push({ time, text, texts: [text] })
           }
         }
       }
@@ -295,7 +295,7 @@ export class LyricsParser {
             const text = parts.slice(textIndex).join(',').replace(/{[^}]*}/g, '').trim()
 
             if (text && startTime !== null) {
-              lyrics.push({ time: startTime, text })
+              lyrics.push({ time: startTime, text, texts: [] })
             }
           }
         }
@@ -326,7 +326,7 @@ export class LyricsParser {
       const text = lines.slice(2).join('\n').trim()
 
       if (text) {
-        lyrics.push({ time: startTime, text })
+        lyrics.push({ time: startTime, text, texts: [text] })
       }
     }
 

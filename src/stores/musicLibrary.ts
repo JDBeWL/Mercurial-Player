@@ -23,10 +23,6 @@ interface CachedPlaylist {
   files: Omit<Track, 'coverPath'>[]
 }
 
-interface PlayHistoryItem extends Track {
-  timestamp: string
-}
-
 interface SearchResult extends Track {
   folderPath?: string
   folderName?: string
@@ -41,14 +37,12 @@ interface MusicLibraryState {
   _currentFileIndex: number
   searchResults: SearchResult[]
   searchTerm: string
-  playHistory: PlayHistoryItem[]
   isLoading: boolean
   /** 是否正在后台刷新（区别于首次加载的阻塞加载） */
   isBackgroundRefreshing: boolean
   /** 加载进度（0-100） */
   loadingProgress: number
   error: string | null
-  directoryTree: unknown | null
   stats: LibraryStats
   /** 记录已排序的播放列表名称，用于惰性排序 */
   _sortedPlaylists: Set<string>
@@ -73,17 +67,11 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     searchResults: [],
     searchTerm: '',
 
-    // 播放历史
-    playHistory: [],
-
     // 加载状态
     isLoading: false,
     isBackgroundRefreshing: false,
     loadingProgress: 0,
     error: null,
-
-    // 目录结构
-    directoryTree: null,
 
     // 统计信息
     stats: {
@@ -101,15 +89,6 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
   }),
 
   getters: {
-    /**
-     * 获取所有音轨的列表
-     * 使用 Array.prototype.concat 替代 push(...spread)，避免大数组展开的栈溢出和性能问题
-     */
-    allTracks: (state): Track[] => {
-      const arrays = state.playlists.map(p => p.files)
-      return ([] as Track[]).concat(...arrays)
-    },
-
     /**
      * 获取当前播放列表的文件列表
      */
@@ -413,7 +392,6 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       this.currentPlaylist = playlist
       this.currentFile = null
       this._currentFileIndex = -1
-      this.addToPlayHistory(playlist as unknown as Track)
     },
 
     /**
@@ -430,18 +408,15 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
           // 检查下一首
           if (cachedIdx + 1 < files.length && files[cachedIdx + 1]?.path === file.path) {
             this._currentFileIndex = cachedIdx + 1
-            this.addToPlayHistory(file)
             return
           }
           // 检查上一首
           if (cachedIdx - 1 >= 0 && files[cachedIdx - 1]?.path === file.path) {
             this._currentFileIndex = cachedIdx - 1
-            this.addToPlayHistory(file)
             return
           }
           // 检查当前位置（重播）
           if (files[cachedIdx]?.path === file.path) {
-            this.addToPlayHistory(file)
             return
           }
         }
@@ -450,7 +425,6 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       } else {
         this._currentFileIndex = -1
       }
-      this.addToPlayHistory(file)
     },
 
     /**
@@ -552,30 +526,6 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       this.searchTerm = ''
     },
 
-    // ========== 播放历史管理 ==========
-
-    /**
-     * 添加到播放历史
-     */
-    addToPlayHistory(item: Track): void {
-      // 限制历史记录长度
-      if (this.playHistory.length >= 100) {
-        this.playHistory.shift()
-      }
-      
-      this.playHistory.push({
-        ...item,
-        timestamp: new Date().toISOString()
-      })
-    },
-
-    /**
-     * 获取播放历史
-     */
-    getPlayHistory(limit: number = 20): PlayHistoryItem[] {
-      return this.playHistory.slice(-limit).reverse()
-    },
-
     // ========== 文件操作 ==========
 
     /**
@@ -617,10 +567,8 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       this.currentFile = null
       this._currentFileIndex = -1
       this.playlists = []
-      this.playHistory = []
       this.searchResults = []
       this.searchTerm = ''
-      this.directoryTree = null
       this._sortedPlaylists = new Set<string>()
       this._loadedFromCache = false
       this.isBackgroundRefreshing = false

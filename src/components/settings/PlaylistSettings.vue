@@ -52,7 +52,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 import { useConfigStore } from '../../stores/config'
 import logger from '../../utils/logger'
@@ -65,7 +65,7 @@ const sortOrderOptions = computed(() => [
   { value: 'desc', label: 'Z-A (降序)' }
 ])
 
-const saveConfig = async () => {
+const saveConfig = async (): Promise<void> => {
   try {
     await configStore.saveConfigNow()
   } catch (error) {
@@ -73,7 +73,7 @@ const saveConfig = async () => {
   }
 }
 
-const toggleSetting = async (key) => {
+const toggleSetting = async (key: 'generateAllSongsPlaylist' | 'folderBasedPlaylists'): Promise<void> => {
   configStore.playlist[key] = !configStore.playlist[key]
   await saveConfig()
 }

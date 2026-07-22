@@ -3,7 +3,8 @@
  * 记录每首歌曲的播放次数和播放历史
  */
 
-import { PluginPermission, type PluginAPI, type BuiltinPluginDefinition, type Track } from '../pluginManager'
+import { PluginPermission, type PluginAPI, type BuiltinPluginDefinition } from '../pluginManager'
+import type { Track } from '@/types'
 
 interface PlayCountData {
   playCounts: Record<string, number>

@@ -133,7 +133,7 @@
   <UpdateDialog />
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'
@@ -142,17 +142,33 @@ import UpdateDialog from '@/components/UpdateDialog.vue'
 import { useAutoUpdate } from '@/composables/useAutoUpdate'
 import logger from '../../utils/logger'
 
+// 技术栈条目
+interface TechItem {
+  name: string
+  desc: string
+  docs?: string
+  repo?: string
+}
+
+// 技术栈分类
+interface TechCategory {
+  name: string
+  icon: string
+  note?: string
+  techs: TechItem[]
+}
+
 const { t } = useI18n()
 
-const appVersion = ref('0.0.0')
+const appVersion = ref<string>('0.0.0')
 const githubUrl = 'https://github.com/JDBeWL/Mercurial-Player'
-const showLicenseDetails = ref(false)
+const showLicenseDetails = ref<boolean>(false)
 
 // 自动更新
 const { isChecking, updateAvailable, newVersion, checkForUpdates, error, lastCheckTime, updateLog } = useAutoUpdate()
 
 // 技术栈分类数据
-const techCategories = computed(() => [
+const techCategories = computed<TechCategory[]>(() => [
   {
     name: t('config.techCategoryCore'),
     icon: 'apps',
@@ -168,6 +184,18 @@ const techCategories = computed(() => [
         desc: t('config.techVue'),
         docs: 'https://vuejs.org/',
         repo: 'https://github.com/vuejs/core'
+      },
+      {
+        name: 'Pinia',
+        desc: t('config.techPinia'),
+        docs: 'https://pinia.vuejs.org/',
+        repo: 'https://github.com/vuejs/pinia'
+      },
+      {
+        name: 'Vue I18n',
+        desc: t('config.techVueI18n'),
+        docs: 'https://vue-i18n.intlify.dev/',
+        repo: 'https://github.com/intlify/vue-i18n'
       }
     ]
   },
@@ -192,12 +220,91 @@ const techCategories = computed(() => [
         desc: t('config.techCPAL'),
         docs: 'https://docs.rs/cpal/',
         repo: 'https://github.com/RustAudio/cpal'
+      },
+      {
+        name: 'Rubato',
+        desc: t('config.techRubato'),
+        docs: 'https://docs.rs/rubato/',
+        repo: 'https://github.com/HEnquist/rubato'
+      },
+      {
+        name: 'Lofty',
+        desc: t('config.techLofty'),
+        docs: 'https://docs.rs/lofty/',
+        repo: 'https://github.com/Serial-ATA/lofty-rs'
+      },
+      {
+        name: 'Spectrum Analyzer',
+        desc: t('config.techSpectrum'),
+        docs: 'https://docs.rs/spectrum-analyzer/',
+        repo: 'https://github.com/phip1611/spectrum-analyzer'
+      }
+    ]
+  },
+  {
+    name: t('config.techCategorySystem'),
+    icon: 'memory',
+    note: t('config.techCategorySystemNote'),
+    techs: [
+      {
+        name: 'WASAPI',
+        desc: t('config.techWASAPI'),
+        docs: 'https://docs.rs/wasapi/',
+        repo: 'https://github.com/HEnquist/wasapi-rs'
+      },
+      {
+        name: 'windows-rs',
+        desc: t('config.techWin32'),
+        docs: 'https://docs.rs/windows/',
+        repo: 'https://github.com/microsoft/windows-rs'
+      }
+    ]
+  },
+  {
+    name: t('config.techCategoryFrontend'),
+    icon: 'palette',
+    techs: [
+      {
+        name: 'Material Color Utilities',
+        desc: t('config.techMaterialColor'),
+        docs: 'https://github.com/material-foundation/material-color-utilities',
+        repo: 'https://github.com/material-foundation/material-color-utilities'
+      },
+      {
+        name: 'Vite',
+        desc: t('config.techVite'),
+        docs: 'https://vitejs.dev/',
+        repo: 'https://github.com/vitejs/vite'
+      },
+      {
+        name: 'TypeScript',
+        desc: t('config.techTypeScript'),
+        docs: 'https://www.typescriptlang.org/',
+        repo: 'https://github.com/microsoft/TypeScript'
+      }
+    ]
+  },
+  {
+    name: t('config.techCategoryDev'),
+    icon: 'science',
+    techs: [
+      {
+        name: 'Vitest',
+        desc: t('config.techVitest'),
+        docs: 'https://vitest.dev/',
+        repo: 'https://github.com/vitest-dev/vitest'
+      },
+      {
+        name: 'Criterion',
+        desc: t('config.techCriterion'),
+        docs: 'https://bheisler.github.io/criterion.rs/book/',
+        repo: 'https://github.com/bheisler/criterion.rs'
       }
     ]
   }
 ])
 
-const loadAppVersion = async () => {
+const loadAppVersion = async (): Promise<void> => {
   try {
     appVersion.value = await getVersion()
   } catch (error) {
@@ -205,7 +312,7 @@ const loadAppVersion = async () => {
   }
 }
 
-const openExternalUrl = async (url) => {
+const openExternalUrl = async (url: string): Promise<void> => {
   try {
     await invoke('open_external_url', { url })
   } catch (error) {
@@ -213,25 +320,25 @@ const openExternalUrl = async (url) => {
   }
 }
 
-const openGitHub = async () => {
+const openGitHub = async (): Promise<void> => {
   await openExternalUrl(githubUrl)
 }
 
-const openLink = async (url) => {
+const openLink = async (url: string): Promise<void> => {
   await openExternalUrl(url)
 }
 
-const openLicense = async () => {
+const openLicense = async (): Promise<void> => {
   // 打开 LICENSE 文件或 GitHub 上的许可证页面
   await openExternalUrl('https://www.gnu.org/licenses/gpl-3.0.html')
 }
 
-const isDownloadFinishedLog = (s) => {
+const isDownloadFinishedLog = (s: unknown): boolean => {
   return typeof s === 'string' && s.startsWith('Download finished:')
 }
 
 onMounted(() => {
-  loadAppVersion()
+  void loadAppVersion()
 })
 </script>
 
