@@ -89,6 +89,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # updater 签名密钥：没有此密钥不会生成 .sig 文件和 latest.json
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           tauriScript: pnpm run tauri
           tagName: ${{ github.ref_name }}
@@ -111,6 +113,9 @@ jobs:
             > 首次使用？查看 [README](https://github.com/${{ github.repository }}#readme) 了解更多。
           releaseDraft: false
           prerelease: false
+          # 生成 latest.json 供 Tauri updater 使用
+          # Windows 优先使用 NSIS（.nsis.zip + .nsis.zip.sig）
+          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
 
       - name: Generate Windows SHA256SUMS

@@ -27,6 +27,11 @@ package-lock.json
 *.njsproj
 *.sln
 *.sw?
+
+# Tauri updater 签名私钥（绝对不能提交）
+*.key
+~/
+.tauri/
 # Scripts - 忽略本地工具脚本，但保留构建相关的 sync-version.mjs
 # (package.json 的 version:sync 脚本依赖它)
 scripts/*

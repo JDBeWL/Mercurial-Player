@@ -65,7 +65,14 @@ const checkForUpdates = async () => {
 
     lastCheckTime.value = new Date().toLocaleString()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Unknown error occurred'
+    // Tauri plugin-updater 抛出的错误可能是字符串或普通对象，不一定是 Error 实例
+    // 需要尽可能提取可读信息，避免显示 "Unknown error occurred"
+    error.value =
+      err instanceof Error
+        ? err.message
+        : typeof err === 'string'
+          ? err
+          : (err as { message?: string })?.message ?? JSON.stringify(err)
     lastCheckTime.value = new Date().toLocaleString()
     logger.error('Update check failed:', err)
   } finally {
@@ -124,7 +131,12 @@ const downloadAndInstall = async () => {
     downloadFinished.value = true
     isDownloading.value = false
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Download/install failed'
+    error.value =
+      err instanceof Error
+        ? err.message
+        : typeof err === 'string'
+          ? err
+          : (err as { message?: string })?.message ?? JSON.stringify(err)
     logger.error('Download/install failed:', err)
     isDownloading.value = false
   }
