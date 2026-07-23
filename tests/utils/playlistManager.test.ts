@@ -76,7 +76,9 @@ describe('PlaylistManager', () => {
     })
 
     it('should ignore blacklisted folders', () => {
-      expect(PlaylistManager.shouldIgnoreFolder('/music/node_modules', ['node_modules'], true)).toBe(true)
+      expect(
+        PlaylistManager.shouldIgnoreFolder('/music/node_modules', ['node_modules'], true),
+      ).toBe(true)
     })
 
     it('should not ignore non-blacklisted folders', () => {
@@ -384,7 +386,7 @@ describe('PlaylistManager', () => {
     })
 
     it('should ignore hidden folders', async () => {
-      invokeMock.mockImplementation((cmd: string, args?: any) => {
+      invokeMock.mockImplementation((cmd: string, _args?: any) => {
         if (cmd === 'read_directory') {
           return Promise.resolve(['/music/.git', '/music/rock'])
         }
@@ -462,7 +464,7 @@ describe('PlaylistManager', () => {
         playlist: { generateAllSongsPlaylist: true },
       })
 
-      const allSongsPlaylist = result.find(p => p.isAllSongsPlaylist)
+      const allSongsPlaylist = result.find((p) => p.isAllSongsPlaylist)
       expect(allSongsPlaylist).toBeDefined()
       expect(allSongsPlaylist!.files).toHaveLength(2)
     })
@@ -470,7 +472,7 @@ describe('PlaylistManager', () => {
 
   describe('searchAudioFiles', () => {
     it('should search by title', async () => {
-      invokeMock.mockImplementation((cmd: string, args?: any) => {
+      invokeMock.mockImplementation((cmd: string, _args?: any) => {
         if (cmd === 'read_directory') return Promise.resolve([])
         if (cmd === 'get_audio_files') {
           return Promise.resolve({
@@ -490,7 +492,7 @@ describe('PlaylistManager', () => {
     })
 
     it('should search by artist', async () => {
-      invokeMock.mockImplementation((cmd: string, args?: any) => {
+      invokeMock.mockImplementation((cmd: string, _args?: any) => {
         if (cmd === 'read_directory') return Promise.resolve([])
         if (cmd === 'get_audio_files') {
           return Promise.resolve({
@@ -532,7 +534,7 @@ describe('PlaylistManager', () => {
     })
 
     it('should return null for non-matching path', async () => {
-      invokeMock.mockImplementation((cmd: string, args?: any) => {
+      invokeMock.mockImplementation((cmd: string, _args?: any) => {
         if (cmd === 'read_directory') return Promise.resolve([])
         if (cmd === 'get_audio_files') return Promise.resolve({ files: [] })
         return Promise.resolve([])

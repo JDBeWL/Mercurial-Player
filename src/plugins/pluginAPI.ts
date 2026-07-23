@@ -31,12 +31,10 @@ import {
 import type { PluginManager } from './pluginManager'
 import logger from '../utils/logger'
 import { usePlayerStore } from '../stores/player'
-import { useConfigStore } from '../stores/config'
 import { useMusicLibraryStore } from '../stores/musicLibrary'
 import { useThemeStore } from '../stores/theme'
 import { useErrorNotification } from '../composables/useErrorNotification'
 import FileUtils from '../utils/fileUtils'
-import { LyricsParser } from '../utils/lyricsParser'
 
 /**
  * 创建插件 API
@@ -44,7 +42,7 @@ import { LyricsParser } from '../utils/lyricsParser'
 export function createPluginAPI(
   pluginId: string,
   permissions: PluginPermissionType[],
-  manager: PluginManager
+  manager: PluginManager,
 ): PluginAPI {
   const hasPermission = (permission: PluginPermissionType): boolean =>
     permissions.includes(permission)
@@ -56,10 +54,16 @@ export function createPluginAPI(
   }
 
   // 歌词行格式转换辅助函数
-  const convertLyricLine = (line: { time: number; texts?: string[]; text?: string; karaoke?: unknown; words?: unknown[] }): LyricLine => {
+  const convertLyricLine = (line: {
+    time: number
+    texts?: string[]
+    text?: string
+    karaoke?: unknown
+    words?: unknown[]
+  }): LyricLine => {
     let textArray: { text: string }[] = []
     if (line.texts && Array.isArray(line.texts) && line.texts.length > 0) {
-      textArray = line.texts.map(t => ({ text: typeof t === 'string' ? t : String(t) }))
+      textArray = line.texts.map((t) => ({ text: typeof t === 'string' ? t : String(t) }))
     } else if (line.text) {
       textArray = [{ text: line.text }]
     }
@@ -74,18 +78,12 @@ export function createPluginAPI(
 
   // 延迟初始化 stores
   let playerStore: ReturnType<typeof usePlayerStore> | null = null
-  let configStore: ReturnType<typeof useConfigStore> | null = null
   let musicLibraryStore: ReturnType<typeof useMusicLibraryStore> | null = null
   let themeStore: ReturnType<typeof useThemeStore> | null = null
 
   const getPlayerStore = () => {
     if (!playerStore) playerStore = usePlayerStore()
     return playerStore
-  }
-
-  const getConfigStore = () => {
-    if (!configStore) configStore = useConfigStore()
-    return configStore
   }
 
   const getMusicLibraryStore = () => {
@@ -158,9 +156,8 @@ export function createPluginAPI(
               if (store.lyrics && store.lyrics.length > 0) {
                 return store.lyrics.map(convertLyricLine)
               }
-              await new Promise(resolve => setTimeout(resolve, 100))
+              await new Promise((resolve) => setTimeout(resolve, 100))
             }
-
           } catch (e) {
             logger.error(`[Plugin:${pluginId}] 加载歌词失败:`, e)
           }
@@ -183,7 +180,9 @@ export function createPluginAPI(
         const adjustedTime = store.currentTime + 0.05 - offset
 
         // 二分查找当前歌词索引（与 useLyrics.ts 中的逻辑一致）
-        let l = 0, r = store.lyrics.length - 1, idx = -1
+        let l = 0,
+          r = store.lyrics.length - 1,
+          idx = -1
         while (l <= r) {
           const mid = (l + r) >> 1
           if (store.lyrics[mid].time <= adjustedTime) {
@@ -236,11 +235,11 @@ export function createPluginAPI(
         requirePermission(PluginPermission.LYRICS_PROVIDER, 'player.setLyrics')
         // 转换为 store 的格式
         const store = getPlayerStore()
-        const storeLyrics = lyrics.map(line => ({
+        const storeLyrics = lyrics.map((line) => ({
           time: line.time,
-          texts: line.texts?.map(t => t.text) || [],
+          texts: line.texts?.map((t) => t.text) || [],
         }))
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         store.lyrics = storeLyrics as any
       },
     },
@@ -251,10 +250,10 @@ export function createPluginAPI(
         requirePermission(PluginPermission.LIBRARY_READ, 'library.getPlaylists')
         const store = getMusicLibraryStore()
         if (!store.playlists) return []
-        return store.playlists.map(p => ({
+        return store.playlists.map((p) => ({
           id: p.name, // 使用 name 作为 id
           name: p.name,
-          tracks: p.files?.map(f => ({ ...f })) || [],
+          tracks: p.files?.map((f) => ({ ...f })) || [],
         }))
       },
 
@@ -265,7 +264,7 @@ export function createPluginAPI(
         return {
           id: store.currentPlaylist.name,
           name: store.currentPlaylist.name,
-          tracks: store.currentPlaylist.files?.map(f => ({ ...f })) || [],
+          tracks: store.currentPlaylist.files?.map((f) => ({ ...f })) || [],
         }
       },
 
@@ -384,7 +383,9 @@ export function createPluginAPI(
 
       unregisterActionButton(buttonId: string): void {
         const buttons = manager.extensions.actionButtons
-        const index = buttons.findIndex((b: ActionButton & { pluginId: string }) => b.id === buttonId && b.pluginId === pluginId)
+        const index = buttons.findIndex(
+          (b: ActionButton & { pluginId: string }) => b.id === buttonId && b.pluginId === pluginId,
+        )
         if (index > -1) {
           buttons.splice(index, 1)
           logger.info(`操作按钮已取消: ${buttonId}`)
@@ -449,7 +450,7 @@ export function createPluginAPI(
         const normalizedKey = shortcut.key
           .toLowerCase()
           .split('+')
-          .map(k => k.trim())
+          .map((k) => k.trim())
           .sort((a, b) => {
             const order: Record<string, number> = { ctrl: 0, alt: 1, shift: 2, meta: 3 }
             return (order[a] ?? 4) - (order[b] ?? 4)
@@ -465,7 +466,9 @@ export function createPluginAPI(
 
       unregister(shortcutId: string): void {
         const shortcuts = manager.extensions.shortcuts
-        const index = shortcuts.findIndex((s: Shortcut & { pluginId: string }) => s.id === shortcutId && s.pluginId === pluginId)
+        const index = shortcuts.findIndex(
+          (s: Shortcut & { pluginId: string }) => s.id === shortcutId && s.pluginId === pluginId,
+        )
         if (index > -1) {
           shortcuts.splice(index, 1)
           logger.info(`快捷键已取消: ${shortcutId}`)
@@ -548,7 +551,10 @@ export function createPluginAPI(
 
     // ========== 工具 API ==========
     utils: {
-      createCanvas(width: number, height: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null } {
+      createCanvas(
+        width: number,
+        height: number,
+      ): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null } {
         const canvas = document.createElement('canvas')
         canvas.width = width
         canvas.height = height
@@ -564,7 +570,7 @@ export function createPluginAPI(
               else reject(new Error('Canvas 转换 Blob 失败'))
             },
             type,
-            quality
+            quality,
           )
         })
       },
@@ -578,11 +584,13 @@ export function createPluginAPI(
           const img = new Image()
           img.crossOrigin = 'anonymous'
           img.onload = () => resolve(img)
-          img.onerror = (e) => reject(new Error(`图片加载失败: ${(e as ErrorEvent).message || src}`))
+          img.onerror = (e) =>
+            reject(new Error(`图片加载失败: ${(e as ErrorEvent).message || src}`))
           // 自动转换本地文件路径为 Tauri 可访问的 URL
-          const url = src.startsWith('http') || src.startsWith('data:') || src.startsWith('asset:')
-            ? src
-            : convertFileSrc(src)
+          const url =
+            src.startsWith('http') || src.startsWith('data:') || src.startsWith('asset:')
+              ? src
+              : convertFileSrc(src)
           img.src = url
         })
       },
@@ -622,7 +630,10 @@ export function createPluginAPI(
 
     // ========== 文件 API ==========
     file: {
-      async saveAs(data: Blob | Uint8Array | string, options: SaveAsOptions = {}): Promise<string | null> {
+      async saveAs(
+        data: Blob | Uint8Array | string,
+        options: SaveAsOptions = {},
+      ): Promise<string | null> {
         requirePermission(PluginPermission.STORAGE, 'file.saveAs')
 
         try {
@@ -658,7 +669,7 @@ export function createPluginAPI(
       async saveImage(
         image: HTMLCanvasElement | Blob | string,
         defaultName = 'image.png',
-        format = 'png'
+        format = 'png',
       ): Promise<string | null> {
         requirePermission(PluginPermission.STORAGE, 'file.saveImage')
 
@@ -667,10 +678,14 @@ export function createPluginAPI(
 
         if (image instanceof HTMLCanvasElement) {
           blob = await new Promise<Blob>((resolve, reject) => {
-            image.toBlob((b) => {
-              if (b) resolve(b)
-              else reject(new Error('Canvas 转换失败'))
-            }, mimeType, 0.92)
+            image.toBlob(
+              (b) => {
+                if (b) resolve(b)
+                else reject(new Error('Canvas 转换失败'))
+              },
+              mimeType,
+              0.92,
+            )
           })
         } else if (image instanceof Blob) {
           blob = image
@@ -732,9 +747,7 @@ export function createPluginAPI(
             throw new Error('不支持的图片格式')
           }
 
-          await navigator.clipboard.write([
-            new ClipboardItem({ [blob.type]: blob })
-          ])
+          await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
           logger.info(`[Plugin:${pluginId}] 图片已复制到剪贴板`)
         } catch (error) {
           logger.error(`[Plugin:${pluginId}] 复制图片失败:`, error)

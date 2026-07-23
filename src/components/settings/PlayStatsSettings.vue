@@ -2,7 +2,11 @@
   <div class="tab-content">
     <div class="content-header">
       <h3>{{ $t('config.playStats') || '播放统计' }}</h3>
-      <button class="text-button danger" @click="clearStats" v-if="playStats && playStats.totalPlays > 0">
+      <button
+        v-if="playStats && playStats.totalPlays > 0"
+        class="text-button danger"
+        @click="clearStats"
+      >
         <span class="material-symbols-rounded">delete</span>
         清除数据
       </button>
@@ -41,7 +45,7 @@
       </div>
 
       <!-- 最常播放 -->
-      <div class="section" v-if="mostPlayed.length > 0">
+      <div v-if="mostPlayed.length > 0" class="section">
         <h4>
           <span class="material-symbols-rounded">trending_up</span>
           最常播放
@@ -51,7 +55,7 @@
             <span class="rank" :class="{ 'top-3': index < 3 }">{{ index + 1 }}</span>
             <div class="track-info">
               <span class="track-title">{{ item.title || '未知曲目' }}</span>
-              <span class="track-artist" v-if="item.artist">{{ item.artist }}</span>
+              <span v-if="item.artist" class="track-artist">{{ item.artist }}</span>
             </div>
             <span class="play-count">{{ item.count }} 次</span>
           </div>
@@ -59,7 +63,7 @@
       </div>
 
       <!-- 最近播放 -->
-      <div class="section" v-if="recentPlayed.length > 0">
+      <div v-if="recentPlayed.length > 0" class="section">
         <h4>
           <span class="material-symbols-rounded">history</span>
           最近播放
@@ -69,7 +73,7 @@
             <span class="material-symbols-rounded track-icon">music_note</span>
             <div class="track-info">
               <span class="track-title">{{ item.title || '未知曲目' }}</span>
-              <span class="track-artist" v-if="item.artist">{{ item.artist }}</span>
+              <span v-if="item.artist" class="track-artist">{{ item.artist }}</span>
             </div>
             <span class="play-time">{{ formatTime(item.timestamp) }}</span>
           </div>
@@ -140,8 +144,9 @@ let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 // 刷新统计数据
 const refreshStats = async (): Promise<void> => {
-  const playCountInstance = (pluginManager as unknown as PluginManagerWithInstances)
-    .instances.get('builtin-play-count')
+  const playCountInstance = (pluginManager as unknown as PluginManagerWithInstances).instances.get(
+    'builtin-play-count',
+  )
   if (playCountInstance?.instance) {
     const instance = playCountInstance.instance
     playStats.value = instance.getStats()
@@ -157,7 +162,7 @@ const refreshStats = async (): Promise<void> => {
 
 // 补充曲目信息（从 player store 获取）
 const enrichTrackInfo = (tracks: Array<{ path: string; count: number }>): MostPlayedItem[] => {
-  return tracks.map(item => {
+  return tracks.map((item) => {
     // 尝试从播放列表中找到对应的曲目信息
     const track = playerStore.playlist.find((t: Track) => t.path === item.path)
     if (track) {
@@ -204,8 +209,9 @@ const formatTime = (timestamp: number): string => {
 
 // 清除统计数据
 const clearStats = (): void => {
-  const playCountInstance = (pluginManager as unknown as PluginManagerWithInstances)
-    .instances.get('builtin-play-count')
+  const playCountInstance = (pluginManager as unknown as PluginManagerWithInstances).instances.get(
+    'builtin-play-count',
+  )
   if (playCountInstance?.instance) {
     playCountInstance.instance.clearAllData()
     void refreshStats()
@@ -215,8 +221,12 @@ const clearStats = (): void => {
 
 onMounted(async () => {
   // 内置插件已在 main.js 中加载
-  setTimeout(() => { void refreshStats() }, 100)
-  refreshInterval = setInterval(() => { void refreshStats() }, 5000)
+  setTimeout(() => {
+    void refreshStats()
+  }, 100)
+  refreshInterval = setInterval(() => {
+    void refreshStats()
+  }, 5000)
 })
 
 onUnmounted(() => {
@@ -374,7 +384,8 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.play-count, .play-time {
+.play-count,
+.play-time {
   font-size: 12px;
   color: var(--md-sys-color-on-surface-variant);
   flex-shrink: 0;

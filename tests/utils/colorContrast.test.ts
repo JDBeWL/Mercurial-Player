@@ -46,7 +46,7 @@ describe('colorContrast', () => {
     it('should use different thresholds for large text', () => {
       const normalResult = checkContrast('#666666', '#ffffff', { level: 'AA', largeText: false })
       const largeResult = checkContrast('#666666', '#ffffff', { level: 'AA', largeText: true })
-      
+
       // Large text has lower requirements
       expect(largeResult.requiredRatio).toBeLessThan(normalResult.requiredRatio)
     })
@@ -84,7 +84,10 @@ describe('colorContrast', () => {
     })
 
     it('should handle large text option', () => {
-      const adjusted = adjustColorForContrast('#999999', '#ffffff', { level: 'AA', largeText: true })
+      const adjusted = adjustColorForContrast('#999999', '#ffffff', {
+        level: 'AA',
+        largeText: true,
+      })
       const check = checkContrast(adjusted, '#ffffff', { level: 'AA', largeText: true })
       expect(check.pass).toBe(true)
     })
@@ -109,9 +112,9 @@ describe('colorContrast', () => {
         { foreground: '#000000', background: '#ffffff', name: 'Black on White' },
         { foreground: '#ffffff', background: '#000000', name: 'White on Black' },
       ]
-      
+
       const results = checkColorPairs(pairs)
-      
+
       expect(results).toHaveLength(2)
       expect(results[0].name).toBe('Black on White')
       expect(results[0].pass).toBe(true)
@@ -124,7 +127,7 @@ describe('colorContrast', () => {
         { foreground: '#666666', background: '#ffffff', name: 'Normal', largeText: false },
         { foreground: '#666666', background: '#ffffff', name: 'Large', largeText: true },
       ]
-      
+
       const results = checkColorPairs(pairs)
       expect(results[0].largeText).toBe(false)
       expect(results[1].largeText).toBe(true)
@@ -144,71 +147,70 @@ describe('colorContrast', () => {
   })
 })
 
-
-  describe('getColorFromCSSVar', () => {
-    beforeEach(() => {
-      // Mock window and document for CSS variable tests
-      vi.stubGlobal('window', {})
-      vi.stubGlobal('document', {
-        documentElement: {},
-      })
-    })
-
-    it('should return null when window is undefined', () => {
-      vi.stubGlobal('window', undefined)
-      
-      const result = getColorFromCSSVar('--test-color')
-      
-      expect(result).toBeNull()
-    })
-
-    it('should return null for empty CSS variable', () => {
-      vi.stubGlobal('getComputedStyle', () => ({
-        getPropertyValue: () => '',
-      }))
-      
-      const result = getColorFromCSSVar('--empty-var')
-      
-      expect(result).toBeNull()
-    })
-
-    it('should return hex color directly', () => {
-      vi.stubGlobal('getComputedStyle', () => ({
-        getPropertyValue: () => '#ff0000',
-      }))
-      
-      const result = getColorFromCSSVar('--red')
-      
-      expect(result).toBe('#ff0000')
-    })
-
-    it('should convert rgb to hex', () => {
-      vi.stubGlobal('getComputedStyle', () => ({
-        getPropertyValue: () => 'rgb(255, 0, 0)',
-      }))
-      
-      const result = getColorFromCSSVar('--red')
-      
-      expect(result).toBe('#ff0000')
-    })
-
-    it('should convert rgba to hex', () => {
-      vi.stubGlobal('getComputedStyle', () => ({
-        getPropertyValue: () => 'rgba(0, 255, 0, 1)',
-      }))
-      
-      const result = getColorFromCSSVar('--green')
-      
-      expect(result).toBe('#00ff00')
-    })
-
-    it('should return null for non-hex non-rgb values', () => {
-      vi.stubGlobal('getComputedStyle', () => ({
-        getPropertyValue: () => 'red',
-      }))
-      
-      const result = getColorFromCSSVar('--named-color')
-      
-      expect(result).toBeNull()
+describe('getColorFromCSSVar', () => {
+  beforeEach(() => {
+    // Mock window and document for CSS variable tests
+    vi.stubGlobal('window', {})
+    vi.stubGlobal('document', {
+      documentElement: {},
     })
   })
+
+  it('should return null when window is undefined', () => {
+    vi.stubGlobal('window', undefined)
+
+    const result = getColorFromCSSVar('--test-color')
+
+    expect(result).toBeNull()
+  })
+
+  it('should return null for empty CSS variable', () => {
+    vi.stubGlobal('getComputedStyle', () => ({
+      getPropertyValue: () => '',
+    }))
+
+    const result = getColorFromCSSVar('--empty-var')
+
+    expect(result).toBeNull()
+  })
+
+  it('should return hex color directly', () => {
+    vi.stubGlobal('getComputedStyle', () => ({
+      getPropertyValue: () => '#ff0000',
+    }))
+
+    const result = getColorFromCSSVar('--red')
+
+    expect(result).toBe('#ff0000')
+  })
+
+  it('should convert rgb to hex', () => {
+    vi.stubGlobal('getComputedStyle', () => ({
+      getPropertyValue: () => 'rgb(255, 0, 0)',
+    }))
+
+    const result = getColorFromCSSVar('--red')
+
+    expect(result).toBe('#ff0000')
+  })
+
+  it('should convert rgba to hex', () => {
+    vi.stubGlobal('getComputedStyle', () => ({
+      getPropertyValue: () => 'rgba(0, 255, 0, 1)',
+    }))
+
+    const result = getColorFromCSSVar('--green')
+
+    expect(result).toBe('#00ff00')
+  })
+
+  it('should return null for non-hex non-rgb values', () => {
+    vi.stubGlobal('getComputedStyle', () => ({
+      getPropertyValue: () => 'red',
+    }))
+
+    const result = getColorFromCSSVar('--named-color')
+
+    expect(result).toBeNull()
+  })
+})

@@ -1,14 +1,18 @@
 <template>
-  <div ref="wrapperRef" class="md3-select-wrapper" :class="{ 'is-open': isOpen, 'is-focused': isFocused }">
-    <div 
+  <div
+    ref="wrapperRef"
+    class="md3-select-wrapper"
+    :class="{ 'is-open': isOpen, 'is-focused': isFocused }"
+  >
+    <div
       ref="triggerRef"
       class="md3-select-trigger"
-      @click="toggleDropdown"
-      @focus="handleFocus"
-      @keydown.esc.prevent="close"
       tabindex="0"
       :aria-expanded="isOpen"
       :aria-haspopup="true"
+      @click="toggleDropdown"
+      @focus="handleFocus"
+      @keydown.esc.prevent="close"
     >
       <span class="md3-select-value">{{ displayValue }}</span>
       <span class="md3-select-icon" :class="{ 'is-open': isOpen }">
@@ -18,8 +22,8 @@
     <Transition name="dropdown">
       <div v-if="isOpen" class="md3-select-dropdown" @click.stop>
         <div class="md3-select-dropdown-scroll">
-          <div 
-            v-for="option in options" 
+          <div
+            v-for="option in options"
             :key="option.value"
             class="md3-select-option"
             :class="{ 'is-selected': modelValue === option.value }"
@@ -45,17 +49,20 @@ interface SelectOption {
   label: string
 }
 
-const props = withDefaults(defineProps<{
-  modelValue: string | number
-  options: SelectOption[]
-  placeholder?: string
-}>(), {
-  placeholder: ''
-})
+const props = withDefaults(
+  defineProps<{
+    modelValue: string | number
+    options: SelectOption[]
+    placeholder?: string
+  }>(),
+  {
+    placeholder: '',
+  },
+)
 
 const emit = defineEmits<{
   'update:modelValue': [value: string | number]
-  'change': [value: string | number]
+  change: [value: string | number]
 }>()
 
 const isOpen = ref<boolean>(false)
@@ -63,13 +70,13 @@ const isFocused = ref<boolean>(false)
 const triggerRef = ref<HTMLElement | null>(null)
 const wrapperRef = ref<HTMLElement | null>(null)
 const instanceId = ref<string>(
-  (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
-    : `md3sel_${Math.random().toString(36).slice(2)}`
+    : `md3sel_${Math.random().toString(36).slice(2)}`,
 )
 
 const displayValue = computed<string>(() => {
-  const selectedOption = props.options.find(opt => opt.value === props.modelValue)
+  const selectedOption = props.options.find((opt) => opt.value === props.modelValue)
   return selectedOption ? selectedOption.label : props.placeholder
 })
 
@@ -194,7 +201,11 @@ const handleOtherSelectOpen = (event: Event): void => {
 
 .md3-select-icon .material-symbols-rounded {
   font-size: 24px;
-  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
 }
 
 .md3-select-wrapper.is-open .md3-select-icon {
@@ -300,7 +311,11 @@ const handleOtherSelectOpen = (event: Event): void => {
 
 .md3-select-option-check .material-symbols-rounded {
   font-size: 20px;
-  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 20;
 }
 
 /* 下拉动画 */
@@ -340,4 +355,3 @@ const handleOtherSelectOpen = (event: Event): void => {
   background: var(--md-sys-color-outline);
 }
 </style>
-

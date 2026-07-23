@@ -8,7 +8,7 @@ import en from './locales/en.json'
 // 定义支持的语言
 const messages = {
   en,
-  zh
+  zh,
 }
 
 // 创建i18n实例
@@ -24,7 +24,7 @@ export default i18n
 
 // 导出设置语言的方法
 export const setLocale = (locale: string): void => {
-  (i18n.global.locale as Ref<string>).value = locale
+  ;(i18n.global.locale as Ref<string>).value = locale
 }
 
 // 导出获取当前语言的方法

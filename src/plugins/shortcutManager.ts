@@ -26,7 +26,7 @@ class ShortcutManager {
    */
   start(): void {
     if (this.isListening) return
-    
+
     window.addEventListener('keydown', this.handleKeyDown)
     this.isListening = true
     logger.info('快捷键管理器已启动')
@@ -37,7 +37,7 @@ class ShortcutManager {
    */
   stop(): void {
     if (!this.isListening) return
-    
+
     window.removeEventListener('keydown', this.handleKeyDown)
     this.isListening = false
     logger.info('快捷键管理器已停止')
@@ -59,43 +59,48 @@ class ShortcutManager {
     if (event.altKey) keys.push('alt')
     if (event.shiftKey) keys.push('shift')
     if (event.metaKey) keys.push('meta')
-    
+
     // 获取按下的主键
     let key = event.key.toLowerCase()
     // 处理特殊键名
     if (key === ' ') key = 'space'
     if (key === 'escape') key = 'esc'
-    
+
     // 避免重复添加修饰键
     if (!['control', 'alt', 'shift', 'meta'].includes(key)) {
       keys.push(key)
     }
-    
+
     // 如果只有修饰键，不处理
-    if (keys.length === 0 || (keys.length === 1 && ['ctrl', 'alt', 'shift', 'meta'].includes(keys[0]))) {
+    if (
+      keys.length === 0 ||
+      (keys.length === 1 && ['ctrl', 'alt', 'shift', 'meta'].includes(keys[0]))
+    ) {
       return
     }
 
-    const pressedKey = keys.sort((a, b) => {
-      const order: Record<string, number> = { ctrl: 0, alt: 1, shift: 2, meta: 3 }
-      return (order[a] ?? 4) - (order[b] ?? 4)
-    }).join('+')
+    const pressedKey = keys
+      .sort((a, b) => {
+        const order: Record<string, number> = { ctrl: 0, alt: 1, shift: 2, meta: 3 }
+        return (order[a] ?? 4) - (order[b] ?? 4)
+      })
+      .join('+')
 
     // 查找匹配的快捷键
     const shortcuts = pluginManager.getExtensions('shortcuts') as ShortcutExtension[]
-    const matched = shortcuts.find(s => s.key === pressedKey)
+    const matched = shortcuts.find((s) => s.key === pressedKey)
 
     if (matched) {
       event.preventDefault()
       event.stopPropagation()
-      
+
       logger.debug(`触发快捷键: ${matched.name} (${pressedKey})`)
-      
+
       try {
         const result = matched.action()
         // 如果返回 Promise，等待它完成
         if (result instanceof Promise) {
-          result.catch(err => {
+          result.catch((err) => {
             logger.error(`快捷键执行失败: ${matched.name}`, err)
           })
         }

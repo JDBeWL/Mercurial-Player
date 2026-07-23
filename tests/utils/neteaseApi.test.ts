@@ -28,9 +28,7 @@ describe('NeteaseAPI', () => {
 
   describe('searchSongs', () => {
     it('should return songs on success', async () => {
-      const songs = [
-        { id: '1', name: 'Song 1', artist: 'Artist 1', duration: 180000 },
-      ]
+      const songs = [{ id: '1', name: 'Song 1', artist: 'Artist 1', duration: 180000 }]
       invokeMock.mockResolvedValue(songs)
 
       const result = await api.searchSongs('test')
@@ -85,9 +83,7 @@ describe('NeteaseAPI', () => {
 
   describe('searchAndGetLyrics', () => {
     it('should return lyrics for best match', async () => {
-      const songs = [
-        { id: '1', name: 'Test Song', artist: 'Test Artist', duration: 180000 },
-      ]
+      const songs = [{ id: '1', name: 'Test Song', artist: 'Test Artist', duration: 180000 }]
       const lyrics = { lrc: '[00:01.00]Hello' }
 
       invokeMock.mockResolvedValueOnce(songs)
@@ -99,9 +95,7 @@ describe('NeteaseAPI', () => {
     })
 
     it('should fallback to title-only search', async () => {
-      const songs = [
-        { id: '1', name: 'Test Song', artist: 'Someone', duration: 180000 },
-      ]
+      const songs = [{ id: '1', name: 'Test Song', artist: 'Someone', duration: 180000 }]
       const lyrics = { lrc: '[00:01.00]Hello' }
 
       invokeMock.mockResolvedValueOnce([])
@@ -128,30 +122,22 @@ describe('NeteaseAPI', () => {
     })
 
     it('should match exact title', () => {
-      const songs = [
-        { id: '1', name: 'Exact Title', artist: 'Artist', duration: 180000 },
-      ]
+      const songs = [{ id: '1', name: 'Exact Title', artist: 'Artist', duration: 180000 }]
       expect(api.findBestMatch(songs, 'Exact Title', '', 0)).toEqual(songs[0])
     })
 
     it('should match title with different case', () => {
-      const songs = [
-        { id: '1', name: 'TITLE', artist: 'Artist', duration: 180000 },
-      ]
+      const songs = [{ id: '1', name: 'TITLE', artist: 'Artist', duration: 180000 }]
       expect(api.findBestMatch(songs, 'title', '', 0)).toEqual(songs[0])
     })
 
     it('should match title with spaces and punctuation removed', () => {
-      const songs = [
-        { id: '1', name: 'My-Song_Title', artist: 'Artist', duration: 180000 },
-      ]
+      const songs = [{ id: '1', name: 'My-Song_Title', artist: 'Artist', duration: 180000 }]
       expect(api.findBestMatch(songs, 'My Song Title', '', 0)).toEqual(songs[0])
     })
 
     it('should match artist', () => {
-      const songs = [
-        { id: '1', name: 'Song', artist: 'Artist Name', duration: 180000 },
-      ]
+      const songs = [{ id: '1', name: 'Song', artist: 'Artist Name', duration: 180000 }]
       expect(api.findBestMatch(songs, 'Song', 'Artist Name', 0)).toEqual(songs[0])
     })
 
@@ -165,16 +151,12 @@ describe('NeteaseAPI', () => {
     })
 
     it('should return null when score is too low', () => {
-      const songs = [
-        { id: '1', name: 'Completely Different', artist: 'Other', duration: 0 },
-      ]
+      const songs = [{ id: '1', name: 'Completely Different', artist: 'Other', duration: 0 }]
       expect(api.findBestMatch(songs, 'Title', 'Artist', 0)).toBeNull()
     })
 
     it('should ignore parentheses in title', () => {
-      const songs = [
-        { id: '1', name: 'Title (Remix)', artist: 'Artist', duration: 0 },
-      ]
+      const songs = [{ id: '1', name: 'Title (Remix)', artist: 'Artist', duration: 0 }]
       expect(api.findBestMatch(songs, 'Title', '', 0)).toEqual(songs[0])
     })
   })

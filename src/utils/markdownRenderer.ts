@@ -25,13 +25,13 @@ function renderInline(text: string): string {
   // 图片 ![alt](url) — 在链接之前匹配
   result = result.replace(
     /!\[([^\]]*)\]\(([^)]+)\)/g,
-    '<img src="$2" alt="$1" style="max-width:100%;border-radius:4px;" />'
+    '<img src="$2" alt="$1" style="max-width:100%;border-radius:4px;" />',
   )
 
   // 链接 [text](url)
   result = result.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
   )
 
   // 粗斜体 ***text*** 或 ___text___
@@ -136,7 +136,7 @@ export function renderMarkdown(markdown: string): string {
         items.push(renderInline(getListItemContent(lines[i])))
         i++
       }
-      const itemsHtml = items.map(item => `<li>${item}</li>`).join('')
+      const itemsHtml = items.map((item) => `<li>${item}</li>`).join('')
       htmlParts.push(`<ul>${itemsHtml}</ul>`)
       continue
     }
@@ -148,7 +148,7 @@ export function renderMarkdown(markdown: string): string {
         items.push(renderInline(getListItemContent(lines[i])))
         i++
       }
-      const itemsHtml = items.map(item => `<li>${item}</li>`).join('')
+      const itemsHtml = items.map((item) => `<li>${item}</li>`).join('')
       htmlParts.push(`<ol>${itemsHtml}</ol>`)
       continue
     }
@@ -169,11 +169,10 @@ export function renderMarkdown(markdown: string): string {
       i++
     }
     if (paragraphLines.length > 0) {
-      const content = paragraphLines.map(l => renderInline(l)).join('<br />')
+      const content = paragraphLines.map((l) => renderInline(l)).join('<br />')
       htmlParts.push(`<p>${content}</p>`)
     }
   }
 
   return htmlParts.join('')
 }
-

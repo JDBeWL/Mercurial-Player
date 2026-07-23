@@ -79,7 +79,7 @@ import { shortcutManager } from './plugins/shortcutManager'
 const loadBuiltinPlugins = async (): Promise<void> => {
   // 先初始化插件管理器（设置播放器状态监听）
   await pluginManager.init()
-  
+
   for (const plugin of builtinPlugins as BuiltinPluginDefinition[]) {
     try {
       if (!pluginManager.plugins.has(plugin.id)) {
@@ -91,7 +91,7 @@ const loadBuiltinPlugins = async (): Promise<void> => {
     }
   }
   logger.info('内置插件加载完成')
-  
+
   // 加载外部插件
   try {
     await loadAllPlugins()
@@ -99,7 +99,7 @@ const loadBuiltinPlugins = async (): Promise<void> => {
   } catch (error) {
     logger.error('加载外部插件失败:', error)
   }
-  
+
   // 启动快捷键管理器
   shortcutManager.start()
 }

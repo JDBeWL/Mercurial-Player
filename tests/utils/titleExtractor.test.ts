@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { TitleExtractor } from '@/utils/titleExtractor'
 import { mockInvoke, resetTauriMocks, setupInvokeMocks } from '../mocks/tauri'
 
@@ -88,7 +88,9 @@ describe('TitleExtractor', () => {
     })
 
     it('should use custom format', () => {
-      expect(TitleExtractor.formatPlaylistName('/music/Rock', 'Playlist: {folderName}')).toBe('Playlist: Rock')
+      expect(TitleExtractor.formatPlaylistName('/music/Rock', 'Playlist: {folderName}')).toBe(
+        'Playlist: Rock',
+      )
     })
   })
 
@@ -109,148 +111,142 @@ describe('TitleExtractor', () => {
   })
 })
 
-
-  describe('extractTitle (with Tauri mock)', () => {
-    it('should extract title from metadata', async () => {
-      setupInvokeMocks({
-        get_track_metadata: {
-          path: '/music/song.mp3',
-          title: 'Song Title',
-          artist: 'Artist Name',
-          album: 'Album Name',
-        },
-      })
-      
-      const result = await TitleExtractor.extractTitle('/music/song.mp3')
-      
-      expect(result.title).toBe('Song Title')
-      expect(result.artist).toBe('Artist Name')
-      expect(result.album).toBe('Album Name')
-      expect(result.isFromMetadata).toBe(true)
+describe('extractTitle (with Tauri mock)', () => {
+  it('should extract title from metadata', async () => {
+    setupInvokeMocks({
+      get_track_metadata: {
+        path: '/music/song.mp3',
+        title: 'Song Title',
+        artist: 'Artist Name',
+        album: 'Album Name',
+      },
     })
 
-    it('should fall back to filename when metadata unavailable', async () => {
-      setupInvokeMocks({
-        get_track_metadata: { path: '/music/Artist - Song.mp3' },
-      })
-      
-      const result = await TitleExtractor.extractTitle('/music/Artist - Song.mp3')
-      
-      expect(result.title).toBe('Song')
-      expect(result.artist).toBe('Artist')
-      expect(result.isFromMetadata).toBe(false)
-    })
+    const result = await TitleExtractor.extractTitle('/music/song.mp3')
 
-    it('should fall back to filename on metadata error', async () => {
-      mockInvoke.mockRejectedValue(new Error('Failed to read metadata'))
-      
-      const result = await TitleExtractor.extractTitle('/music/Artist - Song.mp3')
-      
-      expect(result.title).toBe('Song')
-      expect(result.artist).toBe('Artist')
-      expect(result.isFromMetadata).toBe(false)
-    })
-
-    it('should skip metadata when preferMetadata is false', async () => {
-      resetTauriMocks() // Ensure clean state
-      
-      const result = await TitleExtractor.extractTitle('/music/Artist - Song.mp3', {
-        preferMetadata: false,
-      })
-      
-      expect(result.isFromMetadata).toBe(false)
-      expect(mockInvoke).not.toHaveBeenCalledWith('get_track_metadata', expect.anything())
-    })
-
-    it('should clean title from metadata', async () => {
-      setupInvokeMocks({
-        get_track_metadata: {
-          path: '/music/song.mp3',
-          title: '  Song Title  ',
-          artist: '  Artist  ',
-        },
-      })
-      
-      const result = await TitleExtractor.extractTitle('/music/song.mp3')
-      
-      expect(result.title).toBe('Song Title')
-      expect(result.artist).toBe('Artist')
-    })
+    expect(result.title).toBe('Song Title')
+    expect(result.artist).toBe('Artist Name')
+    expect(result.album).toBe('Album Name')
+    expect(result.isFromMetadata).toBe(true)
   })
 
-  describe('extractTitlesBatch (with Tauri mock)', () => {
-    it('should extract titles for multiple files', async () => {
-      setupInvokeMocks({
-        get_tracks_metadata_batch: [
-          { path: '/music/song1.mp3', title: 'Song 1', artist: 'Artist 1' },
-          { path: '/music/song2.mp3', title: 'Song 2', artist: 'Artist 2' },
-        ],
-      })
-      
-      const result = await TitleExtractor.extractTitlesBatch([
-        '/music/song1.mp3',
-        '/music/song2.mp3',
-      ])
-      
-      expect(result.size).toBe(2)
-      expect(result.get('/music/song1.mp3')?.title).toBe('Song 1')
-      expect(result.get('/music/song2.mp3')?.title).toBe('Song 2')
+  it('should fall back to filename when metadata unavailable', async () => {
+    setupInvokeMocks({
+      get_track_metadata: { path: '/music/Artist - Song.mp3' },
     })
 
-    it('should return empty map for empty input', async () => {
-      const result = await TitleExtractor.extractTitlesBatch([])
-      
-      expect(result.size).toBe(0)
-    })
+    const result = await TitleExtractor.extractTitle('/music/Artist - Song.mp3')
 
-    it('should fall back to filename parsing on batch error', async () => {
-      mockInvoke.mockRejectedValue(new Error('Batch failed'))
-      
-      const result = await TitleExtractor.extractTitlesBatch(['/music/Artist - Song.mp3'])
-      
-      expect(result.size).toBe(1)
-      expect(result.get('/music/Artist - Song.mp3')?.title).toBe('Song')
-      expect(result.get('/music/Artist - Song.mp3')?.isFromMetadata).toBe(false)
-    })
-
-    it('should include audio info from metadata', async () => {
-      setupInvokeMocks({
-        get_tracks_metadata_batch: [
-          {
-            path: '/music/song.mp3',
-            title: 'Song',
-            duration: 180,
-            bitrate: 320,
-            sampleRate: 44100,
-            channels: 2,
-            format: 'mp3',
-          },
-        ],
-      })
-      
-      const result = await TitleExtractor.extractTitlesBatch(['/music/song.mp3'])
-      const info = result.get('/music/song.mp3')
-      
-      expect(info?.duration).toBe(180)
-      expect(info?.bitrate).toBe(320)
-      expect(info?.sampleRate).toBe(44100)
-      expect(info?.channels).toBe(2)
-      expect(info?.format).toBe('mp3')
-    })
-
-    it('should handle files without metadata title', async () => {
-      setupInvokeMocks({
-        get_tracks_metadata_batch: [
-          { path: '/music/Artist - Song.mp3', duration: 180 },
-        ],
-      })
-      
-      const result = await TitleExtractor.extractTitlesBatch(['/music/Artist - Song.mp3'])
-      const info = result.get('/music/Artist - Song.mp3')
-      
-      expect(info?.title).toBe('Song')
-      expect(info?.artist).toBe('Artist')
-      expect(info?.duration).toBe(180)
-      expect(info?.isFromMetadata).toBe(false)
-    })
+    expect(result.title).toBe('Song')
+    expect(result.artist).toBe('Artist')
+    expect(result.isFromMetadata).toBe(false)
   })
+
+  it('should fall back to filename on metadata error', async () => {
+    mockInvoke.mockRejectedValue(new Error('Failed to read metadata'))
+
+    const result = await TitleExtractor.extractTitle('/music/Artist - Song.mp3')
+
+    expect(result.title).toBe('Song')
+    expect(result.artist).toBe('Artist')
+    expect(result.isFromMetadata).toBe(false)
+  })
+
+  it('should skip metadata when preferMetadata is false', async () => {
+    resetTauriMocks() // Ensure clean state
+
+    const result = await TitleExtractor.extractTitle('/music/Artist - Song.mp3', {
+      preferMetadata: false,
+    })
+
+    expect(result.isFromMetadata).toBe(false)
+    expect(mockInvoke).not.toHaveBeenCalledWith('get_track_metadata', expect.anything())
+  })
+
+  it('should clean title from metadata', async () => {
+    setupInvokeMocks({
+      get_track_metadata: {
+        path: '/music/song.mp3',
+        title: '  Song Title  ',
+        artist: '  Artist  ',
+      },
+    })
+
+    const result = await TitleExtractor.extractTitle('/music/song.mp3')
+
+    expect(result.title).toBe('Song Title')
+    expect(result.artist).toBe('Artist')
+  })
+})
+
+describe('extractTitlesBatch (with Tauri mock)', () => {
+  it('should extract titles for multiple files', async () => {
+    setupInvokeMocks({
+      get_tracks_metadata_batch: [
+        { path: '/music/song1.mp3', title: 'Song 1', artist: 'Artist 1' },
+        { path: '/music/song2.mp3', title: 'Song 2', artist: 'Artist 2' },
+      ],
+    })
+
+    const result = await TitleExtractor.extractTitlesBatch(['/music/song1.mp3', '/music/song2.mp3'])
+
+    expect(result.size).toBe(2)
+    expect(result.get('/music/song1.mp3')?.title).toBe('Song 1')
+    expect(result.get('/music/song2.mp3')?.title).toBe('Song 2')
+  })
+
+  it('should return empty map for empty input', async () => {
+    const result = await TitleExtractor.extractTitlesBatch([])
+
+    expect(result.size).toBe(0)
+  })
+
+  it('should fall back to filename parsing on batch error', async () => {
+    mockInvoke.mockRejectedValue(new Error('Batch failed'))
+
+    const result = await TitleExtractor.extractTitlesBatch(['/music/Artist - Song.mp3'])
+
+    expect(result.size).toBe(1)
+    expect(result.get('/music/Artist - Song.mp3')?.title).toBe('Song')
+    expect(result.get('/music/Artist - Song.mp3')?.isFromMetadata).toBe(false)
+  })
+
+  it('should include audio info from metadata', async () => {
+    setupInvokeMocks({
+      get_tracks_metadata_batch: [
+        {
+          path: '/music/song.mp3',
+          title: 'Song',
+          duration: 180,
+          bitrate: 320,
+          sampleRate: 44100,
+          channels: 2,
+          format: 'mp3',
+        },
+      ],
+    })
+
+    const result = await TitleExtractor.extractTitlesBatch(['/music/song.mp3'])
+    const info = result.get('/music/song.mp3')
+
+    expect(info?.duration).toBe(180)
+    expect(info?.bitrate).toBe(320)
+    expect(info?.sampleRate).toBe(44100)
+    expect(info?.channels).toBe(2)
+    expect(info?.format).toBe('mp3')
+  })
+
+  it('should handle files without metadata title', async () => {
+    setupInvokeMocks({
+      get_tracks_metadata_batch: [{ path: '/music/Artist - Song.mp3', duration: 180 }],
+    })
+
+    const result = await TitleExtractor.extractTitlesBatch(['/music/Artist - Song.mp3'])
+    const info = result.get('/music/Artist - Song.mp3')
+
+    expect(info?.title).toBe('Song')
+    expect(info?.artist).toBe('Artist')
+    expect(info?.duration).toBe(180)
+    expect(info?.isFromMetadata).toBe(false)
+  })
+})

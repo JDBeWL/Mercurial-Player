@@ -3,7 +3,7 @@
     <div class="content-header">
       <h3>{{ $t('config.equalizer') || 'EQ 均衡器' }}</h3>
       <div class="header-actions">
-        <button @click="resetEq" class="icon-button" :title="$t('config.reset') || '重置'">
+        <button class="icon-button" :title="$t('config.reset') || '重置'" @click="resetEq">
           <span class="material-symbols-rounded">restart_alt</span>
         </button>
       </div>
@@ -44,9 +44,9 @@
         <span class="preamp-value">{{ preamp > 0 ? '+' : '' }}{{ preamp.toFixed(1) }} dB</span>
       </div>
       <div
+        ref="preampSlider"
         class="slider horizontal"
         :class="{ disabled: !enabled, dragging: preampDragging }"
-        ref="preampSlider"
         @mousedown="startPreampDrag"
         @click="handlePreampClick"
       >
@@ -61,11 +61,13 @@
       <label class="section-label">{{ $t('config.eqBands') || '频段调节' }}</label>
       <div class="bands-container">
         <div v-for="(band, index) in bands" :key="index" class="band-control">
-          <div class="band-value">{{ gains[index] > 0 ? '+' : '' }}{{ gains[index].toFixed(1) }}</div>
+          <div class="band-value">
+            {{ gains[index] > 0 ? '+' : '' }}{{ gains[index].toFixed(1) }}
+          </div>
           <div
+            :ref="(el) => (bandSliders[index] = el as HTMLElement)"
             class="slider vertical"
             :class="{ disabled: !enabled, dragging: bandDragging === index }"
-            :ref="el => bandSliders[index] = el as HTMLElement"
             @mousedown="(e) => startBandDrag(e, index)"
             @click="(e) => handleBandClick(e, index)"
           >
@@ -81,9 +83,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
-import logger from '../../utils/logger';
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+import logger from '../../utils/logger'
 
 // EQ 频段信息(由后端 get_eq_bands 返回)
 interface EqBandInfo {
@@ -106,51 +108,51 @@ interface EqPreset {
 }
 
 // 状态
-const enabled = ref<boolean>(false);
-const preamp = ref<number>(0);
-const gains = ref<number[]>([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-const bands = ref<EqBandInfo[]>([]);
-const presets = ref<EqPreset[]>([]);
-const currentPreset = ref<string>('Flat');
+const enabled = ref<boolean>(false)
+const preamp = ref<number>(0)
+const gains = ref<number[]>([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+const bands = ref<EqBandInfo[]>([])
+const presets = ref<EqPreset[]>([])
+const currentPreset = ref<string>('Flat')
 
 // 滑块引用
-const preampSlider = ref<HTMLElement | null>(null);
+const preampSlider = ref<HTMLElement | null>(null)
 // 模板中使用函数式 ref 绑定,el 类型为 Element | ComponentPublicInstance | null,
 // 使用 unknown[] 存储以兼容该联合类型,读取时断言为 HTMLElement
-const bandSliders = ref<unknown[]>([]);
+const bandSliders = ref<unknown[]>([])
 
 // 拖拽状态
-const preampDragging = ref<boolean>(false);
-const bandDragging = ref<number>(-1);
+const preampDragging = ref<boolean>(false)
+const bandDragging = ref<number>(-1)
 
 // 增益范围
-const MIN_GAIN = -8;
-const MAX_GAIN = 8;
+const MIN_GAIN = -8
+const MAX_GAIN = 8
 
 // 预设名称映射
 const presetLabels: Record<string, string> = {
   'Bass Boost': '低音增强',
   'Treble Boost': '高音增强',
-  'Vocal': '人声',
-  'Rock': '摇滚',
-  'Pop': '流行',
-  'Jazz': '爵士',
-  'Classical': '古典',
-  'Electronic': '电子',
-  'Acoustic': '原声'
-};
+  Vocal: '人声',
+  Rock: '摇滚',
+  Pop: '流行',
+  Jazz: '爵士',
+  Classical: '古典',
+  Electronic: '电子',
+  Acoustic: '原声',
+}
 
-const getPresetLabel = (name: string): string => presetLabels[name] || name;
+const getPresetLabel = (name: string): string => presetLabels[name] || name
 
 // 计算前置增益百分比 (0-100)
 const preampPercent = computed<number>(() => {
-  return ((preamp.value - MIN_GAIN) / (MAX_GAIN - MIN_GAIN)) * 100;
-});
+  return ((preamp.value - MIN_GAIN) / (MAX_GAIN - MIN_GAIN)) * 100
+})
 
 // 计算频段增益百分比
 const getBandPercent = (index: number): number => {
-  return ((gains.value[index] - MIN_GAIN) / (MAX_GAIN - MIN_GAIN)) * 100;
-};
+  return ((gains.value[index] - MIN_GAIN) / (MAX_GAIN - MIN_GAIN)) * 100
+}
 
 // 加载 EQ 设置
 const loadSettings = async (): Promise<void> => {
@@ -158,160 +160,160 @@ const loadSettings = async (): Promise<void> => {
     const [bandsData, settings, presetsData] = await Promise.all([
       invoke<EqBandInfo[]>('get_eq_bands'),
       invoke<EqSettings>('get_eq_settings'),
-      invoke<EqPreset[]>('get_eq_presets')
-    ]);
+      invoke<EqPreset[]>('get_eq_presets'),
+    ])
 
-    bands.value = bandsData;
-    enabled.value = settings.enabled;
-    preamp.value = settings.preamp;
-    gains.value = settings.gains;
-    presets.value = presetsData;
+    bands.value = bandsData
+    enabled.value = settings.enabled
+    preamp.value = settings.preamp
+    gains.value = settings.gains
+    presets.value = presetsData
 
-    detectCurrentPreset();
+    detectCurrentPreset()
   } catch (error) {
-    logger.error('Failed to load EQ settings:', error);
+    logger.error('Failed to load EQ settings:', error)
   }
-};
+}
 
 // 检测当前预设
 const detectCurrentPreset = (): void => {
   for (const preset of presets.value) {
-    const match = preset.gains.every((g, i) => Math.abs(g - gains.value[i]) < 0.1);
+    const match = preset.gains.every((g, i) => Math.abs(g - gains.value[i]) < 0.1)
     if (match) {
-      currentPreset.value = preset.name;
-      return;
+      currentPreset.value = preset.name
+      return
     }
   }
-  currentPreset.value = '';
-};
+  currentPreset.value = ''
+}
 
 // 切换启用状态
 const toggleEnabled = async (): Promise<void> => {
   try {
-    await invoke('set_eq_enabled', { enabled: !enabled.value });
-    enabled.value = !enabled.value;
+    await invoke('set_eq_enabled', { enabled: !enabled.value })
+    enabled.value = !enabled.value
   } catch (error) {
-    logger.error('Failed to toggle EQ:', error);
+    logger.error('Failed to toggle EQ:', error)
   }
-};
+}
 
 // 前置增益滑块处理
 const handlePreampClick = (e: MouseEvent): void => {
-  if (!enabled.value || !preampSlider.value) return;
-  void updatePreampFromEvent(e);
-};
+  if (!enabled.value || !preampSlider.value) return
+  void updatePreampFromEvent(e)
+}
 
 const startPreampDrag = (e: MouseEvent): void => {
-  if (!enabled.value) return;
-  preampDragging.value = true;
-  void updatePreampFromEvent(e);
+  if (!enabled.value) return
+  preampDragging.value = true
+  void updatePreampFromEvent(e)
 
-  document.addEventListener('mousemove', onPreampDrag);
-  document.addEventListener('mouseup', stopPreampDrag);
-};
+  document.addEventListener('mousemove', onPreampDrag)
+  document.addEventListener('mouseup', stopPreampDrag)
+}
 
 const onPreampDrag = (e: MouseEvent): void => {
-  if (!preampDragging.value) return;
-  void updatePreampFromEvent(e);
-};
+  if (!preampDragging.value) return
+  void updatePreampFromEvent(e)
+}
 
 const stopPreampDrag = (): void => {
-  preampDragging.value = false;
-  document.removeEventListener('mousemove', onPreampDrag);
-  document.removeEventListener('mouseup', stopPreampDrag);
-};
+  preampDragging.value = false
+  document.removeEventListener('mousemove', onPreampDrag)
+  document.removeEventListener('mouseup', stopPreampDrag)
+}
 
 const updatePreampFromEvent = async (e: MouseEvent): Promise<void> => {
-  if (!preampSlider.value) return;
+  if (!preampSlider.value) return
 
-  const rect = preampSlider.value.getBoundingClientRect();
-  const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN);
-  const roundedValue = Math.round(newValue * 2) / 2; // 四舍五入到 0.5
+  const rect = preampSlider.value.getBoundingClientRect()
+  const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+  const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN)
+  const roundedValue = Math.round(newValue * 2) / 2 // 四舍五入到 0.5
 
   try {
-    await invoke('set_eq_preamp', { preamp: roundedValue });
-    preamp.value = roundedValue;
+    await invoke('set_eq_preamp', { preamp: roundedValue })
+    preamp.value = roundedValue
   } catch (error) {
-    logger.error('Failed to set preamp:', error);
+    logger.error('Failed to set preamp:', error)
   }
-};
+}
 
 // 频段滑块处理
 const handleBandClick = (e: MouseEvent, index: number): void => {
-  if (!enabled.value) return;
-  void updateBandFromEvent(e, index);
-};
+  if (!enabled.value) return
+  void updateBandFromEvent(e, index)
+}
 
 const startBandDrag = (e: MouseEvent, index: number): void => {
-  if (!enabled.value) return;
-  bandDragging.value = index;
-  void updateBandFromEvent(e, index);
+  if (!enabled.value) return
+  bandDragging.value = index
+  void updateBandFromEvent(e, index)
 
   const onDrag = (ev: MouseEvent): void => {
-    if (bandDragging.value !== index) return;
-    void updateBandFromEvent(ev, index);
-  };
+    if (bandDragging.value !== index) return
+    void updateBandFromEvent(ev, index)
+  }
 
   const stopDrag = (): void => {
-    bandDragging.value = -1;
-    document.removeEventListener('mousemove', onDrag);
-    document.removeEventListener('mouseup', stopDrag);
-  };
+    bandDragging.value = -1
+    document.removeEventListener('mousemove', onDrag)
+    document.removeEventListener('mouseup', stopDrag)
+  }
 
-  document.addEventListener('mousemove', onDrag);
-  document.addEventListener('mouseup', stopDrag);
-};
+  document.addEventListener('mousemove', onDrag)
+  document.addEventListener('mouseup', stopDrag)
+}
 
 const updateBandFromEvent = async (e: MouseEvent, index: number): Promise<void> => {
-  const slider = bandSliders.value[index] as HTMLElement | null;
-  if (!slider) return;
+  const slider = bandSliders.value[index] as HTMLElement | null
+  if (!slider) return
 
-  const rect = slider.getBoundingClientRect();
+  const rect = slider.getBoundingClientRect()
   // 垂直滑块：从底部计算
-  const percent = Math.max(0, Math.min(1, (rect.bottom - e.clientY) / rect.height));
-  const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN);
-  const roundedValue = Math.round(newValue * 2) / 2;
+  const percent = Math.max(0, Math.min(1, (rect.bottom - e.clientY) / rect.height))
+  const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN)
+  const roundedValue = Math.round(newValue * 2) / 2
 
   try {
-    await invoke('set_eq_band_gain', { band: index, gain: roundedValue });
-    gains.value[index] = roundedValue;
-    currentPreset.value = '';
+    await invoke('set_eq_band_gain', { band: index, gain: roundedValue })
+    gains.value[index] = roundedValue
+    currentPreset.value = ''
   } catch (error) {
-    logger.error('Failed to set band gain:', error);
+    logger.error('Failed to set band gain:', error)
   }
-};
+}
 
 // 应用预设
 const applyPreset = async (preset: EqPreset): Promise<void> => {
   try {
-    await invoke('apply_eq_preset', { presetName: preset.name });
-    gains.value = [...preset.gains];
-    currentPreset.value = preset.name;
+    await invoke('apply_eq_preset', { presetName: preset.name })
+    gains.value = [...preset.gains]
+    currentPreset.value = preset.name
   } catch (error) {
-    logger.error('Failed to apply preset:', error);
+    logger.error('Failed to apply preset:', error)
   }
-};
+}
 
 // 重置 EQ
 const resetEq = async (): Promise<void> => {
   try {
-    await invoke('reset_eq');
-    await loadSettings();
+    await invoke('reset_eq')
+    await loadSettings()
   } catch (error) {
-    logger.error('Failed to reset EQ:', error);
+    logger.error('Failed to reset EQ:', error)
   }
-};
+}
 
 onMounted(() => {
-  void loadSettings();
-});
+  void loadSettings()
+})
 
 onUnmounted(() => {
   // 清理可能残留的事件监听器
-  document.removeEventListener('mousemove', onPreampDrag);
-  document.removeEventListener('mouseup', stopPreampDrag);
-});
+  document.removeEventListener('mousemove', onPreampDrag)
+  document.removeEventListener('mouseup', stopPreampDrag)
+})
 </script>
 
 <style scoped>
@@ -538,7 +540,9 @@ onUnmounted(() => {
   background-color: var(--md-sys-color-primary);
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.1s ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   /* 显式覆盖全局 .slider-thumb 的 opacity: 0，
      让滑柄默认可见，而不是仅在 hover 时才显示 */
@@ -639,7 +643,9 @@ onUnmounted(() => {
   background-color: var(--md-sys-color-primary);
   border-radius: 50%;
   transform: translate(-50%, 50%);
-  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.1s ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   /* 显式覆盖全局 .slider-thumb 的 opacity: 0，
      让滑柄默认可见，而不是仅在 hover 时才显示 */

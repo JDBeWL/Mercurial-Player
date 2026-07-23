@@ -3,7 +3,7 @@
     <div class="library-header">
       <h2 class="library-title">{{ $t('library.title') }}</h2>
       <div class="header-actions">
-        <button class="icon-button" @click="refreshDirectoryTrees" title="刷新音乐库">
+        <button class="icon-button" title="刷新音乐库" @click="refreshDirectoryTrees">
           <span class="material-symbols-rounded">refresh</span>
         </button>
         <button class="icon-button" @click="handleClose">
@@ -11,31 +11,32 @@
         </button>
       </div>
     </div>
-    
-    
+
     <div class="library-content">
       <!-- 搜索栏 -->
-      <div class="search-bar" v-if="musicFolders.length > 0">
+      <div v-if="musicFolders.length > 0" class="search-bar">
         <div class="search-input-wrapper">
           <span class="material-symbols-rounded">search</span>
-          <input 
-            type="text" 
-            v-model="searchTerm" 
+          <input
+            v-model="searchTerm"
+            type="text"
             :placeholder="$t('library.searchPlaceholder')"
             @input="handleSearch"
           />
-          <button class="icon-button" @click="clearSearch" v-if="searchTerm">
+          <button v-if="searchTerm" class="icon-button" @click="clearSearch">
             <span class="material-symbols-rounded">close</span>
           </button>
         </div>
       </div>
-      
+
       <!-- 搜索结果 -->
-      <div class="search-results" v-if="searchResults.length > 0">
-        <h3 class="section-title">{{ $t('library.searchResults') }} ({{ searchResults.length }})</h3>
+      <div v-if="searchResults.length > 0" class="search-results">
+        <h3 class="section-title">
+          {{ $t('library.searchResults') }} ({{ searchResults.length }})
+        </h3>
         <div class="list">
-          <div 
-            v-for="(file, index) in searchResults" 
+          <div
+            v-for="(file, index) in searchResults"
             :key="`search-${index}`"
             class="list-item"
             @click="playFile(file)"
@@ -44,42 +45,63 @@
               <span class="material-symbols-rounded">music_note</span>
             </div>
             <div class="list-item-content">
-              <div class="list-item-headline" :title="file.displayTitle || file.name">{{ file.displayTitle || file.name }}</div>
-              <div class="list-item-supporting" :title="(file.displayArtist || file.artist || '') + (file.displayArtist ? ' • ' : '') + file.folderName">
-                {{ file.displayArtist || file.artist || '' }} 
-                {{ file.displayArtist ? '•' : '' }} 
+              <div class="list-item-headline" :title="file.displayTitle || file.name">
+                {{ file.displayTitle || file.name }}
+              </div>
+              <div
+                class="list-item-supporting"
+                :title="
+                  (file.displayArtist || file.artist || '') +
+                  (file.displayArtist ? ' • ' : '') +
+                  file.folderName
+                "
+              >
+                {{ file.displayArtist || file.artist || '' }}
+                {{ file.displayArtist ? '•' : '' }}
                 {{ file.folderName }}
               </div>
             </div>
             <div class="list-item-trailing">
-              <button class="icon-button" @click.stop="addFileNext(file)" :title="$t('library.playNext') || '播放下一首'">
+              <button
+                class="icon-button"
+                :title="$t('library.playNext') || '播放下一首'"
+                @click.stop="addFileNext(file)"
+              >
                 <span class="material-symbols-rounded">playlist_add</span>
               </button>
             </div>
           </div>
         </div>
       </div>
-      
+
       <!-- 播放列表和目录结构 -->
-      <div class="library-structure" v-if="!searchTerm && musicFolders.length > 0">
-        
+      <div v-if="!searchTerm && musicFolders.length > 0" class="library-structure">
         <!-- 播放列表 -->
-        <div class="library-playlists" v-if="playlists.length > 0">
+        <div v-if="playlists.length > 0" class="library-playlists">
           <div class="playlists-header">
             <h3 class="section-title">
               {{ $t('library.playlists') }}
-              <button class="text-button" @click="playAll" v-if="playlists.length > 0" title="播放全部歌曲">
+              <button
+                v-if="playlists.length > 0"
+                class="text-button"
+                title="播放全部歌曲"
+                @click="playAll"
+              >
                 <span class="material-symbols-rounded">play_arrow</span>
                 播放全部歌曲
               </button>
             </h3>
-            <button class="text-button sort-button" @click="toggleSortOrder" :title="$t('library.toggleSortOrder')">
+            <button
+              class="text-button sort-button"
+              :title="$t('library.toggleSortOrder')"
+              @click="toggleSortOrder"
+            >
               {{ configStore.playlist.sortOrder === 'asc' ? 'A-Z' : 'Z-A' }}
             </button>
           </div>
           <div class="list">
-            <div 
-              v-for="(playlist, index) in enhancedPlaylists" 
+            <div
+              v-for="(playlist, index) in enhancedPlaylists"
               :key="`playlist-${index}`"
               class="list-item"
               @click="loadPlaylist(playlist)"
@@ -106,7 +128,7 @@
             </div>
           </div>
         </div>
-        
+
         <!-- 目录结构 -->
         <!-- <div class="library-directories" v-if="directoryStats.totalDirectories > 0">
           <h3 class="section-title">
@@ -118,9 +140,9 @@
           </h3>
         </div> -->
       </div>
-      
+
       <!-- 空状态 -->
-      <div class="library-empty" v-if="musicFolders.length === 0">
+      <div v-if="musicFolders.length === 0" class="library-empty">
         <div class="empty-state">
           <span class="material-symbols-rounded">folder_open</span>
           <h3>{{ $t('library.emptyTitle') }}</h3>
@@ -130,9 +152,9 @@
           </button>
         </div>
       </div>
-      
+
       <!-- 轻量刷新提示：顶部细进度条（不打断浏览） -->
-      <div class="top-loading-bar" v-if="isLoading" aria-live="polite">
+      <div v-if="isLoading" class="top-loading-bar" aria-live="polite">
         <div class="top-loading-bar__track">
           <div class="top-loading-bar__fill"></div>
         </div>
@@ -143,7 +165,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, computed, shallowRef, watch } from 'vue'
+import { ref, reactive, onMounted, computed, shallowRef, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useMusicLibraryStore } from '../stores/musicLibrary'
 import { usePlayerStore } from '../stores/player'
@@ -170,14 +192,13 @@ interface EnhancedPlaylist extends Playlist {
 }
 
 const emit = defineEmits<{
-  'close': []
+  close: []
 }>()
 const { t } = useI18n()
 
 const musicLibraryStore = useMusicLibraryStore()
 const playerStore = usePlayerStore()
 const configStore = useConfigStore()
-
 
 // 关闭处理
 const handleClose = (): void => {
@@ -192,7 +213,7 @@ const directoryStats = reactive<LibraryStats>({
   totalDirectories: 0,
   totalAudioFiles: 0,
   totalPlaylists: 0,
-  maxDepth: 0
+  maxDepth: 0,
 })
 
 // 使用 shallowRef 缓存 enhancedPlaylists 结果，减少响应式开销
@@ -203,7 +224,7 @@ const lastSortOrder = ref<string>('')
 // 计算播放列表的哈希值用于检测变化
 const getPlaylistsHash = (): string => {
   if (!playlists.value.length) return ''
-  return playlists.value.map(p => `${p.name}:${p.files?.length || 0}`).join('|')
+  return playlists.value.map((p) => `${p.name}:${p.files?.length || 0}`).join('|')
 }
 
 // 实际的计算逻辑
@@ -215,7 +236,7 @@ const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
   const uniqueFiles = new Set<string>()
 
   // 检查是否有全部歌曲播放列表
-  const hasAllSongsPlaylist = playlists.value.some(p => p.name === '全部歌曲')
+  const hasAllSongsPlaylist = playlists.value.some((p) => p.name === '全部歌曲')
 
   // 处理全部歌曲播放列表
   for (const playlist of playlists.value) {
@@ -237,7 +258,7 @@ const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
       files: allSongsFiles,
       subdirectoryCount: 0,
       totalFiles: allSongsFiles.length,
-      isAllSongsPlaylist: true
+      isAllSongsPlaylist: true,
     })
   }
 
@@ -245,19 +266,16 @@ const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
   for (const playlist of playlists.value) {
     if (playlist.files && playlist.files.length > 0) {
       // 处理播放列表名称，如果为"全部歌曲"，则加上文件数量
-      let playlistName = playlist.name
-      if (playlist.name === '全部歌曲') {
-        playlistName = `全部歌曲 (${playlist.files.length} 首)`
-      } else {
-        playlistName = `${playlist.name} (${playlist.files.length} 首)`
-      }
+      const playlistName = playlist.name === '全部歌曲'
+        ? `全部歌曲 (${playlist.files.length} 首)`
+        : `${playlist.name} (${playlist.files.length} 首)`
 
       allPlaylists.push({
         ...playlist,
         totalFiles: playlist.files.length,
         subdirectoryCount: 0,
         name: playlistName,
-        isAllSongsPlaylist: playlist.name === '全部歌曲'
+        isAllSongsPlaylist: playlist.name === '全部歌曲',
       })
     }
   }
@@ -304,7 +322,7 @@ watch(
       cachedEnhancedPlaylists.value = computeEnhancedPlaylists()
     }
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 // 使用缓存的结果
@@ -363,32 +381,30 @@ const refreshDirectoryTrees = async (): Promise<void> => {
   }
 }
 
-
-
 const calculateDirectoryStats = async (): Promise<void> => {
   if (!playlists.value.length) {
     Object.assign(directoryStats, {
       totalDirectories: 0,
       totalAudioFiles: 0,
       totalPlaylists: 0,
-      maxDepth: 0
+      maxDepth: 0,
     })
     return
   }
 
-  let totalDirs = 0
-  let totalFiles = 0
+  let totalDirs: number
+  let totalFiles: number
   let allAudioFiles = new Set<string>() // 使用Set来去重
   let allDirectories = new Set<string>() // 使用Set来去重目录
 
   // 统计所有播放列表的实际文件和目录
   for (const playlist of playlists.value) {
     if (playlist.files) {
-      playlist.files.forEach(file => allAudioFiles.add(file.path))
+      playlist.files.forEach((file) => allAudioFiles.add(file.path))
     }
     if (playlist.name !== '全部歌曲' && playlist.files && playlist.files.length > 0) {
       // 如果不是"全部歌曲"，则添加到目录中
-      allDirectories.add(playlist.name);
+      allDirectories.add(playlist.name)
     }
   }
 
@@ -399,7 +415,7 @@ const calculateDirectoryStats = async (): Promise<void> => {
     totalDirectories: totalDirs,
     totalAudioFiles: totalFiles,
     totalPlaylists: enhancedPlaylists.value.length,
-    maxDepth: 3
+    maxDepth: 3,
   })
 }
 
@@ -423,11 +439,12 @@ const handleSearch = async (): Promise<void> => {
 
     for (const playlist of playlists.value) {
       if (playlist.files) {
-        const results = playlist.files.filter(file =>
-          (file.title && file.title.toLowerCase().includes(lowerCaseSearchTerm)) ||
-          (file.artist && file.artist.toLowerCase().includes(lowerCaseSearchTerm)) ||
-          (file.album && file.album.toLowerCase().includes(lowerCaseSearchTerm)) ||
-          (file.name && file.name.toLowerCase().includes(lowerCaseSearchTerm))
+        const results = playlist.files.filter(
+          (file) =>
+            (file.title && file.title.toLowerCase().includes(lowerCaseSearchTerm)) ||
+            (file.artist && file.artist.toLowerCase().includes(lowerCaseSearchTerm)) ||
+            (file.album && file.album.toLowerCase().includes(lowerCaseSearchTerm)) ||
+            (file.name && file.name.toLowerCase().includes(lowerCaseSearchTerm)),
         )
 
         // 去重
@@ -465,13 +482,11 @@ const clearSearch = (): void => {
   searchResults.value = []
 }
 
-
-
 // 播放控制
 const openFolderDialog = async (): Promise<void> => {
   try {
     const selected = await FileUtils.selectFolder({
-      title: '选择音乐文件夹'
+      title: '选择音乐文件夹',
     })
 
     if (selected) {
@@ -501,7 +516,7 @@ const openFolderDialog = async (): Promise<void> => {
 // 播放全部（当前显示的全部歌曲播放列表）
 const playAll = async (): Promise<void> => {
   // 找到全部歌曲播放列表
-  const allSongsPlaylist = enhancedPlaylists.value.find(p => p.isAllSongsPlaylist)
+  const allSongsPlaylist = enhancedPlaylists.value.find((p) => p.isAllSongsPlaylist)
   if (allSongsPlaylist && allSongsPlaylist.files.length > 0) {
     await playerStore.loadPlaylist(allSongsPlaylist.files)
     playerStore.play()
@@ -542,7 +557,7 @@ const toggleSortOrder = (): void => {
 const playFile = (file: SearchResult): void => {
   const playlist: Playlist = {
     name: '搜索结果',
-    files: [file]
+    files: [file],
   }
   playPlaylist(playlist)
 }
@@ -552,16 +567,13 @@ const addFileNext = (file: SearchResult): void => {
   logger.info('Added track to play next:', file.displayTitle || file.name)
 
   // 显示成功通知
-  errorHandler.handle(
-    new Error('Track added to play next'),
-    {
-      type: (ErrorType as unknown as Record<string, ErrorType | undefined>)['PLAYBACK_ERROR'],
-      severity: ErrorSeverity.LOW,
-      context: { trackName: file.displayTitle || file.name },
-      showToUser: true,
-      userMessage: t('library.addedToPlayNext')
-    }
-  )
+  errorHandler.handle(new Error('Track added to play next'), {
+    type: (ErrorType as unknown as Record<string, ErrorType | undefined>)['PLAYBACK_ERROR'],
+    severity: ErrorSeverity.LOW,
+    context: { trackName: file.displayTitle || file.name },
+    showToUser: true,
+    userMessage: t('library.addedToPlayNext'),
+  })
 }
 </script>
 
@@ -586,11 +598,11 @@ const addFileNext = (file: SearchResult): void => {
     width: 100vw;
     max-width: 100vw;
   }
-  
+
   .list-item-headline {
     font-size: 14px;
   }
-  
+
   .list-item-supporting {
     font-size: 12px;
   }
@@ -615,8 +627,6 @@ const addFileNext = (file: SearchResult): void => {
   margin: 0;
   color: var(--md-sys-color-on-surface);
 }
-
-
 
 /* 搜索栏 */
 .search-bar {
@@ -679,7 +689,9 @@ const addFileNext = (file: SearchResult): void => {
   color: var(--md-sys-color-on-surface-variant);
 }
 
-.library-playlists, .library-directories, .search-results {
+.library-playlists,
+.library-directories,
+.search-results {
   margin-bottom: 24px;
 }
 
@@ -748,8 +760,6 @@ const addFileNext = (file: SearchResult): void => {
   /* 确保短艺术家名不会有多余空间 */
   max-height: 1.4em; /* 约1行的高度 */
 }
-
-
 
 .list-item-trailing {
   display: flex;
@@ -839,8 +849,12 @@ const addFileNext = (file: SearchResult): void => {
 }
 
 @keyframes top-loading-indeterminate {
-  0% { transform: translateX(-120%); }
-  100% { transform: translateX(420%); }
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(420%);
+  }
 }
 
 .filled-button {
@@ -859,7 +873,11 @@ const addFileNext = (file: SearchResult): void => {
 }
 
 .filled-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-primary-container));
+  background-color: color-mix(
+    in srgb,
+    var(--md-sys-color-on-surface) 8%,
+    var(--md-sys-color-primary-container)
+  );
 }
 
 .text-button {

@@ -1,7 +1,14 @@
 import { invoke } from '@tauri-apps/api/core'
 import { TitleExtractor } from './titleExtractor'
 import logger from './logger'
-import type { Track, Playlist, DirectoryScanConfig, PlaylistConfig, TitleExtractionConfig, LibraryStats } from '@/types'
+import type {
+  Track,
+  Playlist,
+  DirectoryScanConfig,
+  PlaylistConfig,
+  TitleExtractionConfig,
+  LibraryStats,
+} from '@/types'
 
 interface DirectoryNode {
   path: string
@@ -42,17 +49,19 @@ interface ScanConfig {
  * 支持子目录扫描和结构化展示
  */
 export class PlaylistManager {
-
   /**
    * 获取音频文件树结构
    */
-  static async getAudioFileTree(basePath: string, config: ScanConfig = {}): Promise<FileTreeResult> {
+  static async getAudioFileTree(
+    basePath: string,
+    config: ScanConfig = {},
+  ): Promise<FileTreeResult> {
     try {
       const {
         enableSubdirectoryScan = true,
         maxDepth = 3,
         ignoreHiddenFolders = true,
-        folderBlacklist = []
+        folderBlacklist = [],
       } = config.directoryScan || {}
 
       // 获取目录结构
@@ -60,7 +69,7 @@ export class PlaylistManager {
         enableSubdirectoryScan,
         maxDepth,
         ignoreHiddenFolders,
-        folderBlacklist
+        folderBlacklist,
       })
 
       // 从目录树中提取音频文件并生成播放列表
@@ -70,9 +79,8 @@ export class PlaylistManager {
         basePath,
         directoryTree,
         playlists,
-        totalFiles: this.countAudioFiles(directoryTree)
+        totalFiles: this.countAudioFiles(directoryTree),
       }
-
     } catch (error) {
       logger.error('Error getting audio file tree:', error)
       throw error
@@ -89,13 +97,16 @@ export class PlaylistManager {
       maxDepth: number
       ignoreHiddenFolders: boolean
       folderBlacklist: string[]
-    }
+    },
   ): Promise<DirectoryNode | null> {
     const { enableSubdirectoryScan, maxDepth, ignoreHiddenFolders, folderBlacklist } = config
     let scannedCount = 0
     const YIELD_INTERVAL = 10 // 每扫描 10 个目录让出一次主线程
 
-    const scanDirectory = async (path: string, currentDepth: number = 0): Promise<DirectoryNode | null> => {
+    const scanDirectory = async (
+      path: string,
+      currentDepth: number = 0,
+    ): Promise<DirectoryNode | null> => {
       if (currentDepth > maxDepth) {
         return null
       }
@@ -103,7 +114,7 @@ export class PlaylistManager {
       // 定期让出主线程
       scannedCount++
       if (scannedCount % YIELD_INTERVAL === 0) {
-        await new Promise(resolve => setTimeout(resolve, 0))
+        await new Promise((resolve) => setTimeout(resolve, 0))
       }
 
       try {
@@ -115,7 +126,7 @@ export class PlaylistManager {
           name: this.getFolderName(path),
           depth: currentDepth,
           subdirectories: [],
-          audioFiles: []
+          audioFiles: [],
         }
 
         // 扫描当前目录的音频文件
@@ -144,7 +155,6 @@ export class PlaylistManager {
         }
 
         return node
-
       } catch (error) {
         logger.error(`Error scanning directory ${path}:`, error)
         return null
@@ -159,7 +169,7 @@ export class PlaylistManager {
    */
   static async generatePlaylistsFromTree(
     directoryTree: DirectoryNode | null,
-    config: ScanConfig
+    config: ScanConfig,
   ): Promise<ExtendedPlaylist[]> {
     const playlists: ExtendedPlaylist[] = []
 
@@ -172,11 +182,14 @@ export class PlaylistManager {
       // 只有最终音频目录才创建播放列表
       if (node.audioFiles.length > 0 && isFinalAudioDirectory) {
         const playlist: ExtendedPlaylist = {
-          name: TitleExtractor.formatPlaylistName(node.path, config.playlist?.playlistNameFormat || '{folderName}'),
+          name: TitleExtractor.formatPlaylistName(
+            node.path,
+            config.playlist?.playlistNameFormat || '{folderName}',
+          ),
           path: node.path,
           files: await this.processAudioFiles(node.audioFiles, config),
           subdirectoryCount: node.subdirectories.length,
-          totalFiles: node.audioFiles.length
+          totalFiles: node.audioFiles.length,
         }
         playlists.push(playlist)
       }
@@ -199,7 +212,7 @@ export class PlaylistManager {
           files: await this.processAudioFiles(allFiles, config),
           subdirectoryCount: this.countSubdirectories(directoryTree),
           totalFiles: allFiles.length,
-          isAllSongsPlaylist: true
+          isAllSongsPlaylist: true,
         })
       }
     }
@@ -216,7 +229,7 @@ export class PlaylistManager {
     }
 
     // 收集所有文件路径
-    const filePaths = files.map(file => file.path)
+    const filePaths = files.map((file) => file.path)
 
     // 使用批量 API 获取所有标题信息
     const titleInfoMap = await TitleExtractor.extractTitlesBatch(filePaths, config.titleExtraction)
@@ -239,7 +252,7 @@ export class PlaylistManager {
           sampleRate: titleInfo.sampleRate || file.sampleRate || null,
           channels: titleInfo.channels || file.channels || null,
           bitDepth: titleInfo.bitDepth || file.bitDepth || null,
-          format: titleInfo.format || file.format || null
+          format: titleInfo.format || file.format || null,
         })
       } else {
         // 回退方案：如果批量获取失败
@@ -247,8 +260,11 @@ export class PlaylistManager {
           ...file,
           displayTitle: file.name || '',
           displayArtist: '',
-          fileName: TitleExtractor.getFileName(file.path, config.titleExtraction?.hideFileExtension),
-          isFromMetadata: false
+          fileName: TitleExtractor.getFileName(
+            file.path,
+            config.titleExtraction?.hideFileExtension,
+          ),
+          isFromMetadata: false,
         })
       }
     }
@@ -267,7 +283,11 @@ export class PlaylistManager {
   /**
    * 检查是否应该忽略文件夹
    */
-  static shouldIgnoreFolder(folderPath: string, blacklist: string[], ignoreHiddenFolders: boolean): boolean {
+  static shouldIgnoreFolder(
+    folderPath: string,
+    blacklist: string[],
+    ignoreHiddenFolders: boolean,
+  ): boolean {
     const folderName = this.getFolderName(folderPath)
 
     // 检查隐藏文件夹
@@ -334,7 +354,7 @@ export class PlaylistManager {
   static async searchAudioFiles(
     basePath: string,
     searchTerm: string,
-    config: ScanConfig
+    config: ScanConfig,
   ): Promise<(Track & { folderPath: string; folderName: string })[]> {
     try {
       const fileTree = await this.getAudioFileTree(basePath, config)
@@ -349,16 +369,16 @@ export class PlaylistManager {
             file.title || '',
             file.artist || '',
             file.album || '',
-            file.name || ''
+            file.name || '',
           ]
 
-          if (searchFields.some(field =>
-            field.toLowerCase().includes(searchTerm.toLowerCase())
-          )) {
+          if (
+            searchFields.some((field) => field.toLowerCase().includes(searchTerm.toLowerCase()))
+          ) {
             results.push({
               ...file,
               folderPath: node.path,
-              folderName: node.name
+              folderName: node.name,
             })
           }
         }
@@ -372,7 +392,6 @@ export class PlaylistManager {
       searchInNode(fileTree.directoryTree)
 
       return results
-
     } catch (error) {
       logger.error('Error searching audio files:', error)
       throw error
@@ -385,7 +404,7 @@ export class PlaylistManager {
   static async getPlaylistByPath(
     basePath: string,
     targetPath: string,
-    config: ScanConfig
+    config: ScanConfig,
   ): Promise<ExtendedPlaylist | null> {
     try {
       const fileTree = await this.getAudioFileTree(basePath, config)
@@ -395,11 +414,14 @@ export class PlaylistManager {
 
         if (node.path === targetPath) {
           return {
-            name: TitleExtractor.formatPlaylistName(node.path, config.playlist?.playlistNameFormat || '{folderName}'),
+            name: TitleExtractor.formatPlaylistName(
+              node.path,
+              config.playlist?.playlistNameFormat || '{folderName}',
+            ),
             path: node.path,
             files: node.audioFiles,
             subdirectoryCount: node.subdirectories.length,
-            totalFiles: node.audioFiles.length
+            totalFiles: node.audioFiles.length,
           }
         }
 
@@ -412,7 +434,6 @@ export class PlaylistManager {
       }
 
       return findPlaylist(fileTree.directoryTree)
-
     } catch (error) {
       logger.error('Error getting playlist by path:', error)
       throw error
@@ -430,11 +451,10 @@ export class PlaylistManager {
         totalDirectories: this.countDirectories(fileTree.directoryTree),
         totalAudioFiles: fileTree.totalFiles,
         totalPlaylists: fileTree.playlists.length,
-        maxDepth: this.getMaxDepth(fileTree.directoryTree)
+        maxDepth: this.getMaxDepth(fileTree.directoryTree),
       }
 
       return stats
-
     } catch (error) {
       logger.error('Error getting directory stats:', error)
       throw error

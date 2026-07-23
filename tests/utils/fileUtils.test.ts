@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { FileUtils } from '@/utils/fileUtils'
 import { mockInvoke, mockOpen, resetTauriMocks, setupInvokeMocks } from '../mocks/tauri'
 
@@ -129,68 +129,74 @@ describe('FileUtils', () => {
   describe('selectFolder (with Tauri mock)', () => {
     it('should return selected folder path', async () => {
       mockOpen.mockResolvedValue('/selected/folder')
-      
+
       const result = await FileUtils.selectFolder()
-      
+
       expect(result).toBe('/selected/folder')
-      expect(mockOpen).toHaveBeenCalledWith(expect.objectContaining({
-        directory: true,
-        multiple: false,
-      }))
+      expect(mockOpen).toHaveBeenCalledWith(
+        expect.objectContaining({
+          directory: true,
+          multiple: false,
+        }),
+      )
     })
 
     it('should return null when cancelled', async () => {
       mockOpen.mockResolvedValue(null)
-      
+
       const result = await FileUtils.selectFolder()
-      
+
       expect(result).toBeNull()
     })
 
     it('should return null on error', async () => {
       mockOpen.mockRejectedValue(new Error('Permission denied'))
-      
+
       const result = await FileUtils.selectFolder()
-      
+
       expect(result).toBeNull()
     })
 
     it('should pass custom options', async () => {
       mockOpen.mockResolvedValue('/custom/path')
-      
+
       await FileUtils.selectFolder({ title: 'Custom Title' })
-      
-      expect(mockOpen).toHaveBeenCalledWith(expect.objectContaining({
-        title: 'Custom Title',
-      }))
+
+      expect(mockOpen).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Custom Title',
+        }),
+      )
     })
   })
 
   describe('selectFiles (with Tauri mock)', () => {
     it('should return selected files', async () => {
       mockOpen.mockResolvedValue(['/file1.mp3', '/file2.mp3'])
-      
+
       const result = await FileUtils.selectFiles()
-      
+
       expect(result).toEqual(['/file1.mp3', '/file2.mp3'])
-      expect(mockOpen).toHaveBeenCalledWith(expect.objectContaining({
-        multiple: true,
-      }))
+      expect(mockOpen).toHaveBeenCalledWith(
+        expect.objectContaining({
+          multiple: true,
+        }),
+      )
     })
 
     it('should return null when cancelled', async () => {
       mockOpen.mockResolvedValue(null)
-      
+
       const result = await FileUtils.selectFiles()
-      
+
       expect(result).toBeNull()
     })
 
     it('should return null on error', async () => {
       mockOpen.mockRejectedValue(new Error('Error'))
-      
+
       const result = await FileUtils.selectFiles()
-      
+
       expect(result).toBeNull()
     })
   })
@@ -200,18 +206,18 @@ describe('FileUtils', () => {
       setupInvokeMocks({
         read_directory: ['folder1', 'folder2'],
       })
-      
+
       const result = await FileUtils.readDirectory('/music')
-      
+
       expect(result).toEqual(['folder1', 'folder2'])
       expect(mockInvoke).toHaveBeenCalledWith('read_directory', { path: '/music' })
     })
 
     it('should return empty array on error', async () => {
       mockInvoke.mockRejectedValue(new Error('Not found'))
-      
+
       const result = await FileUtils.readDirectory('/invalid')
-      
+
       expect(result).toEqual([])
     })
   })
@@ -225,17 +231,17 @@ describe('FileUtils', () => {
       setupInvokeMocks({
         get_audio_files: mockPlaylist,
       })
-      
+
       const result = await FileUtils.getAudioFiles('/music/Rock')
-      
+
       expect(result).toEqual(mockPlaylist)
     })
 
     it('should return empty playlist on error', async () => {
       mockInvoke.mockRejectedValue(new Error('Error'))
-      
+
       const result = await FileUtils.getAudioFiles('/invalid')
-      
+
       expect(result).toEqual({ name: '', files: [] })
     })
   })
@@ -245,9 +251,9 @@ describe('FileUtils', () => {
       setupInvokeMocks({
         check_file_exists: true,
       })
-      
+
       const result = await FileUtils.fileExists('/music/song.mp3')
-      
+
       expect(result).toBe(true)
     })
 
@@ -255,17 +261,17 @@ describe('FileUtils', () => {
       setupInvokeMocks({
         check_file_exists: false,
       })
-      
+
       const result = await FileUtils.fileExists('/music/missing.mp3')
-      
+
       expect(result).toBe(false)
     })
 
     it('should return false on error', async () => {
       mockInvoke.mockRejectedValue(new Error('Error'))
-      
+
       const result = await FileUtils.fileExists('/invalid')
-      
+
       expect(result).toBe(false)
     })
   })
@@ -275,17 +281,17 @@ describe('FileUtils', () => {
       setupInvokeMocks({
         read_lyrics_file: '[00:01.00]Hello world',
       })
-      
+
       const result = await FileUtils.readFile('/music/song.lrc')
-      
+
       expect(result).toBe('[00:01.00]Hello world')
     })
 
     it('should return empty string on error', async () => {
       mockInvoke.mockRejectedValue(new Error('Error'))
-      
+
       const result = await FileUtils.readFile('/invalid')
-      
+
       expect(result).toBe('')
     })
   })
@@ -295,9 +301,9 @@ describe('FileUtils', () => {
       setupInvokeMocks({
         check_file_exists: (args: { path: string }) => args.path.endsWith('.lrc'),
       })
-      
+
       const result = await FileUtils.findLyricsFile('/music/song.mp3')
-      
+
       expect(result).toBe('/music/song.lrc')
     })
 
@@ -305,9 +311,9 @@ describe('FileUtils', () => {
       setupInvokeMocks({
         check_file_exists: (args: { path: string }) => args.path.endsWith('.ass'),
       })
-      
+
       const result = await FileUtils.findLyricsFile('/music/song.mp3')
-      
+
       expect(result).toBe('/music/song.ass')
     })
 
@@ -315,9 +321,9 @@ describe('FileUtils', () => {
       setupInvokeMocks({
         check_file_exists: (args: { path: string }) => args.path.endsWith('.srt'),
       })
-      
+
       const result = await FileUtils.findLyricsFile('/music/song.mp3')
-      
+
       expect(result).toBe('/music/song.srt')
     })
 
@@ -325,9 +331,9 @@ describe('FileUtils', () => {
       setupInvokeMocks({
         check_file_exists: false,
       })
-      
+
       const result = await FileUtils.findLyricsFile('/music/song.mp3')
-      
+
       expect(result).toBeNull()
     })
   })

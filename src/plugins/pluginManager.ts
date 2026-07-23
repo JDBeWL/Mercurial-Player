@@ -19,31 +19,31 @@ const STORAGE_PREFIX = 'mercurial-plugin-storage-'
 // 插件状态
 export const PluginState = {
   UNREGISTERED: 'unregistered',
-  REGISTERED: 'registered', 
+  REGISTERED: 'registered',
   LOADING: 'loading',
   ACTIVE: 'active',
   UNLOADING: 'unloading',
   INACTIVE: 'inactive',
   ERROR: 'error',
-  DISABLED: 'disabled'
+  DISABLED: 'disabled',
 } as const
 
-export type PluginStateType = typeof PluginState[keyof typeof PluginState]
+export type PluginStateType = (typeof PluginState)[keyof typeof PluginState]
 
 // 插件权限
 export const PluginPermission = {
-  PLAYER_READ: 'player:read',       // 读取播放器状态
+  PLAYER_READ: 'player:read', // 读取播放器状态
   PLAYER_CONTROL: 'player:control', // 控制播放器
-  LIBRARY_READ: 'library:read',     // 读取音乐库
+  LIBRARY_READ: 'library:read', // 读取音乐库
   LYRICS_PROVIDER: 'lyrics:provider', // 提供歌词源
-  UI_EXTEND: 'ui:extend',           // 扩展 UI
-  VISUALIZER: 'visualizer',         // 可视化效果
-  THEME: 'theme',                   // 主题
-  STORAGE: 'storage',               // 本地存储
-  NETWORK: 'network',               // 网络请求
+  UI_EXTEND: 'ui:extend', // 扩展 UI
+  VISUALIZER: 'visualizer', // 可视化效果
+  THEME: 'theme', // 主题
+  STORAGE: 'storage', // 本地存储
+  NETWORK: 'network', // 网络请求
 } as const
 
-export type PluginPermissionType = typeof PluginPermission[keyof typeof PluginPermission]
+export type PluginPermissionType = (typeof PluginPermission)[keyof typeof PluginPermission]
 
 // 插件 API 类型
 export interface PluginAPI {
@@ -116,7 +116,10 @@ export interface PluginAPI {
     fetch: (url: string, options?: RequestInit) => Promise<Response>
   }
   utils: {
-    createCanvas: (width: number, height: number) => { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null }
+    createCanvas: (
+      width: number,
+      height: number,
+    ) => { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null }
     canvasToBlob: (canvas: HTMLCanvasElement, type?: string, quality?: number) => Promise<Blob>
     canvasToDataURL: (canvas: HTMLCanvasElement, type?: string, quality?: number) => string
     loadImage: (src: string) => Promise<HTMLImageElement>
@@ -127,7 +130,11 @@ export interface PluginAPI {
   }
   file: {
     saveAs: (data: Blob | Uint8Array | string, options?: SaveAsOptions) => Promise<string | null>
-    saveImage: (image: HTMLCanvasElement | Blob | string, defaultName?: string, format?: string) => Promise<string | null>
+    saveImage: (
+      image: HTMLCanvasElement | Blob | string,
+      defaultName?: string,
+      format?: string,
+    ) => Promise<string | null>
     openScreenshotsDirectory: () => Promise<void>
   }
   clipboard: {
@@ -362,7 +369,7 @@ class PluginManager {
    */
   async init(): Promise<void> {
     const playerStore = usePlayerStore()
-    
+
     this._playerWatcherStop = watch(
       () => ({
         track: playerStore.currentTrack,
@@ -371,14 +378,14 @@ class PluginManager {
       (newState, oldState) => {
         const newTrackPath = newState.track?.path
         const oldTrackPath = oldState?.track?.path
-        
+
         if (newTrackPath !== oldTrackPath) {
           this.emit('player:trackChanged', {
             track: newState.track ? { ...newState.track } : null,
             isPlaying: newState.isPlaying,
           })
         }
-        
+
         if (newState.isPlaying !== oldState?.isPlaying) {
           this.emit('player:stateChanged', {
             track: newState.track ? { ...newState.track } : null,
@@ -386,9 +393,9 @@ class PluginManager {
           })
         }
       },
-      { immediate: false }
+      { immediate: false },
     )
-    
+
     logger.info('插件管理器已初始化')
   }
 
@@ -410,8 +417,8 @@ class PluginManager {
     // 停用所有 active 插件(顺序执行,避免并发资源竞争)
     // 收集 active 插件 id 后再调用 deactivate,避免迭代时修改 Map
     const activePluginIds = Array.from(this.plugins.values())
-      .filter(p => p.state === PluginState.ACTIVE)
-      .map(p => p.id)
+      .filter((p) => p.state === PluginState.ACTIVE)
+      .map((p) => p.id)
 
     for (const pluginId of activePluginIds) {
       try {
@@ -487,12 +494,12 @@ class PluginManager {
     }
 
     plugin.state = PluginState.LOADING
-    
+
     try {
       const api = createPluginAPI(pluginId, plugin.permissions, this)
       const sandbox = createPluginSandbox(api)
       const instance = await sandbox.execute(plugin.main)
-      
+
       if (instance && typeof instance.activate === 'function') {
         await sandbox.execute(() => instance.activate!())
       }
@@ -503,7 +510,6 @@ class PluginManager {
 
       logger.info(`插件已激活: ${plugin.name}`)
       this.emit('plugin:activated', { pluginId, plugin })
-
     } catch (error) {
       plugin.state = PluginState.ERROR
       plugin.error = error instanceof Error ? error.message : String(error)
@@ -582,7 +588,7 @@ class PluginManager {
     await this.deactivate(pluginId)
     this.plugins.delete(pluginId)
     this.storage.delete(pluginId)
-    
+
     if (clearStorage) {
       try {
         localStorage.removeItem(STORAGE_PREFIX + pluginId)
@@ -591,7 +597,7 @@ class PluginManager {
         logger.warn(`清除插件存储失败: ${pluginId}`, e)
       }
     }
-    
+
     logger.info(`插件已卸载: ${pluginId}`)
     this.emit('plugin:uninstalled', { pluginId })
   }
@@ -601,13 +607,13 @@ class PluginManager {
    */
   cleanupPluginExtensions(pluginId: string): void {
     for (const key of Object.keys(this.extensions) as (keyof Extensions)[]) {
-      const filtered = this.extensions[key].filter(ext => ext.pluginId !== pluginId)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const filtered = this.extensions[key].filter((ext) => ext.pluginId !== pluginId)
+
       ;(this.extensions as any)[key] = filtered
     }
-    
+
     for (const [event, listeners] of this.eventListeners) {
-      const filtered = listeners.filter(l => l.pluginId !== pluginId)
+      const filtered = listeners.filter((l) => l.pluginId !== pluginId)
       this.eventListeners.set(event, filtered)
     }
   }
@@ -616,15 +622,14 @@ class PluginManager {
    * 注册扩展
    */
   registerExtension<K extends keyof Extensions>(
-    type: K, 
-    pluginId: string, 
-    extension: Omit<Extensions[K][number], 'pluginId'>
+    type: K,
+    pluginId: string,
+    extension: Omit<Extensions[K][number], 'pluginId'>,
   ): void {
     if (!this.extensions[type]) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (this.extensions as any)[type] = []
+      ;(this.extensions as any)[type] = []
     }
-    (this.extensions[type] as { pluginId: string }[]).push({ ...extension, pluginId })
+    ;(this.extensions[type] as { pluginId: string }[]).push({ ...extension, pluginId })
     logger.debug(`插件 ${pluginId} 注册了 ${type} 扩展`)
   }
 
@@ -648,7 +653,7 @@ class PluginManager {
   off(event: string, pluginId: string, callback: EventCallback): void {
     const listeners = this.eventListeners.get(event)
     if (listeners) {
-      const index = listeners.findIndex(l => l.pluginId === pluginId && l.callback === callback)
+      const index = listeners.findIndex((l) => l.pluginId === pluginId && l.callback === callback)
       if (index > -1) {
         listeners.splice(index, 1)
       }
@@ -675,7 +680,7 @@ class PluginManager {
     if (!this.storage.has(pluginId)) {
       const storageKey = STORAGE_PREFIX + pluginId
       let savedData: Record<string, unknown> = {}
-      
+
       try {
         const saved = localStorage.getItem(storageKey)
         if (saved) {
@@ -684,7 +689,7 @@ class PluginManager {
       } catch (e) {
         logger.warn(`加载插件 ${pluginId} 存储失败:`, e)
       }
-      
+
       const storage = reactive(savedData)
       const maxStorageSize = 1024 * 1024
       let saveTimeout: ReturnType<typeof setTimeout> | null = null
@@ -693,7 +698,7 @@ class PluginManager {
       const safeSave = async (target: Record<string, unknown>) => {
         if (isSaving) return // 防止并发保存
         isSaving = true
-        
+
         try {
           const json = JSON.stringify(target)
           if (json.length > maxStorageSize) {
@@ -701,7 +706,9 @@ class PluginManager {
             // 清理大型数组数据
             for (const key of Object.keys(target)) {
               if (Array.isArray(target[key]) && (target[key] as unknown[]).length > 10) {
-                target[key] = (target[key] as unknown[]).slice(-Math.floor((target[key] as unknown[]).length / 2))
+                target[key] = (target[key] as unknown[]).slice(
+                  -Math.floor((target[key] as unknown[]).length / 2),
+                )
               }
             }
           }
@@ -727,12 +734,12 @@ class PluginManager {
           isSaving = false
         }
       }
-      
+
       const debouncedSave = (target: Record<string, unknown>) => {
         if (saveTimeout) clearTimeout(saveTimeout)
         saveTimeout = setTimeout(() => safeSave(target), 300) // 减少延迟
       }
-      
+
       const persistentStorage = new Proxy(storage, {
         set(target, key: string, value) {
           target[key] = value
@@ -743,9 +750,9 @@ class PluginManager {
           delete target[key]
           debouncedSave(target)
           return true
-        }
+        },
       })
-      
+
       // 添加强制保存方法（用于应用关闭时）
       ;(persistentStorage as Record<string, unknown>)._flush = () => {
         if (saveTimeout) {
@@ -754,7 +761,7 @@ class PluginManager {
         }
         return safeSave(storage)
       }
-      
+
       // 添加清理方法（用于插件卸载时）
       ;(persistentStorage as Record<string, unknown>)._cleanup = () => {
         if (saveTimeout) {
@@ -762,7 +769,7 @@ class PluginManager {
           saveTimeout = null
         }
       }
-      
+
       this.storage.set(pluginId, persistentStorage)
     }
     return this.storage.get(pluginId)!
@@ -779,7 +786,7 @@ class PluginManager {
    * 获取活跃插件
    */
   getActivePlugins(): Plugin[] {
-    return this.getAllPlugins().filter(p => p.state === PluginState.ACTIVE)
+    return this.getAllPlugins().filter((p) => p.state === PluginState.ACTIVE)
   }
 }
 

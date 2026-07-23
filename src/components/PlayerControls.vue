@@ -1,59 +1,69 @@
 <template>
   <div class="player-controls">
     <div class="controls-row">
-      <button 
-        class="icon-button" 
-        @click="playerStore.toggleShuffle"
+      <button
+        class="icon-button"
         :class="{ active: playerStore.isShuffle }"
         :title="$t('controls.shuffle')"
+        @click="playerStore.toggleShuffle"
       >
         <span class="material-symbols-rounded">shuffle</span>
       </button>
-      
-      <button 
-        class="icon-button" 
-        @click="playerStore.previousTrack"
+
+      <button
+        class="icon-button"
         :disabled="!playerStore.hasPreviousTrack"
         :title="$t('controls.previous')"
+        @click="playerStore.previousTrack"
       >
         <span class="material-symbols-rounded">skip_previous</span>
       </button>
-      
-      <button class="icon-button play-button" @click="playerStore.togglePlay" :title="playerStore.isPlaying ? $t('controls.pause') : $t('controls.play')">
-        <span class="material-symbols-rounded">{{ playerStore.isPlaying ? 'pause' : 'play_arrow' }}</span>
+
+      <button
+        class="icon-button play-button"
+        :title="playerStore.isPlaying ? $t('controls.pause') : $t('controls.play')"
+        @click="playerStore.togglePlay"
+      >
+        <span class="material-symbols-rounded">{{
+          playerStore.isPlaying ? 'pause' : 'play_arrow'
+        }}</span>
       </button>
-      
-      <button 
-        class="icon-button" 
-        @click="playerStore.nextTrack"
+
+      <button
+        class="icon-button"
         :disabled="!playerStore.hasNextTrack"
         :title="$t('controls.next')"
+        @click="playerStore.nextTrack"
       >
         <span class="material-symbols-rounded">skip_next</span>
       </button>
-      
-      <button 
-        class="icon-button" 
-        @click="playerStore.toggleRepeat"
+
+      <button
+        class="icon-button"
         :class="{ active: playerStore.repeatMode !== 'none' }"
         :title="getRepeatTitle()"
+        @click="playerStore.toggleRepeat"
       >
         <span class="material-symbols-rounded">{{ getRepeatIcon() }}</span>
       </button>
-      
+
       <!-- 悬浮式音量控制 -->
-      <div class="volume-control-container" @mouseenter="showVolume = true" @mouseleave="showVolume = false">
-        <button 
-          class="icon-button volume-button" 
+      <div
+        class="volume-control-container"
+        @mouseenter="showVolume = true"
+        @mouseleave="showVolume = false"
+      >
+        <button
+          class="icon-button volume-button"
           :title="playerStore.isMuted ? $t('controls.unmute') : $t('controls.mute')"
           @click="playerStore.toggleMute"
         >
           <span class="material-symbols-rounded">{{ getVolumeIcon() }}</span>
         </button>
-        
+
         <Transition name="volume-fade">
-          <div class="volume-slider-popup" v-show="showVolume">
-            <div class="slider vertical" ref="volumeSlider" :class="{ dragging: isDragging }">
+          <div v-show="showVolume" class="volume-slider-popup">
+            <div ref="volumeSlider" class="slider vertical" :class="{ dragging: isDragging }">
               <div class="slider-track"></div>
               <div class="slider-fill" :style="{ height: `${playerStore.volume * 100}%` }"></div>
               <div class="slider-thumb" :style="{ bottom: `${playerStore.volume * 100}%` }"></div>
@@ -80,7 +90,7 @@ let sliderMousedownHandler: ((event: MouseEvent) => void) | null = null
 
 const handleVolumeChange = (event: MouseEvent) => {
   if (!volumeSlider.value) return
-  
+
   const rect = volumeSlider.value.getBoundingClientRect()
   // 对于垂直滑块，我们需要从底部计算位置
   const percent = Math.max(0, Math.min(1, (rect.bottom - event.clientY) / rect.height))
@@ -90,18 +100,18 @@ const handleVolumeChange = (event: MouseEvent) => {
 const startDrag = (event: MouseEvent) => {
   // 如果点击的是滑柄本身，不立即更新音量值，避免跳动
   const isThumb = (event.target as HTMLElement)?.classList?.contains('slider-thumb')
-  
+
   isDragging.value = true
-  
+
   if (!isThumb) {
     // 点击轨道时，立即跳转到点击位置
     handleVolumeChange(event)
   }
-  
+
   // 添加全局事件监听器
   document.addEventListener('mousemove', handleDrag)
   document.addEventListener('mouseup', stopDrag)
-  
+
   // 防止文本选择
   event.preventDefault()
 }
@@ -114,7 +124,7 @@ const handleDrag = (event: MouseEvent) => {
 
 const stopDrag = () => {
   isDragging.value = false
-  
+
   // 移除全局事件监听器
   document.removeEventListener('mousemove', handleDrag)
   document.removeEventListener('mouseup', stopDrag)
@@ -152,7 +162,7 @@ const getVolumeIcon = () => {
   if (playerStore.isMuted) {
     return 'volume_off'
   }
-  
+
   const volume = playerStore.volume
   if (volume === 0 || volume < 0.01) {
     return 'volume_off'
@@ -167,7 +177,7 @@ onUnmounted(() => {
   // 清理全局事件监听器
   document.removeEventListener('mousemove', handleDrag)
   document.removeEventListener('mouseup', stopDrag)
-  
+
   // 清理音量滑块的事件监听器
   if (volumeSlider.value && sliderMousedownHandler) {
     volumeSlider.value.removeEventListener('mousedown', sliderMousedownHandler)
@@ -201,7 +211,11 @@ onUnmounted(() => {
 }
 
 .play-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-secondary-container));
+  background-color: color-mix(
+    in srgb,
+    var(--md-sys-color-on-surface) 8%,
+    var(--md-sys-color-secondary-container)
+  );
 }
 
 .play-button .material-symbols-rounded {
@@ -303,7 +317,9 @@ onUnmounted(() => {
 /* 音量弹出动画 */
 .volume-fade-enter-active,
 .volume-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
 }
 
 .volume-fade-enter-from,

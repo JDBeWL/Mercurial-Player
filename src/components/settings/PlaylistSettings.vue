@@ -3,28 +3,36 @@
     <div class="content-header">
       <h3>{{ $t('config.playlistSettings') }}</h3>
     </div>
-    
+
     <div class="settings-section">
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.generateAllSongsPlaylist') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.playlist.generateAllSongsPlaylist }" @click="toggleSetting('generateAllSongsPlaylist')">
+        <div
+          class="switch"
+          :class="{ active: configStore.playlist.generateAllSongsPlaylist }"
+          @click="toggleSetting('generateAllSongsPlaylist')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.folderBasedPlaylists') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.playlist.folderBasedPlaylists }" @click="toggleSetting('folderBasedPlaylists')">
+        <div
+          class="switch"
+          :class="{ active: configStore.playlist.folderBasedPlaylists }"
+          @click="toggleSetting('folderBasedPlaylists')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
-      
+
       <div class="setting-item select">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.sortOrder') }}</span>
@@ -35,18 +43,18 @@
           @change="saveConfig"
         />
       </div>
-      
+
       <div class="setting-item input">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.playlistNameFormat') }}</span>
         </div>
-        <input 
-          type="text" 
-          v-model="configStore.playlist.playlistNameFormat" 
-          @change="saveConfig"
+        <input
+          v-model="configStore.playlist.playlistNameFormat"
+          type="text"
           placeholder="{folderName}"
           class="md3-input"
-        >
+          @change="saveConfig"
+        />
       </div>
     </div>
   </div>
@@ -62,7 +70,7 @@ const configStore = useConfigStore()
 
 const sortOrderOptions = computed(() => [
   { value: 'asc', label: 'A-Z (升序)' },
-  { value: 'desc', label: 'Z-A (降序)' }
+  { value: 'desc', label: 'Z-A (降序)' },
 ])
 
 const saveConfig = async (): Promise<void> => {
@@ -73,7 +81,9 @@ const saveConfig = async (): Promise<void> => {
   }
 }
 
-const toggleSetting = async (key: 'generateAllSongsPlaylist' | 'folderBasedPlaylists'): Promise<void> => {
+const toggleSetting = async (
+  key: 'generateAllSongsPlaylist' | 'folderBasedPlaylists',
+): Promise<void> => {
   configStore.playlist[key] = !configStore.playlist[key]
   await saveConfig()
 }
@@ -169,7 +179,6 @@ const toggleSetting = async (key: 'generateAllSongsPlaylist' | 'folderBasedPlayl
   height: 18px;
   background-color: var(--md-sys-color-on-primary);
 }
-
 
 .md3-input {
   min-width: 200px;

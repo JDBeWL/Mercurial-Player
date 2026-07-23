@@ -3,80 +3,108 @@
     <div class="content-header">
       <h3>{{ $t('config.generalSettings') }}</h3>
     </div>
-    
+
     <!-- 配置设置 -->
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.configSettings') }}</h4>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.startupLoadLastConfig') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.general.startupLoadLastConfig }" @click="toggleSetting('startupLoadLastConfig')">
+        <div
+          class="switch"
+          :class="{ active: configStore.general.startupLoadLastConfig }"
+          @click="toggleSetting('startupLoadLastConfig')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.autoSaveConfig') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.general.autoSaveConfig }" @click="toggleSetting('autoSaveConfig')">
+        <div
+          class="switch"
+          :class="{ active: configStore.general.autoSaveConfig }"
+          @click="toggleSetting('autoSaveConfig')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
     </div>
-    
+
     <!-- 目录扫描设置 -->
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.directoryScan') }}</h4>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.enableSubdirectoryScan') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.directoryScan.enableSubdirectoryScan }" @click="toggleDirectoryScan('enableSubdirectoryScan')">
+        <div
+          class="switch"
+          :class="{ active: configStore.directoryScan.enableSubdirectoryScan }"
+          @click="toggleDirectoryScan('enableSubdirectoryScan')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
-      
-      <div class="setting-item" v-if="configStore.directoryScan.enableSubdirectoryScan">
+
+      <div v-if="configStore.directoryScan.enableSubdirectoryScan" class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.maxDepth') }}</span>
         </div>
         <div class="number-input">
-          <button class="number-btn" @click="decreaseMaxDepth" :disabled="configStore.directoryScan.maxDepth <= 1">
+          <button
+            class="number-btn"
+            :disabled="configStore.directoryScan.maxDepth <= 1"
+            @click="decreaseMaxDepth"
+          >
             <span class="material-symbols-rounded">remove</span>
           </button>
           <span class="number-value">{{ configStore.directoryScan.maxDepth }}</span>
-          <button class="number-btn" @click="increaseMaxDepth" :disabled="configStore.directoryScan.maxDepth >= 10">
+          <button
+            class="number-btn"
+            :disabled="configStore.directoryScan.maxDepth >= 10"
+            @click="increaseMaxDepth"
+          >
             <span class="material-symbols-rounded">add</span>
           </button>
         </div>
       </div>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.ignoreHiddenFolders') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.directoryScan.ignoreHiddenFolders }" @click="toggleDirectoryScan('ignoreHiddenFolders')">
+        <div
+          class="switch"
+          :class="{ active: configStore.directoryScan.ignoreHiddenFolders }"
+          @click="toggleDirectoryScan('ignoreHiddenFolders')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
     </div>
-    
+
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.display') || '显示' }}</h4>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.showAudioInfo') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.general.showAudioInfo }" @click="toggleSetting('showAudioInfo')">
+        <div
+          class="switch"
+          :class="{ active: configStore.general.showAudioInfo }"
+          @click="toggleSetting('showAudioInfo')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
@@ -87,12 +115,16 @@
           <span class="setting-label">{{ $t('config.enableAutoUpdate') }}</span>
           <div class="setting-desc">{{ $t('config.enableAutoUpdateDesc') }}</div>
         </div>
-        <div class="switch" :class="{ active: configStore.general.enableAutoUpdate }" @click="toggleSetting('enableAutoUpdate')">
+        <div
+          class="switch"
+          :class="{ active: configStore.general.enableAutoUpdate }"
+          @click="toggleSetting('enableAutoUpdate')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
-      
+
       <div class="setting-item select">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.language') }}</span>
@@ -104,71 +136,84 @@
         />
       </div>
     </div>
-    
+
     <!-- 缓存设置 -->
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.cacheSettings') || '缓存设置' }}</h4>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.coverCacheSize') || '封面缓存大小' }}</span>
-          <div class="setting-desc">{{ $t('config.coverCacheSizeDesc') || '封面图片缓存的最大磁盘空间' }}</div>
+          <div class="setting-desc">
+            {{ $t('config.coverCacheSizeDesc') || '封面图片缓存的最大磁盘空间' }}
+          </div>
         </div>
         <div class="cache-size-control">
           <input
+            v-model.number="coverCacheSizeMb"
             type="range"
             min="1024"
             max="8192"
             step="512"
-            v-model.number="coverCacheSizeMb"
-            @input="handleCacheSizeChange"
             class="cache-slider"
             :style="cacheSliderStyle"
+            @input="handleCacheSizeChange"
           />
           <span class="cache-size-value">{{ formatCacheSize(coverCacheSizeMb) }}</span>
         </div>
       </div>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.coverCachePath') || '封面缓存路径' }}</span>
-          <div class="setting-desc">{{ $t('config.coverCachePathDesc') || '封面缓存存储位置，默认使用系统临时目录' }}</div>
+          <div class="setting-desc">
+            {{ $t('config.coverCachePathDesc') || '封面缓存存储位置，默认使用系统临时目录' }}
+          </div>
         </div>
         <div class="cache-path-control">
           <span class="cache-path-value">{{ coverCachePathDisplay }}</span>
           <button class="cache-path-btn" @click="selectCachePath">
             <span class="material-symbols-rounded">folder_open</span>
           </button>
-          <button v-if="coverCachePath" class="cache-path-btn" @click="resetCachePath" title="恢复默认">
+          <button
+            v-if="coverCachePath"
+            class="cache-path-btn"
+            title="恢复默认"
+            @click="resetCachePath"
+          >
             <span class="material-symbols-rounded">refresh</span>
           </button>
         </div>
       </div>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.clearCoverCache') || '清理封面缓存' }}</span>
-          <div class="setting-desc">{{ $t('config.clearCoverCacheDesc') || '立即清理所有过期的封面缓存文件' }}</div>
+          <div class="setting-desc">
+            {{ $t('config.clearCoverCacheDesc') || '立即清理所有过期的封面缓存文件' }}
+          </div>
         </div>
-        <button class="clear-cache-btn" @click="clearCoverCache" :disabled="isClearingCache">
+        <button class="clear-cache-btn" :disabled="isClearingCache" @click="clearCoverCache">
           <span v-if="!isClearingCache">{{ $t('config.clearCache') || '清理' }}</span>
           <span v-else>{{ $t('config.clearing') || '清理中...' }}</span>
         </button>
       </div>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.metadataCache') || '元数据缓存' }}</span>
           <div class="setting-desc">{{ metadataCacheDesc }}</div>
         </div>
-        <button class="clear-cache-btn" @click="clearMetadataCache" :disabled="isClearingMetadataCache">
+        <button
+          class="clear-cache-btn"
+          :disabled="isClearingMetadataCache"
+          @click="clearMetadataCache"
+        >
           <span v-if="!isClearingMetadataCache">{{ $t('config.clearCache') || '清理' }}</span>
           <span v-else>{{ $t('config.clearing') || '清理中...' }}</span>
         </button>
       </div>
     </div>
-    
-
   </div>
 </template>
 
@@ -184,14 +229,14 @@ const configStore = useConfigStore()
 
 const languageOptions = computed(() => [
   { value: 'zh', label: '中文' },
-  { value: 'en', label: 'English' }
+  { value: 'en', label: 'English' },
 ])
 
 const coverCacheSizeMb = computed({
   get: () => configStore.general.coverCacheSizeMb || 1024,
   set: (value: number) => {
     configStore.general.coverCacheSizeMb = value
-  }
+  },
 })
 
 const cacheSliderStyle = computed(() => {
@@ -200,7 +245,7 @@ const cacheSliderStyle = computed(() => {
   const value = coverCacheSizeMb.value
   const percentage = ((value - min) / (max - min)) * 100
   return {
-    background: `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`
+    background: `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`,
   }
 })
 
@@ -208,7 +253,7 @@ const coverCachePath = computed({
   get: () => configStore.general.coverCachePath,
   set: (value: string | undefined) => {
     configStore.general.coverCachePath = value
-  }
+  },
 })
 
 const coverCachePathDisplay = computed(() => {
@@ -243,9 +288,8 @@ const metadataCacheDesc = computed(() => {
   if (count === 0) {
     return '暂无元数据缓存'
   }
-  const sizeStr = size > 1024 * 1024 
-    ? `${(size / 1024 / 1024).toFixed(2)} MB` 
-    : `${(size / 1024).toFixed(2)} KB`
+  const sizeStr =
+    size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(2)} MB` : `${(size / 1024).toFixed(2)} KB`
   return `已缓存 ${count} 首歌曲的元数据，占用 ${sizeStr}`
 })
 
@@ -267,12 +311,16 @@ const saveConfig = async () => {
 }
 
 const toggleSetting = async (key: string) => {
-  (configStore.general as Record<string, unknown>)[key] = !(configStore.general as Record<string, unknown>)[key]
+  ;(configStore.general as Record<string, unknown>)[key] = !(
+    configStore.general as Record<string, unknown>
+  )[key]
   await saveConfig()
 }
 
 const toggleDirectoryScan = async (key: string) => {
-  (configStore.directoryScan as Record<string, unknown>)[key] = !(configStore.directoryScan as Record<string, unknown>)[key]
+  ;(configStore.directoryScan as Record<string, unknown>)[key] = !(
+    configStore.directoryScan as Record<string, unknown>
+  )[key]
   configStore.setDirectoryScanConfig(configStore.directoryScan)
 }
 
@@ -312,11 +360,11 @@ const formatCacheSize = (mb: number): string => {
 
 const clearCoverCache = async () => {
   if (isClearingCache.value) return
-  
+
   isClearingCache.value = true
   try {
     const count = await invoke<number>('clean_cover_cache_command', {
-      maxCacheSizeMb: configStore.general.coverCacheSizeMb
+      maxCacheSizeMb: configStore.general.coverCacheSizeMb,
     })
     logger.info(`Cleaned ${count} cover cache files`)
   } catch (error) {
@@ -332,7 +380,7 @@ const selectCachePath = async () => {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: '选择封面缓存目录'
+      title: '选择封面缓存目录',
     })
     if (selected && typeof selected === 'string') {
       coverCachePath.value = selected
@@ -354,7 +402,7 @@ const resetCachePath = async () => {
 
 const clearMetadataCache = async () => {
   if (isClearingMetadataCache.value) return
-  
+
   isClearingMetadataCache.value = true
   try {
     await invoke('clear_metadata_cache_command')
@@ -371,7 +419,6 @@ onMounted(() => {
   loadMetadataCacheStats()
   loadTempDirPath()
 })
-
 </script>
 
 <style scoped>
@@ -473,7 +520,6 @@ onMounted(() => {
   height: 18px;
   background-color: var(--md-sys-color-on-primary);
 }
-
 
 /* 设置描述文字 */
 .setting-desc {

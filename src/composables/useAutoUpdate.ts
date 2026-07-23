@@ -105,7 +105,7 @@ const downloadAndInstall = async () => {
             // 累加进度
             downloadProgress.value = Math.min(
               100,
-              downloadProgress.value + Math.round((chunkLength / contentLength) * 100)
+              downloadProgress.value + Math.round((chunkLength / contentLength) * 100),
             )
           }
           break

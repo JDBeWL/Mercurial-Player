@@ -1,7 +1,11 @@
 <template>
   <div class="mini-player" data-tauri-drag-region>
     <!-- 背景模糊封面 -->
-    <div class="background-cover" data-tauri-drag-region :style="{ backgroundImage: currentTrackCover }"></div>
+    <div
+      class="background-cover"
+      data-tauri-drag-region
+      :style="{ backgroundImage: currentTrackCover }"
+    ></div>
     <div class="background-overlay" data-tauri-drag-region></div>
 
     <!-- 主要内容 -->
@@ -9,12 +13,21 @@
       <!-- 左侧：封面 -->
       <div class="cover-container" data-tauri-drag-region>
         <div class="cover" data-tauri-drag-region :style="{ backgroundImage: currentTrackCover }">
-          <div v-if="!currentTrack || !currentTrack.coverPath" class="cover-placeholder" data-tauri-drag-region>
+          <div
+            v-if="!currentTrack || !currentTrack.coverPath"
+            class="cover-placeholder"
+            data-tauri-drag-region
+          >
             <span class="material-symbols-rounded">album</span>
           </div>
         </div>
         <!-- 悬浮遮罩：恢复按钮 -->
-        <div class="cover-overlay" data-tauri-drag-region="false" @click="exitMiniMode" :title="$t('common.close') || '恢复主界面'">
+        <div
+          class="cover-overlay"
+          data-tauri-drag-region="false"
+          :title="$t('common.close') || '恢复主界面'"
+          @click="exitMiniMode"
+        >
           <span class="material-symbols-rounded">open_in_full</span>
         </div>
       </div>
@@ -23,21 +36,49 @@
       <div class="info-controls" data-tauri-drag-region>
         <!-- 歌曲信息 -->
         <div class="track-info" data-tauri-drag-region>
-          <div class="track-title" data-tauri-drag-region :title="getTrackTitle(currentTrack, $t('player.noTrack'))">{{ getTrackTitle(currentTrack, $t('player.noTrack')) }}</div>
-          <div class="track-artist" data-tauri-drag-region :title="getTrackArtist(currentTrack, '')">{{ getTrackArtist(currentTrack, '') }}</div>
+          <div
+            class="track-title"
+            data-tauri-drag-region
+            :title="getTrackTitle(currentTrack, $t('player.noTrack'))"
+          >
+            {{ getTrackTitle(currentTrack, $t('player.noTrack')) }}
+          </div>
+          <div
+            class="track-artist"
+            data-tauri-drag-region
+            :title="getTrackArtist(currentTrack, '')"
+          >
+            {{ getTrackArtist(currentTrack, '') }}
+          </div>
         </div>
 
         <!-- 控制按钮：容器可拖拽，按钮本身不可拖拽 -->
         <div class="controls" data-tauri-drag-region>
-          <button class="icon-button small" data-tauri-drag-region="false" @click="playerStore.previousTrack" :disabled="!playerStore.hasPreviousTrack">
+          <button
+            class="icon-button small"
+            data-tauri-drag-region="false"
+            :disabled="!playerStore.hasPreviousTrack"
+            @click="playerStore.previousTrack"
+          >
             <span class="material-symbols-rounded">skip_previous</span>
           </button>
 
-          <button class="icon-button play-pause" data-tauri-drag-region="false" @click="playerStore.togglePlay">
-            <span class="material-symbols-rounded filled">{{ playerStore.isPlaying ? 'pause' : 'play_arrow' }}</span>
+          <button
+            class="icon-button play-pause"
+            data-tauri-drag-region="false"
+            @click="playerStore.togglePlay"
+          >
+            <span class="material-symbols-rounded filled">{{
+              playerStore.isPlaying ? 'pause' : 'play_arrow'
+            }}</span>
           </button>
 
-          <button class="icon-button small" data-tauri-drag-region="false" @click="playerStore.nextTrack" :disabled="!playerStore.hasNextTrack">
+          <button
+            class="icon-button small"
+            data-tauri-drag-region="false"
+            :disabled="!playerStore.hasNextTrack"
+            @click="playerStore.nextTrack"
+          >
             <span class="material-symbols-rounded">skip_next</span>
           </button>
         </div>
@@ -45,11 +86,14 @@
     </div>
 
     <!-- 底部进度条 -->
-    <div class="progress-bar-container" data-tauri-drag-region="false"
-         @mousedown="startSeeking"
-         @mousemove="handleSeekMove"
-         @mouseup="endSeeking"
-         @mouseleave="endSeeking">
+    <div
+      class="progress-bar-container"
+      data-tauri-drag-region="false"
+      @mousedown="startSeeking"
+      @mousemove="handleSeekMove"
+      @mouseup="endSeeking"
+      @mouseleave="endSeeking"
+    >
       <div class="progress-fill" :style="{ width: progressPercentage + '%' }"></div>
       <!-- 时间预览提示 -->
       <div v-if="isDragging" class="time-tooltip" :style="{ left: dragPercentage + '%' }">
@@ -60,7 +104,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
 import { useConfigStore } from '../stores/config'
@@ -69,7 +113,7 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 
 const playerStore = usePlayerStore()
 const configStore = useConfigStore()
-const { currentTrack, currentTime, duration, isPlaying } = storeToRefs(playerStore)
+const { currentTrack, currentTime, duration } = storeToRefs(playerStore)
 
 // 使用 composable 处理音轨信息
 const { getTrackTitle, getTrackArtist, watchTrack } = useTrackInfo()
@@ -89,8 +133,6 @@ const currentTrackCover = computed<string>(() => {
   }
   return 'none'
 })
-
-
 
 const progressPercentage = computed<number>(() => {
   if (isDragging.value) return dragPercentage.value
@@ -131,6 +173,7 @@ const handleSeekMove = (e: MouseEvent): void => {
 const endSeeking = (e: MouseEvent): void => {
   if (isDragging.value) {
     isDragging.value = false
+    dragPercentage.value = 0 // 重置拖拽位置，避免下次拖拽开始时闪现旧位置
     // 应用新的播放位置
     if (duration.value) {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -400,6 +443,10 @@ const updateDragPosition = (e: MouseEvent): void => {
 }
 
 .material-symbols-rounded.filled {
-  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-variation-settings:
+    'FILL' 1,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
 }
 </style>

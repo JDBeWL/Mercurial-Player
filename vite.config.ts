@@ -10,7 +10,7 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     watch: {
-      ignored: ['**/src-tauri/target/**']
+      ignored: ['**/src-tauri/target/**'],
     },
   },
   envPrefix: ['VITE_', 'TAURI_'],
@@ -34,7 +34,11 @@ export default defineConfig({
         // 手动分包，优化缓存和加载
         manualChunks(id) {
           // Vue 核心生态
-          if (id.includes('node_modules/vue/') || id.includes('node_modules/pinia/') || id.includes('node_modules/vue-i18n/')) {
+          if (
+            id.includes('node_modules/vue/') ||
+            id.includes('node_modules/pinia/') ||
+            id.includes('node_modules/vue-i18n/')
+          ) {
             return 'vendor'
           }
           // Tauri 核心 API
@@ -42,7 +46,10 @@ export default defineConfig({
             return 'tauri-core'
           }
           // Tauri 插件 - 按功能分组
-          if (id.includes('node_modules/@tauri-apps/plugin-dialog/') || id.includes('node_modules/@tauri-apps/plugin-fs/')) {
+          if (
+            id.includes('node_modules/@tauri-apps/plugin-dialog/') ||
+            id.includes('node_modules/@tauri-apps/plugin-fs/')
+          ) {
             return 'tauri-files'
           }
           if (id.includes('node_modules/@tauri-apps/plugin-global-shortcut/')) {
@@ -51,10 +58,16 @@ export default defineConfig({
           if (id.includes('node_modules/@tauri-apps/plugin-store/')) {
             return 'tauri-store'
           }
-          if (id.includes('node_modules/@tauri-apps/plugin-updater/') || id.includes('node_modules/@tauri-apps/plugin-process/')) {
+          if (
+            id.includes('node_modules/@tauri-apps/plugin-updater/') ||
+            id.includes('node_modules/@tauri-apps/plugin-process/')
+          ) {
             return 'tauri-update'
           }
-          if (id.includes('node_modules/@tauri-apps/plugin-http/') || id.includes('node_modules/@tauri-apps/plugin-opener/')) {
+          if (
+            id.includes('node_modules/@tauri-apps/plugin-http/') ||
+            id.includes('node_modules/@tauri-apps/plugin-opener/')
+          ) {
             return 'tauri-network'
           }
           // Material Design 颜色工具库（体积较大）
@@ -94,13 +107,7 @@ export default defineConfig({
   },
   // 优化依赖预构建
   optimizeDeps: {
-    include: [
-      'vue',
-      'pinia',
-      'vue-i18n',
-      '@tauri-apps/api/core',
-      '@tauri-apps/api/event',
-    ],
+    include: ['vue', 'pinia', 'vue-i18n', '@tauri-apps/api/core', '@tauri-apps/api/event'],
     exclude: [
       // 排除仅在特定场景使用的重型依赖，减少预构建时间
       '@material/material-color-utilities',

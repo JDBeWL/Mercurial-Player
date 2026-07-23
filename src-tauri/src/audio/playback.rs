@@ -22,6 +22,19 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
+/// 获取锁,poison 错误时记录日志并返回内部数据(而非 panic)
+macro_rules! lock_or_log {
+    ($mutex:expr) => {
+        match $mutex.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!("Mutex poisoned, recovering: {}", poisoned);
+                poisoned.into_inner()
+            }
+        }
+    };
+}
+
 // ============================================================================
 // 预计算查找表
 // ============================================================================
@@ -154,6 +167,9 @@ fn emit_playback_position(app: &AppHandle, position: f32) -> Result<(), Box<dyn 
 // ============================================================================
 
 /// 批量EQ处理器
+///
+/// 注意:本 EQ 处理器与 EqProcessor(独占模式)是两套独立实现。
+/// 修改 EQ 算法(频段增益、Q 因子、滤波器类型)时必须同步修改另一处。
 ///
 /// 性能优化要点:
 /// 1. states 采用扁平布局 `[channel][band]` (channel × EQ_BAND_COUNT),避免双层 Vec 解引用
@@ -511,15 +527,17 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
     let player = &state.player;
     // 取消任何正在进行的淡入淡出,防止其 on_complete(pause) 在新歌播放后执行
     player.fade.generation.fetch_add(1, Ordering::SeqCst);
+    // 先读取 target_volume 再锁 sink,避免嵌套锁死锁风险
+    let vol = *lock_or_log!(player.output.target_volume);
     {
-        let player_lock = player.output.sink.lock().unwrap();
+        let player_lock = lock_or_log!(player.output.sink);
         // 直接停止，不做淡出（淡出会阻塞主线程）
         // 新音源会有fade_in效果来平滑过渡
         player_lock.stop();
-        player_lock.set_volume(*player.output.target_volume.lock().unwrap());
+        player_lock.set_volume(vol);
     }
-    *player.track.current_path.lock().unwrap() = Some(path.to_string());
-    *player.track.current_source.lock().unwrap() = None;
+    *lock_or_log!(player.track.current_path) = Some(path.to_string());
+    *lock_or_log!(player.track.current_source) = None;
     let (waveform, spectrum, eq_settings, target_fps, enable_vertical_sync) = (
         Arc::clone(&player.visualization.waveform_data),
         Arc::clone(&player.visualization.spectrum_data),
@@ -531,7 +549,11 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
     let source: Box<dyn Source<Item = f32> + Send> = match SymphoniaDecoder::new(path) {
         Ok(mut dec) => {
             let start_pos = position.unwrap_or(0.0);
-            if let Some(t) = position { let _ = dec.seek(Duration::from_secs_f32(t)); }
+            if let Some(t) = position {
+                if let Err(e) = dec.seek(Duration::from_secs_f32(t)) {
+                    log::warn!("Seek failed for track, starting from beginning: {e}");
+                }
+            }
             let _ = dec.prefill_buffer();
             log::debug!("Symphonia decoder: {path}");
             Box::new(
@@ -559,7 +581,7 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
     // 导致高采样率音频以错误的速率播放（降速）。
     // 解决方案：在 append 之前手动将 source 重采样到 mixer 的采样率。
     let resampled: Box<dyn Source<Item = f32> + Send> = {
-        let stream_guard = player.output.output_stream.lock().unwrap();
+        let stream_guard = lock_or_log!(player.output.output_stream);
         if let Some(ref mixer_sink) = *stream_guard {
             let mixer_sr = mixer_sink.config().sample_rate();
             let mixer_ch = mixer_sink.config().channel_count();
@@ -574,7 +596,7 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
         }
     };
 
-    let player_lock = player.output.sink.lock().unwrap();
+    let player_lock = lock_or_log!(player.output.sink);
     player_lock.append(resampled);
     player_lock.play();
     Ok(())
@@ -584,10 +606,11 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
 #[cfg(windows)]
 pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str, position: Option<f32>) -> Result<(), String> {
     let player = &state.player;
-    player.decode.stop.store(true, Ordering::SeqCst);
+    // 递增代际计数器取消旧解码推送线程(替代 stop 布尔标志,避免 70ms 窗口内状态不一致)
+    player.decode.generation.fetch_add(1, Ordering::SeqCst);
     let new_thread_id = player.decode.id.fetch_add(1, Ordering::SeqCst) + 1;
     {
-        if let Some(ref wasapi) = *player.output.wasapi_player.lock().unwrap() {
+        if let Some(ref wasapi) = *lock_or_log!(player.output.wasapi_player) {
             // 切歌淡出:50ms 平滑过渡到静音,消除 audible click
             // 音频线程内部完成淡出后会自动 stop_stream + clear_buffer
             // fade 禁用时直接 stop + clear_buffer
@@ -605,36 +628,38 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
     std::thread::sleep(Duration::from_millis(wait_ms));
     // 兜底:确保缓冲区被清空(防止淡出未完成的极端情况)
     {
-        if let Some(ref wasapi) = *player.output.wasapi_player.lock().unwrap() {
+        if let Some(ref wasapi) = *lock_or_log!(player.output.wasapi_player) {
             let _ = wasapi.clear_buffer();
         }
     }
-    player.decode.stop.store(false, Ordering::SeqCst);
-    std::sync::atomic::fence(Ordering::SeqCst);
 
     let (target_sr, target_ch) = {
-        let g = player.output.wasapi_player.lock().unwrap();
+        let g = lock_or_log!(player.output.wasapi_player);
         let wasapi = g.as_ref().ok_or("WASAPI player not initialized")?;
         (wasapi.get_sample_rate(), wasapi.get_channels())
     };
     if position.is_none() {
-        *player.track.current_path.lock().unwrap() = Some(path.to_string());
+        *lock_or_log!(player.track.current_path) = Some(path.to_string());
     }
     log::info!("WASAPI Exclusive: {path} @ {target_sr}Hz, {target_ch} ch");
 
     let mut decoder = SymphoniaDecoder::new(path).map_err(|e| format!("Failed to create decoder: {e}"))?;
-    if let Some(t) = position { let _ = decoder.seek(Duration::from_secs_f32(t)); }
+    if let Some(t) = position {
+        if let Err(e) = decoder.seek(Duration::from_secs_f32(t)) {
+            log::warn!("Seek failed for track, starting from beginning: {e}");
+        }
+    }
     let _ = decoder.prefill_buffer();
     let (src_sr, src_ch) = (decoder.sample_rate(), decoder.channels());
     log::debug!("Source: {src_sr}Hz, {src_ch} ch -> Target: {target_sr}Hz, {target_ch} ch");
 
     let source = LockFreeSymphoniaSource::new(decoder);
     let start_pos = position.unwrap_or(0.0);
-    let (wasapi_clone, waveform, spectrum, stop_flag, thread_id, eq_settings) = (
+    let (wasapi_clone, waveform, spectrum, generation, thread_id, eq_settings) = (
         Arc::clone(&player.output.wasapi_player),
         Arc::clone(&player.visualization.waveform_data),
         Arc::clone(&player.visualization.spectrum_data),
-        Arc::clone(&player.decode.stop),
+        Arc::clone(&player.decode.generation),
         Arc::clone(&player.decode.id),
         state.equalizer.get_settings_handle(),
     );
@@ -645,7 +670,7 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
     std::thread::spawn(move || {
         thread_started_clone.store(true, Ordering::SeqCst);
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            decode_and_push_to_wasapi(source, wasapi_clone, waveform, spectrum, app_clone, stop_flag, thread_id, new_thread_id, src_sr, src_ch.get(), target_sr, target_ch, eq_settings, start_pos);
+            decode_and_push_to_wasapi(source, wasapi_clone, waveform, spectrum, app_clone, generation, thread_id, new_thread_id, src_sr, src_ch.get(), target_sr, target_ch, eq_settings, start_pos);
         }));
     });
 
@@ -655,10 +680,10 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
         std::thread::sleep(Duration::from_millis(5));
         wait += 1;
     }
-    
+
     // 等待缓冲区有足够数据再开始播放，避免音频开头欠载
     {
-        if let Some(ref wasapi) = *player.output.wasapi_player.lock().unwrap() {
+        if let Some(ref wasapi) = *lock_or_log!(player.output.wasapi_player) {
             // 等待至少200ms的音频数据（约 1/5 秒）
             let min_buffer_samples = target_sr as usize * target_ch as usize / 5;
             let mut buffer_wait = 0;
@@ -692,6 +717,8 @@ const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
     }
 }
 
+/// 注意:本 EQ 处理器与 BatchEqProcessor(共享模式)是两套独立实现。
+/// 修改 EQ 算法(频段增益、Q 因子、滤波器类型)时必须同步修改另一处。
 #[cfg(windows)]
 struct EqProcessor {
     coefficients: Vec<crate::equalizer::BiquadCoefficients>,
@@ -755,7 +782,7 @@ fn decode_and_push_to_wasapi(
     _waveform: Arc<Mutex<Vec<f32>>>,
     _spectrum: Arc<Mutex<Vec<f32>>>,
     app: AppHandle,
-    stop_flag: Arc<AtomicBool>,
+    generation: Arc<AtomicU64>,
     thread_id_ref: Arc<AtomicU64>,
     my_id: u64,
     src_sr: u32,
@@ -767,7 +794,9 @@ fn decode_and_push_to_wasapi(
 ) {
     use rubato::{Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType, WindowFunction};
     use audioadapter_buffers::direct::SequentialSliceOfVecs;
-    if stop_flag.load(Ordering::SeqCst) || thread_id_ref.load(Ordering::SeqCst) != my_id { return; }
+    // 记录启动时的代际,循环中检测代际变化即退出(替代 stop 布尔标志)
+    let my_generation = generation.load(Ordering::SeqCst);
+    if generation.load(Ordering::SeqCst) != my_generation || thread_id_ref.load(Ordering::SeqCst) != my_id { return; }
 
     let mut eq_proc = EqProcessor::new(src_sr, src_ch);
     if let Ok(settings) = eq_settings.read() {
@@ -818,7 +847,7 @@ fn decode_and_push_to_wasapi(
             .as_millis() as u64;
         if now - *last_time >= 100 {
             *last_time = now;
-            let samples_played = wasapi.lock().unwrap()
+            let samples_played = lock_or_log!(wasapi)
                 .as_ref()
                 .map_or(0, |p| p.get_samples_written());
             let position = start_position + samples_played as f32 / (target_sr as f32 * target_ch as f32);
@@ -827,7 +856,7 @@ fn decode_and_push_to_wasapi(
     };
 
     loop {
-        if stop_flag.load(Ordering::SeqCst) || thread_id_ref.load(Ordering::SeqCst) != my_id || wasapi.lock().unwrap().is_none() { break; }
+        if generation.load(Ordering::SeqCst) != my_generation || thread_id_ref.load(Ordering::SeqCst) != my_id || lock_or_log!(wasapi).is_none() { break; }
         for ch in &mut input_frames { ch.clear(); }
 
         // 复用 interleaved 缓冲区
@@ -951,29 +980,29 @@ fn decode_and_push_to_wasapi(
             // 缓冲区容量约为 target_sr * target_ch * 4 秒,保持在 2 秒以下
             let max_buffer = target_sr as usize * target_ch as usize * 2;
             loop {
-                if stop_flag.load(Ordering::SeqCst) || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
+                if generation.load(Ordering::SeqCst) != my_generation || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
                 // 用 condvar 等待 50ms 超时,期间 WASAPI 消费端 notify 会唤醒本线程
-                let has_space = wasapi.lock().unwrap().as_ref().is_none_or(|p| p.wait_for_buffer_space(max_buffer, Duration::from_millis(50)));
+                let has_space = lock_or_log!(wasapi).as_ref().is_none_or(|p| p.wait_for_buffer_space(max_buffer, Duration::from_millis(50)));
                 if has_space { break; }
                 // 等待时继续发送播放位置
                 emit_position(&mut last_position_emit_time);
             }
-            if stop_flag.load(Ordering::SeqCst) || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
+            if generation.load(Ordering::SeqCst) != my_generation || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
 
-            if let Some(ref p) = *wasapi.lock().unwrap() {
+            if let Some(ref p) = *lock_or_log!(wasapi) {
                 if p.push_samples(final_out).is_err() { break; }
             }
         }
 
         if eof && interleaved.len() < samples_needed {
             loop {
-                if stop_flag.load(Ordering::SeqCst) || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
-                let buf_size = wasapi.lock().unwrap().as_ref().map_or(0, |p| p.get_buffer_size());
+                if generation.load(Ordering::SeqCst) != my_generation || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
+                let buf_size = lock_or_log!(wasapi).as_ref().map_or(0, |p| p.get_buffer_size());
                 if buf_size == 0 { break; }
                 std::thread::sleep(Duration::from_millis(50));
             }
-            if !stop_flag.load(Ordering::SeqCst) && thread_id_ref.load(Ordering::SeqCst) == my_id {
-                if let Some(ref p) = *wasapi.lock().unwrap() { let _ = p.stop(); }
+            if generation.load(Ordering::SeqCst) == my_generation && thread_id_ref.load(Ordering::SeqCst) == my_id {
+                if let Some(ref p) = *lock_or_log!(wasapi) { let _ = p.stop(); }
                 let _ = emit_track_ended(&app);
             }
             break;
@@ -1097,7 +1126,7 @@ pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, t
 
     // 手动重采样到 mixer 采样率（同 play_track_shared 的修复）
     let resampled: Box<dyn Source<Item = f32> + Send> = {
-        let stream_guard = player.output.output_stream.lock().unwrap();
+        let stream_guard = lock_or_log!(player.output.output_stream);
         if let Some(ref mixer_sink) = *stream_guard {
             let mixer_sr = mixer_sink.config().sample_rate();
             let mixer_ch = mixer_sink.config().channel_count();
@@ -1108,12 +1137,12 @@ pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, t
     };
 
     {
-        let sink = player.output.sink.lock().unwrap();
+        let sink = lock_or_log!(player.output.sink);
         // 直接停止，不做阻塞的淡出
         sink.stop();
-        sink.set_volume(*player.output.target_volume.lock().unwrap());
+        sink.set_volume(*lock_or_log!(player.output.target_volume));
     }
-    let sink = player.output.sink.lock().unwrap();
+    let sink = lock_or_log!(player.output.sink);
     sink.append(resampled);
     sink.play();
     Ok(())
@@ -1148,7 +1177,8 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
                 .map_err(|_| "Failed to acquire WASAPI player lock".to_string())?;
             guard
                 .as_ref()
-                .map(|wasapi| wasapi.get_state() == PlaybackState::Playing)
+                // Stopping/Pausing 期间音频仍在淡出(可听见),视为正在播放
+                .map(|wasapi| matches!(wasapi.get_state(), PlaybackState::Playing | PlaybackState::Stopping | PlaybackState::Pausing))
                 .ok_or_else(|| "WASAPI player not initialized".to_string())?
         }
         #[cfg(not(windows))]

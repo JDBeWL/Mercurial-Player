@@ -408,15 +408,29 @@ impl SymphoniaDecoder {
 
     pub fn seek(&mut self, time: Duration) -> Result<(), String> {
         let target_ts = (time.as_secs_f64() * self.sample_rate as f64) as u64;
-        self.current_sample = target_ts;
-        self.buffer.clear();
         if let (Some(format), Some(decoder)) = (&mut self.format, &mut self.decoder) {
             let seek_to = symphonia::core::formats::SeekTo::Timestamp { ts: Timestamp::new(target_ts as i64), track_id: self.track_id.unwrap() };
             match format.seek(symphonia::core::formats::SeekMode::Accurate, seek_to) {
-                Ok(_) => { decoder.reset(); self.state = DecoderState::Ready; Ok(()) }
-                Err(e) => { self.current_sample = 0; self.state = DecoderState::Uninitialized; Err(format!("Seek failed: {e:?}")) }
+                Ok(_) => {
+                    // seek 成功后再更新位置、清空缓冲区、重置解码器
+                    self.current_sample = target_ts;
+                    self.buffer.clear();
+                    decoder.reset();
+                    self.state = DecoderState::Ready;
+                    Ok(())
+                }
+                Err(e) => {
+                    // seek 失败:保持原有状态(缓冲区、当前位置)不变,直接返回错误
+                    Err(format!("Seek failed: {e:?}"))
+                }
             }
-        } else { self.state = DecoderState::Uninitialized; Ok(()) }
+        } else {
+            // 解码器尚未初始化:仅记录目标位置,清空缓冲区(此时缓冲区无有效数据)
+            self.current_sample = target_ts;
+            self.buffer.clear();
+            self.state = DecoderState::Uninitialized;
+            Ok(())
+        }
     }
 
     fn initialize_decoder(&mut self) -> Result<(), String> {

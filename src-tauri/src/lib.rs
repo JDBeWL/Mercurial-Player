@@ -115,8 +115,8 @@ pub struct VisualizationState {
 
 /// 解码线程管理
 pub struct DecodeThreadState {
-    /// 解码线程停止标志
-    pub stop: Arc<AtomicBool>,
+    /// 解码线程代际计数器(每次切歌递增,旧线程检测到变化即退出)
+    pub generation: Arc<AtomicU64>,
     /// 当前解码线程 ID（用于区分不同的播放会话）
     pub id: Arc<AtomicU64>,
 }

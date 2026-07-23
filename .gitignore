@@ -14,6 +14,9 @@ coverage
 *.local
 GEMINI.md
 
+# 锁文件 - 项目使用 pnpm，忽略 npm 生成的 package-lock.json
+package-lock.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -24,4 +27,7 @@ GEMINI.md
 *.njsproj
 *.sln
 *.sw?
-scripts
+# Scripts - 忽略本地工具脚本，但保留构建相关的 sync-version.mjs
+# (package.json 的 version:sync 脚本依赖它)
+scripts/*
+!scripts/sync-version.mjs

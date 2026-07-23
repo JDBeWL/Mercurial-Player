@@ -22,29 +22,37 @@ const MAX_PROCESSED_TRACKS = 200
 
 /**
  * 访问顺序追踪,用于 LRU 驱逐。
- * 用独立数组记录 key 的访问顺序,最近访问的在末尾。
+ * 利用 Map 保持插入顺序的特性,用 delete + set 实现 O(1) 的 LRU 更新,
+ * 最近访问的在末尾,最久未访问的在头部。
  */
-const accessOrder: string[] = []
+const accessOrder = new Map<string, void>()
 
-/** 将 key 移到 accessOrder 末尾 (最近使用) */
+/** 将 key 移到 accessOrder 末尾 (最近使用),O(1) */
 function touchKey(key: string): void {
-  const idx = accessOrder.indexOf(key)
-  if (idx !== -1) accessOrder.splice(idx, 1)
-  accessOrder.push(key)
+  accessOrder.delete(key)
+  accessOrder.set(key, undefined)
 }
 
-/** 当缓存超过上限时,驱逐最久未使用的 key */
-function evictIfNeeded(cache: Record<string, ProcessedTrackInfo>): void {
-  while (accessOrder.length > MAX_PROCESSED_TRACKS) {
-    const oldest = accessOrder.shift()
-    if (oldest) delete cache[oldest]
+/** 当缓存达到上限时,驱逐最久未使用的 key,O(1) */
+function evictIfNeeded(cache: Map<string, ProcessedTrackInfo>): void {
+  while (accessOrder.size >= MAX_PROCESSED_TRACKS) {
+    const oldestKey = accessOrder.keys().next().value
+    if (oldestKey !== undefined) {
+      accessOrder.delete(oldestKey)
+      cache.delete(oldestKey)
+    } else {
+      break
+    }
   }
 }
 
 // 模块级别的共享缓存,确保所有 useTrackInfo 实例共享同一份数据,
 // 避免 App.vue 和 MiniPlayer.vue 各创建一份独立缓存。
-// 使用 ref 包裹 Record 保持 Vue 响应式 (processTrackInfo 完成后模板会自动更新)。
-const sharedProcessedTracks = ref<Record<string, ProcessedTrackInfo>>({})
+// 使用 Map 而非 Record,避免频繁 delete 触发 V8 hidden class 降级 (slow properties),
+// 保证增删操作始终是均摊 O(1) 且常数稳定。
+// Vue 3 的 reactive proxy 原生支持 Map 的增删查改响应式追踪,
+// processTrackInfo 完成后模板会自动更新。
+const sharedProcessedTracks = ref<Map<string, ProcessedTrackInfo>>(new Map())
 
 // 模块级别的 store 引用(在首次调用 useTrackInfo 时赋值)
 let _configStore: ReturnType<typeof useConfigStore> | null = null
@@ -58,26 +66,25 @@ function ensureConfigStore(): ReturnType<typeof useConfigStore> {
 
 /** 从缓存读取并更新访问顺序 (LRU) */
 function getCached(trackPath: string): ProcessedTrackInfo | undefined {
-  const value = sharedProcessedTracks.value[trackPath]
+  const value = sharedProcessedTracks.value.get(trackPath)
   if (value) touchKey(trackPath)
   return value
 }
 
 /** 写入缓存并更新访问顺序 (LRU) */
 function setCached(trackPath: string, value: ProcessedTrackInfo): void {
-  if (!sharedProcessedTracks.value[trackPath]) {
+  if (!sharedProcessedTracks.value.has(trackPath)) {
     // 新 key,可能需要驱逐
     evictIfNeeded(sharedProcessedTracks.value)
   }
-  sharedProcessedTracks.value[trackPath] = value
+  sharedProcessedTracks.value.set(trackPath, value)
   touchKey(trackPath)
 }
 
 /** 删除缓存项 */
 function deleteCached(trackPath: string): void {
-  const idx = accessOrder.indexOf(trackPath)
-  if (idx !== -1) accessOrder.splice(idx, 1)
-  delete sharedProcessedTracks.value[trackPath]
+  accessOrder.delete(trackPath)
+  sharedProcessedTracks.value.delete(trackPath)
 }
 
 /**
@@ -98,7 +105,7 @@ async function processTrackInfo(trackPath: string): Promise<void> {
       hideFileExtension: configStore.titleExtraction?.hideFileExtension ?? true,
       parseArtistTitle: configStore.titleExtraction?.parseArtistTitle ?? true,
       separator: configStore.titleExtraction?.separator ?? '-',
-      customSeparators: configStore.titleExtraction?.customSeparators ?? ['-', '_', '.', ' ']
+      customSeparators: configStore.titleExtraction?.customSeparators ?? ['-', '_', '.', ' '],
     }
 
     // 使用 TitleExtractor 智能提取标题信息
@@ -107,9 +114,8 @@ async function processTrackInfo(trackPath: string): Promise<void> {
     // 更新处理结果
     setCached(trackPath, {
       processing: false,
-      ...titleInfo
+      ...titleInfo,
     })
-
   } catch (error) {
     logger.error('处理音轨信息失败:', trackPath, error)
     // 出错时使用文件名作为标题
@@ -118,7 +124,7 @@ async function processTrackInfo(trackPath: string): Promise<void> {
       title: FileUtils.getFileName(trackPath),
       artist: '',
       fileName: FileUtils.getFileName(trackPath),
-      isFromMetadata: false
+      isFromMetadata: false,
     })
   }
 }
@@ -190,26 +196,30 @@ export function useTrackInfo() {
    * 再触发异步精细提取,避免首次渲染返回原始文件名造成视觉抖动。
    */
   const watchTrack = (trackGetter: () => Track | null | undefined): WatchStopHandle => {
-    return watch(trackGetter, (newTrack) => {
-      if (newTrack && newTrack.path) {
-        const path = newTrack.path
-        // 如果尚无缓存或仍在处理中,先用已有的 title/artist 预填
-        // 让 getTrackTitle/getTrackArtist 在异步完成前也能返回有意义的值
-        const existing = getCached(path)
-        if (!existing || existing.processing) {
-          const preTitle = newTrack.title || newTrack.name || FileUtils.getFileName(path)
-          const preArtist = newTrack.artist || ''
-          setCached(path, {
-            processing: true,
-            title: preTitle,
-            artist: preArtist,
-            fileName: FileUtils.getFileName(path),
-            isFromMetadata: false
-          })
+    return watch(
+      trackGetter,
+      (newTrack) => {
+        if (newTrack && newTrack.path) {
+          const path = newTrack.path
+          // 如果尚无缓存或仍在处理中,先用已有的 title/artist 预填
+          // 让 getTrackTitle/getTrackArtist 在异步完成前也能返回有意义的值
+          const existing = getCached(path)
+          if (!existing || existing.processing) {
+            const preTitle = newTrack.title || newTrack.name || FileUtils.getFileName(path)
+            const preArtist = newTrack.artist || ''
+            setCached(path, {
+              processing: true,
+              title: preTitle,
+              artist: preArtist,
+              fileName: FileUtils.getFileName(path),
+              isFromMetadata: false,
+            })
+          }
+          processTrackInfo(path)
         }
-        processTrackInfo(path)
-      }
-    }, { immediate: true })
+      },
+      { immediate: true },
+    )
   }
 
   /**
@@ -225,8 +235,8 @@ export function useTrackInfo() {
    * 清除所有缓存
    */
   const clearAllCache = (): void => {
-    accessOrder.length = 0
-    sharedProcessedTracks.value = {}
+    accessOrder.clear()
+    sharedProcessedTracks.value.clear()
   }
 
   return {
@@ -236,6 +246,6 @@ export function useTrackInfo() {
     processTrackInfo,
     watchTrack,
     clearCache,
-    clearAllCache
+    clearAllCache,
   }
 }

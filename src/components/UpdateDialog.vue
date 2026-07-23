@@ -4,7 +4,9 @@
       <div class="dialog-header">
         <div class="flex-1">
           <h2 class="text-title">{{ t('config.update.available') }}</h2>
-          <p class="text-secondary">{{ t('config.update.newVersionAvailable', { version: newVersion }) }}</p>
+          <p class="text-secondary">
+            {{ t('config.update.newVersionAvailable', { version: newVersion }) }}
+          </p>
         </div>
         <button class="icon-button close-btn" @click="onDismiss">
           <span class="material-symbols-rounded">close</span>
@@ -30,6 +32,7 @@
         <div v-else class="release-notes">
           <h3>{{ t('config.update.releaseNotes') }}</h3>
           <div class="notes-content">
+            <!-- eslint-disable-next-line vue/no-v-html -- release notes 来自 GitHub API，经 renderMarkdown 渲染 -->
             <div v-if="releaseNotes" class="markdown-body" v-html="renderedNotes"></div>
             <p v-else class="text-secondary">{{ t('config.update.noReleaseNotes') }}</p>
           </div>
@@ -37,20 +40,12 @@
       </div>
 
       <div class="dialog-footer">
-        <button
-          class="text-button"
-          @click="onDismiss"
-          :disabled="isDownloading"
-        >
+        <button class="text-button" :disabled="isDownloading" @click="onDismiss">
           {{ t('common.later') }}
         </button>
-        <button
-          class="filled-button"
-          @click="onUpdate"
-          :disabled="isDownloading || hasError"
-        >
+        <button class="filled-button" :disabled="isDownloading || hasError" @click="onUpdate">
           <span v-if="!isDownloading" class="material-symbols-rounded">download</span>
-          <span class="material-symbols-rounded spin" v-else>autorenew</span>
+          <span v-else class="material-symbols-rounded spin">autorenew</span>
           <span v-if="isDownloading">{{ t('config.update.installing') }}</span>
           <span v-else-if="downloadFinished">{{ t('config.update.installNow') }}</span>
           <span v-else>{{ t('config.update.downloadNow') }}</span>
@@ -133,8 +128,12 @@ const onDismiss = () => {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* ======== 对话框主体 ======== */
@@ -152,8 +151,14 @@ const onDismiss = () => {
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(30px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ======== Header ======== */
@@ -264,10 +269,18 @@ const onDismiss = () => {
   color: var(--md-sys-color-on-surface);
 }
 
-.markdown-body :deep(h1) { font-size: 1.3em; }
-.markdown-body :deep(h2) { font-size: 1.15em; }
-.markdown-body :deep(h3) { font-size: 1.05em; }
-.markdown-body :deep(h4) { font-size: 1em; }
+.markdown-body :deep(h1) {
+  font-size: 1.3em;
+}
+.markdown-body :deep(h2) {
+  font-size: 1.15em;
+}
+.markdown-body :deep(h3) {
+  font-size: 1.05em;
+}
+.markdown-body :deep(h4) {
+  font-size: 1em;
+}
 
 .markdown-body :deep(p) {
   margin: 6px 0;
@@ -292,7 +305,10 @@ const onDismiss = () => {
   font-size: 0.9em;
   padding: 2px 6px;
   border-radius: 4px;
-  background-color: var(--md-sys-color-surface-container-highest, var(--md-sys-color-surface-variant));
+  background-color: var(
+    --md-sys-color-surface-container-highest,
+    var(--md-sys-color-surface-variant)
+  );
   color: var(--md-sys-color-primary);
 }
 
@@ -300,7 +316,10 @@ const onDismiss = () => {
   margin: 8px 0;
   padding: 12px;
   border-radius: 8px;
-  background-color: var(--md-sys-color-surface-container-highest, var(--md-sys-color-surface-variant));
+  background-color: var(
+    --md-sys-color-surface-container-highest,
+    var(--md-sys-color-surface-variant)
+  );
   overflow-x: auto;
 }
 
@@ -375,8 +394,12 @@ const onDismiss = () => {
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 禁用状态 */

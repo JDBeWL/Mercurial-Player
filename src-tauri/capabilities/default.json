@@ -50,9 +50,7 @@
     }
   ],
   "scope": {
-    "allow": [
-      "$TEMP/mercurial-player/**"
-    ],
+    "allow": ["$TEMP/mercurial-player/**"],
     "deny": [
       "$HOME/.ssh/**",
       "$HOME/.gnupg/**",

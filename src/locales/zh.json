@@ -254,6 +254,7 @@
     "updateAvailable": "发现新版本：",
     "usingLatest": "已是最新版本",
     "updateCheckFailed": "检查更新失败，请稍后重试",
+    "aboutApp": "关于本应用",
     "update": {
       "available": "发现新版本",
       "newVersionAvailable": "发现新版本 v{version}",
@@ -267,7 +268,6 @@
       "installerPath": "安装程序路径：{path}",
       "noInstallerPath": "未提供安装程序路径"
     },
-    "aboutApp": "关于本应用", 
     "unknown": "未知"
   },
   "themeSelector": {

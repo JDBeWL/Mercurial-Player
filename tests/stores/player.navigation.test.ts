@@ -267,7 +267,7 @@ describe('usePlayerStore navigation & state', () => {
       await store._onEnded()
       expect(store.isPlaying).toBe(false)
       expect(store.currentTime).toBe(100)
-      const playCalls = invokeMock.mock.calls.filter(c => c[0] === 'play_track')
+      const playCalls = invokeMock.mock.calls.filter((c) => c[0] === 'play_track')
       expect(playCalls).toHaveLength(0)
     })
   })
@@ -491,17 +491,19 @@ describe('usePlayerStore navigation & state', () => {
 
     it('sets audioInfo from first track metadata', () => {
       const store = usePlayerStore()
-      const playlist: Track[] = [{
-        path: '/music/test.mp3',
-        name: 'Test',
-        title: 'Test',
-        duration: 200,
-        bitrate: 320,
-        sampleRate: 44100,
-        channels: 2,
-        bitDepth: 16,
-        format: 'mp3',
-      }]
+      const playlist: Track[] = [
+        {
+          path: '/music/test.mp3',
+          name: 'Test',
+          title: 'Test',
+          duration: 200,
+          bitrate: 320,
+          sampleRate: 44100,
+          channels: 2,
+          bitDepth: 16,
+          format: 'mp3',
+        },
+      ]
       store.loadPlaylist(playlist)
       expect(store.audioInfo.bitrate).toBe(320)
       expect(store.audioInfo.sampleRate).toBe(44100)

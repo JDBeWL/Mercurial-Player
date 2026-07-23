@@ -1,50 +1,53 @@
 .lyrics-style-classic .lyrics {
-    margin: 6px 0;
-    padding: 12px 20px 12px 12px;
-    font-size: 24px;
-    /* font-size transition 保留以实现 active 放大效果
+  margin: 6px 0;
+  padding: 12px 20px 12px 12px;
+  font-size: 24px;
+  /* font-size transition 保留以实现 active 放大效果
        (transform: scale 会被父容器 overflow-x:hidden 截断,不可用)
        滚动定位由 JS 双阶段修正: 立即预估 + 过渡完成后修正 */
-    transition: transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-        color 0.25s ease,
-        background-color 0.25s ease,
-        margin 0.25s ease-in-out,
-        font-size 0.15s ease-in-out;
-    word-break: break-word;
-    min-height: 1em;
-    cursor: pointer;
-    border-radius: 8px;
-    transform-origin: var(--align-origin, left center);
+  transition:
+    transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    color 0.25s ease,
+    background-color 0.25s ease,
+    margin 0.25s ease-in-out,
+    font-size 0.15s ease-in-out;
+  word-break: break-word;
+  min-height: 1em;
+  cursor: pointer;
+  border-radius: 8px;
+  transform-origin: var(--align-origin, left center);
 }
 
 .lyrics-style-classic .lyrics:hover {
-    background-color: var(--md-sys-color-surface-variant);
+  background-color: var(--md-sys-color-surface-variant);
 }
 
 /* will-change 仅应用于 active 行,避免所有歌词行都被提升为独立 GPU 合成层 */
 .lyrics-style-classic .lyrics.active {
-    will-change: transform, font-size;
-    font-size: 32px;
-    font-weight: bold;
-    /* 启用GPU加速 */
-    transform: scale(1.01);
-    color: var(--md-sys-color-primary);
+  will-change: transform, font-size;
+  font-size: 32px;
+  font-weight: bold;
+  /* 启用GPU加速 */
+  transform: scale(1.01);
+  color: var(--md-sys-color-primary);
 }
 
 .lyrics-style-classic .lyrics-display {
-    mask-image: none;
-    -webkit-mask-image: none;
+  mask-image: none;
+  -webkit-mask-image: none;
 }
 
 .lyrics-style-classic .karaoke-text {
-    --inactive-color: color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1));
-    --active-color: var(--md-sys-color-primary);
+  --inactive-color: color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1));
+  --active-color: var(--md-sys-color-primary);
 
-    background-image: linear-gradient(to right,
-            var(--active-color) var(--progress),
-            var(--inactive-color) var(--progress));
+  background-image: linear-gradient(
+    to right,
+    var(--active-color) var(--progress),
+    var(--inactive-color) var(--progress)
+  );
 
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: transparent;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
 }

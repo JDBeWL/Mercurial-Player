@@ -3,38 +3,50 @@
     <div class="content-header">
       <h3>{{ $t('config.titleExtraction') }}</h3>
     </div>
-    
+
     <div class="settings-section">
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.preferMetadata') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.titleExtraction.preferMetadata }" @click="toggleSetting('preferMetadata')">
+        <div
+          class="switch"
+          :class="{ active: configStore.titleExtraction.preferMetadata }"
+          @click="toggleSetting('preferMetadata')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.hideFileExtension') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.titleExtraction.hideFileExtension }" @click="toggleSetting('hideFileExtension')">
+        <div
+          class="switch"
+          :class="{ active: configStore.titleExtraction.hideFileExtension }"
+          @click="toggleSetting('hideFileExtension')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.parseArtistTitle') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.titleExtraction.parseArtistTitle }" @click="toggleSetting('parseArtistTitle')">
+        <div
+          class="switch"
+          :class="{ active: configStore.titleExtraction.parseArtistTitle }"
+          @click="toggleSetting('parseArtistTitle')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
-      
+
       <div class="setting-item select">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.separator') }}</span>
@@ -57,8 +69,8 @@ import MD3Select from '../MD3Select.vue'
 
 const configStore = useConfigStore()
 
-const separatorOptions = computed(() => 
-  configStore.validSeparators.map(sep => ({ value: sep, label: sep }))
+const separatorOptions = computed(() =>
+  configStore.validSeparators.map((sep) => ({ value: sep, label: sep })),
 )
 
 const saveConfig = async () => {
@@ -165,5 +177,4 @@ const toggleSetting = async (key) => {
   height: 18px;
   background-color: var(--md-sys-color-on-primary);
 }
-
 </style>

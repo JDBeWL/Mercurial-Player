@@ -1,17 +1,25 @@
 <template>
   <div class="progress-container">
-    <div class="progress-bar-wrapper"
-         ref="progressBarWrapper"
-         @mousedown="handleMouseDown"
-         @mouseenter="isHovering = true"
-         @mouseleave="handleMouseLeave"
-         @mousemove="handleMouseMoveHover"
-         :class="{ 'is-hovering': isHovering, 'is-dragging': isDragging }">
-      <div class="progress-bar" ref="progressBar">
+    <div
+      ref="progressBarWrapper"
+      class="progress-bar-wrapper"
+      :class="{ 'is-hovering': isHovering, 'is-dragging': isDragging }"
+      @mousedown="handleMouseDown"
+      @mouseenter="isHovering = true"
+      @mouseleave="handleMouseLeave"
+      @mousemove="handleMouseMoveHover"
+    >
+      <div ref="progressBar" class="progress-bar">
         <div class="progress-bar-fill" :style="{ width: `${displayPercent}%` }"></div>
         <div class="progress-bar-handle" :style="{ left: `${displayPercent}%` }"></div>
         <!-- 悬停/拖动时间提示 - 跟随真实滑柄位置 -->
-        <div v-if="isHovering || isDragging" class="hover-time-tooltip" :style="{ left: `clamp(var(--tooltip-half-width), ${displayPercent}%, calc(100% - var(--tooltip-half-width)))` }">
+        <div
+          v-if="isHovering || isDragging"
+          class="hover-time-tooltip"
+          :style="{
+            left: `clamp(var(--tooltip-half-width), ${displayPercent}%, calc(100% - var(--tooltip-half-width)))`,
+          }"
+        >
           {{ formatTime(displayTime) }} / {{ formatTime(playerStore.duration) }}
         </div>
       </div>
@@ -31,22 +39,6 @@ const isHovering = ref(false)
 const dragPercent = ref(0)
 const pendingSeek = ref(false) // 标记是否有待完成的 seek 操作
 const hoverPercent = ref(0)
-const hoverTime = computed(() => {
-  if (playerStore.duration === 0) return 0
-  return (hoverPercent.value / 100) * playerStore.duration
-})
-
-// 提示显示的位置和时间的计算属性
-const tooltipPercent = computed(() => {
-  if (isDragging.value) return dragPercent.value
-  return hoverPercent.value
-})
-
-const tooltipTime = computed(() => {
-  if (playerStore.duration === 0) return 0
-  if (isDragging.value) return (dragPercent.value / 100) * playerStore.duration
-  return (hoverPercent.value / 100) * playerStore.duration
-})
 
 const progressPercent = computed(() => {
   if (playerStore.duration === 0) return 0
@@ -69,15 +61,18 @@ const displayTime = computed(() => {
 })
 
 // 监听 currentTime 变化，当接近目标位置时取消 pendingSeek
-watch(() => playerStore.currentTime, (newTime) => {
-  if (pendingSeek.value && playerStore.duration > 0) {
-    const targetTime = (dragPercent.value / 100) * playerStore.duration
-    // 当实际时间接近目标时间（误差 0.5 秒内），取消等待状态
-    if (Math.abs(newTime - targetTime) < 0.5) {
-      pendingSeek.value = false
+watch(
+  () => playerStore.currentTime,
+  (newTime) => {
+    if (pendingSeek.value && playerStore.duration > 0) {
+      const targetTime = (dragPercent.value / 100) * playerStore.duration
+      // 当实际时间接近目标时间（误差 0.5 秒内），取消等待状态
+      if (Math.abs(newTime - targetTime) < 0.5) {
+        pendingSeek.value = false
+      }
     }
-  }
-})
+  },
+)
 
 const updateDragPosition = (event: MouseEvent) => {
   if (!progressBarWrapper.value) return
@@ -91,7 +86,7 @@ const handleMouseDown = (event: MouseEvent) => {
   isDragging.value = true
   pendingSeek.value = false // 重置
   updateDragPosition(event)
-  
+
   document.addEventListener('mousemove', handleMouseMove)
   document.addEventListener('mouseup', handleMouseUp)
 }
@@ -105,14 +100,14 @@ const handleMouseMove = (event: MouseEvent) => {
 const handleMouseUp = () => {
   if (isDragging.value) {
     isDragging.value = false
-    
+
     // 应用新的播放位置
     if (playerStore.duration > 0) {
       const newTime = (dragPercent.value / 100) * playerStore.duration
       // 标记等待 seek 完成，保持显示位置
       pendingSeek.value = true
       playerStore.seek(newTime)
-      
+
       // 超时保护：如果 1 秒后还没收到更新，取消等待
       setTimeout(() => {
         pendingSeek.value = false
@@ -138,7 +133,7 @@ const handleMouseLeave = () => {
 
 const formatTime = (seconds: number): string => {
   if (isNaN(seconds) || !isFinite(seconds)) return '0:00'
-  
+
   const minutes = Math.floor(seconds / 60)
   const remainingSeconds = Math.floor(seconds % 60)
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
@@ -203,7 +198,9 @@ onUnmounted(() => {
   background-color: var(--md-sys-color-primary);
   border-radius: 50%;
   transform: translate(-50%, -50%) scale(0);
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   pointer-events: none;
   opacity: 0;
@@ -261,6 +258,4 @@ onUnmounted(() => {
     transform: translateX(-50%) scaleY(0.5) translateY(0);
   }
 }
-
-
 </style>

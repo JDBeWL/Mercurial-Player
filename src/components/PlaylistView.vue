@@ -7,7 +7,12 @@
       </button>
     </div>
 
-    <div class="playlist-content" ref="scrollContainer" @scroll="handleScroll" :class="{ 'is-scrolling': isScrolling }">
+    <div
+      ref="scrollContainer"
+      class="playlist-content"
+      :class="{ 'is-scrolling': isScrolling }"
+      @scroll="handleScroll"
+    >
       <div v-if="playlist.length === 0" class="playlist-empty">
         <div class="empty-state">
           <span class="material-symbols-rounded">queue_music</span>
@@ -26,35 +31,42 @@
             :class="{ selected: track.path === currentPath }"
             @click="playTrack(track)"
           >
-
-            <div class="track-cover" v-if="track.coverUrl">
+            <div v-if="track.coverUrl" class="track-cover">
               <img :src="track.coverUrl" :alt="track.cachedTitle" loading="lazy" decoding="async" />
             </div>
-            <div class="track-cover-placeholder" v-else>
+            <div v-else class="track-cover-placeholder">
               <span class="material-symbols-rounded">album</span>
             </div>
             <div class="list-item-content">
-              <div class="list-item-headline" :title="track.cachedTitle">{{ track.cachedTitle }}</div>
-              <div class="list-item-supporting" :title="track.cachedArtist">{{ track.cachedArtist }}</div>
+              <div class="list-item-headline" :title="track.cachedTitle">
+                {{ track.cachedTitle }}
+              </div>
+              <div class="list-item-supporting" :title="track.cachedArtist">
+                {{ track.cachedArtist }}
+              </div>
             </div>
             <div class="list-item-trailing">
               <button
                 v-if="track.path !== currentPath || !playerStore.isPlaying"
                 class="play-button"
-                @click.stop="playTrack(track)"
                 :title="$t('playlist.play')"
+                @click.stop="playTrack(track)"
               >
                 <span class="material-symbols-rounded">play_arrow</span>
               </button>
               <button
                 v-if="track.path === currentPath && playerStore.isPlaying"
                 class="pause-button"
-                @click.stop="pauseTrack"
                 :title="$t('playlist.pause')"
+                @click.stop="pauseTrack"
               >
                 <span class="material-symbols-rounded">pause</span>
               </button>
-              <button class="remove-button" @click.stop="removeTrackByPath(track.path)" :title="$t('playlist.remove')">
+              <button
+                class="remove-button"
+                :title="$t('playlist.remove')"
+                @click.stop="removeTrackByPath(track.path)"
+              >
                 <span class="material-symbols-rounded">close</span>
               </button>
             </div>
@@ -66,7 +78,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, shallowRef, onMounted, onUnmounted, nextTick, type WatchStopHandle } from 'vue'
+import {
+  ref,
+  computed,
+  watch,
+  shallowRef,
+  onMounted,
+  onUnmounted,
+  nextTick,
+  type WatchStopHandle,
+} from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
 import FileUtils from '../utils/fileUtils'
@@ -145,7 +166,7 @@ const buildProcessedTrack = (track: Track): ProcessedTrack => ({
   ...track,
   cachedTitle: getTrackTitle(track),
   cachedArtist: getTrackArtist(track),
-  coverUrl: track.coverPath ? convertFileSrc(track.coverPath) : undefined
+  coverUrl: track.coverPath ? convertFileSrc(track.coverPath) : undefined,
 })
 
 // 处理播放列表：增量更新，只重建变化的部分
@@ -176,8 +197,11 @@ const processPlaylist = (): void => {
   }
 
   // 列表长度变化或有新增/修改项时才更新
-  if (changed || result.length !== processedPlaylist.value.length ||
-      processedMap.size !== newProcessedMap.size) {
+  if (
+    changed ||
+    result.length !== processedPlaylist.value.length ||
+    processedMap.size !== newProcessedMap.size
+  ) {
     processedPlaylist.value = result
   }
   processedMap = newProcessedMap
@@ -236,7 +260,7 @@ const stopCoverCheck = (): void => {
 const scrollToCurrentTrack = (): void => {
   if (!currentTrack.value || processedPlaylist.value.length === 0 || !scrollContainer.value) return
 
-  const currentIndex = processedPlaylist.value.findIndex(t => t.path === currentTrack.value!.path)
+  const currentIndex = processedPlaylist.value.findIndex((t) => t.path === currentTrack.value!.path)
   if (currentIndex === -1) return
 
   nextTick(() => {
@@ -245,7 +269,7 @@ const scrollToCurrentTrack = (): void => {
     if (items[currentIndex]) {
       items[currentIndex].scrollIntoView({
         behavior: 'smooth',
-        block: 'center'
+        block: 'center',
       })
     }
   })
@@ -258,15 +282,19 @@ let stopWatchScrollOnMount: WatchStopHandle | null = null
 onMounted(() => {
   startCoverCheck()
 
-  stopWatchScrollOnMount = watch(processedPlaylist, (newList) => {
-    if (!hasScrolledOnMount && newList.length > 0 && currentTrack.value) {
-      hasScrolledOnMount = true
-      scrollToCurrentTrack()
-      if (stopWatchScrollOnMount) {
-        stopWatchScrollOnMount()
+  stopWatchScrollOnMount = watch(
+    processedPlaylist,
+    (newList) => {
+      if (!hasScrolledOnMount && newList.length > 0 && currentTrack.value) {
+        hasScrolledOnMount = true
+        scrollToCurrentTrack()
+        if (stopWatchScrollOnMount) {
+          stopWatchScrollOnMount()
+        }
       }
-    }
-  }, { immediate: true })
+    },
+    { immediate: true },
+  )
 })
 
 // 组件卸载时清理所有资源
@@ -374,7 +402,9 @@ const removeTrackByPath = (path: string): void => {
   height: 100%;
 }
 
-.is-scrolling .list { pointer-events: none; }
+.is-scrolling .list {
+  pointer-events: none;
+}
 
 .list {
   background-color: var(--md-sys-color-surface);
@@ -403,8 +433,6 @@ const removeTrackByPath = (path: string): void => {
   border-radius: 8px;
   z-index: 1;
 }
-
-
 
 .track-cover,
 .track-cover-placeholder {
@@ -475,7 +503,7 @@ const removeTrackByPath = (path: string): void => {
   .list-item-headline {
     font-size: 14px;
   }
-  
+
   .list-item-supporting {
     font-size: 12px;
   }

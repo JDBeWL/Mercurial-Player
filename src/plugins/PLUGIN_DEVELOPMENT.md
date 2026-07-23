@@ -5,6 +5,7 @@
 ### 插件结构
 
 **外部插件（JavaScript）：**
+
 ```
 my-plugin/
 ├── manifest.json    # 插件清单（必需）
@@ -13,6 +14,7 @@ my-plugin/
 ```
 
 **内置插件（TypeScript）：**
+
 ```
 src/plugins/builtins/
 ├── index.ts         # 导出所有内置插件
@@ -31,10 +33,7 @@ src/plugins/builtins/
   "author": "Your Name",
   "description": "这是一个示例插件",
   "main": "index.js",
-  "permissions": [
-    "player:read",
-    "storage"
-  ],
+  "permissions": ["player:read", "storage"],
   "autoActivate": true
 }
 ```
@@ -60,7 +59,7 @@ const plugin = {
   doSomething() {
     const state = api.player.getState()
     api.log.info('当前播放:', state.currentTrack?.title)
-  }
+  },
 }
 ```
 
@@ -75,10 +74,7 @@ export const myPlugin: BuiltinPluginDefinition = {
   version: '1.0.0',
   author: 'Your Name',
   description: '插件描述',
-  permissions: [
-    PluginPermission.PLAYER_READ,
-    PluginPermission.STORAGE,
-  ],
+  permissions: [PluginPermission.PLAYER_READ, PluginPermission.STORAGE],
 
   main: (api: PluginAPI) => {
     // 插件状态变量
@@ -88,7 +84,7 @@ export const myPlugin: BuiltinPluginDefinition = {
       async activate(): Promise<void> {
         api.log.info('插件已激活！')
         isActive = true
-        
+
         // 注册事件监听器
         api.events.on('player:trackChanged', (data) => {
           const { track } = data as { track: Track | null }
@@ -99,7 +95,7 @@ export const myPlugin: BuiltinPluginDefinition = {
       deactivate(): void {
         api.log.info('插件已停用')
         isActive = false
-        
+
         // 清理事件监听器
         api.events.off('player:trackChanged')
       },
@@ -108,9 +104,9 @@ export const myPlugin: BuiltinPluginDefinition = {
       doSomething(): void {
         const state = api.player.getState()
         api.log.info('当前播放:', state.currentTrack?.title)
-      }
+      },
     }
-  }
+  },
 }
 ```
 
@@ -130,12 +126,14 @@ export const myPlugin: BuiltinPluginDefinition = {
 ### 安全的定时器
 
 插件可以使用 `setTimeout` 和 `setInterval`，但有以下限制：
+
 - `setTimeout` 最大延迟 60 秒
 - `setInterval` 最小间隔 100ms
 
 ### 代码检查
 
 插件代码在加载时会进行安全检查，以下模式会被拒绝：
+
 - 访问 `__proto__`、`constructor`、`prototype` 进行原型链攻击
 - 使用 `fromCharCode`、`fromCodePoint` 构造字符串绕过检测
 - 动态 `import()` 语句
@@ -143,19 +141,20 @@ export const myPlugin: BuiltinPluginDefinition = {
 
 ## 可用权限
 
-| 权限 | 说明 | 涉及的 API |
-|------|------|-----------|
-| `player:read` | 读取播放器状态 | `api.player.getState()`, `api.player.getLyrics()`, `api.player.getCurrentLyricIndex()` |
-| `player:control` | 控制播放器 | `api.player.play()`, `api.player.pause()`, `api.player.next()`, `api.player.seek()`, `api.player.setVolume()` |
-| `library:read` | 读取音乐库 | `api.library.getPlaylists()`, `api.library.getCurrentPlaylist()`, `api.library.getTracks()` |
-| `lyrics:provider` | 提供歌词源 | `api.lyrics.registerProvider()`, `api.player.setLyrics()` |
-| `ui:extend` | 扩展用户界面 | `api.ui.registerSettingsPanel()`, `api.ui.registerMenuItem()`, `api.ui.registerActionButton()`, `api.ui.registerPlayerDecorator()` |
-| `visualizer` | 注册可视化效果 | `api.visualizer.register()` |
-| `theme` | 自定义主题颜色 | `api.theme.setColors()` |
-| `storage` | 本地数据存储 | `api.storage.*`, `api.file.*`, `api.clipboard.*` |
-| `network` | 网络请求 | `api.network.fetch()` (仅 HTTPS) |
+| 权限              | 说明           | 涉及的 API                                                                                                                         |
+| ----------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `player:read`     | 读取播放器状态 | `api.player.getState()`, `api.player.getLyrics()`, `api.player.getCurrentLyricIndex()`                                             |
+| `player:control`  | 控制播放器     | `api.player.play()`, `api.player.pause()`, `api.player.next()`, `api.player.seek()`, `api.player.setVolume()`                      |
+| `library:read`    | 读取音乐库     | `api.library.getPlaylists()`, `api.library.getCurrentPlaylist()`, `api.library.getTracks()`                                        |
+| `lyrics:provider` | 提供歌词源     | `api.lyrics.registerProvider()`, `api.player.setLyrics()`                                                                          |
+| `ui:extend`       | 扩展用户界面   | `api.ui.registerSettingsPanel()`, `api.ui.registerMenuItem()`, `api.ui.registerActionButton()`, `api.ui.registerPlayerDecorator()` |
+| `visualizer`      | 注册可视化效果 | `api.visualizer.register()`                                                                                                        |
+| `theme`           | 自定义主题颜色 | `api.theme.setColors()`                                                                                                            |
+| `storage`         | 本地数据存储   | `api.storage.*`, `api.file.*`, `api.clipboard.*`                                                                                   |
+| `network`         | 网络请求       | `api.network.fetch()` (仅 HTTPS)                                                                                                   |
 
 **注意：** 以下 API 不需要权限：
+
 - `api.log.*` - 日志
 - `api.utils.*` - 工具函数
 - `api.theme.getCurrent()`, `api.theme.getCSSVariable()`, `api.theme.getAllColors()` - 读取主题
@@ -202,8 +201,8 @@ api.player.pause()
 api.player.togglePlay()
 await api.player.next()
 await api.player.previous()
-api.player.seek(30)        // 跳转到 30 秒
-api.player.setVolume(0.8)  // 设置音量 0-1
+api.player.seek(30) // 跳转到 30 秒
+api.player.setVolume(0.8) // 设置音量 0-1
 ```
 
 #### 设置歌词 (需要 `lyrics:provider`)
@@ -283,7 +282,7 @@ api.events.emit('myEvent', { data: 'hello' })
 #### 通知 (无需权限)
 
 ```javascript
-api.ui.showNotification('操作成功', 'info')    // info, warning, error
+api.ui.showNotification('操作成功', 'info') // info, warning, error
 ```
 
 #### 扩展 (需要 `ui:extend`)
@@ -293,9 +292,11 @@ api.ui.showNotification('操作成功', 'info')    // info, warning, error
 api.ui.registerActionButton({
   id: 'my-button',
   name: '按钮提示文字',
-  icon: 'favorite',  // Material Symbols 图标名
+  icon: 'favorite', // Material Symbols 图标名
   location: 'lyrics',
-  action: () => { /* 点击时执行 */ }
+  action: () => {
+    /* 点击时执行 */
+  },
 })
 
 // 取消注册
@@ -305,7 +306,7 @@ api.ui.unregisterActionButton('my-button')
 api.ui.registerSettingsPanel({
   id: 'my-settings',
   name: '我的设置',
-  component: MySettingsComponent  // Vue 组件
+  component: MySettingsComponent, // Vue 组件
 })
 
 // 注册菜单项
@@ -313,14 +314,16 @@ api.ui.registerMenuItem({
   id: 'my-menu-item',
   name: '我的菜单',
   icon: 'star',
-  action: () => { /* ... */ }
+  action: () => {
+    /* ... */
+  },
 })
 
 // 注册播放器装饰器
 api.ui.registerPlayerDecorator({
   id: 'my-decorator',
-  position: 'bottom',  // top, bottom, left, right
-  component: MyDecoratorComponent
+  position: 'bottom', // top, bottom, left, right
+  component: MyDecoratorComponent,
 })
 ```
 
@@ -332,18 +335,16 @@ api.ui.registerPlayerDecorator({
 api.lyrics.registerProvider({
   id: 'my-lyrics-source',
   name: '我的歌词源',
-  
+
   // 搜索歌词
   async search(title, artist) {
-    return [
-      { id: '1', title, artist, source: 'my-source' }
-    ]
+    return [{ id: '1', title, artist, source: 'my-source' }]
   },
-  
+
   // 获取歌词内容
   async getLyrics(id) {
-    return '[00:00.00]歌词内容...'  // LRC 格式
-  }
+    return '[00:00.00]歌词内容...' // LRC 格式
+  },
 })
 ```
 
@@ -355,13 +356,13 @@ api.lyrics.registerProvider({
 api.visualizer.register({
   id: 'my-visualizer',
   name: '我的可视化',
-  
+
   // 渲染函数，每帧调用
   render(canvas, audioData) {
     const ctx = canvas.getContext('2d')
     // audioData.waveform - 波形数据
     // audioData.spectrum - 频谱数据
-  }
+  },
 })
 ```
 
@@ -372,7 +373,7 @@ api.visualizer.register({
 ```javascript
 const response = await api.network.fetch('https://api.example.com/data', {
   method: 'GET',
-  headers: { 'Content-Type': 'application/json' }
+  headers: { 'Content-Type': 'application/json' },
 })
 const data = await response.json()
 ```
@@ -425,11 +426,11 @@ const buffer = await api.utils.blobToArrayBuffer(blob)
 const blob2 = api.utils.dataURLToBlob(dataURL)
 
 // 格式化时间
-api.utils.formatTime(125)   // '2:05'
-api.utils.formatTime(3725)  // '1:02:05'
+api.utils.formatTime(125) // '2:05'
+api.utils.formatTime(3725) // '1:02:05'
 
 // 生成唯一 ID
-const id = api.utils.generateId()  // 'pluginId-1703520000000-abc123xyz'
+const id = api.utils.generateId() // 'pluginId-1703520000000-abc123xyz'
 ```
 
 ### 文件 (api.file)
@@ -441,7 +442,7 @@ const id = api.utils.generateId()  // 'pluginId-1703520000000-abc123xyz'
 const filePath = await api.file.saveAs(data, {
   defaultName: 'export.json',
   filters: [{ name: 'JSON 文件', extensions: ['json'] }],
-  title: '导出数据'
+  title: '导出数据',
 })
 // data 可以是 Blob、Uint8Array 或 string
 
@@ -460,7 +461,7 @@ await api.file.openScreenshotsDirectory()
 
 ```javascript
 // 复制图片到剪贴板
-await api.clipboard.writeImage(canvas)  // 支持 Canvas、Blob、DataURL
+await api.clipboard.writeImage(canvas) // 支持 Canvas、Blob、DataURL
 
 // 复制文本到剪贴板
 await api.clipboard.writeText('Hello World')
@@ -475,11 +476,11 @@ await api.clipboard.writeText('Hello World')
 api.shortcuts.register({
   id: 'my-shortcut',
   name: '我的快捷键',
-  key: 'Ctrl+Shift+M',  // 支持 Ctrl, Alt, Shift, Meta 组合
+  key: 'Ctrl+Shift+M', // 支持 Ctrl, Alt, Shift, Meta 组合
   description: '执行某个操作',
   action: () => {
     api.log.info('快捷键被触发!')
-  }
+  },
 })
 
 // 取消注册（停用时务必调用）
@@ -497,7 +498,7 @@ api.commands.register({
   name: '我的命令',
   execute: async () => {
     api.log.info('命令执行')
-  }
+  },
 })
 
 // 执行命令
@@ -509,6 +510,7 @@ await api.commands.execute('my-command')
 ### 示例 1: 歌词截图分享插件（外部插件 - JavaScript）
 
 manifest.json:
+
 ```json
 {
   "id": "lyrics-share",
@@ -523,26 +525,27 @@ manifest.json:
 ```
 
 index.js:
+
 ```javascript
 const plugin = {
   activate() {
     api.log.info('歌词截图插件已激活')
-    
+
     // 注册快捷键
     api.shortcuts.register({
       id: 'lyrics-share-copy',
       name: '复制歌词图片',
       key: 'Ctrl+Shift+C',
-      action: () => this.copyImage()
+      action: () => this.copyImage(),
     })
-    
+
     // 注册操作按钮
     api.ui.registerActionButton({
       id: 'lyrics-share-btn',
       name: '复制歌词图片',
       icon: 'content_copy',
       location: 'lyrics',
-      action: () => this.copyImage()
+      action: () => this.copyImage(),
     })
   },
 
@@ -578,7 +581,7 @@ const plugin = {
     if (lyrics && lyricIndex >= 0 && lyrics[lyricIndex]) {
       const line = lyrics[lyricIndex]
       ctx.fillText(line.texts[0]?.text || '', 400, 180)
-      
+
       if (line.texts[0]?.translation) {
         ctx.globalAlpha = 0.7
         ctx.font = '24px system-ui'
@@ -591,7 +594,7 @@ const plugin = {
     ctx.fillStyle = theme.isDark ? '#ffffff' : '#000000'
     ctx.font = 'bold 20px system-ui'
     ctx.fillText(state.currentTrack.title || '未知歌曲', 400, 320)
-    
+
     ctx.font = '16px system-ui'
     ctx.globalAlpha = 0.7
     ctx.fillText(state.currentTrack.artist || '未知艺术家', 400, 350)
@@ -599,13 +602,14 @@ const plugin = {
     // 复制到剪贴板
     await api.clipboard.writeImage(canvas)
     api.ui.showNotification('图片已复制到剪贴板', 'info')
-  }
+  },
 }
 ```
 
 ### 示例 2: 播放统计插件（外部插件 - JavaScript）
 
 manifest.json:
+
 ```json
 {
   "id": "play-stats",
@@ -620,13 +624,14 @@ manifest.json:
 ```
 
 index.js:
+
 ```javascript
 let lastTrackPath = null
 
 const plugin = {
   activate() {
     api.log.info('播放统计插件已激活')
-    
+
     // 监听歌曲切换事件
     api.events.on('player:trackChanged', (data) => {
       if (data.track && data.isPlaying) {
@@ -643,12 +648,12 @@ const plugin = {
 
   recordPlay(track) {
     if (!track.path || track.path === lastTrackPath) return
-    
+
     lastTrackPath = track.path
     const counts = api.storage.get('playCounts', {})
     counts[track.path] = (counts[track.path] || 0) + 1
     api.storage.set('playCounts', counts)
-    
+
     api.log.debug(`${track.title} 播放次数: ${counts[track.path]}`)
   },
 
@@ -664,9 +669,9 @@ const plugin = {
     const counts = api.storage.get('playCounts', {})
     return {
       totalTracks: Object.keys(counts).length,
-      totalPlays: Object.values(counts).reduce((a, b) => a + b, 0)
+      totalPlays: Object.values(counts).reduce((a, b) => a + b, 0),
     }
-  }
+  },
 }
 ```
 
@@ -676,11 +681,11 @@ const plugin = {
 
 ```typescript
 // src/plugins/builtins/playCount.ts
-import { 
-  PluginPermission, 
-  type PluginAPI, 
+import {
+  PluginPermission,
+  type PluginAPI,
   type BuiltinPluginDefinition,
-  type Track 
+  type Track,
 } from '../pluginManager'
 
 interface PlayCountData {
@@ -702,17 +707,14 @@ export const playCountPlugin: BuiltinPluginDefinition = {
   version: '1.0.0',
   author: 'Mercurial Player',
   description: '记录每首歌曲的播放次数和播放历史',
-  permissions: [
-    PluginPermission.PLAYER_READ,
-    PluginPermission.STORAGE,
-  ],
+  permissions: [PluginPermission.PLAYER_READ, PluginPermission.STORAGE],
 
   main: (api: PluginAPI) => {
     let lastTrackPath: string | null = null
     let playStartTime: number | null = null
     let hasRecordedCurrentTrack = false
     let pollingInterval: ReturnType<typeof setInterval> | null = null
-    
+
     // 保存事件回调引用以便正确清理
     let trackChangedCallback: (data: unknown) => void
     let stateChangedCallback: (data: unknown) => void
@@ -776,7 +778,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
           const { track, isPlaying } = data as { track: Track | null; isPlaying: boolean }
           handleTrackChange(track, isPlaying)
         }
-        
+
         stateChangedCallback = (data) => {
           const { track, isPlaying } = data as { track: Track | null; isPlaying: boolean }
           handleTrackChange(track, isPlaying)
@@ -805,13 +807,13 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         if (stateChangedCallback) {
           api.events.off('player:stateChanged', stateChangedCallback)
         }
-        
+
         // 清理定时器
         if (pollingInterval) {
           clearInterval(pollingInterval)
           pollingInterval = null
         }
-        
+
         lastTrackPath = null
         playStartTime = null
         hasRecordedCurrentTrack = false
@@ -852,6 +854,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
 ```
 
 **关键特性：**
+
 - 使用 TypeScript 类型系统确保类型安全
 - 正确管理事件监听器的生命周期
 - 使用闭包保存插件状态
@@ -890,16 +893,16 @@ export const playCountPlugin: BuiltinPluginDefinition = {
 
 ### 插件类型对比
 
-| 特性 | 外部插件 (JavaScript) | 内置插件 (TypeScript) |
-|------|---------------------|---------------------|
-| 开发语言 | JavaScript | TypeScript |
-| 类型检查 | 无（可用 JSDoc） | 完整类型检查 |
-| 运行环境 | 沙箱隔离 | 直接运行 |
-| 安全限制 | 严格限制 | 无限制 |
-| 安装方式 | 用户安装 | 内置集成 |
-| 更新方式 | 手动更新 | 应用更新 |
-| 性能 | 略低 | 最佳 |
-| 适用场景 | 第三方扩展 | 核心功能 |
+| 特性     | 外部插件 (JavaScript) | 内置插件 (TypeScript) |
+| -------- | --------------------- | --------------------- |
+| 开发语言 | JavaScript            | TypeScript            |
+| 类型检查 | 无（可用 JSDoc）      | 完整类型检查          |
+| 运行环境 | 沙箱隔离              | 直接运行              |
+| 安全限制 | 严格限制              | 无限制                |
+| 安装方式 | 用户安装              | 内置集成              |
+| 更新方式 | 手动更新              | 应用更新              |
+| 性能     | 略低                  | 最佳                  |
+| 适用场景 | 第三方扩展            | 核心功能              |
 
 ## TypeScript 类型定义
 
@@ -974,7 +977,7 @@ interface BuiltinPluginDefinition {
 interface PluginInstance {
   activate?: () => void | Promise<void>
   deactivate?: () => void | Promise<void>
-  [key: string]: unknown  // 自定义方法
+  [key: string]: unknown // 自定义方法
 }
 
 // 权限枚举
@@ -1003,11 +1006,11 @@ enum PluginPermission {
 
 ```typescript
 // src/plugins/builtins/myPlugin.ts
-import { 
-  PluginPermission, 
-  type PluginAPI, 
+import {
+  PluginPermission,
+  type PluginAPI,
   type BuiltinPluginDefinition,
-  type Track 
+  type Track,
 } from '../pluginManager'
 
 export const myPlugin: BuiltinPluginDefinition = {
@@ -1015,7 +1018,7 @@ export const myPlugin: BuiltinPluginDefinition = {
   name: '我的插件',
   version: '1.0.0',
   permissions: [PluginPermission.PLAYER_READ],
-  
+
   main: (api: PluginAPI) => {
     return {
       activate(): void {
@@ -1023,9 +1026,9 @@ export const myPlugin: BuiltinPluginDefinition = {
       },
       deactivate(): void {
         api.log.info('插件已停用')
-      }
+      },
     }
-  }
+  },
 }
 ```
 
@@ -1061,7 +1064,7 @@ const plugin = {
   },
   deactivate() {
     api.log.info('插件已停用')
-  }
+  },
 }
 ```
 
@@ -1127,6 +1130,7 @@ const plugin = {
 ### Q: 内置插件和外部插件有什么区别？
 
 **内置插件：**
+
 - 使用 TypeScript 编写，享受完整的类型检查
 - 直接集成到应用中，性能最佳
 - 无沙箱限制，可以访问所有 API
@@ -1134,6 +1138,7 @@ const plugin = {
 - 适合核心功能和官方扩展
 
 **外部插件：**
+
 - 使用 JavaScript 编写，在沙箱环境中运行
 - 用户可以自行安装和卸载
 - 有严格的安全限制
@@ -1156,7 +1161,7 @@ const plugin = {
 const plugin = {
   activate() {
     // 现在可以获得 api 的类型提示
-  }
+  },
 }
 ```
 

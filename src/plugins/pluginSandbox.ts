@@ -5,21 +5,6 @@
 
 import type { PluginAPI, PluginInstance, PluginMainFunction } from './pluginManager'
 
-// 危险的全局对象列表
-const DANGEROUS_GLOBALS = [
-  'window', 'document', 'globalThis', 'self', 'top', 'parent', 'frames',
-  'eval', 'Function', 'constructor',
-  'process', 'require', 'module', 'exports', '__dirname', '__filename',
-  'XMLHttpRequest', 'fetch', 'WebSocket', 'Worker', 'SharedWorker',
-  'importScripts', 'postMessage',
-  'localStorage', 'sessionStorage', 'indexedDB', 'caches',
-  'navigator', 'location', 'history',
-  'alert', 'confirm', 'prompt', 'open', 'close',
-  'requestAnimationFrame', 'cancelAnimationFrame',
-  'MutationObserver', 'IntersectionObserver', 'ResizeObserver',
-  'Proxy', 'Reflect',
-]
-
 // 安全的 console 类型
 interface SafeConsole {
   log: (...args: unknown[]) => void
@@ -94,15 +79,22 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
   const timers = new Set<number>()
   const intervals = new Set<number>()
 
-  const safeSetTimeout = (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]): number => {
-    const id = setTimeout(() => {
-      timers.delete(id as unknown as number)
-      try {
-        fn(...args)
-      } catch (e) {
-        api.log.error('定时器执行错误:', e)
-      }
-    }, Math.min(delay || 0, 60000)) as unknown as number
+  const safeSetTimeout = (
+    fn: (...args: unknown[]) => void,
+    delay?: number,
+    ...args: unknown[]
+  ): number => {
+    const id = setTimeout(
+      () => {
+        timers.delete(id as unknown as number)
+        try {
+          fn(...args)
+        } catch (e) {
+          api.log.error('定时器执行错误:', e)
+        }
+      },
+      Math.min(delay || 0, 60000),
+    ) as unknown as number
     timers.add(id)
     return id
   }
@@ -112,7 +104,11 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
     clearTimeout(id)
   }
 
-  const safeSetInterval = (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]): number => {
+  const safeSetInterval = (
+    fn: (...args: unknown[]) => void,
+    delay?: number,
+    ...args: unknown[]
+  ): number => {
     const safeDelay = Math.max(delay || 100, 100)
     const id = setInterval(() => {
       try {
@@ -176,7 +172,7 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
 
   return {
     globals: allowedGlobals,
-    
+
     /**
      * 在沙箱中执行代码
      */
@@ -201,7 +197,7 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
         clearInterval(id)
       }
       intervals.clear()
-    }
+    },
   }
 }
 
@@ -216,7 +212,8 @@ interface ForbiddenPattern {
  */
 export function validatePluginCode(code: string): boolean {
   // 基本长度检查
-  if (code.length > 1024 * 1024) { // 1MB限制
+  if (code.length > 1024 * 1024) {
+    // 1MB限制
     throw new Error('插件代码过大，超过1MB限制')
   }
 
@@ -249,7 +246,7 @@ export function validatePluginCode(code: string): boolean {
     { pattern: /\b__dirname\b/, msg: '__dirname' },
     { pattern: /\b__filename\b/, msg: '__filename' },
     { pattern: /__proto__/, msg: '__proto__' },
-    { pattern: /\bconstructor\b\s*[.\[]/, msg: 'constructor 访问' },
+    { pattern: /\bconstructor\b\s*[.[]/, msg: 'constructor 访问' },
     { pattern: /prototype\s*\[/, msg: 'prototype 动态访问' },
     { pattern: /Object\s*\.\s*getPrototypeOf/, msg: 'getPrototypeOf' },
     { pattern: /Object\s*\.\s*setPrototypeOf/, msg: 'setPrototypeOf' },
@@ -288,7 +285,8 @@ export function validatePluginCode(code: string): boolean {
   // 检查可疑的属性访问模式
   const bracketAccessPattern = /\[\s*[^0-9\]]/g
   const bracketMatches = codeWithoutStrings.match(bracketAccessPattern)
-  if (bracketMatches && bracketMatches.length > 15) { // 降低阈值
+  if (bracketMatches && bracketMatches.length > 15) {
+    // 降低阈值
     throw new Error('插件代码包含过多动态属性访问，可能存在安全风险')
   }
 

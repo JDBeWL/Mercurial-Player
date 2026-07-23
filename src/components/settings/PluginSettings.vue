@@ -21,11 +21,14 @@
     </div>
 
     <div v-else class="plugin-list">
-      <div 
-        v-for="plugin in plugins" 
-        :key="plugin.id" 
+      <div
+        v-for="plugin in plugins"
+        :key="plugin.id"
         class="plugin-item"
-        :class="{ 'plugin-item--active': plugin.state === 'active', 'plugin-item--error': plugin.state === 'error' }"
+        :class="{
+          'plugin-item--active': plugin.state === 'active',
+          'plugin-item--error': plugin.state === 'error',
+        }"
       >
         <div class="plugin-info">
           <div class="plugin-header">
@@ -42,7 +45,7 @@
               {{ plugin.author }}
             </span>
             <span class="plugin-version">v{{ plugin.version }}</span>
-            <span class="plugin-permissions" v-if="plugin.permissions?.length">
+            <span v-if="plugin.permissions?.length" class="plugin-permissions">
               <span class="material-symbols-rounded">security</span>
               {{ plugin.permissions.length }} 项权限
             </span>
@@ -50,27 +53,27 @@
           <p v-if="plugin.error" class="plugin-error">{{ plugin.error }}</p>
         </div>
         <div class="plugin-actions">
-          <button 
-            v-if="plugin.state === 'inactive'" 
-            class="icon-button" 
-            @click="activatePlugin(plugin.id)"
+          <button
+            v-if="plugin.state === 'inactive'"
+            class="icon-button"
             :title="$t('config.activate') || '激活'"
+            @click="activatePlugin(plugin.id)"
           >
             <span class="material-symbols-rounded">play_arrow</span>
           </button>
-          <button 
-            v-if="plugin.state === 'active'" 
-            class="icon-button" 
-            @click="deactivatePlugin(plugin.id)"
+          <button
+            v-if="plugin.state === 'active'"
+            class="icon-button"
             :title="$t('config.deactivate') || '停用'"
+            @click="deactivatePlugin(plugin.id)"
           >
             <span class="material-symbols-rounded">pause</span>
           </button>
-          <button 
+          <button
             v-if="!plugin.id.startsWith('builtin-')"
-            class="icon-button danger" 
-            @click="uninstallPlugin(plugin.id)"
+            class="icon-button danger"
             :title="$t('config.uninstall') || '卸载'"
+            @click="uninstallPlugin(plugin.id)"
           >
             <span class="material-symbols-rounded">delete</span>
           </button>
@@ -357,7 +360,11 @@ onMounted(async () => {
 }
 
 .filled-tonal-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-secondary-container));
+  background-color: color-mix(
+    in srgb,
+    var(--md-sys-color-on-surface) 8%,
+    var(--md-sys-color-secondary-container)
+  );
 }
 
 .icon-button {

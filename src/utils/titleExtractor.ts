@@ -38,7 +38,7 @@ export class TitleExtractor {
    */
   static async extractTitlesBatch(
     filePaths: string[],
-    config: Partial<TitleExtractionConfig> = {}
+    config: Partial<TitleExtractionConfig> = {},
   ): Promise<Map<string, TitleInfo>> {
     const { preferMetadata = true } = config
     const result = new Map<string, TitleInfo>()
@@ -51,7 +51,9 @@ export class TitleExtractor {
     const metadataMap = new Map<string, TrackMetadata>()
     if (preferMetadata) {
       try {
-        const metadataList = await invoke<TrackMetadata[]>('get_tracks_metadata_batch', { paths: filePaths })
+        const metadataList = await invoke<TrackMetadata[]>('get_tracks_metadata_batch', {
+          paths: filePaths,
+        })
         // 将结果转换为 Map 以便快速查找
         for (const metadata of metadataList) {
           if (metadata && metadata.path) {
@@ -81,7 +83,7 @@ export class TitleExtractor {
           channels: metadata.channels || null,
           bitDepth: metadata.bitDepth || null,
           format: metadata.format || null,
-          isFromMetadata: true
+          isFromMetadata: true,
         })
       } else {
         // 回退到文件名解析
@@ -94,7 +96,7 @@ export class TitleExtractor {
           sampleRate: metadata?.sampleRate || null,
           channels: metadata?.channels || null,
           bitDepth: metadata?.bitDepth || null,
-          format: metadata?.format || null
+          format: metadata?.format || null,
         })
       }
     }
@@ -107,7 +109,7 @@ export class TitleExtractor {
    */
   static async extractTitle(
     filePath: string,
-    config: Partial<TitleExtractionConfig> = {}
+    config: Partial<TitleExtractionConfig> = {},
   ): Promise<TitleInfo> {
     try {
       const { preferMetadata = true } = config
@@ -123,7 +125,7 @@ export class TitleExtractor {
               title: this.cleanTitle(metadata.title),
               artist: this.cleanTitle(metadata.artist || ''),
               album: this.cleanTitle(metadata.album || ''),
-              isFromMetadata: true
+              isFromMetadata: true,
             }
           }
         } catch (error) {
@@ -134,18 +136,17 @@ export class TitleExtractor {
 
       // 回退到从文件名解析
       return this.parseFromFileName(filePath, config)
-
     } catch (error) {
       logger.error('Error extracting title:', error)
       // 出现意外错误时的最终回退方案
       const fileName = this.getFileName(filePath, config.hideFileExtension)
-    return {
-      fileName,
-      title: this.cleanTitle(fileName),
-      artist: '',
-      album: '',
-      isFromMetadata: false
-    }
+      return {
+        fileName,
+        title: this.cleanTitle(fileName),
+        artist: '',
+        album: '',
+        isFromMetadata: false,
+      }
     }
   }
 
@@ -154,13 +155,13 @@ export class TitleExtractor {
    */
   static parseFromFileName(
     filePath: string,
-    config: Partial<TitleExtractionConfig> = {}
+    config: Partial<TitleExtractionConfig> = {},
   ): TitleInfo {
     const {
       separator = '-',
       customSeparators = ['-', '_', '.', ' '],
       hideFileExtension = true,
-      parseArtistTitle = true
+      parseArtistTitle = true,
     } = config
 
     const fileName = this.getFileName(filePath, hideFileExtension)
@@ -172,8 +173,8 @@ export class TitleExtractor {
       // 定义一个带优先级的分隔符列表
       const prioritizedSeparators = [
         ' - ', // ' - ' 是最高优先级的
-        ...new Set([separator, ...customSeparators])
-      ].filter(s => s && s.length > 0)
+        ...new Set([separator, ...customSeparators]),
+      ].filter((s) => s && s.length > 0)
 
       for (const sep of prioritizedSeparators) {
         // 使用 lastIndexOf 来处理 "艺术家 - 歌曲 - 专辑" 这类情况
@@ -205,7 +206,7 @@ export class TitleExtractor {
       title,
       artist,
       album: '',
-      isFromMetadata: false
+      isFromMetadata: false,
     }
   }
 
@@ -259,7 +260,7 @@ export class TitleExtractor {
    * 获取所有有效的分隔符
    */
   static getValidSeparators(separators: string[]): string[] {
-    return separators.filter(sep => this.isValidSeparator(sep))
+    return separators.filter((sep) => this.isValidSeparator(sep))
   }
 
   /**

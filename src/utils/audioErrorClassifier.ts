@@ -37,7 +37,7 @@ export function classifyAudioInvokeError(err: unknown): ErrorType {
     'unexpected eof',
     'unsupported', // e.g. unsupported audio buffer format / codec
   ]
-  if (decodePatterns.some(p => m.includes(p))) {
+  if (decodePatterns.some((p) => m.includes(p))) {
     return ErrorType.AUDIO_DECODE_ERROR
   }
 
@@ -54,7 +54,7 @@ export function classifyAudioInvokeError(err: unknown): ErrorType {
     'no default output device',
     'not initialized',
   ]
-  if (devicePatterns.some(p => m.includes(p))) {
+  if (devicePatterns.some((p) => m.includes(p))) {
     return ErrorType.AUDIO_DEVICE_ERROR
   }
 

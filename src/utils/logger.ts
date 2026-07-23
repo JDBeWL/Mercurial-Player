@@ -1,6 +1,6 @@
 /**
  * 日志系统
- * 
+ *
  * 提供统一的日志管理，支持不同日志级别和环境配置
  * 在生产环境自动禁用调试日志
  */
@@ -13,7 +13,7 @@ export enum LogLevel {
   INFO = 1,
   WARN = 2,
   ERROR = 3,
-  NONE = 4
+  NONE = 4,
 }
 
 // 日志级别名称映射
@@ -22,7 +22,7 @@ const LEVEL_NAMES: Record<LogLevel, string> = {
   [LogLevel.INFO]: 'INFO',
   [LogLevel.WARN]: 'WARN',
   [LogLevel.ERROR]: 'ERROR',
-  [LogLevel.NONE]: 'NONE'
+  [LogLevel.NONE]: 'NONE',
 }
 
 // 日志级别颜色映射（用于控制台输出）
@@ -31,7 +31,7 @@ const LEVEL_COLORS: Record<LogLevel, string> = {
   [LogLevel.INFO]: '#2196F3',
   [LogLevel.WARN]: '#FF9800',
   [LogLevel.ERROR]: '#F44336',
-  [LogLevel.NONE]: '#000'
+  [LogLevel.NONE]: '#000',
 }
 
 /**
@@ -50,16 +50,16 @@ class Logger {
     // 获取环境变量
     this.isDev = import.meta.env.DEV
     this.isDebug = import.meta.env.MODE === 'development' || import.meta.env.DEBUG === 'true'
-    
+
     // 根据环境设置默认日志级别
     this.minLevel = this.isDev || this.isDebug ? LogLevel.DEBUG : LogLevel.INFO
-    
+
     // 是否启用控制台输出
     this.enableConsole = true
-    
+
     // 是否启用文件输出（通过Tauri后端）
     this.enableFile = false
-    
+
     // 日志历史（用于调试）
     this.logHistory = []
     this.maxHistorySize = 100
@@ -104,16 +104,15 @@ class Logger {
   private formatLog(level: LogLevel, message: string, args: unknown[] = []): LogData {
     const timestamp = this.formatTimestamp()
     const levelName = LEVEL_NAMES[level]
-    
+
     return {
       timestamp,
       level: levelName,
       levelValue: level,
       message,
       args: args.length > 0 ? args : undefined,
-      stack: level >= LogLevel.ERROR && args[0] instanceof Error 
-        ? (args[0] as Error).stack 
-        : undefined
+      stack:
+        level >= LogLevel.ERROR && args[0] instanceof Error ? (args[0] as Error).stack : undefined,
     }
   }
 
@@ -126,16 +125,20 @@ class Logger {
     const { timestamp, levelValue, message, args } = logData
     const levelName = LEVEL_NAMES[levelValue]
     const color = LEVEL_COLORS[levelValue]
-    
+
     // 构建控制台输出样式
     const style = `color: ${color}; font-weight: bold;`
     const prefix = `%c[${timestamp}] [${levelName}]`
-    
+
     // 根据日志级别选择不同的控制台方法
-    const consoleMethod = levelValue === LogLevel.ERROR ? console.error
-      : levelValue === LogLevel.WARN ? console.warn
-      : levelValue === LogLevel.DEBUG ? console.debug
-      : console.log
+    const consoleMethod =
+      levelValue === LogLevel.ERROR
+        ? console.error
+        : levelValue === LogLevel.WARN
+          ? console.warn
+          : levelValue === LogLevel.DEBUG
+            ? console.debug
+            : console.log
 
     // 输出日志
     if (args && args.length > 0) {
@@ -166,7 +169,7 @@ class Logger {
    */
   private recordHistory(logData: LogData): void {
     this.logHistory.push(logData)
-    
+
     // 限制历史记录大小
     if (this.logHistory.length > this.maxHistorySize) {
       this.logHistory.shift()
@@ -247,27 +250,31 @@ class Logger {
    */
   exportHistoryAsText(): string {
     return this.logHistory
-      .map(log => {
+      .map((log) => {
         const { timestamp, level, message, args, stack } = log
         let text = `[${timestamp}] [${level}] ${message}`
-        
+
         if (args && args.length > 0) {
-          text += ' ' + args.map(arg => {
-            if (arg instanceof Error) {
-              return arg.toString()
-            }
-            try {
-              return JSON.stringify(arg)
-            } catch {
-              return String(arg)
-            }
-          }).join(' ')
+          text +=
+            ' ' +
+            args
+              .map((arg) => {
+                if (arg instanceof Error) {
+                  return arg.toString()
+                }
+                try {
+                  return JSON.stringify(arg)
+                } catch {
+                  return String(arg)
+                }
+              })
+              .join(' ')
         }
-        
+
         if (stack) {
           text += '\n' + stack
         }
-        
+
         return text
       })
       .join('\n')

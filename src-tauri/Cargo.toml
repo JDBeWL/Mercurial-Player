@@ -1,6 +1,6 @@
 [package]
 name = "mercurial-player"
-# 版本号唯一来源: 修改后运行 `npm run version:sync` 同步到 package.json 和 tauri.conf.json
+# 版本号唯一来源: 修改后运行 `pnpm run version:sync` 同步到 package.json 和 tauri.conf.json
 version = "1.3.0"
 description = "A music player by JDBeWL"
 authors = ["jdbEwl"]

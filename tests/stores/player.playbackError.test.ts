@@ -48,7 +48,6 @@ const track = {
 const invokeMock = vi.mocked(invoke)
 
 describe('usePlayerStore playTrack error classification', () => {
-
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
@@ -84,7 +83,10 @@ describe('usePlayerStore playTrack error classification', () => {
   }
 
   it('maps decode/probe errors to AUDIO_DECODE_ERROR', async () => {
-    await expectErrorType(new Error('Failed to probe format: end of stream'), ErrorType.AUDIO_DECODE_ERROR)
+    await expectErrorType(
+      new Error('Failed to probe format: end of stream'),
+      ErrorType.AUDIO_DECODE_ERROR,
+    )
     await expectErrorType(new Error('Unrecognized format'), ErrorType.AUDIO_DECODE_ERROR)
   })
 

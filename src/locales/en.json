@@ -254,11 +254,6 @@
     "updateAvailable": "New version available:",
     "usingLatest": "You are using the latest version",
     "updateCheckFailed": "Failed to check for updates. Please try again later",
-    "releaseNotes": "Release Notes",
-    "noReleaseNotes": "No release notes available",
-    "downloading": "Downloading...",
-    "installing": "Installing...",
-    "installNow": "Install Now",
     "aboutApp": "About This App",
     "update": {
       "available": "Update available",

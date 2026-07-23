@@ -105,8 +105,9 @@ fn monitor_device_changes(
         let current_device_name = match current_device.lock() {
             Ok(device) => device.clone(),
             Err(err) => {
+                // 锁失败时不要更新 previous_devices,直接 continue 保留旧基准,
+                // 否则会用本次的设备列表覆盖基准,导致下次循环时设备变更漏检
                 log::error!("Failed to read current device in monitor loop: {err}");
-                previous_devices = current_devices;
                 continue;
             }
         };

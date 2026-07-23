@@ -122,7 +122,7 @@ fn main() {
                 enable_vertical_sync: Arc::new(AtomicBool::new(false)), // 默认关闭垂直同步
             },
             decode: DecodeThreadState {
-                stop: Arc::new(AtomicBool::new(false)),
+                generation: Arc::new(AtomicU64::new(0)),
                 id: Arc::new(AtomicU64::new(0)),
             },
             equalizer: Arc::new(Mutex::new(Equalizer::new(48000, 2))),

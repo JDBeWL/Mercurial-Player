@@ -394,7 +394,16 @@ impl ConfigManager {
 
     fn save_config_to_file(config: &AppConfig, file_path: &str) -> Result<(), String> {
         let content = serde_json::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {e}"))?;
-        std::fs::write(file_path, content).map_err(|e| format!("Failed to write config file: {e}"))
+        // 原子写入:先写临时文件,再 rename 替换,避免写入过程中崩溃/断电导致配置文件损坏
+        let tmp_path = format!("{file_path}.tmp");
+        std::fs::write(&tmp_path, &content)
+            .map_err(|e| format!("Failed to write temp config file: {e}"))?;
+        std::fs::rename(&tmp_path, file_path).map_err(|e| {
+            // rename 失败时尝试清理临时文件,避免残留
+            let _ = std::fs::remove_file(&tmp_path);
+            format!("Failed to rename config file: {e}")
+        })?;
+        Ok(())
     }
 
     pub fn export_config(&self, config: &AppConfig, export_path: &str) -> Result<(), String> {

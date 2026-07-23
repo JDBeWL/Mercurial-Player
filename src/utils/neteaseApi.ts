@@ -4,7 +4,6 @@
  */
 
 import { invoke } from '@tauri-apps/api/core'
-import logger from './logger'
 import errorHandler, { ErrorType, ErrorSeverity, handlePromise } from './errorHandler'
 
 interface Song {
@@ -31,15 +30,15 @@ export class NeteaseAPI {
       invoke<Song[]>('netease_search_songs', {
         keyword,
         limit,
-        offset
+        offset,
       }),
       {
         type: ErrorType.NETWORK,
         severity: ErrorSeverity.MEDIUM,
         context: { keyword, limit, offset, action: 'searchSongs' },
         showToUser: false,
-        throw: false
-      }
+        throw: false,
+      },
     )
 
     return result.success ? result.data! : []
@@ -49,16 +48,13 @@ export class NeteaseAPI {
    * 获取歌词
    */
   async getLyrics(songId: string): Promise<LyricsData | null> {
-    const result = await handlePromise(
-      invoke<LyricsData>('netease_get_lyrics', { songId }),
-      {
-        type: ErrorType.NETWORK,
-        severity: ErrorSeverity.MEDIUM,
-        context: { songId, action: 'getLyrics' },
-        showToUser: false,
-        throw: false
-      }
-    )
+    const result = await handlePromise(invoke<LyricsData>('netease_get_lyrics', { songId }), {
+      type: ErrorType.NETWORK,
+      severity: ErrorSeverity.MEDIUM,
+      context: { songId, action: 'getLyrics' },
+      showToUser: false,
+      throw: false,
+    })
 
     return result.success ? result.data : null
   }
@@ -69,7 +65,7 @@ export class NeteaseAPI {
   async searchAndGetLyrics(
     title: string,
     artist: string = '',
-    duration: number = 0
+    duration: number = 0,
   ): Promise<LyricsData | null> {
     try {
       // 构建搜索关键词
@@ -80,7 +76,7 @@ export class NeteaseAPI {
 
       // 搜索歌曲
       let songs = await this.searchSongs(keyword, 10)
-      
+
       if (songs.length === 0) {
         // 如果没有结果，尝试只用标题搜索
         songs = await this.searchSongs(title, 10)
@@ -91,7 +87,7 @@ export class NeteaseAPI {
 
       // 找到最匹配的歌曲
       const bestMatch = this.findBestMatch(songs, title, artist, duration)
-      
+
       if (!bestMatch) {
         // 如果没有找到匹配，使用第一个结果
         if (songs.length > 0) {
@@ -107,7 +103,7 @@ export class NeteaseAPI {
         type: ErrorType.NETWORK,
         severity: ErrorSeverity.LOW,
         context: { title, artist, duration, action: 'searchAndGetLyrics' },
-        showToUser: false
+        showToUser: false,
       })
       return null
     }
@@ -116,19 +112,15 @@ export class NeteaseAPI {
   /**
    * 找到最匹配的歌曲
    */
-  findBestMatch(
-    songs: Song[],
-    title: string,
-    artist: string,
-    duration: number
-  ): Song | null {
+  findBestMatch(songs: Song[], title: string, artist: string, duration: number): Song | null {
     if (songs.length === 0) return null
 
     let bestScore = -1
     let bestMatch: Song | null = null
 
     const normalizeStr = (str: string): string => {
-      return str.toLowerCase()
+      return str
+        .toLowerCase()
         .replace(/[\s\-_.]/g, '')
         .replace(/[（(][^）)]*[）)]/g, '')
         .trim()
@@ -210,7 +202,7 @@ export class NeteaseAPI {
     for (const time of times) {
       const orig = origLyrics[time] || ''
       const trans = transLyrics[time] || ''
-      
+
       if (orig) {
         merged.push(`[${time}]${orig}`)
         if (trans && trans !== orig) {

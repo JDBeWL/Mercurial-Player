@@ -3,20 +3,20 @@
     <button class="icon-button" @click="toggleColorPicker">
       <span class="material-symbols-rounded">palette</span>
     </button>
-    
+
     <Transition name="picker-fade">
-      <div class="color-picker" v-if="showColorPicker" @click.stop>
+      <div v-if="showColorPicker" class="color-picker" @click.stop>
         <div class="color-picker-header">
           <h3>{{ $t('themeSelector.chooseThemeColor') }}</h3>
           <button class="close-btn" @click="showColorPicker = false">
             <span class="material-symbols-rounded">close</span>
           </button>
         </div>
-        
+
         <!-- 色彩分类标签 -->
         <div class="color-categories">
-          <button 
-            v-for="category in colorCategories" 
+          <button
+            v-for="category in colorCategories"
             :key="category.id"
             class="category-chip"
             :class="{ active: activeCategory === category.id }"
@@ -25,11 +25,11 @@
             {{ category.name }}
           </button>
         </div>
-        
+
         <!-- 颜色预设网格 -->
         <div class="color-presets">
-          <div 
-            v-for="color in filteredColors" 
+          <div
+            v-for="color in filteredColors"
             :key="color.hex"
             class="color-preset"
             :class="{ selected: themeStore.primaryColor === color.hex }"
@@ -37,31 +37,35 @@
             :title="color.name"
             @click="selectColor(color.hex)"
           >
-            <span v-if="themeStore.primaryColor === color.hex" class="check-icon material-symbols-rounded">check</span>
+            <span
+              v-if="themeStore.primaryColor === color.hex"
+              class="check-icon material-symbols-rounded"
+              >check</span
+            >
           </div>
         </div>
-        
+
         <!-- 自定义颜色 -->
         <div class="custom-color-section">
           <label for="custom-color">{{ $t('themeSelector.customColor') }}</label>
           <div class="custom-color-input">
-            <input 
-              type="color" 
-              id="custom-color" 
-              :value="themeStore.primaryColor" 
+            <input
+              id="custom-color"
+              type="color"
+              :value="themeStore.primaryColor"
               @input="selectCustomColor"
             />
-            <input 
-              type="text" 
+            <input
+              type="text"
               class="hex-input"
               :value="themeStore.primaryColor"
-              @change="onHexInput"
               placeholder="#000000"
               maxlength="7"
+              @change="onHexInput"
             />
           </div>
         </div>
-        
+
         <!-- 当前颜色预览 -->
         <div class="color-preview">
           <div class="preview-swatch" :style="{ backgroundColor: themeStore.primaryColor }"></div>
@@ -124,7 +128,7 @@ const colorPresets: ColorPreset[] = [
   { hex: '#00ACC1', name: '水鸭蓝', category: 'blue' },
   { hex: '#00BCD4', name: '青色', category: 'blue' },
   { hex: '#26C6DA', name: '浅青色', category: 'blue' },
-  
+
   // 紫色系 - 神秘、优雅、创意
   { hex: '#7C4DFF', name: '电光紫', category: 'purple' },
   { hex: '#651FFF', name: '深紫', category: 'purple' },
@@ -136,7 +140,7 @@ const colorPresets: ColorPreset[] = [
   { hex: '#536DFE', name: '靛蓝紫', category: 'purple' },
   { hex: '#3D5AFE', name: '明亮靛蓝', category: 'purple' },
   { hex: '#304FFE', name: '深靛蓝', category: 'purple' },
-  
+
   // 粉色系 - 浪漫、温柔、活力
   { hex: '#E67EA5', name: '杏山和纱', category: 'pink' },
   { hex: '#F48FB1', name: '樱花粉', category: 'pink' },
@@ -149,7 +153,7 @@ const colorPresets: ColorPreset[] = [
   { hex: '#FF4081', name: '霓虹粉', category: 'pink' },
   { hex: '#F50057', name: '亮玫红', category: 'pink' },
   { hex: '#E040FB', name: '紫粉', category: 'pink' },
-  
+
   // 红色系 - 热情、活力、警示
   { hex: '#EF5350', name: '珊瑚红', category: 'red' },
   { hex: '#F44336', name: '经典红', category: 'red' },
@@ -160,7 +164,7 @@ const colorPresets: ColorPreset[] = [
   { hex: '#FF5252', name: '亮红', category: 'red' },
   { hex: '#FF1744', name: '霓虹红', category: 'red' },
   { hex: '#D50000', name: '纯红', category: 'red' },
-  
+
   // 橙色系 - 温暖、活泼、创意
   { hex: '#FF7043', name: '珊瑚橙', category: 'orange' },
   { hex: '#FF5722', name: '深橙', category: 'orange' },
@@ -172,7 +176,7 @@ const colorPresets: ColorPreset[] = [
   { hex: '#FFA726', name: '杏橙', category: 'orange' },
   { hex: '#FFB300', name: '琥珀', category: 'orange' },
   { hex: '#FFC107', name: '金黄', category: 'orange' },
-  
+
   // 绿色系 - 自然、健康、成长
   { hex: '#66BB6A', name: '草绿', category: 'green' },
   { hex: '#4CAF50', name: '经典绿', category: 'green' },
@@ -184,7 +188,7 @@ const colorPresets: ColorPreset[] = [
   { hex: '#009688', name: '青绿', category: 'green' },
   { hex: '#00897B', name: '深青绿', category: 'green' },
   { hex: '#26A69A', name: '薄荷绿', category: 'green' },
-  
+
   // 中性色 - 稳重、专业、简约
   { hex: '#2C2C2C', name: '鬼方佳代子', category: 'neutral' },
   { hex: '#78909C', name: '蓝灰', category: 'neutral' },
@@ -204,7 +208,7 @@ const filteredColors = computed<ColorPreset[]>(() => {
   if (activeCategory.value === 'all') {
     return colorPresets
   }
-  return colorPresets.filter(c => c.category === activeCategory.value)
+  return colorPresets.filter((c) => c.category === activeCategory.value)
 })
 
 const toggleColorPicker = (): void => {
@@ -230,7 +234,7 @@ onUnmounted(() => {
 
 const selectColor = async (color: string): Promise<void> => {
   themeStore.setPrimaryColor(color)
-  
+
   // 自动保存配置到 user.json
   if (configStore.general.autoSaveConfig) {
     try {
@@ -244,7 +248,7 @@ const selectColor = async (color: string): Promise<void> => {
 
 const selectCustomColor = async (event: Event): Promise<void> => {
   themeStore.setPrimaryColor((event.target as HTMLInputElement).value)
-  
+
   // 自动保存配置到 user.json
   if (configStore.general.autoSaveConfig) {
     try {
@@ -261,7 +265,7 @@ const onHexInput = async (event: Event): Promise<void> => {
   // 验证 HEX 颜色格式
   if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
     themeStore.setPrimaryColor(value)
-    
+
     if (configStore.general.autoSaveConfig) {
       try {
         await configStore.saveConfig()
@@ -431,7 +435,7 @@ const onHexInput = async (event: Event): Promise<void> => {
   gap: 12px;
 }
 
-.custom-color-input input[type="color"] {
+.custom-color-input input[type='color'] {
   width: 48px;
   height: 48px;
   border: none;
@@ -444,14 +448,14 @@ const onHexInput = async (event: Event): Promise<void> => {
   -webkit-appearance: none;
 }
 
-.custom-color-input input[type="color"]::-webkit-color-swatch-wrapper {
+.custom-color-input input[type='color']::-webkit-color-swatch-wrapper {
   padding: 0;
   margin: 0;
   border: none;
   background: transparent;
 }
 
-.custom-color-input input[type="color"]::-webkit-color-swatch {
+.custom-color-input input[type='color']::-webkit-color-swatch {
   border: none;
   border-radius: var(--md-sys-shape-corner-medium);
 }

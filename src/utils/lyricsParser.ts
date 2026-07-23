@@ -5,7 +5,7 @@ import logger from './logger'
 import type { LyricLine, LyricsFormat, KaraokeWord } from '@/types'
 
 // 让出主线程的辅助函数
-const yieldToMain = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
+const yieldToMain = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
 export class LyricsParser {
   /**
@@ -59,7 +59,11 @@ export class LyricsParser {
    * 自动检测歌词格式
    */
   static detectFormat(content: string): LyricsFormat {
-    if (content.includes('[Script Info]') || content.includes('[V4+ Styles]') || content.includes('[Events]')) {
+    if (
+      content.includes('[Script Info]') ||
+      content.includes('[V4+ Styles]') ||
+      content.includes('[Events]')
+    ) {
       return 'ass'
     }
     if (/^\d+\s*\n\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}\s*\n/m.test(content)) {
@@ -72,7 +76,7 @@ export class LyricsParser {
    * 异步解析 LRC 格式歌词（支持卡拉OK、翻译、分块处理）
    */
   static async parseLRCAsync(content: string): Promise<LyricLine[]> {
-    const lines = content.split("\n")
+    const lines = content.split('\n')
     const pattern = /\[(\d{2}):(\d{2}):(\d{2})\]|\[(\d{2}):(\d{2})\.(\d{2,3})\]/g
     const resultMap: Record<number, LyricLine> = {}
     const CHUNK_SIZE = 100
@@ -91,19 +95,20 @@ export class LyricsParser {
         if (match[1] !== undefined) {
           time = parseInt(match[1]) * 60 + parseInt(match[2]) + parseInt(match[3]) / 100
         } else {
-          time = parseInt(match[4]) * 60 + parseInt(match[5]) + parseInt(match[6].padEnd(3, "0")) / 1000
+          time =
+            parseInt(match[4]) * 60 + parseInt(match[5]) + parseInt(match[6].padEnd(3, '0')) / 1000
         }
         timestamps.push({ time, index: match.index })
       }
       if (timestamps.length < 1) continue
-      const text = line.replace(linePattern, "").trim()
+      const text = line.replace(linePattern, '').trim()
       if (!text) continue
       const startTime = timestamps[0].time
       resultMap[startTime] = resultMap[startTime] || { time: startTime, texts: [], karaoke: null }
       if (timestamps.length > 1) {
         resultMap[startTime].karaoke = {
           fullText: text,
-          timings: timestamps.slice(1).map((s, idx) => ({ time: s.time, position: idx + 1 }))
+          timings: timestamps.slice(1).map((s, idx) => ({ time: s.time, position: idx + 1 })),
         }
       }
       resultMap[startTime].texts!.push(text)
@@ -143,22 +148,65 @@ export class LyricsParser {
     const isTranslationStyle = (style: string): boolean => {
       const lowerStyle = style.toLowerCase()
       // 翻译相关的 style 关键词
-      const translationKeywords = ['ts', 'translation', 'trans', 'cn', 'zh', 'chs', 'cht', 'chinese', 'romaji', 'roma', 'chn', '翻译', '中文']
-      return translationKeywords.some(keyword => lowerStyle.includes(keyword))
+      const translationKeywords = [
+        'ts',
+        'translation',
+        'trans',
+        'cn',
+        'zh',
+        'chs',
+        'cht',
+        'chinese',
+        'romaji',
+        'roma',
+        'chn',
+        '翻译',
+        '中文',
+      ]
+      return translationKeywords.some((keyword) => lowerStyle.includes(keyword))
     }
 
     const isOriginalStyle = (style: string): boolean => {
       const lowerStyle = style.toLowerCase()
       // 原歌词相关的 style 关键词（优先级低于翻译判断）
-      const originalKeywords = ['orig', 'original', 'en', 'english', 'jp', 'ja', 'japanese', 'main', 'default', 'lyric', '原文', '日文', '英文']
-      return originalKeywords.some(keyword => lowerStyle.includes(keyword))
+      const originalKeywords = [
+        'orig',
+        'original',
+        'en',
+        'english',
+        'jp',
+        'ja',
+        'japanese',
+        'main',
+        'default',
+        'lyric',
+        '原文',
+        '日文',
+        '英文',
+      ]
+      return originalKeywords.some((keyword) => lowerStyle.includes(keyword))
     }
 
-    const groupedMap = new Map<string, { startTime: number; endTime: number; texts: { orig: string; ts: string }; styles: Set<string>; karaoke: null }>()
-    dialogues.forEach(d => {
+    const groupedMap = new Map<
+      string,
+      {
+        startTime: number
+        endTime: number
+        texts: { orig: string; ts: string }
+        styles: Set<string>
+        karaoke: null
+      }
+    >()
+    dialogues.forEach((d) => {
       const key = d.startTime.toFixed(3) + '-' + d.endTime.toFixed(3)
       if (!groupedMap.has(key)) {
-        groupedMap.set(key, { startTime: d.startTime, endTime: d.endTime, texts: { orig: '', ts: '' }, styles: new Set(), karaoke: null })
+        groupedMap.set(key, {
+          startTime: d.startTime,
+          endTime: d.endTime,
+          texts: { orig: '', ts: '' },
+          styles: new Set(),
+          karaoke: null,
+        })
       }
       const group = groupedMap.get(key)!
       group.styles.add(d.style)
@@ -184,7 +232,7 @@ export class LyricsParser {
     })
 
     const result: LyricLine[] = []
-    groupedMap.forEach(group => {
+    groupedMap.forEach((group) => {
       const parseKaraoke = (text: string): KaraokeWord[] => {
         const karaokeTag = /{\\k[f]?(\d+)}([^{}]*)/g
         const words: KaraokeWord[] = []
@@ -200,15 +248,17 @@ export class LyricsParser {
       const enWords = parseKaraoke(group.texts.orig)
       const plainText = group.texts.orig.replace(/{.*?}/g, '')
       // 没有 karaoke 标记时，生成覆盖整行的虚拟 word
-      const finalWords = enWords.length > 0 ? enWords
-        : (plainText.length > 0 && group.endTime > group.startTime
-          ? [{ text: plainText, start: group.startTime, end: group.endTime }]
-          : [])
+      const finalWords =
+        enWords.length > 0
+          ? enWords
+          : plainText.length > 0 && group.endTime > group.startTime
+            ? [{ text: plainText, start: group.startTime, end: group.endTime }]
+            : []
       result.push({
         time: group.startTime,
         texts: [plainText, group.texts.ts.replace(/{.*?}/g, '')],
         words: finalWords,
-        karaoke: finalWords.length > 0 ? { fullText: group.texts.orig, timings: [] } : null
+        karaoke: finalWords.length > 0 ? { fullText: group.texts.orig, timings: [] } : null,
       })
     })
     return result.sort((a, b) => a.time - b.time)
@@ -242,7 +292,9 @@ export class LyricsParser {
         if (singleMatch) {
           const minutes = parseInt(singleMatch[1])
           const seconds = parseInt(singleMatch[2])
-          const milliseconds = singleMatch[3] ? parseInt(singleMatch[3].padEnd(3, '0').substring(0, 3)) : 0
+          const milliseconds = singleMatch[3]
+            ? parseInt(singleMatch[3].padEnd(3, '0').substring(0, 3))
+            : 0
           const time = minutes * 60 + seconds + milliseconds / 1000
           const text = singleMatch[4].trim()
           if (text) {
@@ -279,7 +331,10 @@ export class LyricsParser {
       }
 
       if (inEvents && trimmedLine.startsWith('Format:')) {
-        formatFields = trimmedLine.substring(7).split(',').map(field => field.trim())
+        formatFields = trimmedLine
+          .substring(7)
+          .split(',')
+          .map((field) => field.trim())
         continue
       }
 
@@ -292,7 +347,11 @@ export class LyricsParser {
 
           if (startIndex !== -1 && textIndex !== -1) {
             const startTime = this.parseASSTime(parts[startIndex])
-            const text = parts.slice(textIndex).join(',').replace(/{[^}]*}/g, '').trim()
+            const text = parts
+              .slice(textIndex)
+              .join(',')
+              .replace(/{[^}]*}/g, '')
+              .trim()
 
             if (text && startTime !== null) {
               lyrics.push({ time: startTime, text, texts: [] })
@@ -321,8 +380,11 @@ export class LyricsParser {
       const timeMatch = lines[1].match(timeRegex)
       if (!timeMatch) continue
 
-      const startTime = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 +
-        parseInt(timeMatch[3]) + parseInt(timeMatch[4]) / 1000
+      const startTime =
+        parseInt(timeMatch[1]) * 3600 +
+        parseInt(timeMatch[2]) * 60 +
+        parseInt(timeMatch[3]) +
+        parseInt(timeMatch[4]) / 1000
       const text = lines.slice(2).join('\n').trim()
 
       if (text) {
@@ -340,8 +402,12 @@ export class LyricsParser {
   static parseASSTime(timeStr: string): number | null {
     const match = timeStr.match(/^(\d+):(\d{2}):(\d{2})\.(\d{2})$/)
     if (match) {
-      return parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 +
-        parseInt(match[3]) + parseInt(match[4]) / 100
+      return (
+        parseInt(match[1]) * 3600 +
+        parseInt(match[2]) * 60 +
+        parseInt(match[3]) +
+        parseInt(match[4]) / 100
+      )
     }
     return null
   }
@@ -368,17 +434,19 @@ export class LyricsParser {
   }
 
   static stringifyLRC(lyrics: LyricLine[]): string {
-    return lyrics.map(item => {
-      const minutes = Math.floor(item.time / 60)
-      const seconds = Math.floor(item.time % 60)
-      const milliseconds = Math.floor((item.time % 1) * 100)
-      const timeTag = `[${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}]`
-      return `${timeTag}${item.text || ''}`
-    }).join('\n')
+    return lyrics
+      .map((item) => {
+        const minutes = Math.floor(item.time / 60)
+        const seconds = Math.floor(item.time % 60)
+        const milliseconds = Math.floor((item.time % 1) * 100)
+        const timeTag = `[${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}]`
+        return `${timeTag}${item.text || ''}`
+      })
+      .join('\n')
   }
 
   static stringifyASS(lyrics: LyricLine[]): string {
-    let ass = `[Script Info]
+    const ass = `[Script Info]
 Title: Lyrics
 ScriptType: v4.00+
 
@@ -389,31 +457,38 @@ Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `
-    return ass + lyrics.map((item, index) => {
-      const formatTime = (t: number): string => {
-        const h = Math.floor(t / 3600)
-        const m = Math.floor((t % 3600) / 60)
-        const s = Math.floor(t % 60)
-        const cs = Math.floor((t % 1) * 100)
-        return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`
-      }
-      const nextTime = index < lyrics.length - 1 ? lyrics[index + 1].time : item.time + 5
-      return `Dialogue: 0,${formatTime(item.time)},${formatTime(nextTime)},Default,,0,0,0,,${item.text || ''}`
-    }).join('\n')
+    return (
+      ass +
+      lyrics
+        .map((item, index) => {
+          const formatTime = (t: number): string => {
+            const h = Math.floor(t / 3600)
+            const m = Math.floor((t % 3600) / 60)
+            const s = Math.floor(t % 60)
+            const cs = Math.floor((t % 1) * 100)
+            return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`
+          }
+          const nextTime = index < lyrics.length - 1 ? lyrics[index + 1].time : item.time + 5
+          return `Dialogue: 0,${formatTime(item.time)},${formatTime(nextTime)},Default,,0,0,0,,${item.text || ''}`
+        })
+        .join('\n')
+    )
   }
 
   static stringifySRT(lyrics: LyricLine[]): string {
-    return lyrics.map((item, index) => {
-      const formatTime = (t: number): string => {
-        const h = Math.floor(t / 3600)
-        const m = Math.floor((t % 3600) / 60)
-        const s = Math.floor(t % 60)
-        const ms = Math.floor((t % 1) * 1000)
-        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`
-      }
-      const nextTime = index < lyrics.length - 1 ? lyrics[index + 1].time : item.time + 5
-      return `${index + 1}\n${formatTime(item.time)} --> ${formatTime(nextTime)}\n${item.text || ''}\n`
-    }).join('\n')
+    return lyrics
+      .map((item, index) => {
+        const formatTime = (t: number): string => {
+          const h = Math.floor(t / 3600)
+          const m = Math.floor((t % 3600) / 60)
+          const s = Math.floor(t % 60)
+          const ms = Math.floor((t % 1) * 1000)
+          return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`
+        }
+        const nextTime = index < lyrics.length - 1 ? lyrics[index + 1].time : item.time + 5
+        return `${index + 1}\n${formatTime(item.time)} --> ${formatTime(nextTime)}\n${item.text || ''}\n`
+      })
+      .join('\n')
   }
 }
 

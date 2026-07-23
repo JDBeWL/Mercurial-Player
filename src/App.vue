@@ -7,30 +7,69 @@
         <button class="icon-button" data-tauri-drag-region="false" @click="toggleLibrary">
           <span class="material-symbols-rounded">menu</span>
         </button>
-        <button class="icon-button" data-tauri-drag-region="false" @click="toggleSettings" title="设置">
+        <button
+          class="icon-button"
+          data-tauri-drag-region="false"
+          title="设置"
+          @click="toggleSettings"
+        >
           <span class="material-symbols-rounded">settings</span>
         </button>
-        <button class="icon-button" data-tauri-drag-region="false" @click="themeStore.toggleDarkMode" title="切换主题">
-          <span class="material-symbols-rounded">{{ themeStore.isDarkMode ? 'light_mode' : 'dark_mode' }}</span>
+        <button
+          class="icon-button"
+          data-tauri-drag-region="false"
+          title="切换主题"
+          @click="themeStore.toggleDarkMode"
+        >
+          <span class="material-symbols-rounded">{{
+            themeStore.isDarkMode ? 'light_mode' : 'dark_mode'
+          }}</span>
         </button>
         <ThemeSelector data-tauri-drag-region="false" />
       </div>
       <!-- 右侧控制区 -->
       <div class="nav-right">
-        <button class="icon-button" :class="{ active: configStore.lyrics?.desktopLyrics?.enabled }" data-tauri-drag-region="false" @click="toggleDesktopLyrics" :title="$t('config.toggleDesktopLyrics')">
+        <button
+          class="icon-button"
+          :class="{ active: configStore.lyrics?.desktopLyrics?.enabled }"
+          data-tauri-drag-region="false"
+          :title="$t('config.toggleDesktopLyrics')"
+          @click="toggleDesktopLyrics"
+        >
           <span class="material-symbols-rounded">subtitles</span>
         </button>
-        <button class="icon-button" data-tauri-drag-region="false" @click="configStore.toggleMiniMode" title="Mini模式">
+        <button
+          class="icon-button"
+          data-tauri-drag-region="false"
+          title="Mini模式"
+          @click="configStore.toggleMiniMode"
+        >
           <span class="material-symbols-rounded">picture_in_picture_alt</span>
         </button>
-        <button class="icon-button" data-tauri-drag-region="false" @click="minimizeWindow" title="最小化">
+        <button
+          class="icon-button"
+          data-tauri-drag-region="false"
+          title="最小化"
+          @click="minimizeWindow"
+        >
           <span class="material-symbols-rounded">minimize</span>
         </button>
-        <button class="icon-button" data-tauri-drag-region="false" @click="toggleFullscreen"
-          :title="isFullscreen ? '退出全屏' : '全屏'">
-          <span class="material-symbols-rounded">{{ isFullscreen ? 'fullscreen_exit' : 'fullscreen' }}</span>
+        <button
+          class="icon-button"
+          data-tauri-drag-region="false"
+          :title="isFullscreen ? '退出全屏' : '全屏'"
+          @click="toggleFullscreen"
+        >
+          <span class="material-symbols-rounded">{{
+            isFullscreen ? 'fullscreen_exit' : 'fullscreen'
+          }}</span>
         </button>
-        <button class="icon-button" data-tauri-drag-region="false" @click="closeWindow" title="关闭">
+        <button
+          class="icon-button"
+          data-tauri-drag-region="false"
+          title="关闭"
+          @click="closeWindow"
+        >
           <span class="material-symbols-rounded">close</span>
         </button>
       </div>
@@ -51,16 +90,25 @@
               <!-- 左侧：专辑封面和歌曲信息 -->
               <div class="player-left">
                 <div class="album-art-container">
-                  <Transition :name="transitionDirection === 'next' ? 'album-art-slide-next' : 'album-art-slide-prev'"
-                    mode="out-in">
-                    <div 
-                      :key="currentTrack ? currentTrack.path : 'no-track'" 
+                  <Transition
+                    :name="
+                      transitionDirection === 'next'
+                        ? 'album-art-slide-next'
+                        : 'album-art-slide-prev'
+                    "
+                    mode="out-in"
+                  >
+                    <div
+                      :key="currentTrack ? currentTrack.path : 'no-track'"
                       class="album-art-wrapper"
                       @mousemove="handleAlbumArtMouseMove"
                       @mouseleave="handleAlbumArtMouseLeave"
                     >
                       <div class="album-art" :style="{ backgroundImage: currentTrackCover }">
-                        <div v-if="!currentTrack || !currentTrack.coverPath" class="album-art-placeholder">
+                        <div
+                          v-if="!currentTrack || !currentTrack.coverPath"
+                          class="album-art-placeholder"
+                        >
                           <span class="material-symbols-rounded">album</span>
                         </div>
                       </div>
@@ -68,9 +116,9 @@
                       <button
                         v-if="currentTrack && currentTrack.coverPath"
                         class="extract-cover-btn"
-                        :class="{ 'show': showExtractButton }"
-                        @click="extractCover"
+                        :class="{ show: showExtractButton }"
                         :title="$t('player.extractCover')"
+                        @click="extractCover"
                       >
                         <span class="material-symbols-rounded">download</span>
                       </button>
@@ -80,14 +128,16 @@
 
                 <Transition name="fade" mode="out-in">
                   <div :key="currentTrack ? currentTrack.path : 'no-track-info'">
-                    <div class="track-info" v-if="currentTrack">
-                      <h2 
-                        class="track-title" 
+                    <div v-if="currentTrack" class="track-info">
+                      <h2
+                        class="track-title"
                         :title="getTrackTitle(currentTrack) || $t('player.noTrack')"
-                      >{{ getTrackTitle(currentTrack) || $t('player.noTrack') }}</h2>
-                      <div 
-                        class="track-artist" 
-                        v-if="getTrackArtist(currentTrack)" 
+                      >
+                        {{ getTrackTitle(currentTrack) || $t('player.noTrack') }}
+                      </h2>
+                      <div
+                        v-if="getTrackArtist(currentTrack)"
+                        class="track-artist"
                         :title="getTrackArtist(currentTrack)"
                       >
                         {{ getTrackArtist(currentTrack) }}
@@ -98,16 +148,18 @@
                         <span class="alert-text">{{ $t('player.fileNotFound') }}</span>
                       </div>
                     </div>
-                    <div class="track-info-placeholder" v-else>
+                    <div v-else class="track-info-placeholder">
                       <h2 class="track-title">{{ $t('player.noTrack') }}</h2>
                       <div class="track-artist">&nbsp;</div>
                     </div>
 
-                    <div class="audio-info"
-                      v-if="currentTrack && formattedAudioInfo && configStore.general.showAudioInfo">
+                    <div
+                      v-if="currentTrack && formattedAudioInfo && configStore.general.showAudioInfo"
+                      class="audio-info"
+                    >
                       <span class="text-caption">{{ formattedAudioInfo }}</span>
                     </div>
-                    <div class="audio-info-placeholder" v-else>
+                    <div v-else class="audio-info-placeholder">
                       <span class="text-caption">&nbsp;</span>
                     </div>
                   </div>
@@ -116,20 +168,34 @@
 
               <!-- 右侧：歌词/可视化 -->
               <div class="player-right">
-                 <!-- 右上角控制区域 -->
-                 <div class="view-controls-container">
-                   <!-- 在线歌词指示图标 -->
-                   <div v-if="lyricsSource === 'online'" class="online-lyrics-indicator" :title="$t('lyrics.fromOnline')">
-                     <span class="material-symbols-rounded">cloud_done</span>
-                   </div>
-                   <!-- 视图切换按钮（非独占模式） -->
-                   <button v-if="!configStore.audio.exclusiveMode" class="icon-button view-toggle-btn" @click="toggleViewMode" :title="viewMode === 'lyrics' ? '切换到波形模式' : '切换到歌词模式'">
-                      <span class="material-symbols-rounded">{{ viewMode === 'lyrics' ? 'equalizer' : 'lyrics' }}</span>
-                   </button>
+                <!-- 右上角控制区域 -->
+                <div class="view-controls-container">
+                  <!-- 在线歌词指示图标 -->
+                  <div
+                    v-if="lyricsSource === 'online'"
+                    class="online-lyrics-indicator"
+                    :title="$t('lyrics.fromOnline')"
+                  >
+                    <span class="material-symbols-rounded">cloud_done</span>
+                  </div>
+                  <!-- 视图切换按钮（非独占模式） -->
+                  <button
+                    v-if="!configStore.audio.exclusiveMode"
+                    class="icon-button view-toggle-btn"
+                    :title="viewMode === 'lyrics' ? '切换到波形模式' : '切换到歌词模式'"
+                    @click="toggleViewMode"
+                  >
+                    <span class="material-symbols-rounded">{{
+                      viewMode === 'lyrics' ? 'equalizer' : 'lyrics'
+                    }}</span>
+                  </button>
                 </div>
-                
+
                 <Transition name="fade" mode="out-in">
-                  <LyricsDisplay v-if="viewMode === 'lyrics' || configStore.audio.exclusiveMode" class="lyrics-container" />
+                  <LyricsDisplay
+                    v-if="viewMode === 'lyrics' || configStore.audio.exclusiveMode"
+                    class="lyrics-container"
+                  />
                   <VisualizerPanel v-else class="lyrics-container" />
                 </Transition>
               </div>
@@ -149,7 +215,7 @@
       <PlaylistView v-if="showPlaylist" @close="showPlaylist = false" />
     </Transition>
 
-    <button class="fab" @click="togglePlaylist" v-if="playlist.length > 0">
+    <button v-if="playlist.length > 0" class="fab" @click="togglePlaylist">
       <span class="material-symbols-rounded">playlist_play</span>
     </button>
 
@@ -162,7 +228,13 @@
         @click="removeError(notification.id)"
       >
         <span class="material-symbols-rounded error-icon">
-          {{ notification.severity === 'error' ? 'error' : notification.severity === 'warning' ? 'warning' : 'info' }}
+          {{
+            notification.severity === 'error'
+              ? 'error'
+              : notification.severity === 'warning'
+                ? 'warning'
+                : 'info'
+          }}
         </span>
         <span class="error-message">{{ notification.message }}</span>
         <button class="error-close" @click.stop="removeError(notification.id)">
@@ -173,20 +245,22 @@
   </div>
 </template>
 
-
-
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from './stores/player'
 import { useThemeStore } from './stores/theme'
 import { useConfigStore } from './stores/config'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
-import { save } from '@tauri-apps/plugin-dialog'
-import logger from './utils/logger'
 import { useErrorNotification } from './composables/useErrorNotification'
+import { useTrackInfo } from './composables/useTrackInfo'
+import { useLyrics } from './composables/useLyrics'
+import { useAutoUpdate } from './composables/useAutoUpdate'
+import { useDesktopLyrics } from './composables/useDesktopLyrics'
+import { useWindowControls } from './composables/useWindowControls'
+import { useAlbumArtInteraction } from './composables/useAlbumArtInteraction'
+import { useGlobalKeyboard } from './composables/useGlobalKeyboard'
+import { useAppLifecycle } from './composables/useAppLifecycle'
 import PlayerControls from './components/PlayerControls.vue'
 import ProgressBar from './components/ProgressBar.vue'
 import LyricsDisplay from './components/LyricsDisplay.vue'
@@ -197,46 +271,19 @@ import ThemeSelector from './components/ThemeSelector.vue'
 import Settings from './components/Settings.vue'
 import MiniPlayer from './components/MiniPlayer.vue'
 
-// 获取屏幕刷新率
-const getScreenRefreshRate = (): Promise<number> => {
-  return new Promise((resolve) => {
-    let frames = 0
-    let lastTime = performance.now()
-    const duration = 1000 // 测量1秒
-
-    const countFrame = () => {
-      frames++
-      const currentTime = performance.now()
-      if (currentTime - lastTime < duration) {
-        requestAnimationFrame(countFrame)
-      } else {
-        // 返回测得的刷新率，至少是1
-        resolve(Math.max(1, frames))
-      }
-    }
-    requestAnimationFrame(countFrame)
-  })
-}
-import { useTrackInfo } from './composables/useTrackInfo'
-import { useLyrics } from './composables/useLyrics'
-import { useAutoUpdate } from './composables/useAutoUpdate'
-import { useDesktopLyrics } from './composables/useDesktopLyrics'
-import { useI18n } from 'vue-i18n'
-import { setLocale } from './i18n'
-import { pluginManager } from './plugins'
-
 const playerStore = usePlayerStore()
 const themeStore = useThemeStore()
 const configStore = useConfigStore()
-const { t } = useI18n()
 
 // 初始化错误通知
-const { errorNotifications, showError, removeError, unsubscribe: unsubscribeErrorNotification } = useErrorNotification()
+const {
+  errorNotifications,
+  showError,
+  removeError,
+  unsubscribe: unsubscribeErrorNotification,
+} = useErrorNotification()
 
-// 获取当前窗口实例
-const appWindow = getCurrentWindow()
-
-const { currentTrack, playlist, audioInfo, currentTrackIndex, lastTrackIndex } = storeToRefs(playerStore)
+const { currentTrack, playlist, audioInfo, currentTrackIndex } = storeToRefs(playerStore)
 
 // 使用 composable 处理音轨信息
 const { getTrackTitle, getTrackArtist, watchTrack } = useTrackInfo()
@@ -246,174 +293,33 @@ const { lyricsSource } = useLyrics()
 
 useDesktopLyrics()
 
+// 自动更新 composable（在 setup 顶层调用，确保内部生命周期钩子能正确注册）
+const { checkForUpdates, updateAvailable, newVersion } = useAutoUpdate()
+
+// 窗口控制（封装最小化/全屏/关闭及 isFullscreen/isMaximized 状态）
+const {
+  isFullscreen,
+  isMaximized,
+  minimizeWindow,
+  toggleFullscreen,
+  closeWindow,
+  syncWindowState,
+} = useWindowControls()
+
+// 专辑封面交互（右下角提取封面按钮的显隐与导出逻辑）
+const { showExtractButton, handleAlbumArtMouseMove, handleAlbumArtMouseLeave, extractCover } =
+  useAlbumArtInteraction(currentTrack)
+
+// 全局键盘事件（内部自注册 onMounted/onUnmounted 监听 keydown）
+useGlobalKeyboard()
+
+// 本地 UI 状态
 const showLibrary = ref(false)
 const showPlaylist = ref(false)
-const isFullscreen = ref(false)
-const isMaximized = ref(false)
 const viewMode = ref('lyrics') // 'lyrics' or 'visualizer'
-const showExtractButton = ref(false)
 
 const toggleViewMode = () => {
   viewMode.value = viewMode.value === 'lyrics' ? 'visualizer' : 'lyrics'
-}
-
-// 处理专辑封面鼠标移动事件，检测是否在右下角区域
-const handleAlbumArtMouseMove = (event: MouseEvent) => {
-  if (!currentTrack.value || !currentTrack.value.coverPath) {
-    showExtractButton.value = false
-    return
-  }
-
-  const wrapper = event.currentTarget as HTMLElement
-  const rect = wrapper.getBoundingClientRect()
-  const x = event.clientX - rect.left
-  const y = event.clientY - rect.top
-
-  // 定义右下角区域（右下角80x80像素区域）
-  const cornerSize = 80
-  showExtractButton.value = x >= rect.width - cornerSize && y >= rect.height - cornerSize
-}
-
-// 鼠标离开封面区域时隐藏按钮
-const handleAlbumArtMouseLeave = () => {
-  showExtractButton.value = false
-}
-
-// 提取封面功能
-const extractCover = async () => {
-  if (!currentTrack.value || !currentTrack.value.path) return
-  
-  try {
-    // 获取默认文件名（基于音频文件名）
-    const audioPath = currentTrack.value.path
-    const baseName = audioPath.replace(/\.[^/.]+$/, '') // 移除扩展名
-    const defaultName = baseName.split(/[/\\]/).pop() + '_cover'
-    
-    // 打开保存对话框
-    const savePath = await save({
-      defaultPath: defaultName,
-      filters: [{
-        name: 'Image',
-        extensions: ['jpg', 'png', 'webp']
-      }]
-    })
-    
-    if (!savePath) return // 用户取消
-    
-    // 调用后端提取封面
-    const result = await invoke('extract_cover', {
-      audioPath: audioPath,
-      outputPath: savePath
-    })
-    
-    logger.info('Cover extracted to:', result)
-    // 可以添加成功提示
-  } catch (error) {
-    logger.error('Failed to extract cover:', error)
-  }
-}
-
-
-
-const currentTrackCover = computed(() => {
-  if (currentTrack.value && currentTrack.value.coverPath) {
-    // 使用 convertFileSrc 将本地文件路径转换为可渲染的 URL
-    return `url('${convertFileSrc(currentTrack.value.coverPath)}')`
-  }
-  return 'none' // 如果没有封面，返回none
-})
-
-const formattedAudioInfo = computed(() => {
-  const { bitrate, sampleRate, channels, bitDepth, format } = audioInfo.value;
-
-  const parts = [];
-  
-  // 格式 (FLAC, MP3, WAV, etc.)
-  if (format) {
-    parts.push(format);
-  }
-  
-  // 比特率
-  if (bitrate) {
-    parts.push(`${bitrate} kbps`);
-  }
-  
-  // 采样率 (44100 -> 44.1 kHz)
-  if (sampleRate) {
-    const kHz = sampleRate >= 1000 ? (sampleRate / 1000).toFixed(1).replace(/\.0$/, '') : sampleRate;
-    parts.push(`${kHz} kHz`);
-  }
-  
-  // 位深度
-  if (bitDepth) {
-    parts.push(`${bitDepth} bit`);
-  }
-  
-  // 声道
-  if (channels) {
-    if (channels === 2) {
-      parts.push('Stereo');
-    } else if (channels === 1) {
-      parts.push('Mono');
-    } else {
-      parts.push(`${channels}ch`);
-    }
-  }
-
-  return parts.join(' | ');
-});
-
-// 检查当前歌曲文件是否存在
-const isTrackFileExists = computed(() => {
-  if (!currentTrack.value) return true;
-  return !!currentTrack.value.path;
-});
-
-// 全局键盘事件处理
-const handleKeyDown = (event: KeyboardEvent) => {
-  // 只在用户没有在输入框等元素中编辑时响应键盘事件
-  const activeEl = document.activeElement
-  if (!activeEl) return
-
-  const isInputFocused = activeEl.tagName === 'INPUT' ||
-    activeEl.tagName === 'TEXTAREA' ||
-    (activeEl as HTMLElement).isContentEditable
-
-  if (isInputFocused) return
-
-  // 空格键暂停/恢复播放
-  if (event.code === 'Space') {
-    event.preventDefault()
-    playerStore.togglePlay()
-  }
-
-  // 方向键控制
-  switch (event.code) {
-    case 'ArrowLeft':
-      event.preventDefault()
-      if (playerStore.hasPreviousTrack) {
-        playerStore.previousTrack()
-      }
-      break
-    case 'ArrowRight':
-      event.preventDefault()
-      if (playerStore.hasNextTrack) {
-        playerStore.nextTrack()
-      }
-      break
-    case 'ArrowUp': {
-      event.preventDefault()
-      const newVolume = Math.min(1, playerStore.volume + 0.05)
-      playerStore.setVolume(newVolume)
-      break
-    }
-    case 'ArrowDown': {
-      event.preventDefault()
-      const newVolume = Math.max(0, playerStore.volume - 0.05)
-      playerStore.setVolume(newVolume)
-      break
-    }
-  }
 }
 
 const toggleLibrary = () => {
@@ -433,186 +339,103 @@ const toggleDesktopLyrics = () => {
   configStore.setDesktopLyricsConfig({ enabled: !current })
 }
 
-const minimizeWindow = async () => {
-  try {
-    await appWindow.minimize()
-  } catch (error) {
-    logger.error('Failed to minimize window:', error)
+// 计算属性
+const currentTrackCover = computed(() => {
+  if (currentTrack.value && currentTrack.value.coverPath) {
+    // 使用 convertFileSrc 将本地文件路径转换为可渲染的 URL
+    return `url('${convertFileSrc(currentTrack.value.coverPath)}')`
   }
-}
+  return 'none' // 如果没有封面，返回none
+})
 
-const toggleFullscreen = async () => {
-  try {
-    if (isFullscreen.value) {
-      // 退出全屏
-      await appWindow.setFullscreen(false)
-      isFullscreen.value = false
+const formattedAudioInfo = computed(() => {
+  const { bitrate, sampleRate, channels, bitDepth, format } = audioInfo.value
+
+  const parts = []
+
+  // 格式 (FLAC, MP3, WAV, etc.)
+  if (format) {
+    parts.push(format)
+  }
+
+  // 比特率
+  if (bitrate) {
+    parts.push(`${bitrate} kbps`)
+  }
+
+  // 采样率 (44100 -> 44.1 kHz)
+  if (sampleRate) {
+    const kHz = sampleRate >= 1000 ? (sampleRate / 1000).toFixed(1).replace(/\.0$/, '') : sampleRate
+    parts.push(`${kHz} kHz`)
+  }
+
+  // 位深度
+  if (bitDepth) {
+    parts.push(`${bitDepth} bit`)
+  }
+
+  // 声道
+  if (channels) {
+    if (channels === 2) {
+      parts.push('Stereo')
+    } else if (channels === 1) {
+      parts.push('Mono')
     } else {
-      // 进入全屏前先检查并取消最大化状态
-      const currentlyMaximized = await appWindow.isMaximized()
-      if (currentlyMaximized) {
-        await appWindow.unmaximize()
-      }
-      await appWindow.setFullscreen(true)
-      isFullscreen.value = true
+      parts.push(`${channels}ch`)
     }
-  } catch (error) {
-    logger.error('Failed to toggle fullscreen:', error)
   }
-}
 
-const closeWindow = async () => {
-  try {
-    await appWindow.close()
-  } catch (error) {
-    logger.error('Failed to close window:', error)
-  }
-}
+  return parts.join(' | ')
+})
 
-
+// 检查当前歌曲文件是否存在
+const isTrackFileExists = computed(() => {
+  if (!currentTrack.value) return true
+  return !!currentTrack.value.path
+})
 
 // 监听当前音轨变化，自动处理标题信息
 const stopWatchTrack = watchTrack(() => currentTrack.value)
 
+// 音轨切换动画方向
 const transitionDirection = ref<string | null>(null)
 
-// 监听当前音轨索引变化，自动处理标题信息
+// 监听当前音轨索引变化，决定切换动画方向
 watch(currentTrackIndex, (newIndex, oldIndex) => {
   if (oldIndex === -1 || newIndex === -1) {
-    transitionDirection.value = null;
-    return;
+    transitionDirection.value = null
+    return
   }
 
   // 如果播放列表为空，则不进行播放列表循环处理
-  const playlistLength = playlist.value.length;
+  const playlistLength = playlist.value.length
   if (playlistLength === 0) {
-    transitionDirection.value = null;
-    return;
+    transitionDirection.value = null
+    return
   }
 
   if (newIndex === (oldIndex + 1) % playlistLength) {
-    transitionDirection.value = 'next';
+    transitionDirection.value = 'next'
   } else if (newIndex === (oldIndex - 1 + playlistLength) % playlistLength) {
-    transitionDirection.value = 'prev';
+    transitionDirection.value = 'prev'
   } else if (newIndex > oldIndex) {
-    transitionDirection.value = 'next'; // 播放列表向后跳选，与"下一首"动画一致
+    transitionDirection.value = 'next' // 播放列表向后跳选，与"下一首"动画一致
   } else if (newIndex < oldIndex) {
-    transitionDirection.value = 'prev'; // 播放列表向前跳选，与"上一首"动画一致
+    transitionDirection.value = 'prev' // 播放列表向前跳选，与"上一首"动画一致
   } else {
-    transitionDirection.value = null; // 同一首歌不处理
+    transitionDirection.value = null // 同一首歌不处理
   }
-});
-
-// 应用关闭前强制保存配置
-const handleBeforeUnload = async () => {
-  await configStore.flushPendingSave()
-  // 清理播放器资源（包括全局快捷键）
-  await playerStore.cleanup()
-  // 清理插件管理器（停用所有插件、保存存储、清理沙箱）
-  await pluginManager.cleanup()
-}
-
-onMounted(async () => {
-  // 注册 beforeunload 事件，确保关闭前保存配置
-  window.addEventListener('beforeunload', handleBeforeUnload)
-  
-  // 加载配置文件（启动时允许重置 UI 状态）
-  try {
-    await configStore.loadConfig(true)
-  } catch (error) {
-    logger.warn('Failed to load configuration:', error)
-  }
-
-  // 设置语言
-  try {
-    setLocale(configStore.general.language || 'zh')
-  } catch (error) {
-    logger.error('Failed to apply language from config:', error)
-  }
-
-  // 从配置加载主题设置
-  try {
-    const savedTheme = configStore.general.theme
-    if (savedTheme) {
-      themeStore.setThemePreference(savedTheme)
-    }
-  } catch (error) {
-    logger.error('Failed to apply theme from config:', error)
-  }
-
-  // 应用主题
-  themeStore.applyTheme()
-
-  // 初始化封面缓存路径
-  try {
-    await invoke('set_cover_cache_path_command', { 
-      path: configStore.general.coverCachePath 
-    })
-  } catch (error) {
-    logger.warn('Failed to set cover cache path:', error)
-  }
-
-  // 初始化音频播放器
-  await playerStore.initAudio()
-
-  // 尝试恢复上次播放会话 (启动时根据 last_session 校验并恢复)
-  // 失败静默忽略 (用户选择不弹提示)
-  try {
-    await playerStore.resumeLastSession()
-  } catch (error) {
-    logger.warn('Failed to resume last session:', error)
-  }
-
-  // 获取屏幕刷新率并设置到后端，用于动态调整FFT计算频率
-  try {
-    const refreshRate = await getScreenRefreshRate()
-    await invoke('set_target_fps', { fps: refreshRate })
-    logger.info(`Screen refresh rate set to ${refreshRate}Hz`)
-  } catch (error) {
-    logger.warn('Failed to set target FPS:', error)
-  }
-
-  // 如果用户启用了自动检查更新，则在启动时执行一次检查（仅检查，不自动安装）
-  try {
-    const { checkForUpdates, updateAvailable, newVersion } = useAutoUpdate()
-    if (configStore.general.enableAutoUpdate) {
-      await checkForUpdates()
-      if (updateAvailable.value) {
-        // 通知用户有新版本可用（非阻塞信息通知）
-        showError(`${t('config.updateAvailable')} v${newVersion.value}`, 'info', 10000)
-      }
-    }
-  } catch (err) {
-    logger.warn('Auto update check failed:', err)
-  }
-
-  // 检查当前窗口是否处于全屏状态
-  try {
-    isFullscreen.value = await appWindow.isFullscreen()
-    isMaximized.value = await appWindow.isMaximized()
-  } catch (error) {
-    logger.error('Failed to check window state:', error)
-  }
-
-  // 添加全局键盘事件监听器
-  document.addEventListener('keydown', handleKeyDown)
 })
 
-onUnmounted(async () => {
-  // 强制保存待处理的配置
-  await configStore.flushPendingSave()
-  // 移除 beforeunload 事件监听器
-  window.removeEventListener('beforeunload', handleBeforeUnload)
-  // 清理键盘事件监听器
-  document.removeEventListener('keydown', handleKeyDown)
-  // 清理错误通知监听器
-  unsubscribeErrorNotification()
-  // 清理音轨监听器
-  if (stopWatchTrack) {
-    stopWatchTrack()
-  }
-  // 清理播放器资源
-  playerStore.cleanup()
+// 应用生命周期（onMounted/onUnmounted 由 composable 内部注册）
+useAppLifecycle({
+  checkForUpdates,
+  updateAvailable,
+  newVersion,
+  showError,
+  unsubscribeErrorNotification,
+  syncWindowState,
+  stopWatchTrack,
 })
 </script>
 
@@ -633,7 +456,9 @@ onUnmounted(async () => {
 
 .slide-right-enter-active,
 .slide-right-leave-active {
-  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.3s ease;
+  transition:
+    transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    opacity 0.3s ease;
 }
 
 .slide-right-enter-from {
@@ -1037,8 +862,8 @@ onUnmounted(async () => {
 }
 
 /* 全屏和最大化状态下移除圆角 */
-.app-container[data-fullscreen="true"],
-.app-container[data-maximized="true"] {
+.app-container[data-fullscreen='true'],
+.app-container[data-maximized='true'] {
   border-radius: 0;
 }
 

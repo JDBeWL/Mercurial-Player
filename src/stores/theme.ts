@@ -29,7 +29,7 @@ function generateTonalVariants(hexColor: string): TonalVariants {
   const argb = argbFromHex(hexColor)
   const hct = Hct.fromInt(argb)
   const palette = TonalPalette.fromHct(hct)
-  
+
   const tones = [0, 5, 10, 15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 95, 98, 99, 100]
   const result: TonalVariants = {}
   for (const tone of tones) {
@@ -45,7 +45,7 @@ function generateHarmonyColors(hexColor: string): HarmonyColors {
   const hue = hct.hue
   const chroma = hct.chroma
   const tone = hct.tone
-  
+
   return {
     complementary: hexFromArgb(Hct.from((hue + 180) % 360, chroma, tone).toInt()),
     analogous1: hexFromArgb(Hct.from((hue + 30) % 360, chroma, tone).toInt()),
@@ -59,14 +59,14 @@ function generateHarmonyColors(hexColor: string): HarmonyColors {
 function generateGrayThemeColors(hexColor: string, isDark: boolean) {
   const hct = Hct.fromInt(argbFromHex(hexColor))
   const hue = hct.hue
-  
+
   // 使用 MD3 neutral palette 的 chroma 值，但保持用户选择的色相
-  const primaryPalette = TonalPalette.fromHueAndChroma(hue, 8)      // 稍高于 neutral variant
-  const secondaryPalette = TonalPalette.fromHueAndChroma(hue, 6)    // 介于 n1 和 n2 之间
-  const tertiaryPalette = TonalPalette.fromHueAndChroma(hue, 4)     // 等于 neutral
+  const primaryPalette = TonalPalette.fromHueAndChroma(hue, 8) // 稍高于 neutral variant
+  const secondaryPalette = TonalPalette.fromHueAndChroma(hue, 6) // 介于 n1 和 n2 之间
+  const tertiaryPalette = TonalPalette.fromHueAndChroma(hue, 4) // 等于 neutral
   const neutralPalette = TonalPalette.fromHueAndChroma(hue, 4)
   const neutralVariantPalette = TonalPalette.fromHueAndChroma(hue, 8)
-  
+
   if (isDark) {
     return {
       primary: hexFromArgb(primaryPalette.tone(80)),
@@ -117,40 +117,45 @@ function generateGrayThemeColors(hexColor: string, isDark: boolean) {
 }
 
 // 生成自定义 CSS 变量
-function generateCustomCSS(primaryColor: string, isDark: boolean, enableGlass: boolean, enableGradients: boolean): string {
+function generateCustomCSS(
+  primaryColor: string,
+  isDark: boolean,
+  enableGlass: boolean,
+  enableGradients: boolean,
+): string {
   const primaryHct = Hct.fromInt(argbFromHex(primaryColor))
   const isLightColor = primaryHct.tone > 50
-  
+
   // 生成色调变体和和谐色
   const tones = generateTonalVariants(primaryColor)
   const harmony = generateHarmonyColors(primaryColor)
   const accentTones = generateTonalVariants(harmony.complementary)
-  
+
   const onPrimaryColor = isLightColor ? '#000000' : '#ffffff'
-  
+
   let css = ''
-  
+
   // 主题源颜色
   css += `--theme-source-color: ${primaryColor};\n`
   css += `--theme-on-primary: ${onPrimaryColor};\n`
-  
+
   // 主色调变体
   for (const [key, value] of Object.entries(tones)) {
     css += `--theme-primary-${key}: ${value};\n`
   }
-  
+
   // 和谐色
   css += `--theme-complementary: ${harmony.complementary};\n`
   css += `--theme-analogous-1: ${harmony.analogous1};\n`
   css += `--theme-analogous-2: ${harmony.analogous2};\n`
   css += `--theme-triadic-1: ${harmony.triadic1};\n`
   css += `--theme-triadic-2: ${harmony.triadic2};\n`
-  
+
   // 强调色变体
   for (const [key, value] of Object.entries(accentTones)) {
     css += `--theme-accent-${key}: ${value};\n`
   }
-  
+
   // 阴影
   const shadowAlpha = isDark ? [0.5, 0.6, 0.7] : [0.08, 0.12, 0.16]
   css += `--shadow-soft: 0 4px 20px rgba(0, 0, 0, ${shadowAlpha[0]});\n`
@@ -165,7 +170,7 @@ function generateCustomCSS(primaryColor: string, isDark: boolean, enableGlass: b
   css += `--primary-alpha-10: color-mix(in srgb, var(--md-sys-color-primary) 10%, transparent);\n`
   css += `--primary-alpha-20: color-mix(in srgb, var(--md-sys-color-primary) 20%, transparent);\n`
   css += `--primary-alpha-30: color-mix(in srgb, var(--md-sys-color-primary) 30%, transparent);\n`
-  
+
   // 玻璃态效果
   if (enableGlass) {
     css += `--glass-blur: 12px;\n`
@@ -178,7 +183,7 @@ function generateCustomCSS(primaryColor: string, isDark: boolean, enableGlass: b
     css += `--glass-border: none;\n`
     css += `--glass-shadow: var(--md-sys-elevation-level2);\n`
   }
-  
+
   // 渐变效果
   if (enableGradients) {
     css += `--gradient-primary: linear-gradient(135deg, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) 100%);\n`
@@ -193,7 +198,7 @@ function generateCustomCSS(primaryColor: string, isDark: boolean, enableGlass: b
     css += `--gradient-background: none;\n`
     css += `--gradient-hover: none;\n`
   }
-  
+
   return css
 }
 
@@ -251,12 +256,12 @@ export const useThemeStore = defineStore('theme', {
       }
       this.applyTheme()
     },
-    
+
     setGlassEffect(enabled: boolean): void {
       this.enableGlassEffect = enabled
       this.applyTheme()
     },
-    
+
     setGradients(enabled: boolean): void {
       this.enableGradients = enabled
       this.applyTheme()
@@ -264,16 +269,16 @@ export const useThemeStore = defineStore('theme', {
 
     applyTheme(): void {
       const isGray = isNeutralGray(this.primaryColor)
-      
+
       // 1. 使用 MD3 库设置基础颜色
       const theme = themeFromSourceColor(argbFromHex(this.primaryColor))
       applyTheme(theme, { target: document.documentElement, dark: this.isDarkMode })
-      
+
       // 2. 如果是灰色，覆盖 MD3 生成的彩色为真正的灰色
       if (isGray) {
         const grayColors = generateGrayThemeColors(this.primaryColor, this.isDarkMode)
         const root = document.documentElement
-        
+
         root.style.setProperty('--md-sys-color-primary', grayColors.primary)
         root.style.setProperty('--md-sys-color-on-primary', grayColors.onPrimary)
         root.style.setProperty('--md-sys-color-primary-container', grayColors.primaryContainer)
@@ -281,11 +286,17 @@ export const useThemeStore = defineStore('theme', {
         root.style.setProperty('--md-sys-color-secondary', grayColors.secondary)
         root.style.setProperty('--md-sys-color-on-secondary', grayColors.onSecondary)
         root.style.setProperty('--md-sys-color-secondary-container', grayColors.secondaryContainer)
-        root.style.setProperty('--md-sys-color-on-secondary-container', grayColors.onSecondaryContainer)
+        root.style.setProperty(
+          '--md-sys-color-on-secondary-container',
+          grayColors.onSecondaryContainer,
+        )
         root.style.setProperty('--md-sys-color-tertiary', grayColors.tertiary)
         root.style.setProperty('--md-sys-color-on-tertiary', grayColors.onTertiary)
         root.style.setProperty('--md-sys-color-tertiary-container', grayColors.tertiaryContainer)
-        root.style.setProperty('--md-sys-color-on-tertiary-container', grayColors.onTertiaryContainer)
+        root.style.setProperty(
+          '--md-sys-color-on-tertiary-container',
+          grayColors.onTertiaryContainer,
+        )
         root.style.setProperty('--md-sys-color-surface', grayColors.surface)
         root.style.setProperty('--md-sys-color-on-surface', grayColors.onSurface)
         root.style.setProperty('--md-sys-color-surface-variant', grayColors.surfaceVariant)
@@ -295,43 +306,43 @@ export const useThemeStore = defineStore('theme', {
         root.style.setProperty('--md-sys-color-outline', grayColors.outline)
         root.style.setProperty('--md-sys-color-outline-variant', grayColors.outlineVariant)
       }
-      
+
       // 3. 生成并应用自定义 CSS
       const cacheKey = `${this.primaryColor}-${this.isDarkMode}-${this.enableGlassEffect}-${this.enableGradients}`
-      
+
       if (!customStyleCache.has(cacheKey)) {
         const customCSS = generateCustomCSS(
-          this.primaryColor, 
-          this.isDarkMode, 
-          this.enableGlassEffect, 
-          this.enableGradients
+          this.primaryColor,
+          this.isDarkMode,
+          this.enableGlassEffect,
+          this.enableGradients,
         )
         customStyleCache.set(cacheKey, customCSS)
-        
+
         if (customStyleCache.size > 20) {
           const firstKey = customStyleCache.keys().next().value
           if (firstKey) customStyleCache.delete(firstKey)
         }
       }
-      
+
       if (!customStyleElement) {
         customStyleElement = document.createElement('style')
         customStyleElement.id = 'theme-custom-variables'
         document.head.appendChild(customStyleElement)
       }
-      
+
       customStyleElement.textContent = `:root {\n${customStyleCache.get(cacheKey)}}`
-      
+
       // 移除旧的覆盖样式
       const overrideStyle = document.getElementById('theme-gray-override')
       if (overrideStyle) {
         overrideStyle.remove()
       }
-      
+
       document.documentElement.setAttribute('data-theme', this.isDarkMode ? 'dark' : 'light')
-      
+
       logger.debug('Theme applied:', cacheKey, isGray ? '(gray mode)' : '')
-      
+
       // 验证颜色对比度
       setTimeout(() => {
         const results = validateThemeContrast(this.isDarkMode)
@@ -340,7 +351,7 @@ export const useThemeStore = defineStore('theme', {
         }
       }, 50)
     },
-    
+
     async saveThemeToConfig(): Promise<void> {
       try {
         const configStore = useConfigStore()

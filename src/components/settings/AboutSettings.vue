@@ -3,41 +3,67 @@
     <div class="content-header">
       <h3>{{ $t('config.about') }}</h3>
     </div>
-    
+
     <div class="about-card">
       <div class="app-header">
         <div class="app-name">Mercurial Player</div>
         <div class="app-version">v{{ appVersion }}</div>
-        <div style="margin-left: auto; display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+        <div
+          style="
+            margin-left: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 8px;
+          "
+        >
           <div>
-            <button class="filled-button" @click="checkForUpdates" :disabled="isChecking">
-              <span class="material-symbols-rounded" v-if="!isChecking">download</span>
-              <span class="material-symbols-rounded spin" v-else>hourglass_empty</span>
+            <button class="filled-button" :disabled="isChecking" @click="checkForUpdates">
+              <span v-if="!isChecking" class="material-symbols-rounded">download</span>
+              <span v-else class="material-symbols-rounded spin">hourglass_empty</span>
               {{ isChecking ? t('config.checkingUpdates') : t('config.checkUpdates') }}
             </button>
           </div>
-          <div v-if="lastCheckTime" class="text-caption" style="color:var(--md-sys-color-on-surface-variant);">
+          <div
+            v-if="lastCheckTime"
+            class="text-caption"
+            style="color: var(--md-sys-color-on-surface-variant)"
+          >
             {{ t('config.lastChecked') }}: {{ lastCheckTime }}
           </div>
 
-          <div v-if="error" class="text-caption" style="color:var(--md-sys-color-error); margin-top:6px;">
+          <div
+            v-if="error"
+            class="text-caption"
+            style="color: var(--md-sys-color-error); margin-top: 6px"
+          >
             {{ error }}
           </div>
-          <div v-if="updateLog && !isDownloadFinishedLog(updateLog)" class="text-caption" style="margin-top:6px; color:var(--md-sys-color-on-surface-variant); word-break:break-all;">
+          <div
+            v-if="updateLog && !isDownloadFinishedLog(updateLog)"
+            class="text-caption"
+            style="
+              margin-top: 6px;
+              color: var(--md-sys-color-on-surface-variant);
+              word-break: break-all;
+            "
+          >
             {{ updateLog }}
           </div>
-
         </div>
       </div>
     </div>
-    
+
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.links') }}</h4>
-      
+
       <div class="link-item">
         <div class="link-icon">
           <svg viewBox="0 0 24 24" width="24" height="24">
-            <path fill="currentColor" d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+            <path
+              fill="currentColor"
+              d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
+            />
           </svg>
         </div>
         <div class="link-info">
@@ -47,45 +73,37 @@
         <span class="material-symbols-rounded link-arrow" @click="openGitHub">open_in_new</span>
       </div>
     </div>
-    
+
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.techStack') }}</h4>
-      
+
       <div class="tech-categories">
-        <div 
-          v-for="category in techCategories" 
-          :key="category.name"
-          class="tech-category-card"
-        >
+        <div v-for="category in techCategories" :key="category.name" class="tech-category-card">
           <div class="category-header">
             <span class="category-icon material-symbols-rounded">{{ category.icon }}</span>
             <h5 class="category-title">{{ category.name }}</h5>
           </div>
           <p v-if="category.note" class="category-note">{{ category.note }}</p>
           <div class="tech-list">
-            <div 
-              v-for="tech in category.techs" 
-              :key="tech.name" 
-              class="tech-item"
-            >
+            <div v-for="tech in category.techs" :key="tech.name" class="tech-item">
               <div class="tech-info">
                 <span class="tech-name">{{ tech.name }}</span>
                 <span class="tech-desc">{{ tech.desc }}</span>
               </div>
               <div class="tech-links">
-                <button 
-                  v-if="tech.docs" 
-                  class="icon-button tech-link-btn" 
-                  @click.stop="openLink(tech.docs)"
+                <button
+                  v-if="tech.docs"
+                  class="icon-button tech-link-btn"
                   :title="$t('config.openDocs')"
+                  @click.stop="openLink(tech.docs)"
                 >
                   <span class="material-symbols-rounded">description</span>
                 </button>
-                <button 
-                  v-if="tech.repo" 
-                  class="icon-button tech-link-btn" 
-                  @click.stop="openLink(tech.repo)"
+                <button
+                  v-if="tech.repo"
+                  class="icon-button tech-link-btn"
                   :title="$t('config.openRepo')"
+                  @click.stop="openLink(tech.repo)"
                 >
                   <span class="material-symbols-rounded">code</span>
                 </button>
@@ -96,33 +114,41 @@
       </div>
       <div class="settings-section">
         <h4 class="section-title">{{ $t('config.license') }}</h4>
-        
+
         <div class="license-card">
-          <button class="license-external-link" @click="openLicense" :title="$t('config.licenseDetails')">
+          <button
+            class="license-external-link"
+            :title="$t('config.licenseDetails')"
+            @click="openLicense"
+          >
             <span class="material-symbols-rounded">open_in_new</span>
           </button>
-          
+
           <div class="license-content">
             <div class="license-icon">
               <span class="material-symbols-rounded">code</span>
             </div>
-            
+
             <div class="license-main">
               <h3 class="license-title">{{ $t('config.licenseTitle') }}</h3>
               <p class="license-subtitle">{{ $t('config.licenseSubtitle') }}</p>
               <p class="license-copyright">{{ $t('config.copyright') }}</p>
-              
+
               <div v-if="showLicenseDetails" class="license-legal-text">
                 <p class="license-paragraph">{{ $t('config.licenseInfo') }}</p>
                 <p class="license-paragraph">{{ $t('config.licenseWarranty') }}</p>
               </div>
-              
-              <button 
-                class="license-details-toggle" 
+
+              <button
+                class="license-details-toggle"
                 @click="showLicenseDetails = !showLicenseDetails"
               >
-                <span class="material-symbols-rounded">{{ showLicenseDetails ? 'expand_less' : 'expand_more' }}</span>
-                <span>{{ showLicenseDetails ? $t('config.hideDetails') : $t('config.viewDetails') }}</span>
+                <span class="material-symbols-rounded">{{
+                  showLicenseDetails ? 'expand_less' : 'expand_more'
+                }}</span>
+                <span>{{
+                  showLicenseDetails ? $t('config.hideDetails') : $t('config.viewDetails')
+                }}</span>
               </button>
             </div>
           </div>
@@ -165,7 +191,13 @@ const githubUrl = 'https://github.com/JDBeWL/Mercurial-Player'
 const showLicenseDetails = ref<boolean>(false)
 
 // 自动更新
-const { isChecking, updateAvailable, newVersion, checkForUpdates, error, lastCheckTime, updateLog } = useAutoUpdate()
+const {
+  isChecking,
+  checkForUpdates,
+  error,
+  lastCheckTime,
+  updateLog,
+} = useAutoUpdate()
 
 // 技术栈分类数据
 const techCategories = computed<TechCategory[]>(() => [
@@ -177,27 +209,27 @@ const techCategories = computed<TechCategory[]>(() => [
         name: 'Tauri',
         desc: t('config.techTauri'),
         docs: 'https://tauri.app/',
-        repo: 'https://github.com/tauri-apps/tauri'
+        repo: 'https://github.com/tauri-apps/tauri',
       },
       {
         name: 'Vue 3',
         desc: t('config.techVue'),
         docs: 'https://vuejs.org/',
-        repo: 'https://github.com/vuejs/core'
+        repo: 'https://github.com/vuejs/core',
       },
       {
         name: 'Pinia',
         desc: t('config.techPinia'),
         docs: 'https://pinia.vuejs.org/',
-        repo: 'https://github.com/vuejs/pinia'
+        repo: 'https://github.com/vuejs/pinia',
       },
       {
         name: 'Vue I18n',
         desc: t('config.techVueI18n'),
         docs: 'https://vue-i18n.intlify.dev/',
-        repo: 'https://github.com/intlify/vue-i18n'
-      }
-    ]
+        repo: 'https://github.com/intlify/vue-i18n',
+      },
+    ],
   },
   {
     name: t('config.techCategoryAudio'),
@@ -207,39 +239,39 @@ const techCategories = computed<TechCategory[]>(() => [
         name: 'Symphonia',
         desc: t('config.techSymphonia'),
         docs: 'https://docs.rs/symphonia/',
-        repo: 'https://github.com/pdeljanov/Symphonia'
+        repo: 'https://github.com/pdeljanov/Symphonia',
       },
       {
         name: 'Rodio',
         desc: t('config.techRodio'),
         docs: 'https://docs.rs/rodio/',
-        repo: 'https://github.com/RustAudio/rodio'
+        repo: 'https://github.com/RustAudio/rodio',
       },
       {
         name: 'CPAL',
         desc: t('config.techCPAL'),
         docs: 'https://docs.rs/cpal/',
-        repo: 'https://github.com/RustAudio/cpal'
+        repo: 'https://github.com/RustAudio/cpal',
       },
       {
         name: 'Rubato',
         desc: t('config.techRubato'),
         docs: 'https://docs.rs/rubato/',
-        repo: 'https://github.com/HEnquist/rubato'
+        repo: 'https://github.com/HEnquist/rubato',
       },
       {
         name: 'Lofty',
         desc: t('config.techLofty'),
         docs: 'https://docs.rs/lofty/',
-        repo: 'https://github.com/Serial-ATA/lofty-rs'
+        repo: 'https://github.com/Serial-ATA/lofty-rs',
       },
       {
         name: 'Spectrum Analyzer',
         desc: t('config.techSpectrum'),
         docs: 'https://docs.rs/spectrum-analyzer/',
-        repo: 'https://github.com/phip1611/spectrum-analyzer'
-      }
-    ]
+        repo: 'https://github.com/phip1611/spectrum-analyzer',
+      },
+    ],
   },
   {
     name: t('config.techCategorySystem'),
@@ -250,15 +282,15 @@ const techCategories = computed<TechCategory[]>(() => [
         name: 'WASAPI',
         desc: t('config.techWASAPI'),
         docs: 'https://docs.rs/wasapi/',
-        repo: 'https://github.com/HEnquist/wasapi-rs'
+        repo: 'https://github.com/HEnquist/wasapi-rs',
       },
       {
         name: 'windows-rs',
         desc: t('config.techWin32'),
         docs: 'https://docs.rs/windows/',
-        repo: 'https://github.com/microsoft/windows-rs'
-      }
-    ]
+        repo: 'https://github.com/microsoft/windows-rs',
+      },
+    ],
   },
   {
     name: t('config.techCategoryFrontend'),
@@ -268,21 +300,21 @@ const techCategories = computed<TechCategory[]>(() => [
         name: 'Material Color Utilities',
         desc: t('config.techMaterialColor'),
         docs: 'https://github.com/material-foundation/material-color-utilities',
-        repo: 'https://github.com/material-foundation/material-color-utilities'
+        repo: 'https://github.com/material-foundation/material-color-utilities',
       },
       {
         name: 'Vite',
         desc: t('config.techVite'),
         docs: 'https://vitejs.dev/',
-        repo: 'https://github.com/vitejs/vite'
+        repo: 'https://github.com/vitejs/vite',
       },
       {
         name: 'TypeScript',
         desc: t('config.techTypeScript'),
         docs: 'https://www.typescriptlang.org/',
-        repo: 'https://github.com/microsoft/TypeScript'
-      }
-    ]
+        repo: 'https://github.com/microsoft/TypeScript',
+      },
+    ],
   },
   {
     name: t('config.techCategoryDev'),
@@ -292,16 +324,16 @@ const techCategories = computed<TechCategory[]>(() => [
         name: 'Vitest',
         desc: t('config.techVitest'),
         docs: 'https://vitest.dev/',
-        repo: 'https://github.com/vitest-dev/vitest'
+        repo: 'https://github.com/vitest-dev/vitest',
       },
       {
         name: 'Criterion',
         desc: t('config.techCriterion'),
         docs: 'https://bheisler.github.io/criterion.rs/book/',
-        repo: 'https://github.com/bheisler/criterion.rs'
-      }
-    ]
-  }
+        repo: 'https://github.com/bheisler/criterion.rs',
+      },
+    ],
+  },
 ])
 
 const loadAppVersion = async (): Promise<void> => {

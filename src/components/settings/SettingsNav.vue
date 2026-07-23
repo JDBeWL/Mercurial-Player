@@ -2,14 +2,14 @@
   <nav class="settings-nav">
     <div class="nav-header">
       <h2>{{ $t('config.title') }}</h2>
-      <button class="icon-button" @click="$emit('close')" :title="$t('common.close')">
+      <button class="icon-button" :title="$t('common.close')" @click="$emit('close')">
         <span class="material-symbols-rounded">close</span>
       </button>
     </div>
-    
+
     <div class="nav-items">
-      <button 
-        v-for="tab in tabs" 
+      <button
+        v-for="tab in tabs"
         :key="tab.id"
         class="nav-item"
         :class="{ active: modelValue === tab.id }"
@@ -32,7 +32,7 @@ defineProps<{
 
 defineEmits<{
   'update:modelValue': [value: string]
-  'close': []
+  close: []
 }>()
 </script>
 
@@ -131,7 +131,7 @@ defineEmits<{
     border-right: none;
     border-bottom: 1px solid var(--md-sys-color-outline-variant);
   }
-  
+
   .nav-items {
     display: flex;
     flex-wrap: nowrap;
@@ -139,13 +139,13 @@ defineEmits<{
     padding: 8px 12px;
     gap: 8px;
   }
-  
+
   .nav-item {
     flex-shrink: 0;
     padding: 12px 16px;
     margin-bottom: 0;
   }
-  
+
   .nav-label {
     display: none;
   }

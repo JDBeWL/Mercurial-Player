@@ -1,6 +1,6 @@
 /**
  * 错误通知 Composable
- * 
+ *
  * 提供统一的错误通知机制，用于向用户显示友好的错误消息
  */
 
@@ -37,14 +37,14 @@ export function useErrorNotification() {
   const showError = (
     message: string,
     severity: 'error' | 'warning' | 'info' = 'error',
-    duration: number = 5000
+    duration: number = 5000,
   ): number => {
     const notification: ErrorNotification = {
       id: Date.now() + Math.random(),
       message,
       severity,
       duration,
-      timestamp: new Date()
+      timestamp: new Date(),
     }
 
     errorNotifications.value.push(notification)
@@ -75,7 +75,7 @@ export function useErrorNotification() {
    * 移除错误通知
    */
   const removeError = (id: number): void => {
-    const index = errorNotifications.value.findIndex(n => n.id === id)
+    const index = errorNotifications.value.findIndex((n) => n.id === id)
     if (index > -1) {
       errorNotifications.value.splice(index, 1)
       // 清理对应的 timeout
@@ -100,19 +100,21 @@ export function useErrorNotification() {
 
   // 注册错误处理器监听器（模块级单例，仅首次调用时注册）
   if (!bridgeUnsubscribe) {
-    bridgeUnsubscribe = errorHandler.onError((error: AppError, options: { showToUser: boolean; userMessage: string }) => {
-      if (options.showToUser) {
-        const message = options.userMessage || errorHandler.getUserFriendlyMessage(error)
-        const severity: 'error' | 'warning' | 'info' = 
-          error.severity === ErrorSeverity.CRITICAL || error.severity === ErrorSeverity.HIGH 
-            ? 'error' 
-            : error.severity === ErrorSeverity.MEDIUM 
-            ? 'warning' 
-            : 'info'
-        
-        showError(message, severity)
-      }
-    })
+    bridgeUnsubscribe = errorHandler.onError(
+      (error: AppError, options: { showToUser: boolean; userMessage: string }) => {
+        if (options.showToUser) {
+          const message = options.userMessage || errorHandler.getUserFriendlyMessage(error)
+          const severity: 'error' | 'warning' | 'info' =
+            error.severity === ErrorSeverity.CRITICAL || error.severity === ErrorSeverity.HIGH
+              ? 'error'
+              : error.severity === ErrorSeverity.MEDIUM
+                ? 'warning'
+                : 'info'
+
+          showError(message, severity)
+        }
+      },
+    )
   }
 
   // 返回的 unsubscribe 会注销全局桥接监听器并复位，允许后续调用重新注册
@@ -128,6 +130,6 @@ export function useErrorNotification() {
     showError,
     removeError,
     clearErrors,
-    unsubscribe
+    unsubscribe,
   }
 }

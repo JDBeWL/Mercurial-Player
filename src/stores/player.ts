@@ -1,84 +1,23 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { register, unregisterAll, isRegistered } from '@tauri-apps/plugin-global-shortcut'
+import { type UnlistenFn } from '@tauri-apps/api/event'
 import FileUtils from '../utils/fileUtils'
 import LyricsParser from '../utils/lyricsParser'
 import logger from '../utils/logger'
 import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
 import { classifyAudioInvokeError } from '../utils/audioErrorClassifier'
+import { LRUCache } from '@/utils/lruCache'
 import { useConfigStore } from './config'
 import { useMusicLibraryStore } from './musicLibrary'
-import type { Track, AudioInfo, LyricLine, RepeatMode, CacheItem, ResumeResult, TrackSnapshot } from '@/types'
-
-/**
- * 简单的LRU缓存实现
- */
-class LRUCache<T> {
-  private maxSize: number
-  private ttl: number
-  private cache: Map<string, CacheItem<T>>
-
-  constructor(maxSize: number = 100, ttl: number = 60000) {
-    this.maxSize = maxSize
-    this.ttl = ttl
-    this.cache = new Map()
-  }
-
-  get(key: string): T | null {
-    const item = this.cache.get(key)
-    if (!item) return null
-
-    // 检查是否过期
-    if (Date.now() - item.timestamp > this.ttl) {
-      this.cache.delete(key)
-      return null
-    }
-
-    // 移到末尾（最近使用）
-    this.cache.delete(key)
-    this.cache.set(key, item)
-    return item.value
-  }
-
-  set(key: string, value: T): void {
-    // 如果已存在，先删除
-    if (this.cache.has(key)) {
-      this.cache.delete(key)
-    }
-
-    // 如果超过最大大小，删除最旧的
-    while (this.cache.size >= this.maxSize) {
-      const firstKey = this.cache.keys().next().value
-      if (firstKey) this.cache.delete(firstKey)
-    }
-
-    this.cache.set(key, {
-      value,
-      timestamp: Date.now()
-    })
-  }
-
-  has(key: string): boolean {
-    return this.get(key) !== null
-  }
-
-  delete(key: string): void {
-    this.cache.delete(key)
-  }
-
-  clear(): void {
-    this.cache.clear()
-  }
-
-  get size(): number {
-    return this.cache.size
-  }
-
-  keys(): IterableIterator<string> {
-    return this.cache.keys()
-  }
-}
+import {
+  setupTrackEndedListener,
+  setupPositionListener,
+  setupTaskbarListeners,
+  setupGlobalShortcuts,
+  setupDeviceListeners,
+  unregisterGlobalShortcuts,
+} from './playerListeners'
+import type { Track, AudioInfo, LyricLine, RepeatMode, ResumeResult, TrackSnapshot } from '@/types'
 
 interface TrackMetadata {
   title: string
@@ -143,7 +82,6 @@ interface PlayerState {
   _shuffleHistory: number[]
 }
 
-
 export const usePlayerStore = defineStore('player', {
   state: (): PlayerState => ({
     // 当前播放状态
@@ -171,7 +109,7 @@ export const usePlayerStore = defineStore('player', {
       sampleRate: null,
       channels: null,
       bitDepth: null,
-      format: null
+      format: null,
     },
 
     // 加载状态
@@ -219,7 +157,7 @@ export const usePlayerStore = defineStore('player', {
   getters: {
     currentTrackIndex: (state): number => {
       if (!state.currentTrack || state.playlist.length === 0) return -1
-      return state.playlist.findIndex(track => track.path === state.currentTrack!.path)
+      return state.playlist.findIndex((track) => track.path === state.currentTrack!.path)
     },
     hasNextTrack: (state): boolean => {
       // 手动切换应总是允许,与循环模式无关;自动结束行为由 _onEnded 处理
@@ -232,11 +170,15 @@ export const usePlayerStore = defineStore('player', {
       return true
     },
     currentLyric: (state): LyricLine | null => {
-      if (!state.lyrics || state.currentLyricIndex < 0 || state.currentLyricIndex >= state.lyrics.length) {
+      if (
+        !state.lyrics ||
+        state.currentLyricIndex < 0 ||
+        state.currentLyricIndex >= state.lyrics.length
+      ) {
         return null
       }
       return state.lyrics[state.currentLyricIndex]
-    }
+    },
   },
 
   actions: {
@@ -244,7 +186,6 @@ export const usePlayerStore = defineStore('player', {
 
     _getFileExistsCache(): LRUCache<boolean> {
       if (!this._fileExistsCache) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this._fileExistsCache = new LRUCache<boolean>(200, 30000) as any
       }
       return this._fileExistsCache as LRUCache<boolean>
@@ -252,7 +193,6 @@ export const usePlayerStore = defineStore('player', {
 
     _getMetadataCache(): LRUCache<TrackMetadata> {
       if (!this._metadataCache) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this._metadataCache = new LRUCache<TrackMetadata>(500, 300000) as any
       }
       return this._metadataCache as LRUCache<TrackMetadata>
@@ -281,7 +221,7 @@ export const usePlayerStore = defineStore('player', {
         for (let i = 0; i < keys.length; i++) {
           this._fileExistsCache.get(keys[i])
           if (i > 0 && i % CHUNK_SIZE === 0) {
-            await new Promise(resolve => setTimeout(resolve, 0))
+            await new Promise((resolve) => setTimeout(resolve, 0))
           }
         }
       }
@@ -290,7 +230,7 @@ export const usePlayerStore = defineStore('player', {
         for (let i = 0; i < keys.length; i++) {
           this._metadataCache.get(keys[i])
           if (i > 0 && i % CHUNK_SIZE === 0) {
-            await new Promise(resolve => setTimeout(resolve, 0))
+            await new Promise((resolve) => setTimeout(resolve, 0))
           }
         }
       }
@@ -335,11 +275,7 @@ export const usePlayerStore = defineStore('player', {
             logger.error('Failed to load volume from config:', err)
           }
 
-          await this._setupTrackEndedListener()
-          await this._setupPositionListener()
-          await this._setupTaskbarListeners()
-          await this._setupDeviceListeners()
-          await this._setupGlobalShortcuts()
+          await this._setupListeners()
           this._startCleanupTask()
 
           logger.info('Player store initialized.')
@@ -352,30 +288,26 @@ export const usePlayerStore = defineStore('player', {
       await this._initPromise
     },
 
-    async _setupTrackEndedListener(): Promise<void> {
-      try {
-        this._trackEndedUnlisten = await listen('track-ended', () => {
-          if (this._isDestroyed) return
-          logger.debug('Received track-ended event')
-          this._onEnded()
-        })
-      } catch (err) {
-        logger.error('Failed to setup track-ended listener:', err)
-      }
-    },
+    /**
+     * 统一设置所有事件监听器 (track-ended / playback-position / taskbar / device / global shortcuts)
+     * 监听器实现抽离到 playerListeners.ts
+     */
+    async _setupListeners(): Promise<void> {
+      this._trackEndedUnlisten = await setupTrackEndedListener(this)
+      this._positionUnlisten = await setupPositionListener(this)
 
-    async _setupPositionListener(): Promise<void> {
-      try {
-        this._positionUnlisten = await listen<{ position: number }>('playback-position', (event) => {
-          if (this._isDestroyed || !this.isPlaying) return
-          const position = event.payload?.position
-          if (typeof position === 'number' && position >= 0) {
-            this.currentTime = position
-          }
-        })
-      } catch (err) {
-        logger.error('Failed to setup position listener:', err)
-      }
+      const taskbarListeners = await setupTaskbarListeners(this)
+      this._taskbarPreviousUnlisten = taskbarListeners.previous
+      this._taskbarPlayPauseUnlisten = taskbarListeners.playPause
+      this._taskbarNextUnlisten = taskbarListeners.next
+
+      const deviceListeners = await setupDeviceListeners(this)
+      this._deviceRemovedUnlisten = deviceListeners.removed
+      this._deviceSwitchRequiredUnlisten = deviceListeners.switchRequired
+      this._noDeviceAvailableUnlisten = deviceListeners.noDevice
+      this._deviceDefaultChangedUnlisten = deviceListeners.defaultChanged
+
+      await setupGlobalShortcuts(this)
     },
 
     /**
@@ -399,7 +331,7 @@ export const usePlayerStore = defineStore('player', {
         if (musicLibraryStore.currentPlaylist) {
           playlistName = musicLibraryStore.currentPlaylist.name
           const idx = musicLibraryStore.currentPlaylist.files.findIndex(
-            f => f.path === track.path
+            (f) => f.path === track.path,
           )
           if (idx >= 0) trackIndexInPlaylist = idx
         }
@@ -408,7 +340,7 @@ export const usePlayerStore = defineStore('player', {
       }
       // 提取 player.playlist 的元数据快照 (不依赖 musicLibrary 缓存)
       // 这样启动恢复时即使 musicLibrary 还没加载,也能直接重建 player.playlist
-      const playlistTracks: TrackSnapshot[] = this.playlist.map(t => ({
+      const playlistTracks: TrackSnapshot[] = this.playlist.map((t) => ({
         path: t.path,
         title: t.title ?? null,
         artist: t.artist ?? null,
@@ -454,7 +386,7 @@ export const usePlayerStore = defineStore('player', {
           // 1. 用返回的 playlistTracks 直接构造 player.playlist
           //    不依赖 musicLibrary 缓存是否加载,保证恢复后播放列表完整
           const playlistTracks = result.playlistTracks ?? []
-          const playlist: Track[] = playlistTracks.map(s => ({
+          const playlist: Track[] = playlistTracks.map((s) => ({
             path: s.path,
             title: s.title ?? undefined,
             artist: s.artist ?? undefined,
@@ -471,7 +403,7 @@ export const usePlayerStore = defineStore('player', {
           this.playlist = playlist
 
           // 2. 在 playlist 中查找当前曲目 (含完整元数据: bitrate/sampleRate 等)
-          let matchedTrack: Track | null = playlist.find(t => t.path === trackPath) ?? null
+          let matchedTrack: Track | null = playlist.find((t) => t.path === trackPath) ?? null
 
           // 3. 如果 playlistTracks 为空或没找到,用 lastSession 快照构造一个最小 Track
           if (!matchedTrack) {
@@ -495,18 +427,14 @@ export const usePlayerStore = defineStore('player', {
                 await musicLibraryStore.loadPlaylistsFromCache()
               }
               const mlPlaylist = musicLibraryStore.playlists.find(
-                p => p.name === result.playlistName
+                (p) => p.name === result.playlistName,
               )
               if (mlPlaylist) {
                 musicLibraryStore.selectPlaylist(mlPlaylist)
-                // selectPlaylist 会清空 currentFile,设置回匹配的曲目让 UI 正确高亮
-                const mlTrack = mlPlaylist.files.find(t => t.path === trackPath)
-                if (mlTrack) {
-                  musicLibraryStore.setCurrentFile(mlTrack)
-                  // 如果 musicLibrary 中的曲目有更完整的元数据 (比如 coverPath 已加载),用它
-                  if (mlTrack.bitrate && !matchedTrack.bitrate) {
-                    matchedTrack = mlTrack
-                  }
+                // 如果 musicLibrary 中的曲目有更完整的元数据 (比如 coverPath 已加载),用它
+                const mlTrack = mlPlaylist.files.find((t) => t.path === trackPath)
+                if (mlTrack && mlTrack.bitrate && !matchedTrack.bitrate) {
+                  matchedTrack = mlTrack
                 }
               }
             } catch (err) {
@@ -536,19 +464,23 @@ export const usePlayerStore = defineStore('player', {
           // 保持暂停状态 - 用户主动点播放才会开始
           this.isPlaying = false
           this._updateTaskbarState()
-          logger.info(`Resumed last session (paused): ${trackPath} @ ${result.positionSecs}s (${result.status}), playlist=${playlist.length} tracks`)
+          logger.info(
+            `Resumed last session (paused): ${trackPath} @ ${result.positionSecs}s (${result.status}), playlist=${playlist.length} tracks`,
+          )
 
           // 7. 加载当前曲目封面 (异步,不阻塞恢复)
           invoke<string | null>('get_track_cover_path', { path: trackPath })
-            .then(coverPath => {
+            .then((coverPath) => {
+              // 守卫:应用关闭后不再修改已销毁的 store state
+              if (this._isDestroyed) return
               if (this.currentTrack && this.currentTrack.path === trackPath && coverPath) {
                 this.currentTrack.coverPath = coverPath
               }
             })
-            .catch(err => logger.debug('Failed to load cover for resumed track:', err))
+            .catch((err) => logger.debug('Failed to load cover for resumed track:', err))
         } else if (result.status === 'not_found' && result.trackPath) {
           // 静默处理:从当前播放列表移除该文件 (用户选择)
-          const idx = this.playlist.findIndex(t => t.path === result.trackPath)
+          const idx = this.playlist.findIndex((t) => t.path === result.trackPath)
           if (idx >= 0) {
             this.playlist.splice(idx, 1)
             logger.info(`Removed missing track from playlist: ${result.trackPath}`)
@@ -561,73 +493,13 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
-    async _setupTaskbarListeners(): Promise<void> {
-      try {
-        // 监听任务栏上一首按钮
-        this._taskbarPreviousUnlisten = await listen('taskbar-previous', () => {
-          if (this._isDestroyed) return
-          logger.debug('Taskbar: Previous button clicked')
-          this.previousTrack()
-        })
-
-        // 监听任务栏播放/暂停按钮
-        this._taskbarPlayPauseUnlisten = await listen('taskbar-play-pause', () => {
-          if (this._isDestroyed) return
-          logger.debug('Taskbar: Play/Pause button clicked')
-          this.togglePlay()
-        })
-
-        // 监听任务栏下一首按钮
-        this._taskbarNextUnlisten = await listen('taskbar-next', () => {
-          if (this._isDestroyed) return
-          logger.debug('Taskbar: Next button clicked')
-          this.nextTrack()
-        })
-
-        logger.info('Taskbar listeners setup complete')
-      } catch (err) {
-        logger.error('Failed to setup taskbar listeners:', err)
-      }
-    },
-
-    /**
-     * 注册全局媒体键快捷方式（使用 plugin-global-shortcut）
-     * MediaPlayPause / MediaTrackNext / MediaTrackPrevious
-     */
-    async _setupGlobalShortcuts(): Promise<void> {
-      const shortcuts = [
-        { key: 'MediaPlayPause', handler: () => this.togglePlay() },
-        { key: 'MediaTrackNext', handler: () => this.nextTrack() },
-        { key: 'MediaTrackPrevious', handler: () => this.previousTrack() }
-      ];
-
-      for (const { key, handler } of shortcuts) {
-        try {
-          if (await isRegistered(key)) {
-            logger.debug(`Shortcut ${key} already registered, skipping`);
-            continue;
-          }
-
-          await register(key, () => {
-            if (this._isDestroyed) return;
-            logger.debug(`Global shortcut: ${key}`);
-            handler();
-          });
-        } catch (err: any) {
-          // 如果错误信息包含 "already registered"，说明已经注册过了，可以忽略
-          const errorMsg = String(err);
-          if (errorMsg.includes('already registered')) {
-            logger.debug(`Shortcut ${key} was already registered (caught exception)`);
-          } else {
-            logger.error(`Failed to register shortcut ${key}:`, err);
-          }
-        }
-      }
-      
-      logger.info('Global media shortcuts setup complete');
-    },
-
-    async _switchAudioDevice(deviceName: string, successAction: 'switch-fallback-success' | 'switch-default-success', successMessage: string, errorAction: 'switch-fallback' | 'switch-default', errorSeverity: ErrorSeverity): Promise<void> {
+    async _switchAudioDevice(
+      deviceName: string,
+      successAction: 'switch-fallback-success' | 'switch-default-success',
+      successMessage: string,
+      errorAction: 'switch-fallback' | 'switch-default',
+      errorSeverity: ErrorSeverity,
+    ): Promise<void> {
       if (this._isDestroyed || !deviceName) return
       if (this._isSwitchingDevice) {
         if (this._lastDeviceSwitchTarget === deviceName) {
@@ -657,88 +529,27 @@ export const usePlayerStore = defineStore('player', {
         }
 
         logger.info(`Successfully switched audio device: ${deviceName}`)
-        errorHandler.handle(
-          new Error(`Device switched to ${deviceName}`),
-          {
-            type: ErrorType.AUDIO_DEVICE_ERROR,
-            severity: ErrorSeverity.LOW,
-            context: { deviceName, action: successAction },
-            showToUser: true,
-            userMessage: successMessage,
-          }
-        )
+        errorHandler.handle(new Error(`Device switched to ${deviceName}`), {
+          type: ErrorType.AUDIO_DEVICE_ERROR,
+          severity: ErrorSeverity.LOW,
+          context: { deviceName, action: successAction },
+          showToUser: true,
+          userMessage: successMessage,
+        })
       } catch (err) {
-        errorHandler.handle(
-          err instanceof Error ? err : new Error(String(err)),
-          {
-            type: ErrorType.AUDIO_DEVICE_ERROR,
-            severity: errorSeverity,
-            context: { deviceName, action: errorAction },
-            showToUser: true,
-            userMessage: errorAction === 'switch-fallback'
+        errorHandler.handle(err instanceof Error ? err : new Error(String(err)), {
+          type: ErrorType.AUDIO_DEVICE_ERROR,
+          severity: errorSeverity,
+          context: { deviceName, action: errorAction },
+          showToUser: true,
+          userMessage:
+            errorAction === 'switch-fallback'
               ? `音频设备已断开，切换到备用设备失败: ${deviceName}`
               : `切换到新设备失败: ${deviceName}`,
-          }
-        )
+        })
       } finally {
         this._isSwitchingDevice = false
         this._lastDeviceSwitchTarget = null
-      }
-    },
-
-    async _setupDeviceListeners(): Promise<void> {
-      try {
-        // 监听设备移除事件
-        this._deviceRemovedUnlisten = await listen<{ eventType: string; deviceName: string | null }>('device-removed', (event) => {
-          if (this._isDestroyed) return
-          const deviceName = event.payload?.deviceName
-          logger.warn(`Audio device removed: ${deviceName}`)
-        })
-
-        // 监听设备切换请求事件
-        this._deviceSwitchRequiredUnlisten = await listen<{ eventType: string; deviceName: string | null }>('device-switch-required', async (event) => {
-          if (this._isDestroyed) return
-          const deviceName = event.payload?.deviceName
-          if (!deviceName) return
-
-          logger.info(`Switching to fallback device: ${deviceName}`)
-          await this._switchAudioDevice(deviceName, 'switch-fallback-success', `音频设备已断开，已自动切换到: ${deviceName}`, 'switch-fallback', ErrorSeverity.HIGH)
-        })
-
-
-        // 监听无可用设备事件
-        this._noDeviceAvailableUnlisten = await listen('no-device-available', () => {
-          if (this._isDestroyed) return
-          logger.error('No audio device available')
-          
-          // 暂停播放
-          this.pause()
-          
-          errorHandler.handle(
-            new Error('No audio device available'),
-            {
-              type: ErrorType.AUDIO_DEVICE_ERROR,
-              severity: ErrorSeverity.CRITICAL,
-              context: { action: 'no-device' },
-              showToUser: true,
-              userMessage: '没有可用的音频设备，请连接音频设备后重试'
-            }
-          )
-        })
-
-        // 监听默认设备变更事件（新设备添加且为系统默认）
-        this._deviceDefaultChangedUnlisten = await listen<{ eventType: string; deviceName: string | null }>('device-default-changed', async (event) => {
-          if (this._isDestroyed) return
-          const deviceName = event.payload?.deviceName
-          if (!deviceName) return
-
-          logger.info(`System default device changed to: ${deviceName}`)
-          await this._switchAudioDevice(deviceName, 'switch-default-success', `已自动切换到新设备: ${deviceName}`, 'switch-default', ErrorSeverity.MEDIUM)
-        })
-
-        logger.info('Device listeners setup complete')
-      } catch (err) {
-        logger.error('Failed to setup device listeners:', err)
       }
     },
 
@@ -774,7 +585,9 @@ export const usePlayerStore = defineStore('player', {
       let resolvedPath = track.path
       let trackExists = await this._checkFileExists(resolvedPath)
       if (!trackExists && resolvedPath) {
-        const altPath = resolvedPath.includes('/') ? resolvedPath.replace(/\//g, '\\') : resolvedPath.replace(/\\/g, '/')
+        const altPath = resolvedPath.includes('/')
+          ? resolvedPath.replace(/\//g, '\\')
+          : resolvedPath.replace(/\\/g, '/')
         if (altPath !== resolvedPath) {
           resolvedPath = altPath
           trackExists = await this._checkFileExists(resolvedPath)
@@ -787,8 +600,14 @@ export const usePlayerStore = defineStore('player', {
 
       if (!trackExists) {
         logger.warn('Track file not found:', resolvedPath)
-        const currentTrackIndex = this.playlist.findIndex(t => t.path === track.path || t.path === resolvedPath)
-        if (this.playlist.length > 1 && currentTrackIndex >= 0 && currentTrackIndex < this.playlist.length - 1) {
+        const currentTrackIndex = this.playlist.findIndex(
+          (t) => t.path === track.path || t.path === resolvedPath,
+        )
+        if (
+          this.playlist.length > 1 &&
+          currentTrackIndex >= 0 &&
+          currentTrackIndex < this.playlist.length - 1
+        ) {
           return this.nextTrack()
         }
 
@@ -811,7 +630,7 @@ export const usePlayerStore = defineStore('player', {
           sampleRate: track.sampleRate || null,
           channels: track.channels || null,
           bitDepth: track.bitDepth || null,
-          format: track.format || null
+          format: track.format || null,
         }
       }
 
@@ -822,7 +641,7 @@ export const usePlayerStore = defineStore('player', {
         artist: metadata.artist,
         album: metadata.album,
         duration: metadata.duration,
-        coverPath: track.coverPath // 保留原始的 coverPath
+        coverPath: track.coverPath, // 保留原始的 coverPath
       }
 
       this.lastTrackIndex = this.currentTrackIndex
@@ -846,7 +665,7 @@ export const usePlayerStore = defineStore('player', {
       if (!resolvedTrack.coverPath) {
         logger.debug('Loading cover for track:', resolvedPath)
         invoke<string | null>('get_track_cover_path', { path: resolvedPath })
-          .then(coverPath => {
+          .then((coverPath) => {
             logger.debug('Cover path result:', coverPath)
             if (this.currentTrack?.path === resolvedPath && coverPath) {
               this.currentTrack.coverPath = coverPath
@@ -858,7 +677,7 @@ export const usePlayerStore = defineStore('player', {
               }
             }
           })
-          .catch(err => logger.error('Failed to load cover path:', err))
+          .catch((err) => logger.error('Failed to load cover path:', err))
       } else {
         logger.debug('Track already has coverPath:', resolvedTrack.coverPath)
       }
@@ -874,7 +693,7 @@ export const usePlayerStore = defineStore('player', {
         format: metadata.format || null,
       }
 
-      invoke('pause_track').catch(err => logger.debug('pause before play:', err))
+      invoke('pause_track').catch((err) => logger.warn('pause before play:', err))
 
       try {
         logger.info('Playing track:', resolvedPath)
@@ -902,7 +721,7 @@ export const usePlayerStore = defineStore('player', {
         this.startStatusPolling()
         this._updateTaskbarState()
 
-        this.loadLyrics(resolvedPath, requestId).catch(err => {
+        this.loadLyrics(resolvedPath, requestId).catch((err) => {
           logger.debug('Lyrics load error:', err)
         })
       } catch (err) {
@@ -911,20 +730,19 @@ export const usePlayerStore = defineStore('player', {
         }
 
         const type = classifyAudioInvokeError(err)
-        const handled = errorHandler.handle(
-          err instanceof Error ? err : new Error(String(err)),
-          {
-            type,
-            severity: ErrorSeverity.HIGH,
-            context: { trackPath: resolvedPath, trackName: track.name },
-            showToUser: true,
-          }
-        )
+        const handled = errorHandler.handle(err instanceof Error ? err : new Error(String(err)), {
+          type,
+          severity: ErrorSeverity.HIGH,
+          context: { trackPath: resolvedPath, trackName: track.name },
+          showToUser: true,
+        })
 
         logger.error('Failed to play track:', handled)
         this.isPlaying = false
 
-        const currentIdx = this.playlist.findIndex(t => t.path === track.path || t.path === resolvedPath)
+        const currentIdx = this.playlist.findIndex(
+          (t) => t.path === track.path || t.path === resolvedPath,
+        )
         if (this.playlist.length > 1 && currentIdx >= 0 && currentIdx < this.playlist.length - 1) {
           const nextTrackTimeoutId = setTimeout(() => {
             if (!this._isDestroyed && this._activePlayRequestId === requestId) {
@@ -951,7 +769,7 @@ export const usePlayerStore = defineStore('player', {
           // 暂停时立即保存 last_session (无节流)
           void this._saveLastSessionNow()
         })
-        .catch(err => logger.error("Failed to pause:", err))
+        .catch((err) => logger.error('Failed to pause:', err))
     },
 
     resume(): void {
@@ -962,7 +780,7 @@ export const usePlayerStore = defineStore('player', {
           this.startStatusPolling()
           this._updateTaskbarState()
         })
-        .catch(err => logger.error("Failed to resume:", err))
+        .catch((err) => logger.error('Failed to resume:', err))
     },
 
     togglePlay(): void {
@@ -998,8 +816,18 @@ export const usePlayerStore = defineStore('player', {
     async _onEnded(): Promise<void> {
       if (this._isDestroyed || !this.currentTrack) return
 
+      // 空播放列表守卫:停止播放,避免后续 list 模式分支 % 0 得到 NaN
+      if (this.playlist.length === 0) {
+        this.isPlaying = false
+        this.stopStatusPolling()
+        invoke('pause_track').catch((err) =>
+          logger.warn('pause on ended with empty playlist:', err),
+        )
+        return
+      }
+
       const endedTrackPath = this.currentTrack.path
-      await invoke('pause_track').catch(err => logger.debug('pause on ended:', err))
+      await invoke('pause_track').catch((err) => logger.warn('pause on ended:', err))
 
       // 在 await 期间，用户可能已经手动切换了曲目，需要检测过时事件
       if (this._isDestroyed || !this.currentTrack || this.currentTrack.path !== endedTrackPath) {
@@ -1012,12 +840,13 @@ export const usePlayerStore = defineStore('player', {
       } else if (this.isShuffle) {
         // shuffle 模式: 顺序播放且一轮已播完时停止,否则沿 _shuffleOrder 前进
         const isShuffleOrderValid = this._isShuffleOrderValid()
-        const isAtEnd = isShuffleOrderValid && this._shufflePosition >= this._shuffleOrder.length - 1
+        const isAtEnd =
+          isShuffleOrderValid && this._shufflePosition >= this._shuffleOrder.length - 1
         if (this.repeatMode === 'none' && isAtEnd) {
           this.isPlaying = false
           this.stopStatusPolling()
           this.currentTime = this.duration
-          invoke('pause_track').catch(err => logger.debug('pause after shuffle ended:', err))
+          invoke('pause_track').catch((err) => logger.warn('pause after shuffle ended:', err))
         } else {
           await this.nextTrack()
         }
@@ -1031,7 +860,7 @@ export const usePlayerStore = defineStore('player', {
         this.isPlaying = false
         this.stopStatusPolling()
         this.currentTime = this.duration
-        invoke('pause_track').catch(err => logger.debug('pause after playlist ended:', err))
+        invoke('pause_track').catch((err) => logger.warn('pause after playlist ended:', err))
       }
     },
 
@@ -1092,6 +921,8 @@ export const usePlayerStore = defineStore('player', {
 
     async nextTrack(): Promise<void> {
       if (!this.currentTrack || this._isLoading) return
+      // 空播放列表守卫:避免 (currentTrackIndex + 1) % 0 得到 NaN
+      if (this.playlist.length === 0) return
 
       // 单曲循环由 _onEnded 处理,手动 next 走下一首
       let nextIndex: number
@@ -1124,6 +955,8 @@ export const usePlayerStore = defineStore('player', {
 
     async previousTrack(): Promise<void> {
       if (!this.currentTrack || this._isLoading) return
+      // 空播放列表守卫:避免 playlist.length - 1 得到 -1,从而访问 playlist[-1] = undefined
+      if (this.playlist.length === 0) return
 
       let prevIndex: number
       if (this.isShuffle) {
@@ -1171,21 +1004,21 @@ export const usePlayerStore = defineStore('player', {
           this.currentTime = newTime
           if (!wasPlaying) {
             // 后端 seek 总是 play，如果之前是暂停状态需要重新暂停
-            invoke('pause_track').catch(err => logger.error("Failed to pause after seek:", err))
+            invoke('pause_track').catch((err) => logger.error('Failed to pause after seek:', err))
           }
         })
-        .catch(err => logger.error("Failed to seek:", err))
+        .catch((err) => logger.error('Failed to seek:', err))
     },
 
     setVolume(volume: number): void {
       const newVolume = Math.max(0, Math.min(1, volume))
       this.volume = newVolume
-      
+
       // 如果设置音量大于0，取消静音状态
       if (newVolume > 0 && this.isMuted) {
         this.isMuted = false
       }
-      
+
       // 如果音量大于0，更新 previousVolume
       if (newVolume > 0) {
         this.previousVolume = newVolume
@@ -1197,7 +1030,7 @@ export const usePlayerStore = defineStore('player', {
           configStore.audio.volume = newVolume
           configStore.saveConfigNow()
         })
-        .catch(err => logger.error("Failed to set volume:", err))
+        .catch((err) => logger.error('Failed to set volume:', err))
     },
 
     toggleMute(): void {
@@ -1212,13 +1045,12 @@ export const usePlayerStore = defineStore('player', {
             configStore.audio.volume = volumeToRestore
             configStore.saveConfigNow()
           })
-          .catch(err => logger.error("Failed to unmute:", err))
+          .catch((err) => logger.error('Failed to unmute:', err))
       } else {
         // 静音，保存当前音量
         this.previousVolume = this.volume > 0 ? this.volume : this.previousVolume
         this.isMuted = true
-        invoke('set_volume', { volume: 0 })
-          .catch(err => logger.error("Failed to mute:", err))
+        invoke('set_volume', { volume: 0 }).catch((err) => logger.error('Failed to mute:', err))
       }
     },
 
@@ -1294,9 +1126,11 @@ export const usePlayerStore = defineStore('player', {
      * 失效条件: 序列长度与当前 playlist 不一致 (playlist 变化/重置)
      */
     _isShuffleOrderValid(): boolean {
-      return this._shuffleOrder.length === this.playlist.length &&
+      return (
+        this._shuffleOrder.length === this.playlist.length &&
         this._shuffleOrder.length > 0 &&
         this._shufflePosition >= 0
+      )
     },
 
     // --- 歌词偏移 ---
@@ -1316,7 +1150,7 @@ export const usePlayerStore = defineStore('player', {
     // --- 播放列表管理 ---
 
     removeTrack(path: string): void {
-      const index = this.playlist.findIndex(t => t.path === path)
+      const index = this.playlist.findIndex((t) => t.path === path)
       if (index === -1) return
 
       // 先从播放列表中移除
@@ -1335,7 +1169,7 @@ export const usePlayerStore = defineStore('player', {
 
         // 暂停当前播放，避免音频状态不一致
         if (wasPlaying) {
-          invoke('pause_track').catch(err => logger.debug('pause before remove:', err))
+          invoke('pause_track').catch((err) => logger.warn('pause before remove:', err))
         }
 
         this.playTrack(this.playlist[nextIndex]).then(() => {
@@ -1347,6 +1181,21 @@ export const usePlayerStore = defineStore('player', {
         // 如果删除的不是当前播放的歌曲，但删除了当前歌曲前面的歌曲，
         // 我们不需要更新 currentTrack，但需要处理 vue 响应式带来的潜在问题
         // 虽然在目前的设计中 currentTrackIndex 是一个 getter，所以它会自动更新
+
+        // 同步更新 shuffle 顺序，避免 _shuffleOrder.length 与 playlist.length 不一致
+        // 导致 _isShuffleOrderValid() 返回 false，进而造成 shuffle 模式下单曲列表无限重播
+        if (this._shuffleOrder.length > 0) {
+          // 被删 index 在 _shuffleOrder 中的位置 (用于后续校正 _shufflePosition)
+          const removedPos = this._shuffleOrder.indexOf(index)
+          // 移除被删 index,并将大于该 index 的值减 1 (保持索引一致性)
+          this._shuffleOrder = this._shuffleOrder
+            .filter((i) => i !== index)
+            .map((i) => (i > index ? i - 1 : i))
+          // 若被删条目位于当前播放位置之前,当前条目前移一位,_shufflePosition 需同步减 1
+          if (removedPos !== -1 && removedPos < this._shufflePosition) {
+            this._shufflePosition--
+          }
+        }
       }
     },
 
@@ -1357,7 +1206,7 @@ export const usePlayerStore = defineStore('player', {
       if (!track) return
 
       const currentIndex = this.currentTrackIndex
-      
+
       // 如果没有当前曲目或播放列表为空，直接添加到开头
       if (currentIndex === -1 || this.playlist.length === 0) {
         this.playlist.unshift(track)
@@ -1366,12 +1215,12 @@ export const usePlayerStore = defineStore('player', {
       }
 
       // 检查曲目是否已经在播放列表中
-      const existingIndex = this.playlist.findIndex(t => t.path === track.path)
-      
+      const existingIndex = this.playlist.findIndex((t) => t.path === track.path)
+
       if (existingIndex !== -1) {
         // 如果曲目已存在，先移除它
         this.playlist.splice(existingIndex, 1)
-        
+
         // 移除后当前曲目的实际索引可能已偏移，需要重新计算
         const adjustedCurrentIndex = existingIndex < currentIndex ? currentIndex - 1 : currentIndex
         // 插入到当前曲目之后
@@ -1392,7 +1241,7 @@ export const usePlayerStore = defineStore('player', {
       if (!tracks || tracks.length === 0) return
 
       const currentIndex = this.currentTrackIndex
-      
+
       // 如果没有当前曲目或播放列表为空，直接添加到开头
       if (currentIndex === -1 || this.playlist.length === 0) {
         this.playlist.unshift(...tracks)
@@ -1401,9 +1250,9 @@ export const usePlayerStore = defineStore('player', {
       }
 
       // 过滤掉已存在的曲目并记录它们的位置
-      const existingPaths = new Set(this.playlist.map(t => t.path))
-      const newTracks = tracks.filter(t => !existingPaths.has(t.path))
-      
+      const existingPaths = new Set(this.playlist.map((t) => t.path))
+      const newTracks = tracks.filter((t) => !existingPaths.has(t.path))
+
       // 插入到当前曲目后面
       this.playlist.splice(currentIndex + 1, 0, ...newTracks)
       logger.info(`Added ${newTracks.length} new tracks to next position`)
@@ -1450,7 +1299,7 @@ export const usePlayerStore = defineStore('player', {
 
       // 创建新的 AbortController，使此次缓存任务可被后续调用取消
       const abortController = new AbortController()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
       this._cacheAbortController = abortController as any
 
       const cache = this._getMetadataCache()
@@ -1468,7 +1317,8 @@ export const usePlayerStore = defineStore('player', {
         if (!track.path || cache.has(track.path)) continue
 
         cache.set(track.path, {
-          title: track.displayTitle || track.title || track.name || FileUtils.getFileName(track.path),
+          title:
+            track.displayTitle || track.title || track.name || FileUtils.getFileName(track.path),
           artist: track.displayArtist || track.artist || '',
           album: track.album || '',
           duration: track.duration || 0,
@@ -1481,7 +1331,7 @@ export const usePlayerStore = defineStore('player', {
         cached++
 
         if (cached > 0 && cached % CHUNK_SIZE === 0) {
-          await new Promise(resolve => setTimeout(resolve, 0))
+          await new Promise((resolve) => setTimeout(resolve, 0))
         }
       }
 
@@ -1493,6 +1343,12 @@ export const usePlayerStore = defineStore('player', {
 
       const metadataCache = this._getMetadataCache()
 
+      // 注意:循环内逐个修改 track.coverPath 会触发 Pinia 响应式更新。
+      // 保持该写法的原因:播放列表项已通过 v-memo 优化重渲染,实际重渲染开销很小;
+      // 且封面加载本身是 IO 密集型,瓶颈不在响应式触发上。
+      // 如需进一步优化,可在所有封面加载完成后统一刷新 (例如先收集到本地 Map 再批量赋值),
+      // 但收益有限、改动风险较高,故暂不调整。
+
       // 批量加载封面路径，每次处理 10 首歌曲
       const BATCH_SIZE = 10
       for (let i = 0; i < playlist.length; i += BATCH_SIZE) {
@@ -1503,7 +1359,9 @@ export const usePlayerStore = defineStore('player', {
           batch.map(async (track) => {
             if (!track.coverPath) {
               try {
-                const coverPath = await invoke<string | null>('get_track_cover_path', { path: track.path })
+                const coverPath = await invoke<string | null>('get_track_cover_path', {
+                  path: track.path,
+                })
                 if (coverPath) {
                   track.coverPath = coverPath
                   // 同时更新元数据缓存中的封面路径
@@ -1517,12 +1375,12 @@ export const usePlayerStore = defineStore('player', {
                 logger.debug(`Failed to load cover for ${track.path}:`, err)
               }
             }
-          })
+          }),
         )
 
         // 让出主线程，避免阻塞 UI
         if (i + BATCH_SIZE < playlist.length) {
-          await new Promise(resolve => setTimeout(resolve, 0))
+          await new Promise((resolve) => setTimeout(resolve, 0))
         }
       }
 
@@ -1537,7 +1395,11 @@ export const usePlayerStore = defineStore('player', {
 
       try {
         const lyricsPath = await FileUtils.findLyricsFile(trackPath)
-        if (this._isDestroyed || this._activePlayRequestId !== lyricsRequestId || this.currentTrack?.path !== trackPath) {
+        if (
+          this._isDestroyed ||
+          this._activePlayRequestId !== lyricsRequestId ||
+          this.currentTrack?.path !== trackPath
+        ) {
           return
         }
 
@@ -1546,7 +1408,11 @@ export const usePlayerStore = defineStore('player', {
           const format = FileUtils.getFileExtension(lyricsPath) as 'lrc' | 'ass' | 'srt'
           const parsedLyrics = await LyricsParser.parseAsync(lyricsContent, format)
 
-          if (this._isDestroyed || this._activePlayRequestId !== lyricsRequestId || this.currentTrack?.path !== trackPath) {
+          if (
+            this._isDestroyed ||
+            this._activePlayRequestId !== lyricsRequestId ||
+            this.currentTrack?.path !== trackPath
+          ) {
             return
           }
 
@@ -1556,7 +1422,10 @@ export const usePlayerStore = defineStore('player', {
         }
       } catch (error) {
         logger.debug('No lyrics found or failed to load:', error)
-        if (this.currentTrack?.path === trackPath && this._activePlayRequestId === lyricsRequestId) {
+        if (
+          this.currentTrack?.path === trackPath &&
+          this._activePlayRequestId === lyricsRequestId
+        ) {
           this.lyrics = null
         }
       }
@@ -1627,17 +1496,12 @@ export const usePlayerStore = defineStore('player', {
       }
 
       // 注销全局媒体键快捷方式
-      try {
-        await unregisterAll()
-        logger.debug('Global shortcuts unregistered')
-      } catch {
-        // 忽略清理错误
-      }
+      await unregisterGlobalShortcuts()
 
       try {
-        invoke('pause_track').catch(() => { })
+        invoke('pause_track').catch((err) => logger.warn('pause during cleanup:', err))
         // 设置任务栏为停止状态
-        invoke('set_taskbar_stopped').catch(() => { })
+        invoke('set_taskbar_stopped').catch(() => {})
       } catch {
         // 忽略错误
       }
@@ -1661,6 +1525,6 @@ export const usePlayerStore = defineStore('player', {
       }
 
       logger.info('Player store cleaned up')
-    }
-  }
+    },
+  },
 })

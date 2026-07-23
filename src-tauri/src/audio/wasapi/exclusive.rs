@@ -101,6 +101,10 @@ pub enum PlaybackState {
     Stopped,
     Playing,
     Paused,
+    /// 带淡出的停止中:已发送 StopWithFadeOut 命令,音频线程仍在淡出,完成后转为 Stopped
+    Stopping,
+    /// 带淡出的暂停中:已发送 PauseWithFadeOut 命令,音频线程仍在淡出,完成后转为 Paused
+    Pausing,
 }
 
 /// WASAPI独占模式播放器
@@ -196,6 +200,11 @@ impl WasapiExclusivePlayback {
             Ok(AudioResponse::InitFailed(e)) => Err(e),
             Ok(other) => Err(format!("Unexpected response: {other:?}")),
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                log::warn!("WASAPI initialize timed out, cleaning up stale responses");
+                // 清空可能残留的过时响应,避免影响后续命令
+                while self.response_rx.try_recv().is_ok() {}
+                // 超时后设备未成功初始化,重置状态为 Uninitialized
+                *self.state.lock().unwrap() = PlaybackState::Uninitialized;
                 Err("Device initialization timeout - device may be in use or unavailable".to_string())
             }
             Err(e) => Err(format!("Failed to receive response: {e}")),
@@ -221,8 +230,8 @@ impl WasapiExclusivePlayback {
         self.command_tx
             .send(AudioCommand::StopWithFadeOut { duration_ms })
             .map_err(|e| format!("Failed to send stop_with_fade_out command: {e}"))?;
-        // 状态先标记为 Stopped,主线程可立即推进
-        *self.state.lock().unwrap() = PlaybackState::Stopped;
+        // 状态标记为 Stopping,表示音频线程仍在淡出;淡出完成后由 FadeAction::Stop 转为 Stopped
+        *self.state.lock().unwrap() = PlaybackState::Stopping;
         Ok(())
     }
 
@@ -245,8 +254,8 @@ impl WasapiExclusivePlayback {
         self.command_tx
             .send(AudioCommand::PauseWithFadeOut { duration_ms })
             .map_err(|e| format!("Failed to send pause_with_fade_out command: {e}"))?;
-        // 状态先标记为 Paused,主线程可立即推进
-        *self.state.lock().unwrap() = PlaybackState::Paused;
+        // 状态标记为 Pausing,表示音频线程仍在淡出;淡出完成后由 FadeAction::Pause 转为 Paused
+        *self.state.lock().unwrap() = PlaybackState::Pausing;
         Ok(())
     }
 

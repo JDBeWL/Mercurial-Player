@@ -7,17 +7,21 @@
         {{ $t('config.addFolder') }}
       </button>
     </div>
-    
+
     <div v-if="musicDirectories.length === 0" class="empty-state">
       <span class="material-symbols-rounded">folder_open</span>
       <p>{{ $t('config.noMusicFolders') }}</p>
     </div>
-    
+
     <div v-else class="folder-list">
       <div v-for="(folder, index) in musicDirectories" :key="index" class="folder-item">
         <span class="material-symbols-rounded folder-icon">folder</span>
         <span class="folder-path">{{ folder }}</span>
-        <button class="icon-button danger" @click="removeFolder(index)" :title="$t('config.remove')">
+        <button
+          class="icon-button danger"
+          :title="$t('config.remove')"
+          @click="removeFolder(index)"
+        >
           <span class="material-symbols-rounded">delete</span>
         </button>
       </div>
@@ -166,7 +170,11 @@ const removeFolder = async (index: number): Promise<void> => {
 }
 
 .filled-tonal-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-secondary-container));
+  background-color: color-mix(
+    in srgb,
+    var(--md-sys-color-on-surface) 8%,
+    var(--md-sys-color-secondary-container)
+  );
 }
 
 .icon-button {

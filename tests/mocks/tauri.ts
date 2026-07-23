@@ -1,5 +1,3 @@
-import { vi } from 'vitest'
-
 // Re-export mocks from setup
 export { mockInvoke, mockOpen } from '../setup'
 import { mockInvoke, mockOpen } from '../setup'
@@ -12,7 +10,7 @@ export function resetTauriMocks() {
 
 // Helper to setup common invoke responses
 export function setupInvokeMock(command: string, response: any) {
-  mockInvoke.mockImplementation((cmd: string, args?: any) => {
+  mockInvoke.mockImplementation((cmd: string, _args?: any) => {
     if (cmd === command) {
       return Promise.resolve(response)
     }

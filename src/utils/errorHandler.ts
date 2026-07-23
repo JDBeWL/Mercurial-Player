@@ -1,6 +1,6 @@
 /**
  * 统一错误处理系统
- * 
+ *
  * 提供统一的错误处理机制，包括错误分类、日志记录和用户提示
  */
 
@@ -15,39 +15,39 @@ export enum ErrorType {
   NETWORK = 'NETWORK',
   NETWORK_TIMEOUT = 'NETWORK_TIMEOUT',
   NETWORK_OFFLINE = 'NETWORK_OFFLINE',
-  
+
   // 文件系统相关错误
   FILE_NOT_FOUND = 'FILE_NOT_FOUND',
   FILE_READ_ERROR = 'FILE_READ_ERROR',
   FILE_WRITE_ERROR = 'FILE_WRITE_ERROR',
   FILE_PERMISSION_DENIED = 'FILE_PERMISSION_DENIED',
-  
+
   // 音频相关错误
   AUDIO_DECODE_ERROR = 'AUDIO_DECODE_ERROR',
   AUDIO_PLAYBACK_ERROR = 'AUDIO_PLAYBACK_ERROR',
   AUDIO_DEVICE_ERROR = 'AUDIO_DEVICE_ERROR',
-  
+
   // 配置相关错误
   CONFIG_LOAD_ERROR = 'CONFIG_LOAD_ERROR',
   CONFIG_SAVE_ERROR = 'CONFIG_SAVE_ERROR',
   CONFIG_INVALID = 'CONFIG_INVALID',
-  
+
   // 数据相关错误
   DATA_PARSE_ERROR = 'DATA_PARSE_ERROR',
   DATA_VALIDATION_ERROR = 'DATA_VALIDATION_ERROR',
-  
+
   // 未知错误
-  UNKNOWN = 'UNKNOWN'
+  UNKNOWN = 'UNKNOWN',
 }
 
 /**
  * 错误严重程度枚举
  */
 export enum ErrorSeverity {
-  LOW = 'LOW',        // 低严重程度，可以忽略或自动恢复
-  MEDIUM = 'MEDIUM',  // 中等严重程度，需要用户注意
-  HIGH = 'HIGH',      // 高严重程度，影响功能使用
-  CRITICAL = 'CRITICAL' // 严重错误，可能导致应用崩溃
+  LOW = 'LOW', // 低严重程度，可以忽略或自动恢复
+  MEDIUM = 'MEDIUM', // 中等严重程度，需要用户注意
+  HIGH = 'HIGH', // 高严重程度，影响功能使用
+  CRITICAL = 'CRITICAL', // 严重错误，可能导致应用崩溃
 }
 
 /**
@@ -65,7 +65,7 @@ export class AppError extends Error {
     type: ErrorType = ErrorType.UNKNOWN,
     severity: ErrorSeverity = ErrorSeverity.MEDIUM,
     originalError: Error | unknown | null = null,
-    context: ErrorContext = {}
+    context: ErrorContext = {},
   ) {
     super(message)
     this.name = 'AppError'
@@ -74,9 +74,11 @@ export class AppError extends Error {
     this.originalError = originalError
     this.context = context
     this.timestamp = new Date().toISOString()
-    
+
     // 保持堆栈跟踪（V8引擎特有API）
-    const ErrorWithCapture = Error as { captureStackTrace?: (target: object, constructor: Function) => void }
+    const ErrorWithCapture = Error as {
+      captureStackTrace?: (target: object, constructor: object) => void
+    }
     if (ErrorWithCapture.captureStackTrace) {
       ErrorWithCapture.captureStackTrace(this, AppError)
     }
@@ -94,18 +96,22 @@ export class AppError extends Error {
       timestamp: this.timestamp,
       context: this.context,
       stack: this.stack,
-      originalError: this.originalError instanceof Error
-        ? {
-            name: this.originalError.name,
-            message: this.originalError.message,
-            stack: this.originalError.stack
-          }
-        : this.originalError
+      originalError:
+        this.originalError instanceof Error
+          ? {
+              name: this.originalError.name,
+              message: this.originalError.message,
+              stack: this.originalError.stack,
+            }
+          : this.originalError,
     }
   }
 }
 
-type ErrorListener = (error: AppError, options: { showToUser: boolean; userMessage: string }) => void
+type ErrorListener = (
+  error: AppError,
+  options: { showToUser: boolean; userMessage: string },
+) => void
 
 /**
  * 错误处理器类
@@ -113,15 +119,15 @@ type ErrorListener = (error: AppError, options: { showToUser: boolean; userMessa
 class ErrorHandler {
   // 错误监听器列表
   private listeners: ErrorListener[] = []
-  
+
   // 错误统计
   private errorStats: ErrorStats = {
     total: 0,
     byType: {},
     bySeverity: {},
-    recent: []
+    recent: [],
   }
-  
+
   // 最大最近错误记录数
   private maxRecentErrors = 50
 
@@ -148,7 +154,7 @@ class ErrorHandler {
       context = {},
       silent = false,
       showToUser = true,
-      userMessage = null
+      userMessage = null,
     } = options
 
     // 转换为 AppError
@@ -158,21 +164,9 @@ class ErrorHandler {
       // 合并上下文
       appError.context = { ...appError.context, ...context }
     } else if (error instanceof Error) {
-      appError = new AppError(
-        error.message || '未知错误',
-        type,
-        severity,
-        error,
-        context
-      )
+      appError = new AppError(error.message || '未知错误', type, severity, error, context)
     } else {
-      appError = new AppError(
-        String(error) || '未知错误',
-        type,
-        severity,
-        error,
-        context
-      )
+      appError = new AppError(String(error) || '未知错误', type, severity, error, context)
     }
 
     // 更新统计
@@ -194,7 +188,7 @@ class ErrorHandler {
    */
   private updateStats(error: AppError): void {
     this.errorStats.total++
-    
+
     // 按类型统计
     if (!this.errorStats.byType[error.type]) {
       this.errorStats.byType[error.type] = 0
@@ -210,7 +204,7 @@ class ErrorHandler {
     // 记录最近错误
     this.errorStats.recent.push({
       error: error.toJSON(),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     })
 
     // 限制最近错误数量
@@ -227,7 +221,7 @@ class ErrorHandler {
     const logContext = {
       severity: error.severity,
       context: error.context,
-      originalError: error.originalError
+      originalError: error.originalError,
     }
 
     // 根据严重程度选择日志级别
@@ -250,14 +244,17 @@ class ErrorHandler {
   /**
    * 通知错误监听器
    */
-  private notifyListeners(error: AppError, options: { showToUser: boolean; userMessage: string | null }): void {
+  private notifyListeners(
+    error: AppError,
+    options: { showToUser: boolean; userMessage: string | null },
+  ): void {
     const { showToUser = true, userMessage = null } = options
 
-    this.listeners.forEach(listener => {
+    this.listeners.forEach((listener) => {
       try {
         listener(error, {
           showToUser,
-          userMessage: userMessage || this.getUserFriendlyMessage(error)
+          userMessage: userMessage || this.getUserFriendlyMessage(error),
         })
       } catch (listenerError) {
         // 避免监听器错误导致循环
@@ -287,7 +284,7 @@ class ErrorHandler {
       [ErrorType.CONFIG_INVALID]: '配置格式无效，已重置为默认配置',
       [ErrorType.DATA_PARSE_ERROR]: '数据解析失败，数据格式可能不正确',
       [ErrorType.DATA_VALIDATION_ERROR]: '数据验证失败，请检查输入数据',
-      [ErrorType.UNKNOWN]: '发生未知错误，请稍后重试'
+      [ErrorType.UNKNOWN]: '发生未知错误，请稍后重试',
     }
 
     return messages[error.type] || error.message || '发生错误，请稍后重试'
@@ -299,7 +296,7 @@ class ErrorHandler {
   getStats(): ErrorStats {
     return {
       ...this.errorStats,
-      recent: [...this.errorStats.recent]
+      recent: [...this.errorStats.recent],
     }
   }
 
@@ -311,7 +308,7 @@ class ErrorHandler {
       total: 0,
       byType: {},
       bySeverity: {},
-      recent: []
+      recent: [],
     }
   }
 }
@@ -324,24 +321,24 @@ const errorHandler = new ErrorHandler()
  */
 export function withErrorHandling<T, Args extends unknown[]>(
   asyncFn: (...args: Args) => Promise<T>,
-  options: ErrorHandlerOptions = {}
+  options: ErrorHandlerOptions = {},
 ): (...args: Args) => Promise<T | HandleResult<T>> {
   return async (...args: Args): Promise<T | HandleResult<T>> => {
     try {
       return await asyncFn(...args)
     } catch (error) {
       const handledError = errorHandler.handle(error, options)
-      
+
       // 如果设置了 throw，则重新抛出错误
       if (options.throw !== false) {
         throw handledError
       }
-      
+
       // 否则返回错误结果
       return {
         success: false,
         error: handledError,
-        data: null
+        data: null,
       }
     }
   }
@@ -352,21 +349,21 @@ export function withErrorHandling<T, Args extends unknown[]>(
  */
 export async function handlePromise<T>(
   promise: Promise<T>,
-  options: ErrorHandlerOptions = {}
+  options: ErrorHandlerOptions = {},
 ): Promise<HandleResult<T>> {
   try {
     const result = await promise
     return {
       success: true,
       data: result,
-      error: null
+      error: null,
     }
   } catch (error) {
     const handledError = errorHandler.handle(error, options)
     return {
       success: false,
       data: null,
-      error: handledError
+      error: handledError,
     }
   }
 }
@@ -375,14 +372,14 @@ export async function handlePromise<T>(
  * 创建错误处理装饰器（用于类方法）
  */
 export function errorHandlerDecorator(options: ErrorHandlerOptions = {}) {
-  return function<T>(
+  return function <T>(
     _target: object,
     propertyKey: string,
-    descriptor: TypedPropertyDescriptor<(...args: unknown[]) => Promise<T>>
+    descriptor: TypedPropertyDescriptor<(...args: unknown[]) => Promise<T>>,
   ) {
     const originalMethod = descriptor.value!
 
-    descriptor.value = async function(this: object, ...args: unknown[]): Promise<T> {
+    descriptor.value = async function (this: object, ...args: unknown[]): Promise<T> {
       try {
         return await originalMethod.apply(this, args)
       } catch (error) {
@@ -391,18 +388,18 @@ export function errorHandlerDecorator(options: ErrorHandlerOptions = {}) {
           context: {
             ...options.context,
             method: propertyKey,
-            className: this.constructor.name
-          }
+            className: this.constructor.name,
+          },
         })
-        
+
         if (options.throw !== false) {
           throw handledError
         }
-        
+
         return {
           success: false,
           error: handledError,
-          data: null
+          data: null,
         } as unknown as T
       }
     }

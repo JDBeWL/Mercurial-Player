@@ -71,13 +71,13 @@ describe('renderMarkdown', () => {
   describe('links and images', () => {
     it('should render links', () => {
       expect(renderMarkdown('[link](https://example.com)')).toBe(
-        '<p><a href="https://example.com" target="_blank" rel="noopener noreferrer">link</a></p>'
+        '<p><a href="https://example.com" target="_blank" rel="noopener noreferrer">link</a></p>',
       )
     })
 
     it('should render images', () => {
       expect(renderMarkdown('![alt](image.png)')).toBe(
-        '<p><img src="image.png" alt="alt" style="max-width:100%;border-radius:4px;" /></p>'
+        '<p><img src="image.png" alt="alt" style="max-width:100%;border-radius:4px;" /></p>',
       )
     })
   })
@@ -102,7 +102,9 @@ describe('renderMarkdown', () => {
 
     it('should render nested blockquote', () => {
       const md = '> > nested'
-      expect(renderMarkdown(md)).toBe('<blockquote><blockquote><p>nested</p></blockquote></blockquote>')
+      expect(renderMarkdown(md)).toBe(
+        '<blockquote><blockquote><p>nested</p></blockquote></blockquote>',
+      )
     })
   })
 

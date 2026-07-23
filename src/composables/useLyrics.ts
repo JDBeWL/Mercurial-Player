@@ -63,6 +63,9 @@ let sharedAbortController: AbortController | null = null
 // 模块级别的初始化标记
 let isInitialized = false
 
+// 共享 watcher 的停止函数,在 cleanup 时用于停止所有 watcher (HMR 场景)
+const sharedWatchStopFns: Array<() => void> = []
+
 // 模块级别的 store 引用（在 initializeSharedWatchers 中赋值）
 let _playerStore: ReturnType<typeof usePlayerStore> | null = null
 let _configStore: ReturnType<typeof useConfigStore> | null = null
@@ -170,7 +173,7 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
         onlineLyricsCache.set(trackPath, {
           lrc: onlineLrc,
           parsed,
-          source: 'online'
+          source: 'online',
         })
 
         if (_configStore.lyrics?.autoSaveOnlineLyrics) {
@@ -211,7 +214,7 @@ function initializeSharedWatchers(): void {
   let lastActiveIndexUpdate = 0
   const ACTIVE_INDEX_THROTTLE = 100 // 每 100ms 更新一次
 
-  watch(
+  const stopWatchCurrentTime = watch(
     () => _playerStore!.currentTime,
     (currentTime) => {
       if (!sharedLyrics.value.length) {
@@ -232,7 +235,9 @@ function initializeSharedWatchers(): void {
       const adjustedTime = currentTime - offset
 
       // 二分查找当前歌词索引
-      let l = 0, r = sharedLyrics.value.length - 1, idx = -1
+      let l = 0,
+        r = sharedLyrics.value.length - 1,
+        idx = -1
       while (l <= r) {
         const mid = (l + r) >> 1
         if (sharedLyrics.value[mid].time <= adjustedTime) {
@@ -248,8 +253,9 @@ function initializeSharedWatchers(): void {
         _playerStore!.currentLyricIndex = idx
       }
     },
-    { immediate: true }
+    { immediate: true },
   )
+  sharedWatchStopFns.push(stopWatchCurrentTime)
 }
 
 export function useLyrics() {
@@ -276,7 +282,7 @@ export function useLyrics() {
         onlineLyricsCache.set(track.path, {
           lrc: onlineLrc,
           parsed,
-          source: 'online'
+          source: 'online',
         })
 
         // 只有在启用自动保存时才保存到本地
@@ -300,15 +306,30 @@ export function useLyrics() {
     }
   }
 
-  // cleanup 不再需要手动调用:
-  // 共享 watcher 的生命周期与整个应用一致,
-  // 组件卸载时无需停止 watcher（否则其他调用方会丢失更新）。
-  // 真正需要清理的资源（如 abortController）由模块自己管理。
+  // cleanup 用于显式全量清理 (如 HMR 重建 store 时手动调用):
+  // 停止共享 watcher、重置初始化标记与 store 引用、清空共享状态,
+  // 以便下次 useLyrics() 调用时重新初始化并引用新的 store。
+  // 注意:不要在单个组件 onUnmounted 中调用 cleanup,
+  // 否则会停掉其他调用方共享的 watcher 导致丢失更新。
   const cleanup = (): void => {
     if (sharedAbortController) {
       sharedAbortController.abort()
       sharedAbortController = null
     }
+    // 停止所有共享 watcher,避免 HMR 重建 store 后旧 watcher 仍引用旧 store
+    sharedWatchStopFns.forEach((fn) => fn())
+    sharedWatchStopFns.length = 0
+    // 重置初始化标记,允许下次 useLyrics() 调用重新初始化 watchers(引用新的 store)
+    isInitialized = false
+    // 注意:不置空 _playerStore / _configStore,避免 cleanup 后 loadLyrics /
+    // fetchOnlineLyrics 因守卫检查而静默失效。下次 initializeSharedWatchers()
+    // 会重新赋值为最新的 store 实例。
+    // 清空共享状态
+    sharedLyrics.value = []
+    sharedLoading.value = false
+    sharedActiveIndex.value = -1
+    sharedLyricsSource.value = 'local'
+    sharedOnlineLyricsError.value = null
   }
 
   return {
@@ -319,6 +340,6 @@ export function useLyrics() {
     onlineLyricsError: sharedOnlineLyricsError,
     fetchAndSaveLyrics,
     loadLyrics,
-    cleanup
+    cleanup,
   }
 }

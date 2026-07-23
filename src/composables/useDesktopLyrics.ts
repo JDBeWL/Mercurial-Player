@@ -21,6 +21,11 @@ let updateIntervalId: number | null = null
 const stopFns: Array<() => void> = []
 const unlistenFns: Array<() => void> = []
 
+// 引用计数:跟踪当前有多少组件正在使用本 composable。
+// 只有最后一个组件卸载时 (refCount 归零) 才真正清理全局监听器/watcher,
+// 避免先卸载的组件停掉其他仍挂载组件共享的监听器。
+let refCount = 0
+
 function getSubLine(lyrics: any[], index: number): string {
   if (index < 0 || index >= lyrics.length) return ''
   const line = lyrics[index]
@@ -30,7 +35,10 @@ function getSubLine(lyrics: any[], index: number): string {
   return ''
 }
 
-function getCurrentWords(lyrics: any[], index: number): Array<{ text: string; start: number; end: number }> {
+function getCurrentWords(
+  lyrics: any[],
+  index: number,
+): Array<{ text: string; start: number; end: number }> {
   if (index < 0 || index >= lyrics.length) return []
   const line = lyrics[index]
   return Array.isArray(line?.words)
@@ -38,17 +46,17 @@ function getCurrentWords(lyrics: any[], index: number): Array<{ text: string; st
         .map((word: any) => ({
           text: String(word?.text ?? ''),
           start: Number(word?.start),
-          end: Number(word?.end)
+          end: Number(word?.end),
         }))
-        .filter((word: { text: string; start: number; end: number }) => (
-          word.text.length > 0 &&
-          Number.isFinite(word.start) &&
-          Number.isFinite(word.end) &&
-          word.end > word.start
-        ))
+        .filter(
+          (word: { text: string; start: number; end: number }) =>
+            word.text.length > 0 &&
+            Number.isFinite(word.start) &&
+            Number.isFinite(word.end) &&
+            word.end > word.start,
+        )
     : []
 }
-
 
 function getCurrentLine(lyrics: any[], index: number): string {
   if (index < 0 || index >= lyrics.length) return ''
@@ -62,7 +70,12 @@ function clampProgress(value: number): number {
   return Math.max(0, Math.min(1, value))
 }
 
-function getCurrentLyricProgress(lyrics: any[] | null, index: number, currentTime: number, lyricsOffset: number): number {
+function getCurrentLyricProgress(
+  lyrics: any[] | null,
+  index: number,
+  currentTime: number,
+  lyricsOffset: number,
+): number {
   if (!lyrics || index < 0 || index >= lyrics.length) return 0
 
   const current = lyrics[index]
@@ -77,14 +90,15 @@ function getCurrentLyricProgress(lyrics: any[] | null, index: number, currentTim
     .map((word: any) => ({
       text: String(word?.text ?? ''),
       start: Number(word?.start),
-      end: Number(word?.end)
+      end: Number(word?.end),
     }))
-    .filter((word: { text: string; start: number; end: number }) => (
-      word.text.length > 0 &&
-      Number.isFinite(word.start) &&
-      Number.isFinite(word.end) &&
-      word.end > word.start
-    ))
+    .filter(
+      (word: { text: string; start: number; end: number }) =>
+        word.text.length > 0 &&
+        Number.isFinite(word.start) &&
+        Number.isFinite(word.end) &&
+        word.end > word.start,
+    )
 
   if (validWords.length === 0) return 0
 
@@ -93,7 +107,10 @@ function getCurrentLyricProgress(lyrics: any[] | null, index: number, currentTim
   if (syncedTime <= firstStart) return 0
   if (syncedTime >= lastEnd) return 1
 
-  const totalChars = validWords.reduce((sum: number, word: { text: string }) => sum + word.text.length, 0)
+  const totalChars = validWords.reduce(
+    (sum: number, word: { text: string }) => sum + word.text.length,
+    0,
+  )
   if (totalChars <= 0) return 0
 
   let passedChars = 0
@@ -135,7 +152,7 @@ async function updateDesktopLyrics() {
     lyrics,
     currentIndex,
     playerStore.currentTime,
-    playerStore.lyricsOffset
+    playerStore.lyricsOffset,
   )
   const wordsKey = currentWords.map((word) => `${word.start}:${word.end}:${word.text}`).join('|')
 
@@ -164,7 +181,7 @@ async function updateDesktopLyrics() {
       progress,
       words: currentWords,
       currentTime: syncedTime,
-      isPlaying
+      isPlaying,
     })
   } catch {
     // non-Windows platform or not initialized
@@ -260,34 +277,31 @@ export function useDesktopLyrics() {
   const playerStore = usePlayerStore()
   const configStore = useConfigStore()
 
+  // 引用计数 +1,跟踪当前使用本 composable 的组件数
+  refCount++
+
   if (!isInitialized) {
     isInitialized = true
 
     listen('desktop-lyrics-closed', () => {
       logger.info('Desktop lyrics closed from window button')
       configStore.setDesktopLyricsConfig({ enabled: false })
-    }).then(unlisten => unlistenFns.push(unlisten))
+    }).then((unlisten) => unlistenFns.push(unlisten))
 
     listen<boolean>('desktop-lyrics-lock-changed', (event) => {
       logger.info('Desktop lyrics lock changed:', event.payload)
       configStore.setDesktopLyricsConfig({ locked: event.payload })
-    }).then(unlisten => unlistenFns.push(unlisten))
+    }).then((unlisten) => unlistenFns.push(unlisten))
 
     const stopWatchLyricIndex = watch(
       () => playerStore.currentLyricIndex,
-      () => scheduleDesktopLyricsUpdate()
+      () => scheduleDesktopLyricsUpdate(),
     )
     stopFns.push(stopWatchLyricIndex)
 
-    const stopWatchCurrentTime = watch(
-      () => playerStore.currentTime,
-      () => {}
-    )
-    stopFns.push(stopWatchCurrentTime)
-
     const stopWatchLyricsOffset = watch(
       () => playerStore.lyricsOffset,
-      () => scheduleDesktopLyricsUpdate()
+      () => scheduleDesktopLyricsUpdate(),
     )
     stopFns.push(stopWatchLyricsOffset)
 
@@ -298,7 +312,7 @@ export function useDesktopLyrics() {
         lastSubLine = ''
         lastProgress = -1
         scheduleDesktopLyricsUpdate()
-      }
+      },
     )
     stopFns.push(stopWatchLyrics)
 
@@ -316,25 +330,25 @@ export function useDesktopLyrics() {
           stopDesktopLyricsPolling()
           hideDesktopLyrics()
         }
-      }
+      },
     )
     stopFns.push(stopWatchEnabled)
 
     const stopWatchLocked = watch(
       () => configStore.lyrics?.desktopLyrics?.locked,
-      () => syncLockState()
+      () => syncLockState(),
     )
     stopFns.push(stopWatchLocked)
 
     const stopWatchFontSize = watch(
       () => configStore.lyrics?.desktopLyrics?.fontSize,
-      () => syncFontSize()
+      () => syncFontSize(),
     )
     stopFns.push(stopWatchFontSize)
 
     const stopWatchColorPreset = watch(
       () => configStore.lyrics?.desktopLyrics?.colorPreset,
-      () => syncColorPreset()
+      () => syncColorPreset(),
     )
     stopFns.push(stopWatchColorPreset)
 
@@ -345,7 +359,7 @@ export function useDesktopLyrics() {
         lastSubLine = ''
         lastProgress = -1
         scheduleDesktopLyricsUpdate()
-      }
+      },
     )
     stopFns.push(stopWatchTrack)
   }
@@ -362,11 +376,23 @@ export function useDesktopLyrics() {
   })
 
   onUnmounted(() => {
+    // 引用计数 -1,只有最后一个组件卸载时才真正清理全局资源,
+    // 避免先卸载的组件停掉其他仍挂载组件共享的监听器
+    refCount--
+    if (refCount > 0) return
+
     stopDesktopLyricsPolling()
     if (updateFrameId !== null) {
       window.cancelAnimationFrame(updateFrameId)
       updateFrameId = null
     }
+    // 停止所有 watcher
+    stopFns.forEach((fn) => fn())
+    stopFns.length = 0
+    // 取消所有 Tauri 事件监听
     unlistenFns.forEach((fn) => fn())
+    unlistenFns.length = 0
+    // 重置初始化标记,允许下次调用重新建立监听器/watcher
+    isInitialized = false
   })
 }

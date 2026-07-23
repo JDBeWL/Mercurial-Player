@@ -5,7 +5,11 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import logger from '../utils/logger'
-import pluginManager, { type PluginAPI, type PluginPermissionType, PluginPermission } from './pluginManager'
+import pluginManager, {
+  type PluginAPI,
+  type PluginPermissionType,
+  PluginPermission,
+} from './pluginManager'
 import { validatePluginCode } from './pluginSandbox'
 
 // 插件清单类型
@@ -33,7 +37,7 @@ interface InstallResult {
 export async function loadAllPlugins(): Promise<void> {
   try {
     const pluginDirs = await invoke<string[]>('list_plugins')
-    
+
     logger.info(`发现 ${pluginDirs.length} 个插件`)
 
     for (const pluginDir of pluginDirs) {
@@ -55,16 +59,16 @@ function validateManifest(manifest: PluginManifest): void {
   if (!manifest.id || typeof manifest.id !== 'string') {
     throw new Error('插件清单缺少有效的 id 字段')
   }
-  
+
   if (!manifest.name || typeof manifest.name !== 'string') {
     throw new Error('插件清单缺少有效的 name 字段')
   }
-  
+
   // 验证ID格式（只允许字母、数字、连字符、下划线）
   if (!/^[a-zA-Z0-9_-]+$/.test(manifest.id)) {
     throw new Error('插件ID只能包含字母、数字、连字符和下划线')
   }
-  
+
   // 验证权限
   if (manifest.permissions) {
     const validPermissions = Object.values(PluginPermission)
@@ -74,7 +78,7 @@ function validateManifest(manifest: PluginManifest): void {
       }
     }
   }
-  
+
   // 验证版本格式（如果提供）
   if (manifest.version && !/^\d+\.\d+\.\d+/.test(manifest.version)) {
     throw new Error('版本号格式无效，应为 x.y.z 格式')
@@ -86,8 +90,10 @@ function validateManifest(manifest: PluginManifest): void {
  */
 export async function loadPlugin(pluginPath: string): Promise<void> {
   try {
-    const manifest = await invoke<PluginManifest | null>('read_plugin_manifest', { path: pluginPath })
-    
+    const manifest = await invoke<PluginManifest | null>('read_plugin_manifest', {
+      path: pluginPath,
+    })
+
     if (!manifest) {
       throw new Error('无法读取插件清单')
     }
@@ -106,9 +112,9 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
       }
     }
 
-    const mainCode = await invoke<string>('read_plugin_main', { 
-      path: pluginPath, 
-      main: manifest.main || 'index.js' 
+    const mainCode = await invoke<string>('read_plugin_main', {
+      path: pluginPath,
+      main: manifest.main || 'index.js',
     })
 
     try {
@@ -175,11 +181,22 @@ function createPluginFunction(code: string, pluginId: string) {
       const timers = new Set<number>()
       const intervals = new Set<number>()
 
-      const safeSetTimeout = (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]): number => {
-        const id = setTimeout(() => {
-          timers.delete(id as unknown as number)
-          try { fn(...args) } catch (e) { api.log.error('定时器错误:', e) }
-        }, Math.min(delay || 0, 60000)) as unknown as number
+      const safeSetTimeout = (
+        fn: (...args: unknown[]) => void,
+        delay?: number,
+        ...args: unknown[]
+      ): number => {
+        const id = setTimeout(
+          () => {
+            timers.delete(id as unknown as number)
+            try {
+              fn(...args)
+            } catch (e) {
+              api.log.error('定时器错误:', e)
+            }
+          },
+          Math.min(delay || 0, 60000),
+        ) as unknown as number
         timers.add(id)
         return id
       }
@@ -189,10 +206,18 @@ function createPluginFunction(code: string, pluginId: string) {
         clearTimeout(id)
       }
 
-      const safeSetInterval = (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]): number => {
+      const safeSetInterval = (
+        fn: (...args: unknown[]) => void,
+        delay?: number,
+        ...args: unknown[]
+      ): number => {
         const safeDelay = Math.max(delay || 100, 100)
         const id = setInterval(() => {
-          try { fn(...args) } catch (e) { api.log.error('定时器错误:', e) }
+          try {
+            fn(...args)
+          } catch (e) {
+            api.log.error('定时器错误:', e)
+          }
         }, safeDelay) as unknown as number
         intervals.add(id)
         return id
@@ -204,16 +229,36 @@ function createPluginFunction(code: string, pluginId: string) {
       }
 
       const safeParams: SafeParams = {
-        Object, Array, String, Number, Boolean, Date, RegExp,
-        Error, TypeError, RangeError, SyntaxError,
-        Map, Set, WeakMap, WeakSet,
+        Object,
+        Array,
+        String,
+        Number,
+        Boolean,
+        Date,
+        RegExp,
+        Error,
+        TypeError,
+        RangeError,
+        SyntaxError,
+        Map,
+        Set,
+        WeakMap,
+        WeakSet,
         JSON: Object.freeze({ parse: JSON.parse, stringify: JSON.stringify }),
         Math,
         Promise,
-        encodeURIComponent, decodeURIComponent, encodeURI, decodeURI,
-        btoa, atob,
-        isNaN, isFinite, parseInt, parseFloat,
-        NaN, Infinity,
+        encodeURIComponent,
+        decodeURIComponent,
+        encodeURI,
+        decodeURI,
+        btoa,
+        atob,
+        isNaN,
+        isFinite,
+        parseInt,
+        parseFloat,
+        NaN,
+        Infinity,
         console: safeConsole,
         setTimeout: safeSetTimeout,
         clearTimeout: safeClearTimeout,
@@ -264,7 +309,6 @@ function createPluginFunction(code: string, pluginId: string) {
         return typeof plugin !== 'undefined' ? plugin : {};
       `
 
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const fn = new Function(...paramNames, wrappedCode)
       const result = fn(...paramValues)
 

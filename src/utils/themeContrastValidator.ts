@@ -151,7 +151,7 @@ export function validateThemeContrast(_isDark: boolean = false): ValidationResul
         largeText,
         message: checkAA.message,
       }
-      
+
       if (required) {
         results.failed.push(result)
       } else {

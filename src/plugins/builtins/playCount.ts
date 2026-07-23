@@ -29,7 +29,7 @@ interface PlayCountStats {
 function formatDuration(seconds: number): string {
   const hours = Math.floor(seconds / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
-  
+
   if (hours > 0) {
     return `${hours}小时${minutes}分钟`
   }
@@ -42,18 +42,14 @@ export const playCountPlugin: BuiltinPluginDefinition = {
   version: '1.1.0',
   author: 'Mercurial Player',
   description: '记录每首歌曲的播放次数和播放历史',
-  permissions: [
-    PluginPermission.PLAYER_READ,
-    PluginPermission.STORAGE,
-  ],
+  permissions: [PluginPermission.PLAYER_READ, PluginPermission.STORAGE],
 
   main: (api: PluginAPI) => {
     let lastTrack: Track | null = null
     let playStartTime: number | null = null
-    let accumulatedPlayTime: number = 0  // 累计播放时长
-    let hasRecordedCurrentTrack = false
+    let accumulatedPlayTime: number = 0 // 累计播放时长
     let pollingInterval: ReturnType<typeof setInterval> | null = null
-    
+
     // 保存事件回调引用以便正确清理
     let trackChangedCallback: (data: unknown) => void
     let stateChangedCallback: (data: unknown) => void
@@ -74,10 +70,12 @@ export const playCountPlugin: BuiltinPluginDefinition = {
 
     const recordPlayCount = (track: Track, playDuration: number): void => {
       if (!track || !track.path) return
-      
+
       // 只统计播放时间超过30秒的音乐
       if (playDuration < 30) {
-        api.log.debug(`播放时长不足30秒，不记录统计: ${track.title} (${Math.round(playDuration)}秒)`)
+        api.log.debug(
+          `播放时长不足30秒，不记录统计: ${track.title} (${Math.round(playDuration)}秒)`,
+        )
         return
       }
 
@@ -98,12 +96,14 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       }
 
       saveData(data)
-      api.log.debug(`播放记录: ${track.title} - 第 ${data.playCounts[trackPath]} 次 (播放时长: ${Math.round(playDuration)}秒)`)
+      api.log.debug(
+        `播放记录: ${track.title} - 第 ${data.playCounts[trackPath]} 次 (播放时长: ${Math.round(playDuration)}秒)`,
+      )
     }
 
     const addPlayTime = (seconds: number): void => {
       if (seconds <= 0) return
-      
+
       const data = loadData()
       data.totalPlayTime += seconds
       saveData(data)
@@ -116,12 +116,12 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         accumulatedPlayTime += currentPlayDuration
         playStartTime = null
       }
-      
+
       // 如果是暂停，只累计播放时长
       if (isPausing) {
         return
       }
-      
+
       // 切换歌曲或停止播放时，结算统计
       if (track && accumulatedPlayTime > 0) {
         // 累计播放时长
@@ -144,8 +144,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         // 切换歌曲时，结算上一首的播放时长和统计
         settleLastTrack(lastTrack)
         lastTrack = newTrack
-        accumulatedPlayTime = 0  // 重置累计播放时长
-        hasRecordedCurrentTrack = false
+        accumulatedPlayTime = 0 // 重置累计播放时长
 
         if (newTrack && isPlaying) {
           // 开始播放新歌曲，记录开始时间（但不立即记录播放次数）
@@ -188,7 +187,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
           const { track, isPlaying } = data as { track: Track | null; isPlaying: boolean }
           handleTrackChange(track, isPlaying)
         }
-        
+
         stateChangedCallback = (data) => {
           const { track, isPlaying } = data as { track: Track | null; isPlaying: boolean }
           handleTrackChange(track, isPlaying)
@@ -205,7 +204,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       deactivate(): void {
         // 停用时结算最后一首歌曲的播放时长和统计
         settleLastTrack(lastTrack)
-        
+
         // 正确清理事件监听器
         if (trackChangedCallback) {
           api.events.off('player:trackChanged', trackChangedCallback)
@@ -213,16 +212,15 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         if (stateChangedCallback) {
           api.events.off('player:stateChanged', stateChangedCallback)
         }
-        
+
         if (pollingInterval) {
           clearInterval(pollingInterval)
           pollingInterval = null
         }
-        
+
         lastTrack = null
         playStartTime = null
         accumulatedPlayTime = 0
-        hasRecordedCurrentTrack = false
         api.log.info('播放统计插件已停用')
       },
 
@@ -262,14 +260,14 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         const data = loadData()
         const totalTracks = Object.keys(data.playCounts).length
         const totalPlays = Object.values(data.playCounts).reduce((a, b) => a + b, 0)
-        
+
         let totalPlayTime = data.totalPlayTime
         if (playStartTime) {
           totalPlayTime += accumulatedPlayTime + (Date.now() - playStartTime) / 1000
         } else {
           totalPlayTime += accumulatedPlayTime
         }
-        
+
         return {
           totalTracks,
           totalPlays,
@@ -284,7 +282,6 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         api.storage.set('totalPlayTime', 0)
         playStartTime = null
         accumulatedPlayTime = 0
-        hasRecordedCurrentTrack = false
         api.log.info('播放统计数据已清除')
       },
     }

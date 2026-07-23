@@ -223,14 +223,14 @@ export enum ErrorType {
   CONFIG_INVALID = 'CONFIG_INVALID',
   DATA_PARSE_ERROR = 'DATA_PARSE_ERROR',
   DATA_VALIDATION_ERROR = 'DATA_VALIDATION_ERROR',
-  UNKNOWN = 'UNKNOWN'
+  UNKNOWN = 'UNKNOWN',
 }
 
 export enum ErrorSeverity {
   LOW = 'LOW',
   MEDIUM = 'MEDIUM',
   HIGH = 'HIGH',
-  CRITICAL = 'CRITICAL'
+  CRITICAL = 'CRITICAL',
 }
 
 export interface ErrorContext {
@@ -268,7 +268,7 @@ export enum LogLevel {
   INFO = 1,
   WARN = 2,
   ERROR = 3,
-  NONE = 4
+  NONE = 4,
 }
 
 export interface LogData {

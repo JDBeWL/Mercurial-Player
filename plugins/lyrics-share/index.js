@@ -70,11 +70,16 @@ const wrapText = (ctx, text, x, y, maxWidth, lineHeight, dryRun = false) => {
     })
   }
 
-  return { totalHeight, lines: lines.length, startY, endY: startY + (lines.length - 1) * lineHeight }
+  return {
+    totalHeight,
+    lines: lines.length,
+    startY,
+    endY: startY + (lines.length - 1) * lineHeight,
+  }
 }
 
 // 让出主线程的辅助函数
-const yieldToMain = () => new Promise(resolve => setTimeout(resolve, 0))
+const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 /**
  * 生成经典布局分享图片
@@ -202,11 +207,15 @@ const generateClassicImage = async (options = {}) => {
   const { canvas, ctx } = api.utils.createCanvas(width, height)
 
   // 直接获取 CSS 变量值，确保颜色一致
-  const bgColor = api.theme.getCSSVariable('md-sys-color-background') || (isDark ? '#121212' : '#fefefe')
+  const bgColor =
+    api.theme.getCSSVariable('md-sys-color-background') || (isDark ? '#121212' : '#fefefe')
   let primaryColor = api.theme.getCSSVariable('md-sys-color-primary') || '#6750a4'
-  const onBgColor = api.theme.getCSSVariable('md-sys-color-on-background') || (isDark ? '#e6e1e5' : '#1c1b1f')
-  const onSurfaceVariant = api.theme.getCSSVariable('md-sys-color-on-surface-variant') || (isDark ? '#cac4d0' : '#49454f')
-  const surfaceContainer = api.theme.getCSSVariable('md-sys-color-surface-container') || (isDark ? '#211f26' : '#f3edf7')
+  const onBgColor =
+    api.theme.getCSSVariable('md-sys-color-on-background') || (isDark ? '#e6e1e5' : '#1c1b1f')
+  const onSurfaceVariant =
+    api.theme.getCSSVariable('md-sys-color-on-surface-variant') || (isDark ? '#cac4d0' : '#49454f')
+  const surfaceContainer =
+    api.theme.getCSSVariable('md-sys-color-surface-container') || (isDark ? '#211f26' : '#f3edf7')
 
   // 绘制纯色背景
   ctx.fillStyle = bgColor
@@ -304,8 +313,8 @@ const generateClassicImage = async (options = {}) => {
 
   // 歌词区域 - 在封面信息和进度条之间居中
   // 歌词区域的范围：从歌曲信息下方到进度条上方
-  const lyricsAreaTop = artistY + artistInfo.totalHeight / 2 + 40  // 艺术家下方
-  const lyricsAreaBottom = height - padding - 140  // 进度条上方
+  const lyricsAreaTop = artistY + artistInfo.totalHeight / 2 + 40 // 艺术家下方
+  const lyricsAreaBottom = height - padding - 140 // 进度条上方
   const lyricsAreaCenterY = (lyricsAreaTop + lyricsAreaBottom) / 2
   const gap = 24 // 主歌词和翻译之间的间隙
 
@@ -499,11 +508,15 @@ const generateCompactImage = async (options = {}) => {
   const { canvas, ctx } = api.utils.createCanvas(width, height)
 
   // 获取颜色
-  const bgColor = api.theme.getCSSVariable('md-sys-color-background') || (isDark ? '#121212' : '#fefefe')
+  const bgColor =
+    api.theme.getCSSVariable('md-sys-color-background') || (isDark ? '#121212' : '#fefefe')
   const primaryColor = api.theme.getCSSVariable('md-sys-color-primary') || '#6750a4'
-  const onBgColor = api.theme.getCSSVariable('md-sys-color-on-background') || (isDark ? '#e6e1e5' : '#1c1b1f')
-  const onSurfaceVariant = api.theme.getCSSVariable('md-sys-color-on-surface-variant') || (isDark ? '#cac4d0' : '#49454f')
-  const surfaceContainer = api.theme.getCSSVariable('md-sys-color-surface-container') || (isDark ? '#211f26' : '#f3edf7')
+  const onBgColor =
+    api.theme.getCSSVariable('md-sys-color-on-background') || (isDark ? '#e6e1e5' : '#1c1b1f')
+  const onSurfaceVariant =
+    api.theme.getCSSVariable('md-sys-color-on-surface-variant') || (isDark ? '#cac4d0' : '#49454f')
+  const surfaceContainer =
+    api.theme.getCSSVariable('md-sys-color-surface-container') || (isDark ? '#211f26' : '#f3edf7')
 
   // 绘制纯色背景
   ctx.fillStyle = bgColor
@@ -622,8 +635,8 @@ const generateCompactImage = async (options = {}) => {
   const infoX = padding
 
   // 计算左侧区域的垂直位置（与封面对齐）
-  const leftAreaTop = coverY  // 与封面顶部对齐
-  const leftAreaBottom = coverY + coverSize  // 与封面底部对齐
+  const leftAreaTop = coverY // 与封面顶部对齐
+  const leftAreaBottom = coverY + coverSize // 与封面底部对齐
 
   // 进度条在顶部
   if (config.showProgress && state.duration > 0) {
@@ -657,7 +670,7 @@ const generateCompactImage = async (options = {}) => {
   }
 
   // 歌曲标题（在底部区域的中下部）
-  const titleY = leftAreaBottom - 60  // 距离底部60px
+  const titleY = leftAreaBottom - 60 // 距离底部60px
   ctx.fillStyle = onBgColor
   ctx.font = `bold 40px ${config.fontFamily}`
   ctx.textAlign = 'left'
@@ -712,7 +725,6 @@ const generateImage = async (options = {}) => {
   return generateClassicImage(options)
 }
 
-
 let isGenerating = false
 
 // 插件主体
@@ -726,7 +738,7 @@ const plugin = {
       name: '复制歌词图片',
       key: 'Ctrl+Shift+C',
       description: '将当前歌词生成分享图片并复制到剪贴板',
-      action: () => this.copyImage()
+      action: () => this.copyImage(),
     })
 
     api.shortcuts.register({
@@ -734,7 +746,7 @@ const plugin = {
       name: '保存歌词图片',
       key: 'Ctrl+Shift+S',
       description: '将当前歌词生成分享图片并保存到本地',
-      action: () => this.saveImage()
+      action: () => this.saveImage(),
     })
 
     // 注册操作按钮 - 布局切换
@@ -743,7 +755,7 @@ const plugin = {
       name: `切换布局 (当前: ${getConfig().layout === 'compact' ? '紧凑' : '经典'})`,
       icon: 'dashboard',
       location: 'lyrics',
-      action: () => this.toggleLayout()
+      action: () => this.toggleLayout(),
     })
 
     // 注册操作按钮 - 统一操作
@@ -752,7 +764,7 @@ const plugin = {
       name: '复制图片 (Ctrl+Shift+C)',
       icon: 'content_copy',
       location: 'lyrics',
-      action: () => this.copyImage()
+      action: () => this.copyImage(),
     })
 
     api.ui.registerActionButton({
@@ -760,7 +772,7 @@ const plugin = {
       name: '保存图片 (Ctrl+Shift+S)',
       icon: 'save',
       location: 'lyrics',
-      action: () => this.saveImage()
+      action: () => this.saveImage(),
     })
   },
 
@@ -789,7 +801,7 @@ const plugin = {
     isGenerating = true
     try {
       // 使用 setTimeout 让 UI 有机会更新
-      await new Promise(resolve => setTimeout(resolve, 10))
+      await new Promise((resolve) => setTimeout(resolve, 10))
 
       const canvas = await generateImage(options)
       if (!canvas) return null
@@ -829,7 +841,7 @@ const plugin = {
     isGenerating = true
     try {
       // 使用 setTimeout 让 UI 有机会更新
-      await new Promise(resolve => setTimeout(resolve, 10))
+      await new Promise((resolve) => setTimeout(resolve, 10))
 
       const canvas = await generateImage(options)
       if (!canvas) return false

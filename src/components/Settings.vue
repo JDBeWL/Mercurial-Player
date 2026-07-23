@@ -1,10 +1,6 @@
 <template>
   <div class="settings-panel">
-    <SettingsNav 
-      v-model="activeTab" 
-      :tabs="visibleTabs" 
-      @close="configStore.closeConfigPanel" 
-    />
+    <SettingsNav v-model="activeTab" :tabs="visibleTabs" @close="configStore.closeConfigPanel" />
 
     <div class="settings-content">
       <FolderSettings v-if="activeTab === 'folders'" />
@@ -35,7 +31,9 @@ import type { SettingsTab } from '@/types'
 const FolderSettings = defineAsyncComponent(() => import('./settings/FolderSettings.vue'))
 const GeneralSettings = defineAsyncComponent(() => import('./settings/GeneralSettings.vue'))
 const LyricsSettings = defineAsyncComponent(() => import('./settings/LyricsSettings.vue'))
-const TitleExtractionSettings = defineAsyncComponent(() => import('./settings/TitleExtractionSettings.vue'))
+const TitleExtractionSettings = defineAsyncComponent(
+  () => import('./settings/TitleExtractionSettings.vue'),
+)
 const PlaylistSettings = defineAsyncComponent(() => import('./settings/PlaylistSettings.vue'))
 const AudioDeviceSettings = defineAsyncComponent(() => import('./settings/AudioDeviceSettings.vue'))
 const EqualizerSettings = defineAsyncComponent(() => import('./settings/EqualizerSettings.vue'))

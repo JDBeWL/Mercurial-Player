@@ -15,7 +15,7 @@ import type {
   UIConfig,
   AudioConfig,
   VisualizerConfig,
-  AppConfig
+  AppConfig,
 } from '@/types'
 
 // plugin-store 实例（懒加载单例）
@@ -36,9 +36,12 @@ interface DebouncedFunction<T extends (...args: unknown[]) => unknown> {
   cancel: () => void
 }
 
-function debounce<T extends (...args: unknown[]) => unknown>(func: T, wait: number): DebouncedFunction<T> {
+function debounce<T extends (...args: unknown[]) => unknown>(
+  func: T,
+  wait: number,
+): DebouncedFunction<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined
-  const debounced = function(this: unknown, ...args: Parameters<T>) {
+  const debounced = function (this: unknown, ...args: Parameters<T>) {
     clearTimeout(timeout)
     timeout = setTimeout(() => func.apply(this, args), wait)
   } as DebouncedFunction<T>
@@ -51,17 +54,18 @@ function deepEqual(obj1: unknown, obj2: unknown): boolean {
   if (obj1 === obj2) return true
   if (typeof obj1 !== 'object' || typeof obj2 !== 'object') return false
   if (obj1 === null || obj2 === null) return false
-  
+
   const keys1 = Object.keys(obj1 as object)
   const keys2 = Object.keys(obj2 as object)
-  
+
   if (keys1.length !== keys2.length) return false
-  
+
   for (const key of keys1) {
     if (!keys2.includes(key)) return false
-    if (!deepEqual((obj1 as Record<string, unknown>)[key], (obj2 as Record<string, unknown>)[key])) return false
+    if (!deepEqual((obj1 as Record<string, unknown>)[key], (obj2 as Record<string, unknown>)[key]))
+      return false
   }
-  
+
   return true
 }
 
@@ -94,7 +98,7 @@ export const useConfigStore = defineStore('config', {
       enableSubdirectoryScan: true,
       maxDepth: 3,
       ignoreHiddenFolders: true,
-      folderBlacklist: ['.git', 'node_modules', 'temp', 'tmp']
+      folderBlacklist: ['.git', 'node_modules', 'temp', 'tmp'],
     },
 
     // 标题提取配置
@@ -103,7 +107,7 @@ export const useConfigStore = defineStore('config', {
       separator: '-',
       customSeparators: ['-', '_', '.', ' '],
       hideFileExtension: true,
-      parseArtistTitle: true
+      parseArtistTitle: true,
     },
 
     // 播放列表配置
@@ -111,7 +115,7 @@ export const useConfigStore = defineStore('config', {
       generateAllSongsPlaylist: true,
       folderBasedPlaylists: true,
       playlistNameFormat: '{folderName}',
-      sortOrder: 'asc'
+      sortOrder: 'asc',
     },
 
     // 通用设置
@@ -147,7 +151,7 @@ export const useConfigStore = defineStore('config', {
     ui: {
       showSettings: false,
       showConfigPanel: false,
-      miniMode: false
+      miniMode: false,
     },
 
     // 音频设置
@@ -160,7 +164,7 @@ export const useConfigStore = defineStore('config', {
     // 可视化设置
     visualizer: {
       targetFps: 60,
-      enableVerticalSync: false
+      enableVerticalSync: false,
     },
 
     // 内部状态（不保存到文件）
@@ -172,12 +176,14 @@ export const useConfigStore = defineStore('config', {
 
   getters: {
     availableSeparators: (state): string[] => {
-      return [...new Set([state.titleExtraction.separator, ...state.titleExtraction.customSeparators])]
+      return [
+        ...new Set([state.titleExtraction.separator, ...state.titleExtraction.customSeparators]),
+      ]
     },
     validSeparators(): string[] {
       return this.availableSeparators.filter((sep: string) => sep && sep.trim() !== '')
     },
-    hasUnsavedChanges: (state): boolean => state._isDirty
+    hasUnsavedChanges: (state): boolean => state._isDirty,
   },
 
   actions: {
@@ -188,10 +194,10 @@ export const useConfigStore = defineStore('config', {
       // 创建一个副本以避免修改当前状态，因为 UI 临时状态不应持久化
       const saveableConfig = { ...config }
       if (saveableConfig.ui) {
-        saveableConfig.ui = { 
+        saveableConfig.ui = {
           ...saveableConfig.ui,
           showSettings: false,
-          showConfigPanel: false
+          showConfigPanel: false,
         }
       }
 
@@ -230,16 +236,13 @@ export const useConfigStore = defineStore('config', {
 
       // 回退到后端 ConfigManager（首次迁移或 store 为空时）
       if (!configData) {
-        const configResult = await handlePromise(
-          invoke<Partial<AppConfig>>('load_config'),
-          {
-            type: ErrorType.CONFIG_LOAD_ERROR,
-            severity: ErrorSeverity.MEDIUM,
-            context: { action: 'loadConfig' },
-            showToUser: false,
-            throw: false
-          }
-        )
+        const configResult = await handlePromise(invoke<Partial<AppConfig>>('load_config'), {
+          type: ErrorType.CONFIG_LOAD_ERROR,
+          severity: ErrorSeverity.MEDIUM,
+          context: { action: 'loadConfig' },
+          showToUser: false,
+          throw: false,
+        })
         if (configResult.success && configResult.data) {
           configData = configResult.data
           logger.info('Configuration loaded from backend ConfigManager')
@@ -279,7 +282,7 @@ export const useConfigStore = defineStore('config', {
                 onlineSource: 'netease',
                 lyricsAlignment: 'center',
                 lyricsFontFamily: 'Roboto',
-                lyricsStyle: 'modern'
+                lyricsStyle: 'modern',
               }
             }
             if (general.lyricsAlignment) {
@@ -321,16 +324,13 @@ export const useConfigStore = defineStore('config', {
         logger.info('Configuration loaded successfully')
       }
 
-      const directoriesResult = await handlePromise(
-        invoke<string[]>('get_music_directories'),
-        {
-          type: ErrorType.CONFIG_LOAD_ERROR,
-          severity: ErrorSeverity.LOW,
-          context: { action: 'loadMusicDirectories' },
-          showToUser: false,
-          throw: false
-        }
-      )
+      const directoriesResult = await handlePromise(invoke<string[]>('get_music_directories'), {
+        type: ErrorType.CONFIG_LOAD_ERROR,
+        severity: ErrorSeverity.LOW,
+        context: { action: 'loadMusicDirectories' },
+        showToUser: false,
+        throw: false,
+      })
 
       if (directoriesResult.success && directoriesResult.data) {
         this.musicDirectories = directoriesResult.data
@@ -382,9 +382,15 @@ export const useConfigStore = defineStore('config', {
         if (!configToSave.lyrics.lyricsAlignment) configToSave.lyrics.lyricsAlignment = 'center'
         if (!configToSave.lyrics.lyricsFontFamily) configToSave.lyrics.lyricsFontFamily = 'Roboto'
         if (!configToSave.lyrics.lyricsStyle) configToSave.lyrics.lyricsStyle = 'modern'
-        if (configToSave.lyrics.onlineSource === undefined) configToSave.lyrics.onlineSource = 'netease'
+        if (configToSave.lyrics.onlineSource === undefined)
+          configToSave.lyrics.onlineSource = 'netease'
         if (!configToSave.lyrics.desktopLyrics) {
-          configToSave.lyrics.desktopLyrics = { enabled: false, locked: true, fontSize: 28, colorPreset: 'dark' as const }
+          configToSave.lyrics.desktopLyrics = {
+            enabled: false,
+            locked: true,
+            fontSize: 28,
+            colorPreset: 'dark' as const,
+          }
         }
       }
 
@@ -400,16 +406,13 @@ export const useConfigStore = defineStore('config', {
         }
 
         // 同步到后端 ConfigManager（确保 Rust 侧的 exclusive_mode 等配置保持一致）
-        await handlePromise(
-          invoke('save_config', { config: configToSave }),
-          {
-            type: ErrorType.CONFIG_SAVE_ERROR,
-            severity: ErrorSeverity.LOW,
-            context: { action: 'saveConfigBackend' },
-            showToUser: false,
-            throw: false
-          }
-        )
+        await handlePromise(invoke('save_config', { config: configToSave }), {
+          type: ErrorType.CONFIG_SAVE_ERROR,
+          severity: ErrorSeverity.LOW,
+          context: { action: 'saveConfigBackend' },
+          showToUser: false,
+          throw: false,
+        })
       })()
 
       await this._savePromise
@@ -421,7 +424,7 @@ export const useConfigStore = defineStore('config', {
     },
 
     // 防抖保存（2秒延迟）
-    saveConfig: debounce(function(this: any) {
+    saveConfig: debounce(function (this: any) {
       return this.saveConfigNow()
     }, 2000) as DebouncedFunction<() => void>,
 
@@ -429,7 +432,7 @@ export const useConfigStore = defineStore('config', {
     async flushPendingSave(): Promise<void> {
       // 取消待执行的防抖保存
       if ((this.saveConfig as DebouncedFunction<() => void>).cancel) {
-        (this.saveConfig as DebouncedFunction<() => void>).cancel()
+        ;(this.saveConfig as DebouncedFunction<() => void>).cancel()
       }
       // 立即保存
       await this.saveConfigNow()
@@ -523,7 +526,12 @@ export const useConfigStore = defineStore('config', {
 
     setDesktopLyricsConfig(config: Partial<DesktopLyricsConfig>): void {
       if (!this.lyrics.desktopLyrics) {
-        this.lyrics.desktopLyrics = { enabled: false, locked: true, fontSize: 28, colorPreset: 'dark' as const }
+        this.lyrics.desktopLyrics = {
+          enabled: false,
+          locked: true,
+          fontSize: 28,
+          colorPreset: 'dark' as const,
+        }
       }
       this.lyrics.desktopLyrics = { ...this.lyrics.desktopLyrics, ...config }
       this._markDirty()
@@ -559,12 +567,24 @@ export const useConfigStore = defineStore('config', {
     },
 
     // UI 相关
-    openSettings(): void { this.ui.showSettings = true },
-    closeSettings(): void { this.ui.showSettings = false },
-    toggleSettings(): void { this.ui.showSettings = !this.ui.showSettings },
-    openConfigPanel(): void { this.ui.showConfigPanel = true },
-    closeConfigPanel(): void { this.ui.showConfigPanel = false },
-    toggleConfigPanel(): void { this.ui.showConfigPanel = !this.ui.showConfigPanel },
+    openSettings(): void {
+      this.ui.showSettings = true
+    },
+    closeSettings(): void {
+      this.ui.showSettings = false
+    },
+    toggleSettings(): void {
+      this.ui.showSettings = !this.ui.showSettings
+    },
+    openConfigPanel(): void {
+      this.ui.showConfigPanel = true
+    },
+    closeConfigPanel(): void {
+      this.ui.showConfigPanel = false
+    },
+    toggleConfigPanel(): void {
+      this.ui.showConfigPanel = !this.ui.showConfigPanel
+    },
 
     async toggleMiniMode(): Promise<void> {
       try {
@@ -575,6 +595,6 @@ export const useConfigStore = defineStore('config', {
         logger.error('Failed to toggle mini mode:', error)
         // invoke 失败时不修改状态，因为 try 块中尚未修改
       }
-    }
-  }
+    },
+  },
 })

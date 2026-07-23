@@ -3,47 +3,59 @@
     <div class="content-header">
       <h3>{{ $t('config.lyricsSettings') }}</h3>
     </div>
-    
+
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.onlineLyrics') || '在线歌词' }}</h4>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.enableOnlineFetch') }}</span>
           <span class="setting-description">{{ $t('config.enableOnlineFetchDesc') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.lyrics?.enableOnlineFetch }" @click="toggleSetting('enableOnlineFetch')">
+        <div
+          class="switch"
+          :class="{ active: configStore.lyrics?.enableOnlineFetch }"
+          @click="toggleSetting('enableOnlineFetch')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.autoSaveOnlineLyrics') }}</span>
           <span class="setting-description">{{ $t('config.autoSaveOnlineLyricsDesc') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.lyrics?.autoSaveOnlineLyrics }" @click="toggleSetting('autoSaveOnlineLyrics')">
+        <div
+          class="switch"
+          :class="{ active: configStore.lyrics?.autoSaveOnlineLyrics }"
+          @click="toggleSetting('autoSaveOnlineLyrics')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.preferTranslation') }}</span>
           <span class="setting-description">{{ $t('config.preferTranslationDesc') }}</span>
         </div>
-        <div class="switch" :class="{ active: configStore.lyrics?.preferTranslation }" @click="toggleSetting('preferTranslation')">
+        <div
+          class="switch"
+          :class="{ active: configStore.lyrics?.preferTranslation }"
+          @click="toggleSetting('preferTranslation')"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
       </div>
     </div>
-    
+
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.display') || '显示' }}</h4>
-      
+
       <div class="setting-item select">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.lyricsAlignment') }}</span>
@@ -54,7 +66,7 @@
           @change="saveConfig"
         />
       </div>
-      
+
       <div class="setting-item select">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.lyricsFontFamily') }}</span>
@@ -65,7 +77,7 @@
           @change="saveConfig"
         />
       </div>
-      
+
       <div class="setting-item select">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.lyricsStyle') }}</span>
@@ -80,13 +92,17 @@
 
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.desktopLyrics') }}</h4>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.enableDesktopLyrics') }}</span>
           <span class="setting-description">{{ $t('config.enableDesktopLyricsDesc') }}</span>
         </div>
-        <div class="switch" :class="{ active: desktopLyricsConfig.enabled }" @click="toggleDesktopLyrics">
+        <div
+          class="switch"
+          :class="{ active: desktopLyricsConfig.enabled }"
+          @click="toggleDesktopLyrics"
+        >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
         </div>
@@ -98,7 +114,11 @@
             <span class="setting-label">{{ $t('config.lockDesktopLyrics') }}</span>
             <span class="setting-description">{{ $t('config.lockDesktopLyricsDesc') }}</span>
           </div>
-          <div class="switch" :class="{ active: desktopLyricsConfig.locked }" @click="toggleDesktopLyricsLock">
+          <div
+            class="switch"
+            :class="{ active: desktopLyricsConfig.locked }"
+            @click="toggleDesktopLyricsLock"
+          >
             <div class="switch-track"></div>
             <div class="switch-handle"></div>
           </div>
@@ -117,8 +137,8 @@
               :max="48"
               :step="1"
               :value="desktopLyricsConfig.fontSize"
-              @input="handleFontSizeChange"
               :style="fontSizeSliderStyle"
+              @input="handleFontSizeChange"
             />
             <span class="font-size-value">{{ desktopLyricsConfig.fontSize }}px</span>
           </div>
@@ -133,8 +153,8 @@
             <button
               class="preset-btn"
               :class="{ active: desktopLyricsConfig.colorPreset === 'dark' }"
-              @click="setColorPreset('dark')"
               :title="$t('config.colorPresetDark')"
+              @click="setColorPreset('dark')"
             >
               <span class="preset-preview dark-preview"></span>
               <span class="preset-label">{{ $t('config.colorPresetDark') }}</span>
@@ -142,8 +162,8 @@
             <button
               class="preset-btn"
               :class="{ active: desktopLyricsConfig.colorPreset === 'light' }"
-              @click="setColorPreset('light')"
               :title="$t('config.colorPresetLight')"
+              @click="setColorPreset('light')"
             >
               <span class="preset-preview light-preview"></span>
               <span class="preset-label">{{ $t('config.colorPresetLight') }}</span>
@@ -151,8 +171,8 @@
             <button
               class="preset-btn"
               :class="{ active: desktopLyricsConfig.colorPreset === 'blue' }"
-              @click="setColorPreset('blue')"
               :title="$t('config.colorPresetBlue') || '深蓝'"
+              @click="setColorPreset('blue')"
             >
               <span class="preset-preview blue-preview"></span>
               <span class="preset-label">{{ $t('config.colorPresetBlue') || '深蓝' }}</span>
@@ -160,8 +180,8 @@
             <button
               class="preset-btn"
               :class="{ active: desktopLyricsConfig.colorPreset === 'pink' }"
-              @click="setColorPreset('pink')"
               :title="$t('config.colorPresetPink') || '粉色'"
+              @click="setColorPreset('pink')"
             >
               <span class="preset-preview pink-preview"></span>
               <span class="preset-label">{{ $t('config.colorPresetPink') || '粉色' }}</span>
@@ -169,8 +189,8 @@
             <button
               class="preset-btn"
               :class="{ active: desktopLyricsConfig.colorPreset === 'orange' }"
-              @click="setColorPreset('orange')"
               :title="$t('config.colorPresetOrange') || '橙色'"
+              @click="setColorPreset('orange')"
             >
               <span class="preset-preview orange-preview"></span>
               <span class="preset-label">{{ $t('config.colorPresetOrange') || '橙色' }}</span>
@@ -178,8 +198,8 @@
             <button
               class="preset-btn"
               :class="{ active: desktopLyricsConfig.colorPreset === 'green' }"
-              @click="setColorPreset('green')"
               :title="$t('config.colorPresetGreen') || '绿色'"
+              @click="setColorPreset('green')"
             >
               <span class="preset-preview green-preview"></span>
               <span class="preset-label">{{ $t('config.colorPresetGreen') || '绿色' }}</span>
@@ -193,18 +213,22 @@
     <div class="settings-section">
       <div class="section-header">
         <h4 class="section-title">{{ $t('config.visualizerSettings') }}</h4>
-        <button class="icon-button" @click="detectScreenRefreshRate" :title="$t('config.detectRefreshRate')">
+        <button
+          class="icon-button"
+          :title="$t('config.detectRefreshRate')"
+          @click="detectScreenRefreshRate"
+        >
           <span class="material-symbols-rounded">refresh</span>
         </button>
       </div>
-      
+
       <div class="setting-item info-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.screenRefreshRate') }}</span>
           <span class="setting-value">{{ currentRefreshRate }} Hz</span>
         </div>
       </div>
-      
+
       <div class="setting-item select">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.targetFps') }}</span>
@@ -216,15 +240,15 @@
           @change="handleFpsChange"
         />
       </div>
-      
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.enableVerticalSync') }}</span>
           <span class="setting-description">{{ $t('config.enableVerticalSyncDesc') }}</span>
         </div>
-        <div 
-          class="switch" 
-          :class="{ active: visualizerConfig.enableVerticalSync }" 
+        <div
+          class="switch"
+          :class="{ active: visualizerConfig.enableVerticalSync }"
           @click="toggleVerticalSync"
         >
           <div class="switch-track"></div>
@@ -236,7 +260,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useConfigStore } from '../../stores/config'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
@@ -254,13 +278,13 @@ const fpsOptions = computed(() => [
   { value: 120, label: '120 FPS' },
   { value: 144, label: '144 FPS' },
   { value: 165, label: '165 FPS' },
-  { value: 240, label: '240 FPS' }
+  { value: 240, label: '240 FPS' },
 ])
 
 const alignmentOptions = computed(() => [
   { value: 'left', label: t('config.alignLeft') },
   { value: 'center', label: t('config.alignCenter') },
-  { value: 'right', label: t('config.alignRight') }
+  { value: 'right', label: t('config.alignRight') },
 ])
 
 const fontOptions = computed(() => {
@@ -268,28 +292,28 @@ const fontOptions = computed(() => {
   const fonts = ['Roboto', 'sans-serif', 'serif', 'monospace', ...systemFonts.value]
   // 去重
   const uniqueFonts = [...new Set(fonts)]
-  return uniqueFonts.map(font => ({ value: font, label: font }))
+  return uniqueFonts.map((font) => ({ value: font, label: font }))
 })
 
 const styleOptions = computed(() => [
   { value: 'modern', label: t('config.lyricsStyleModern') },
-  { value: 'classic', label: t('config.lyricsStyleClassic') }
+  { value: 'classic', label: t('config.lyricsStyleClassic') },
 ])
 
+// 初始化默认值（在 setup 阶段同步执行，避免 computed 副作用）
+if (!configStore.visualizer) {
+  configStore.visualizer = {
+    targetFps: 60,
+    enableVerticalSync: false,
+    detectedRefreshRate: 60,
+  }
+}
+
 const visualizerConfig = computed<VisualizerConfig>({
-  get: () => {
-    if (!configStore.visualizer) {
-      configStore.visualizer = {
-        targetFps: 60,
-        enableVerticalSync: false,
-        detectedRefreshRate: 60
-      }
-    }
-    return configStore.visualizer
-  },
+  get: () => configStore.visualizer,
   set: (value: VisualizerConfig) => {
     configStore.visualizer = value
-  }
+  },
 })
 
 // 当前刷新率从config读取
@@ -396,8 +420,13 @@ const applyFpsBasedOnVsync = async (): Promise<void> => {
 
   if (visualizerConfig.value.enableVerticalSync && visualizerConfig.value.detectedRefreshRate) {
     // 垂直同步开启：使用 min(目标帧率, 屏幕刷新率)
-    fpsToApply = Math.min(visualizerConfig.value.targetFps, visualizerConfig.value.detectedRefreshRate)
-    logger.info(`VSync enabled: using min(${visualizerConfig.value.targetFps}, ${visualizerConfig.value.detectedRefreshRate}) = ${fpsToApply} FPS`)
+    fpsToApply = Math.min(
+      visualizerConfig.value.targetFps,
+      visualizerConfig.value.detectedRefreshRate,
+    )
+    logger.info(
+      `VSync enabled: using min(${visualizerConfig.value.targetFps}, ${visualizerConfig.value.detectedRefreshRate}) = ${fpsToApply} FPS`,
+    )
   } else {
     // 垂直同步关闭：使用目标帧率
     logger.info(`VSync disabled: using target FPS ${fpsToApply}`)
@@ -406,36 +435,35 @@ const applyFpsBasedOnVsync = async (): Promise<void> => {
   await applyRefreshRate(fpsToApply)
 }
 
+// 初始化默认值（在 setup 阶段同步执行，避免 computed 副作用）
+if (!configStore.lyrics) {
+  configStore.lyrics = {
+    enableOnlineFetch: false,
+    autoSaveOnlineLyrics: true,
+    preferTranslation: true,
+    onlineSource: 'netease',
+    lyricsAlignment: 'center',
+    lyricsFontFamily: 'Roboto',
+    lyricsStyle: 'modern',
+  }
+} else {
+  // 确保所有字段都存在
+  if (!configStore.lyrics.lyricsAlignment) {
+    configStore.lyrics.lyricsAlignment = 'center'
+  }
+  if (!configStore.lyrics.lyricsFontFamily) {
+    configStore.lyrics.lyricsFontFamily = 'Roboto'
+  }
+  if (!configStore.lyrics.lyricsStyle) {
+    configStore.lyrics.lyricsStyle = 'modern'
+  }
+}
+
 const lyricsConfig = computed<LyricsConfig>({
-  get: () => {
-    // 确保 lyrics 配置存在且包含所有必需字段
-    if (!configStore.lyrics) {
-      configStore.lyrics = {
-        enableOnlineFetch: false,
-        autoSaveOnlineLyrics: true,
-        preferTranslation: true,
-        onlineSource: 'netease',
-        lyricsAlignment: 'center',
-        lyricsFontFamily: 'Roboto',
-        lyricsStyle: 'modern'
-      }
-    } else {
-      // 确保所有字段都存在
-      if (!configStore.lyrics.lyricsAlignment) {
-        configStore.lyrics.lyricsAlignment = 'center'
-      }
-      if (!configStore.lyrics.lyricsFontFamily) {
-        configStore.lyrics.lyricsFontFamily = 'Roboto'
-      }
-      if (!configStore.lyrics.lyricsStyle) {
-        configStore.lyrics.lyricsStyle = 'modern'
-      }
-    }
-    return configStore.lyrics
-  },
+  get: () => configStore.lyrics,
   set: (value: LyricsConfig) => {
     configStore.lyrics = value
-  }
+  },
 })
 
 const loadSystemFonts = async (): Promise<void> => {
@@ -443,7 +471,7 @@ const loadSystemFonts = async (): Promise<void> => {
     const fonts = await invoke<string[]>('get_system_fonts')
     // 过滤掉已经在默认列表中的字体
     const defaultFonts = ['Roboto', 'sans-serif', 'serif', 'monospace']
-    systemFonts.value = fonts.filter(font => !defaultFonts.includes(font))
+    systemFonts.value = fonts.filter((font) => !defaultFonts.includes(font))
     logger.info(`Loaded ${systemFonts.value.length} system fonts`)
   } catch (error) {
     logger.error('Failed to load system fonts:', error)
@@ -460,7 +488,9 @@ const saveConfig = async (): Promise<void> => {
   }
 }
 
-const toggleSetting = async (key: 'enableOnlineFetch' | 'autoSaveOnlineLyrics' | 'preferTranslation'): Promise<void> => {
+const toggleSetting = async (
+  key: 'enableOnlineFetch' | 'autoSaveOnlineLyrics' | 'preferTranslation',
+): Promise<void> => {
   // 确保 lyrics 配置存在
   if (!configStore.lyrics) {
     configStore.lyrics = {
@@ -470,7 +500,7 @@ const toggleSetting = async (key: 'enableOnlineFetch' | 'autoSaveOnlineLyrics' |
       onlineSource: 'netease',
       lyricsAlignment: 'center',
       lyricsFontFamily: 'Roboto',
-      lyricsStyle: 'modern'
+      lyricsStyle: 'modern',
     }
   }
   configStore.lyrics[key] = !configStore.lyrics[key]
@@ -486,7 +516,7 @@ const desktopLyricsConfig = computed<DesktopLyricsConfig>({
   },
   set: (value: DesktopLyricsConfig) => {
     configStore.setDesktopLyricsConfig(value)
-  }
+  },
 })
 
 const fontSizeSliderStyle = computed(() => {
@@ -495,7 +525,7 @@ const fontSizeSliderStyle = computed(() => {
   const value = desktopLyricsConfig.value.fontSize
   const percentage = ((value - min) / (max - min)) * 100
   return {
-    background: `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`
+    background: `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`,
   }
 })
 
@@ -524,23 +554,28 @@ onMounted(() => {
   loadSystemFonts()
 
   // 如果没有检测过刷新率，自动检测一次
-  if (!visualizerConfig.value.detectedRefreshRate || visualizerConfig.value.detectedRefreshRate === 60) {
+  if (
+    !visualizerConfig.value.detectedRefreshRate ||
+    visualizerConfig.value.detectedRefreshRate === 60
+  ) {
     detectScreenRefreshRate()
   }
 
   // 确保后端的FPS设置与配置同步
   if (visualizerConfig.value.targetFps) {
     // 根据垂直同步状态应用正确的FPS
-    applyFpsBasedOnVsync().catch(error => {
+    applyFpsBasedOnVsync().catch((error) => {
       logger.error('Failed to sync FPS on mount:', error)
     })
   }
 
   // 确保后端的垂直同步设置与配置同步
   if (visualizerConfig.value.enableVerticalSync !== undefined) {
-    invoke('set_vertical_sync', { enabled: visualizerConfig.value.enableVerticalSync }).catch(error => {
-      logger.error('Failed to sync vertical sync on mount:', error)
-    })
+    invoke('set_vertical_sync', { enabled: visualizerConfig.value.enableVerticalSync }).catch(
+      (error) => {
+        logger.error('Failed to sync vertical sync on mount:', error)
+      },
+    )
   }
 })
 </script>
@@ -721,7 +756,11 @@ onMounted(() => {
 }
 
 .filled-tonal-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, var(--md-sys-color-secondary-container));
+  background-color: color-mix(
+    in srgb,
+    var(--md-sys-color-on-surface) 8%,
+    var(--md-sys-color-secondary-container)
+  );
 }
 
 .filled-tonal-button .material-symbols-rounded {
@@ -844,5 +883,4 @@ onMounted(() => {
 .preset-label {
   font-size: 12px;
 }
-
 </style>

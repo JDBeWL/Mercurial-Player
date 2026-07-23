@@ -25,6 +25,7 @@
 # 功能特性
 
 ## 音频播放
+
 - [x] 支持格式：Symphonia支持什么就支持什么
 - [x] 支持的播放方式：共享模式下面使用rodio(rodio已内部使用Symphonia解码)，在Windows平台上特殊支持WASAPI独占模式访问
 - [x] 切换设备：支持在断开，手动切换下自动切换输出设备，WASAPI独占模式也能通过监听事件实现在共享模式和独占模式的切换，不需要切换下一首，无论是在播放中还是没有播放情况下这个功能基本可用。（未长时间测试）
@@ -34,6 +35,7 @@
 - [x] WASAPI独占模式音频加速解码：Windows下的WASAPI独占模式下特殊支持SIMD处理部分数据，如果不支持会fallback到SSE2加速。在不支持软件模拟的ARM64环境下，或者还有不支持SSE2的64位的桌面X86处理器平台在支持WASAPI且能驱动这个WebView2的Windows环境中（~~按道理任何x86_64的CPU都应该支持这个SSE2吧，如果有当我什么都没说~~），这种情况将fallback到不加速
 
 ## 歌词功能
+
 - [x] 多格式支持：LRC、ASS
 - [x] 自动加载：根据音频文件名自动查找匹配的歌词文件
 - [x] 在线歌词：从网易云音乐Web API获取歌词
@@ -46,6 +48,7 @@
 - [x] 桌面歌词
 
 ## 播放控制
+
 - [x] 播放/暂停/上一首/下一首
 - [x] 进度条拖动跳转
 - [x] 音量调节
@@ -53,12 +56,14 @@
 - [x] 随机播放（Knuth Shuffle‌）
 
 ## 可视化
+
 - [x] 实时FFT频谱
 - [x] 动画帧率理论无上限
 - [x] 垂直同步支持
 - [x] 歌词/可视化视图切换
 
 ## 播放列表
+
 - [x] 文件夹扫描
 - [x] 子目录扫描
 - [x] 元数据读取（单次采样精度、比特率、封面、标题、艺术家）
@@ -66,23 +71,28 @@
 - [x] 批量元数据获取优化
 
 ## 界面
+
 - [x] 浅色/深色主题
 - [x] 主题颜色系统
 - [x] Mini模式
 - [x] 中文/English
 
 ## 配置
+
 - [x] 配置持久化
 - [x] 标题提取配置
 
 ## 插件
+
 - [x] 插件系统
 - [x] 播放统计（内置插件）
 
 ## 安全
+
 - [x] 文件系统安全限制
 
 ## 其他
+
 - [x] 可以在任务栏控制播放（但是必须要先有播放列表）
 - [x] 更好的字体显示
 - [x] 简化图标字体集
@@ -90,35 +100,37 @@
 # 技术栈
 
 ## 前端
-| 技术 | 版本 |
-|------|------|
-| Vue | ^3.5.33 |
-| Vite | ^8.0.10 |
-| Pinia | ^4.0.2 |
-| Vue I18n | ^11.4.6 |
-| Sass | ^1.99.0 |
-| TypeScript | ^6.0.3 |
-| Tauri API | ^2.11.1 |
-| @vitejs/plugin-vue | ^6.0.6 |
-| Vitest | ^4.1.5 |
-| esbuild | ^0.28.0 |
-| @material/material-color-utilities | ^0.4.0 |
+
+| 技术                               | 版本    |
+| ---------------------------------- | ------- |
+| Vue                                | ^3.5.33 |
+| Vite                               | ^8.0.10 |
+| Pinia                              | ^4.0.2  |
+| Vue I18n                           | ^11.4.6 |
+| Sass                               | ^1.99.0 |
+| TypeScript                         | ^6.0.3  |
+| Tauri API                          | ^2.11.1 |
+| @vitejs/plugin-vue                 | ^6.0.6  |
+| Vitest                             | ^4.1.5  |
+| esbuild                            | ^0.28.0 |
+| @material/material-color-utilities | ^0.4.0  |
 
 ## 后端 (Rust)
-| 技术 | 版本 | 说明 |
-|------|------|------|
-| Rust | 1.92+ |
-| Tauri | 2.11 |
-| Symphonia | 0.6 | 音频解码器 |
-| Rodio | 0.22 | 音频播放引擎 |
-| CPAL | 0.17 |
-| WASAPI | 0.23 | Windows独占模式音频 |
-| Windows API | 0.62 | Win32 API绑定 |
-| Rubato | 4.0 | 音频重采样 |
-| Lofty | 0.24 | 音频元数据读取 |
-| Tokio | 1.x |
-| Reqwest | 0.12 |
-| Spectrum Analyzer | 1.7 | 频谱分析 |
+
+| 技术              | 版本  | 说明                |
+| ----------------- | ----- | ------------------- |
+| Rust              | 1.92+ |
+| Tauri             | 2.11  |
+| Symphonia         | 0.6   | 音频解码器          |
+| Rodio             | 0.22  | 音频播放引擎        |
+| CPAL              | 0.17  |
+| WASAPI            | 0.23  | Windows独占模式音频 |
+| Windows API       | 0.62  | Win32 API绑定       |
+| Rubato            | 4.0   | 音频重采样          |
+| Lofty             | 0.24  | 音频元数据读取      |
+| Tokio             | 1.x   |
+| Reqwest           | 0.12  |
+| Spectrum Analyzer | 1.7   | 频谱分析            |
 
 # 部署
 
@@ -135,22 +147,18 @@
 ```bash
 # 安装前端依赖
 pnpm install
-# 或
-npm install
 
 # 启动Tauri开发环境
 pnpm run tauri dev
-# 或
-npm run tauri dev
 
 # 仅启动Vite开发环境（可以看看UI就行了）
-npm run dev
+pnpm run dev
 ```
 
 ## 打包构建
 
 ```bash
-npm run tauri build
+pnpm run tauri build
 ```
 
 # 注意

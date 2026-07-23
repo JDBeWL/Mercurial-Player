@@ -11,8 +11,24 @@
 use crate::config::manager::{LastSession, TrackSnapshot, LAST_SESSION_MAX_AGE_SECS};
 use crate::AppState;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, State};
+
+/// save_last_session 写盘节流间隔
+///
+/// 限制两次实际写盘之间的最小间隔,避免在大型播放列表 (数千首曲目) 场景下
+/// 每次 pause/切歌都触发全量序列化 + 文件 I/O 造成开销。
+///
+/// 权衡: 若程序在节流窗口内退出,最后一次未落盘的更新会丢失。
+/// 播放器场景下可接受 (下次启动最多回退到 SAVE_THROTTLE_DURATION 前的状态)。
+const SAVE_THROTTLE_DURATION: Duration = Duration::from_secs(5);
+
+/// 上次实际写盘时间,用于 save_last_session 节流
+///
+/// 使用 static + std::sync::Mutex 实现,无需修改 AppState 结构。
+/// Mutex::new 在 Rust 1.63+ 支持 const 上下文,可直接初始化 static。
+static LAST_SAVE_TIME: Mutex<Option<Instant>> = Mutex::new(None);
 /// 当前 Unix 时间 (秒)
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -308,6 +324,26 @@ pub fn save_last_session(
     track_index_in_playlist: Option<usize>,
     playlist_tracks: Vec<TrackSnapshot>,
 ) -> Result<(), String> {
+    // 节流检查: 距上次写盘不足 SAVE_THROTTLE_DURATION 则跳过本次写入,
+    // 避免对大型播放列表频繁全量序列化 + 写盘。
+    // 检查与更新 last_save_time 在同一把锁内完成,保证原子性。
+    {
+        let mut guard = LAST_SAVE_TIME
+            .lock()
+            .map_err(|e| format!("Failed to acquire LAST_SAVE_TIME lock: {e}"))?;
+        if let Some(last) = *guard {
+            let elapsed = last.elapsed();
+            if elapsed < SAVE_THROTTLE_DURATION {
+                log::debug!(
+                    "save_last_session throttled: elapsed {elapsed:?} < {SAVE_THROTTLE_DURATION:?}, skipping write"
+                );
+                return Ok(());
+            }
+        }
+        // 标记本次写入时间,后续在节流窗口内的调用将被跳过
+        *guard = Some(Instant::now());
+    }
+
     // L2 校验需要文件大小和修改时间
     // 如果文件不存在或无法读取,则不保存 (避免无效记录)
     let (file_size, file_mtime) = if let Some(meta) = get_file_metadata(&track_path) { meta } else {

@@ -1,6 +1,5 @@
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
-import logger from './logger'
 import { ErrorType, ErrorSeverity, handlePromise } from './errorHandler'
 import type { Playlist } from '@/types'
 
@@ -17,15 +16,15 @@ export class FileUtils {
         directory: true,
         multiple: false,
         title: 'Select a folder',
-        ...options
+        ...options,
       }),
       {
         type: ErrorType.FILE_PERMISSION_DENIED,
         severity: ErrorSeverity.MEDIUM,
         context: { action: 'selectFolder' },
         showToUser: false,
-        throw: false
-      }
+        throw: false,
+      },
     )
 
     return result.success ? (result.data as string | null) : null
@@ -39,15 +38,15 @@ export class FileUtils {
       open({
         multiple: true,
         title: 'Select files',
-        ...options
+        ...options,
       }),
       {
         type: ErrorType.FILE_PERMISSION_DENIED,
         severity: ErrorSeverity.MEDIUM,
         context: { action: 'selectFiles' },
         showToUser: false,
-        throw: false
-      }
+        throw: false,
+      },
     )
 
     return result.success ? (result.data as string[] | null) : null
@@ -57,16 +56,13 @@ export class FileUtils {
    * 读取目录中的子文件夹
    */
   static async readDirectory(path: string): Promise<string[]> {
-    const result = await handlePromise(
-      invoke<string[]>('read_directory', { path }),
-      {
-        type: ErrorType.FILE_READ_ERROR,
-        severity: ErrorSeverity.MEDIUM,
-        context: { path, action: 'readDirectory' },
-        showToUser: false,
-        throw: false
-      }
-    )
+    const result = await handlePromise(invoke<string[]>('read_directory', { path }), {
+      type: ErrorType.FILE_READ_ERROR,
+      severity: ErrorSeverity.MEDIUM,
+      context: { path, action: 'readDirectory' },
+      showToUser: false,
+      throw: false,
+    })
 
     return result.success ? result.data! : []
   }
@@ -75,16 +71,13 @@ export class FileUtils {
    * 获取目录中的音频文件
    */
   static async getAudioFiles(path: string): Promise<Playlist> {
-    const result = await handlePromise(
-      invoke<Playlist>('get_audio_files', { path }),
-      {
-        type: ErrorType.FILE_READ_ERROR,
-        severity: ErrorSeverity.MEDIUM,
-        context: { path, action: 'getAudioFiles' },
-        showToUser: false,
-        throw: false
-      }
-    )
+    const result = await handlePromise(invoke<Playlist>('get_audio_files', { path }), {
+      type: ErrorType.FILE_READ_ERROR,
+      severity: ErrorSeverity.MEDIUM,
+      context: { path, action: 'getAudioFiles' },
+      showToUser: false,
+      throw: false,
+    })
 
     return result.success ? result.data! : { name: '', files: [] }
   }
@@ -93,16 +86,13 @@ export class FileUtils {
    * 检查文件是否存在
    */
   static async fileExists(path: string): Promise<boolean> {
-    const result = await handlePromise(
-      invoke<boolean>('check_file_exists', { path }),
-      {
-        type: ErrorType.FILE_READ_ERROR,
-        severity: ErrorSeverity.LOW,
-        context: { path, action: 'fileExists' },
-        showToUser: false,
-        throw: false
-      }
-    )
+    const result = await handlePromise(invoke<boolean>('check_file_exists', { path }), {
+      type: ErrorType.FILE_READ_ERROR,
+      severity: ErrorSeverity.LOW,
+      context: { path, action: 'fileExists' },
+      showToUser: false,
+      throw: false,
+    })
 
     return result.success ? result.data! : false
   }
@@ -111,16 +101,13 @@ export class FileUtils {
    * 读取文件内容
    */
   static async readFile(path: string): Promise<string> {
-    const result = await handlePromise(
-      invoke<string>('read_lyrics_file', { path }),
-      {
-        type: ErrorType.FILE_READ_ERROR,
-        severity: ErrorSeverity.MEDIUM,
-        context: { path, action: 'readFile' },
-        showToUser: false,
-        throw: false
-      }
-    )
+    const result = await handlePromise(invoke<string>('read_lyrics_file', { path }), {
+      type: ErrorType.FILE_READ_ERROR,
+      severity: ErrorSeverity.MEDIUM,
+      context: { path, action: 'readFile' },
+      showToUser: false,
+      throw: false,
+    })
 
     return result.success ? result.data! : ''
   }
@@ -159,7 +146,10 @@ export class FileUtils {
    */
   static getDirectoryPath(filePath: string): string {
     const normalizedPath = filePath.replace(/[\\/]+$/, '')
-    const lastSeparatorIndex = Math.max(normalizedPath.lastIndexOf('/'), normalizedPath.lastIndexOf('\\'))
+    const lastSeparatorIndex = Math.max(
+      normalizedPath.lastIndexOf('/'),
+      normalizedPath.lastIndexOf('\\'),
+    )
 
     if (lastSeparatorIndex < 0) return ''
     if (lastSeparatorIndex === 0) return normalizedPath[0]
@@ -189,13 +179,13 @@ export class FileUtils {
    * 拼接路径片段，自动兼容分隔符
    */
   static joinPath(...segments: string[]): string {
-    const validSegments = segments.filter(segment => segment.length > 0)
+    const validSegments = segments.filter((segment) => segment.length > 0)
     if (validSegments.length === 0) return ''
 
     const separator = validSegments[0].includes('\\') ? '\\' : '/'
     const [firstSegment, ...restSegments] = validSegments
     const normalizedFirst = firstSegment.replace(/[\\/]+$/, '')
-    const normalizedRest = restSegments.map(segment => segment.replace(/^[\\/]+|[\\/]+$/g, ''))
+    const normalizedRest = restSegments.map((segment) => segment.replace(/^[\\/]+|[\\/]+$/g, ''))
 
     return [normalizedFirst, ...normalizedRest].filter(Boolean).join(separator)
   }
@@ -231,11 +221,11 @@ export class FileUtils {
    */
   static formatFileSize(bytes: number): string {
     if (bytes === 0) return '0 Bytes'
-    
+
     const k = 1024
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
     const i = Math.floor(Math.log(bytes) / Math.log(k))
-    
+
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
@@ -244,11 +234,11 @@ export class FileUtils {
    */
   static formatTime(seconds: number): string {
     if (isNaN(seconds) || !isFinite(seconds)) return '0:00'
-    
+
     const hours = Math.floor(seconds / 3600)
     const minutes = Math.floor((seconds % 3600) / 60)
     const remainingSeconds = Math.floor(seconds % 60)
-    
+
     if (hours > 0) {
       return `${hours}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`
     } else {

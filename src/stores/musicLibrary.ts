@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { load, type Store } from '@tauri-apps/plugin-store'
 import { useConfigStore } from './config'
+import { usePlayerStore } from './player'
 import logger from '../utils/logger'
 import type { Track, Playlist, LibraryStats } from '@/types'
 
@@ -15,6 +16,11 @@ async function getLibraryStore(): Promise<Store> {
     })
   }
   return _libraryStoreInstance
+}
+
+/** 规范化路径用于比较：统一为正斜杠 + 小写，避免 Windows 下斜杠方向不一致导致匹配失败 */
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/').toLowerCase()
 }
 
 /** 缓存中存储的播放列表数据（不包含封面以减小体积） */
@@ -32,9 +38,6 @@ interface MusicLibraryState {
   musicFolders: string[]
   playlists: Playlist[]
   currentPlaylist: Playlist | null
-  currentFile: Track | null
-  /** 缓存当前播放文件在 currentPlaylist 中的索引，避免每次 getter 都做 O(N) 查找 */
-  _currentFileIndex: number
   searchResults: SearchResult[]
   searchTerm: string
   isLoading: boolean
@@ -59,10 +62,6 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     playlists: [],
     currentPlaylist: null,
 
-    // 当前播放状态
-    currentFile: null,
-    _currentFileIndex: -1,
-
     // 搜索功能
     searchResults: [],
     searchTerm: '',
@@ -78,7 +77,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       totalDirectories: 0,
       totalAudioFiles: 0,
       totalPlaylists: 0,
-      maxDepth: 0
+      maxDepth: 0,
     },
 
     // 惰性排序追踪
@@ -88,80 +87,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     _loadedFromCache: false,
   }),
 
-  getters: {
-    /**
-     * 获取当前播放列表的文件列表
-     */
-    currentFiles: (state): Track[] => {
-      return state.currentPlaylist?.files || []
-    },
-
-    /**
-     * 获取当前播放文件的索引
-     * 优先使用缓存的 _currentFileIndex，仅在缓存失效时回退到线性查找
-     */
-    currentIndex: (state): number => {
-      if (!state.currentPlaylist || !state.currentFile) return -1
-
-      const files = state.currentPlaylist.files
-      const cachedIdx = state._currentFileIndex
-
-      // 缓存命中：O(1)
-      if (cachedIdx >= 0 && cachedIdx < files.length && files[cachedIdx]?.path === state.currentFile.path) {
-        return cachedIdx
-      }
-
-      // 缓存失效，回退到线性查找
-      return files.findIndex(file => file.path === state.currentFile!.path)
-    },
-
-    /**
-     * 获取上一首文件
-     */
-    previousFile(): Track | null {
-      const index = this.currentIndex
-      if (index > 0 && this.currentPlaylist) {
-        return this.currentPlaylist.files[index - 1]
-      }
-      return null
-    },
-
-    /**
-     * 获取下一首文件
-     */
-    nextFile(): Track | null {
-      const index = this.currentIndex
-      if (this.currentPlaylist && index >= 0 && index < this.currentPlaylist.files.length - 1) {
-        return this.currentPlaylist.files[index + 1]
-      }
-      return null
-    },
-
-    /**
-     * 检查是否在当前播放列表的开头
-     */
-    isAtStart(): boolean {
-      return this.currentIndex <= 0
-    },
-
-    /**
-     * 检查是否在当前播放列表的结尾
-     */
-    isAtEnd(): boolean {
-      const index = this.currentIndex
-      return this.currentPlaylist ? index >= this.currentPlaylist.files.length - 1 : true
-    },
-
-    /**
-     * 获取总播放进度
-     */
-    totalProgress(): number {
-      if (!this.currentPlaylist) return 0
-      const total = this.currentPlaylist.files.length
-      const current = this.currentIndex + 1
-      return total > 0 ? (current / total) * 100 : 0
-    }
-  },
+  getters: {},
 
   actions: {
     // ========== 音乐文件夹管理 ==========
@@ -201,17 +127,25 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
      */
     async removeMusicFolder(folderPath: string): Promise<{ success: boolean; message: string }> {
       try {
-        const updatedFolders = await invoke<string[]>('remove_music_directory', { path: folderPath })
+        const updatedFolders = await invoke<string[]>('remove_music_directory', {
+          path: folderPath,
+        })
         this.musicFolders = updatedFolders
         // 同时更新配置存储中的音乐文件夹列表
         const configStore = useConfigStore()
         configStore.musicDirectories = updatedFolders
-        
+
         // 如果当前播放列表受到影响，清空它
-        if (this.currentPlaylist && this.currentPlaylist.files.some(f => f.path.startsWith(folderPath))) {
+        // 注意：folderPath 与 f.path 可能来自不同数据源，Windows 下斜杠方向可能不一致，
+        // 需要先规范化再比较，避免漏判
+        const normalizedFolder = normalizePath(folderPath)
+        if (
+          this.currentPlaylist &&
+          this.currentPlaylist.files.some((f) => normalizePath(f.path).startsWith(normalizedFolder))
+        ) {
           this.currentPlaylist = null
         }
-        
+
         return { success: true, message: 'Folder removed successfully' }
       } catch (error) {
         logger.error('Error removing music folder:', error)
@@ -245,10 +179,11 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       try {
         // 先记录当前选中状态，刷新后重新绑定到新对象，避免封面/元数据显示不更新
         const currentPlaylistName = this.currentPlaylist?.name ?? null
-        const currentFilePath = this.currentFile?.path ?? null
 
         // 获取新的播放列表数据
-        const newPlaylists = await invoke<Playlist[]>('get_all_audio_files', { paths: this.musicFolders })
+        const newPlaylists = await invoke<Playlist[]>('get_all_audio_files', {
+          paths: this.musicFolders,
+        })
 
         // 分批更新，避免一次性替换导致响应式风暴
         const BATCH_SIZE = 10 // 每批处理 10 个播放列表
@@ -260,7 +195,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
 
           // 让出主线程，避免阻塞 UI
           if (i + BATCH_SIZE < newPlaylists.length) {
-            await new Promise(resolve => setTimeout(resolve, 0))
+            await new Promise((resolve) => setTimeout(resolve, 0))
           }
         }
 
@@ -269,32 +204,25 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
 
         // 重新绑定当前播放列表（指向刷新后的新对象）
         if (currentPlaylistName) {
-          this.currentPlaylist = this.playlists.find(p => p.name === currentPlaylistName) ?? null
+          this.currentPlaylist = this.playlists.find((p) => p.name === currentPlaylistName) ?? null
         }
 
-        // 重新绑定当前文件（指向刷新后的新对象，确保 coverPath 等字段能更新）
-        if (currentFilePath) {
-          const playlistToSearch = this.currentPlaylist ? [this.currentPlaylist] : this.playlists
-          let refreshedTrack: Track | null = null
-
-          for (const p of playlistToSearch) {
-            const found = p.files.find(f => f.path === currentFilePath)
-            if (found) {
-              refreshedTrack = found
-              // 同步索引缓存
-              if (this.currentPlaylist && this.currentPlaylist.name === p.name) {
-                this._currentFileIndex = p.files.findIndex(f => f.path === currentFilePath)
-              }
-              break
+        // 刷新后同步更新 player.playlist 中的曲目引用
+        // playlists 已重建为新对象，但 player.playlist 仍持有旧对象引用，元数据不会更新
+        const playerStore = usePlayerStore()
+        if (playerStore.playlist.length > 0) {
+          const trackMap = new Map<string, Track>()
+          for (const p of this.playlists) {
+            for (const f of p.files) {
+              trackMap.set(f.path, f)
             }
           }
-
-          this.currentFile = refreshedTrack
+          playerStore.playlist = playerStore.playlist.map((t) => trackMap.get(t.path) || t)
         }
 
         // 异步缓存到 plugin-store（不阻塞当前流程）
-        this._savePlaylistsToCache().catch(err =>
-          logger.warn('Failed to save playlists cache:', err)
+        this._savePlaylistsToCache().catch((err) =>
+          logger.warn('Failed to save playlists cache:', err),
         )
 
         return { success: true, message: 'Library refreshed successfully' }
@@ -311,7 +239,9 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     async loadPlaylistsFromCache(): Promise<boolean> {
       try {
         const store = await getLibraryStore()
-        const cached = await store.get<{ playlists: CachedPlaylist[], timestamp: number }>('libraryCache')
+        const cached = await store.get<{ playlists: CachedPlaylist[]; timestamp: number }>(
+          'libraryCache',
+        )
         if (!cached || !cached.playlists || cached.playlists.length === 0) {
           return false
         }
@@ -343,13 +273,13 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       try {
         const store = await getLibraryStore()
         // 去除 coverPath 字段以减小体积
-        const lightPlaylists: CachedPlaylist[] = this.playlists.map(p => ({
+        const lightPlaylists: CachedPlaylist[] = this.playlists.map((p) => ({
           name: p.name,
-          files: p.files.map(({ coverPath, ...rest }) => rest)
+          files: p.files.map(({ coverPath: _coverPath, ...rest }) => rest),
         }))
         await store.set('libraryCache', {
           playlists: lightPlaylists,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         })
         await store.save()
         logger.debug('Playlists cache saved')
@@ -390,93 +320,6 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     selectPlaylist(playlist: Playlist): void {
       this._ensureSorted(playlist)
       this.currentPlaylist = playlist
-      this.currentFile = null
-      this._currentFileIndex = -1
-    },
-
-    /**
-     * 设置当前播放文件，同步维护索引缓存
-     */
-    setCurrentFile(file: Track): void {
-      this.currentFile = file
-      // 同步更新索引缓存，避免 currentIndex getter 做 O(N) 查找
-      if (this.currentPlaylist && file) {
-        const files = this.currentPlaylist.files
-        // 先检查相邻位置（连续播放的高频场景）
-        const cachedIdx = this._currentFileIndex
-        if (cachedIdx >= 0 && cachedIdx < files.length) {
-          // 检查下一首
-          if (cachedIdx + 1 < files.length && files[cachedIdx + 1]?.path === file.path) {
-            this._currentFileIndex = cachedIdx + 1
-            return
-          }
-          // 检查上一首
-          if (cachedIdx - 1 >= 0 && files[cachedIdx - 1]?.path === file.path) {
-            this._currentFileIndex = cachedIdx - 1
-            return
-          }
-          // 检查当前位置（重播）
-          if (files[cachedIdx]?.path === file.path) {
-            return
-          }
-        }
-        // 回退到线性查找
-        this._currentFileIndex = files.findIndex(f => f.path === file.path)
-      } else {
-        this._currentFileIndex = -1
-      }
-    },
-
-    /**
-     * 播放上一首
-     */
-    playPrevious(): Track | null {
-      if (this.isAtStart) return null
-      
-      const previousFile = this.previousFile
-      if (previousFile) {
-        this.setCurrentFile(previousFile)
-        return previousFile
-      }
-      
-      return null
-    },
-
-    /**
-     * 播放下一首
-     */
-    playNext(): Track | null {
-      if (this.isAtEnd) return null
-      
-      const nextFile = this.nextFile
-      if (nextFile) {
-        this.setCurrentFile(nextFile)
-        return nextFile
-      }
-      
-      return null
-    },
-
-    /**
-     * 随机播放
-     */
-    playRandom(): Track | null {
-      if (!this.currentPlaylist || this.currentPlaylist.files.length === 0) return null
-      
-      const files = this.currentPlaylist.files
-      const randomIndex = Math.floor(Math.random() * files.length)
-      const randomFile = files[randomIndex]
-      
-      this.setCurrentFile(randomFile)
-      return randomFile
-    },
-
-    /**
-     * 清空当前播放列表
-     */
-    clearCurrentPlaylist(): void {
-      this.currentPlaylist = null
-      this.currentFile = null
     },
 
     // ========== 搜索功能 ==========
@@ -487,28 +330,28 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     async searchFiles(searchTerm: string): Promise<void> {
       this.isLoading = true
       this.searchTerm = searchTerm
-      
+
       try {
         if (!searchTerm.trim()) {
           this.searchResults = []
           return
         }
-        
+
         this.searchResults = []
         const lowerCaseSearchTerm = searchTerm.toLowerCase()
 
         for (const playlist of this.playlists) {
           if (playlist.files) {
-            const results = playlist.files.filter(file => 
-              (file.title && file.title.toLowerCase().includes(lowerCaseSearchTerm)) ||
-              (file.artist && file.artist.toLowerCase().includes(lowerCaseSearchTerm)) ||
-              (file.album && file.album.toLowerCase().includes(lowerCaseSearchTerm)) ||
-              (file.name && file.name.toLowerCase().includes(lowerCaseSearchTerm))
+            const results = playlist.files.filter(
+              (file) =>
+                (file.title && file.title.toLowerCase().includes(lowerCaseSearchTerm)) ||
+                (file.artist && file.artist.toLowerCase().includes(lowerCaseSearchTerm)) ||
+                (file.album && file.album.toLowerCase().includes(lowerCaseSearchTerm)) ||
+                (file.name && file.name.toLowerCase().includes(lowerCaseSearchTerm)),
             )
             this.searchResults = this.searchResults.concat(results)
           }
         }
-        
       } catch (error) {
         logger.error('Error searching files:', error)
         this.error = (error as Error).message
@@ -534,20 +377,11 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     removeFileFromPlaylist(filePath: string): void {
       if (!this.currentPlaylist) return
 
-      const index = this.currentPlaylist.files.findIndex(file => file.path === filePath)
+      const index = this.currentPlaylist.files.findIndex((file) => file.path === filePath)
       if (index > -1) {
         this.currentPlaylist.files.splice(index, 1)
         if (this.currentPlaylist.totalFiles) {
           this.currentPlaylist.totalFiles--
-        }
-
-        // 如果移除的是当前播放的文件，需要更新当前文件
-        if (this.currentFile && this.currentFile.path === filePath) {
-          this.currentFile = null
-          this._currentFileIndex = -1
-        } else if (index < this._currentFileIndex) {
-          // 移除的在当前索引之前，索引需要前移
-          this._currentFileIndex--
         }
       }
     },
@@ -564,8 +398,6 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
      */
     reset(): void {
       this.currentPlaylist = null
-      this.currentFile = null
-      this._currentFileIndex = -1
       this.playlists = []
       this.searchResults = []
       this.searchTerm = ''
@@ -577,8 +409,8 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         totalDirectories: 0,
         totalAudioFiles: 0,
         totalPlaylists: 0,
-        maxDepth: 0
+        maxDepth: 0,
       }
-    }
-  }
+    },
+  },
 })

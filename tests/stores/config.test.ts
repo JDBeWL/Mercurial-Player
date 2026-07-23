@@ -236,7 +236,9 @@ describe('useConfigStore', () => {
       const store = useConfigStore()
       store.general.autoSaveConfig = false
       // Force-clear the sub-config to simulate legacy state.
-      store.lyrics.desktopLyrics = undefined as unknown as NonNullable<typeof store.lyrics.desktopLyrics>
+      store.lyrics.desktopLyrics = undefined as unknown as NonNullable<
+        typeof store.lyrics.desktopLyrics
+      >
       store.setDesktopLyricsConfig({ enabled: true })
       expect(store.lyrics.desktopLyrics).toBeDefined()
       expect(store.lyrics.desktopLyrics?.enabled).toBe(true)
@@ -547,7 +549,10 @@ describe('useConfigStore', () => {
       store._lastSavedConfig = null // force real changes
       store.audio.volume = 0.9
       await store.saveConfigNow()
-      expect(invokeMock).toHaveBeenCalledWith('save_config', expect.objectContaining({ config: expect.any(Object) }))
+      expect(invokeMock).toHaveBeenCalledWith(
+        'save_config',
+        expect.objectContaining({ config: expect.any(Object) }),
+      )
       // After save: _isDirty cleared, _lastSavedConfig set
       expect(store._isDirty).toBe(false)
       expect(store._lastSavedConfig).not.toBeNull()
@@ -559,7 +564,10 @@ describe('useConfigStore', () => {
       const store = useConfigStore()
       store._lastSavedConfig = null
       await store.flushPendingSave()
-      expect(invokeMock).toHaveBeenCalledWith('save_config', expect.objectContaining({ config: expect.any(Object) }))
+      expect(invokeMock).toHaveBeenCalledWith(
+        'save_config',
+        expect.objectContaining({ config: expect.any(Object) }),
+      )
     })
   })
 
@@ -570,10 +578,13 @@ describe('useConfigStore', () => {
       invokeMock.mockResolvedValue(undefined)
       const store = useConfigStore()
       await store.exportConfig('/path/to/config.json')
-      expect(invokeMock).toHaveBeenCalledWith('export_config', expect.objectContaining({
-        filePath: '/path/to/config.json',
-        config: expect.any(Object),
-      }))
+      expect(invokeMock).toHaveBeenCalledWith(
+        'export_config',
+        expect.objectContaining({
+          filePath: '/path/to/config.json',
+          config: expect.any(Object),
+        }),
+      )
     })
 
     it('throws when invoke fails', async () => {
