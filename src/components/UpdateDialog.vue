@@ -373,6 +373,46 @@ const onDismiss = () => {
   margin: 8px 0;
 }
 
+/* 表格 */
+.markdown-body :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 0.95em;
+  display: block;
+  overflow-x: auto;
+}
+
+.markdown-body :deep(thead) {
+  background-color: var(
+    --md-sys-color-surface-container-high,
+    var(--md-sys-color-surface-variant)
+  );
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  padding: 6px 12px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  text-align: left;
+}
+
+.markdown-body :deep(th) {
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+}
+
+.markdown-body :deep(td) {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.markdown-body :deep(tbody tr:nth-child(even)) {
+  background-color: var(
+    --md-sys-color-surface-container-low,
+    var(--md-sys-color-surface)
+  );
+}
+
 /* ======== Footer ======== */
 .dialog-footer {
   display: flex;

@@ -149,4 +149,64 @@ describe('renderMarkdown', () => {
       expect(result).toContain('<blockquote><p>Fixed memory leak</p></blockquote>')
     })
   })
+
+  describe('tables', () => {
+    it('should render a basic table', () => {
+      const md = `| 平台 | 文件 |
+|------|------|
+| Windows | .exe |
+| macOS | .dmg |`
+      const result = renderMarkdown(md)
+      expect(result).toBe(
+        '<table><thead><tr><th>平台</th><th>文件</th></tr></thead>' +
+          '<tbody><tr><td>Windows</td><td>.exe</td></tr>' +
+          '<tr><td>macOS</td><td>.dmg</td></tr></tbody></table>',
+      )
+    })
+
+    it('should render table with inline formatting in cells', () => {
+      const md = `| Type | Command |
+|------|---------|
+| Run | \`npm start\` |`
+      const result = renderMarkdown(md)
+      expect(result).toContain('<th>Type</th>')
+      expect(result).toContain('<th>Command</th>')
+      expect(result).toContain('<td>Run</td>')
+      expect(result).toContain('<td><code>npm start</code></td>')
+    })
+
+    it('should render table with alignment separators', () => {
+      const md = `| Left | Center | Right |
+|:-----|:------:|------:|
+| a | b | c |`
+      const result = renderMarkdown(md)
+      expect(result).toContain('<th>Left</th>')
+      expect(result).toContain('<th>Center</th>')
+      expect(result).toContain('<th>Right</th>')
+      expect(result).toContain('<td>a</td>')
+      expect(result).toContain('<td>b</td>')
+      expect(result).toContain('<td>c</td>')
+    })
+
+    it('should not treat a single pipe line as table without separator', () => {
+      const md = '| not a table'
+      const result = renderMarkdown(md)
+      expect(result).not.toContain('<table>')
+    })
+
+    it('should render table surrounded by other elements', () => {
+      const md = `## Download
+
+| OS | File |
+|----|-----|
+| Win | .msi |
+
+Done.`
+      const result = renderMarkdown(md)
+      expect(result).toContain('<h2>Download</h2>')
+      expect(result).toContain('<table>')
+      expect(result).toContain('<td>.msi</td>')
+      expect(result).toContain('<p>Done.</p>')
+    })
+  })
 })

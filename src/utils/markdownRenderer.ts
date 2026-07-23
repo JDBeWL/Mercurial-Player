@@ -67,6 +67,28 @@ function getListItemContent(line: string): string {
   return line.trim().replace(/^[-*+]\s+|^\d+\.\s+/, '')
 }
 
+/** 判断是否为表格分隔行（如 |---|---| 或 |:---:|---:|） */
+function isTableSeparator(line: string): boolean {
+  const trimmed = line.trim()
+  if (!trimmed.includes('|')) return false
+  // 去掉首尾的 |，按 | 分割后，每个单元格应只包含 -、:、空格，且至少有一个 -
+  const inner = trimmed.replace(/^\||\|$/g, '')
+  const cells = inner.split('|')
+  if (cells.length === 0) return false
+  return cells.every((cell) => {
+    const c = cell.trim()
+    return c !== '' && /^[-:]+$/.test(c) && c.includes('-')
+  })
+}
+
+/** 解析表格行，返回各单元格内容（已 trim） */
+function parseTableRow(line: string): string[] {
+  const trimmed = line.trim()
+  // 去掉首尾的 |，然后按 | 分割
+  const inner = trimmed.replace(/^\||\|$/g, '')
+  return inner.split('|').map((cell) => cell.trim())
+}
+
 /**
  * 将 Markdown 文本渲染为 HTML
  */
@@ -129,6 +151,37 @@ export function renderMarkdown(markdown: string): string {
       continue
     }
 
+    // —— 表格（GFM 风格：| header | ... | 后跟 |---|---| 分隔行）——
+    if (
+      trimmed.includes('|') &&
+      i + 1 < lines.length &&
+      isTableSeparator(lines[i + 1])
+    ) {
+      const headerCells = parseTableRow(trimmed)
+      i += 2 // 跳过表头和分隔行
+
+      // 收集数据行
+      const bodyRows: string[][] = []
+      while (i < lines.length && lines[i].trim().includes('|') && lines[i].trim() !== '') {
+        bodyRows.push(parseTableRow(lines[i]))
+        i++
+      }
+
+      const headerHtml = headerCells
+        .map((cell) => `<th>${renderInline(cell)}</th>`)
+        .join('')
+      const bodyHtml = bodyRows
+        .map(
+          (row) =>
+            `<tr>${row.map((cell) => `<td>${renderInline(cell)}</td>`).join('')}</tr>`,
+        )
+        .join('')
+      htmlParts.push(
+        `<table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`,
+      )
+      continue
+    }
+
     // —— 无序列表 ——
     if (isUnorderedListItem(trimmed)) {
       const items: string[] = []
@@ -163,7 +216,13 @@ export function renderMarkdown(markdown: string): string {
       !lines[i].trim().startsWith('>') &&
       !/^[-*_]{3,}$/.test(lines[i].trim()) &&
       !isUnorderedListItem(lines[i].trim()) &&
-      !isOrderedListItem(lines[i].trim())
+      !isOrderedListItem(lines[i].trim()) &&
+      // 表格起始行：当前行含 | 且下一行是分隔行
+      !(
+        lines[i].trim().includes('|') &&
+        i + 1 < lines.length &&
+        isTableSeparator(lines[i + 1])
+      )
     ) {
       paragraphLines.push(lines[i].trim())
       i++
