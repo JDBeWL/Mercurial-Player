@@ -29,17 +29,10 @@ interface CachedPlaylist {
   files: Omit<Track, 'coverPath'>[]
 }
 
-interface SearchResult extends Track {
-  folderPath?: string
-  folderName?: string
-}
-
 interface MusicLibraryState {
   musicFolders: string[]
   playlists: Playlist[]
   currentPlaylist: Playlist | null
-  searchResults: SearchResult[]
-  searchTerm: string
   isLoading: boolean
   /** 是否正在后台刷新（区别于首次加载的阻塞加载） */
   isBackgroundRefreshing: boolean
@@ -61,10 +54,6 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     // 播放列表管理
     playlists: [],
     currentPlaylist: null,
-
-    // 搜索功能
-    searchResults: [],
-    searchTerm: '',
 
     // 加载状态
     isLoading: false,
@@ -322,53 +311,6 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       this.currentPlaylist = playlist
     },
 
-    // ========== 搜索功能 ==========
-
-    /**
-     * 搜索音频文件
-     */
-    async searchFiles(searchTerm: string): Promise<void> {
-      this.isLoading = true
-      this.searchTerm = searchTerm
-
-      try {
-        if (!searchTerm.trim()) {
-          this.searchResults = []
-          return
-        }
-
-        this.searchResults = []
-        const lowerCaseSearchTerm = searchTerm.toLowerCase()
-
-        for (const playlist of this.playlists) {
-          if (playlist.files) {
-            const results = playlist.files.filter(
-              (file) =>
-                (file.title && file.title.toLowerCase().includes(lowerCaseSearchTerm)) ||
-                (file.artist && file.artist.toLowerCase().includes(lowerCaseSearchTerm)) ||
-                (file.album && file.album.toLowerCase().includes(lowerCaseSearchTerm)) ||
-                (file.name && file.name.toLowerCase().includes(lowerCaseSearchTerm)),
-            )
-            this.searchResults = this.searchResults.concat(results)
-          }
-        }
-      } catch (error) {
-        logger.error('Error searching files:', error)
-        this.error = (error as Error).message
-        throw error
-      } finally {
-        this.isLoading = false
-      }
-    },
-
-    /**
-     * 清空搜索
-     */
-    clearSearch(): void {
-      this.searchResults = []
-      this.searchTerm = ''
-    },
-
     // ========== 文件操作 ==========
 
     /**
@@ -399,8 +341,6 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     reset(): void {
       this.currentPlaylist = null
       this.playlists = []
-      this.searchResults = []
-      this.searchTerm = ''
       this._sortedPlaylists = new Set<string>()
       this._loadedFromCache = false
       this.isBackgroundRefreshing = false

@@ -1364,6 +1364,13 @@ export const usePlayerStore = defineStore('player', {
                 })
                 if (coverPath) {
                   track.coverPath = coverPath
+                  // 同步 currentTrack: playTrack 会创建 resolvedTrack 浅拷贝,
+                  // 导致 currentTrack 与 playlist 内对象脱钩,
+                  // 主界面/MiniPlayer 封面基于 currentTrack.coverPath,
+                  // 不同步会导致切歌时封面丢失
+                  if (this.currentTrack?.path === track.path) {
+                    this.currentTrack.coverPath = coverPath
+                  }
                   // 同时更新元数据缓存中的封面路径
                   const cachedMetadata = metadataCache.get(track.path)
                   if (cachedMetadata) {

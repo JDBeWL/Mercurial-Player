@@ -42,7 +42,17 @@
             @click="playFile(file)"
           >
             <div class="list-item-leading">
-              <span class="material-symbols-rounded">music_note</span>
+              <img
+                v-if="file.coverPath"
+                :src="convertFileSrc(file.coverPath)"
+                :alt="file.displayTitle || file.name"
+                class="list-item-cover"
+                loading="lazy"
+                decoding="async"
+              />
+              <div v-else class="list-item-cover-placeholder">
+                <span class="material-symbols-rounded">music_note</span>
+              </div>
             </div>
             <div class="list-item-content">
               <div class="list-item-headline" :title="file.displayTitle || file.name">
@@ -172,6 +182,7 @@ import { usePlayerStore } from '../stores/player'
 import { useConfigStore } from '../stores/config'
 import { useI18n } from 'vue-i18n'
 
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import FileUtils from '../utils/fileUtils'
 import logger from '../utils/logger'
 import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
@@ -421,6 +432,9 @@ const calculateDirectoryStats = async (): Promise<void> => {
 
 // 搜索功能 - 添加防抖
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
+// 封面加载的 generation 计数器，用于在重新搜索时取消上一次加载
+let coverLoadGeneration = 0
+
 const handleSearch = async (): Promise<void> => {
   // 清除之前的定时器
   if (searchTimeout) {
@@ -429,6 +443,7 @@ const handleSearch = async (): Promise<void> => {
 
   if (!searchTerm.value.trim()) {
     searchResults.value = []
+    coverLoadGeneration++ // 取消正在进行的封面加载
     return
   }
 
@@ -474,12 +489,45 @@ const handleSearch = async (): Promise<void> => {
 
       return 0
     })
+
+    // 异步加载搜索结果的封面（从缓存恢复的 track 无 coverPath）
+    coverLoadGeneration++
+    loadSearchResultCovers(coverLoadGeneration)
   }, 300)
+}
+
+// 批量加载搜索结果封面，每批 5 首并行，加载完成后直接修改原对象触发响应式更新
+const loadSearchResultCovers = async (gen: number): Promise<void> => {
+  const files = searchResults.value
+  const BATCH = 5
+  for (let i = 0; i < files.length; i += BATCH) {
+    if (gen !== coverLoadGeneration) return
+    const batch = files.slice(i, i + BATCH)
+    await Promise.all(
+      batch.map(async (file) => {
+        if (gen !== coverLoadGeneration) return
+        if (!file.coverPath) {
+          try {
+            const coverPath = await invoke<string | null>('get_track_cover_path', {
+              path: file.path,
+            })
+            if (gen !== coverLoadGeneration) return
+            if (coverPath) {
+              file.coverPath = coverPath
+            }
+          } catch {
+            // 忽略单首加载失败
+          }
+        }
+      }),
+    )
+  }
 }
 
 const clearSearch = (): void => {
   searchTerm.value = ''
   searchResults.value = []
+  coverLoadGeneration++ // 取消正在进行的封面加载
 }
 
 // 播放控制
@@ -721,7 +769,34 @@ const addFileNext = (file: SearchResult): void => {
 }
 
 .list-item-leading {
-  margin-right: 16px;
+  margin-right: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.list-item-cover {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.list-item-cover-placeholder {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background-color: var(--md-sys-color-surface-variant);
+}
+
+.list-item-cover-placeholder .material-symbols-rounded {
+  font-size: 24px;
   color: var(--md-sys-color-on-surface-variant);
 }
 

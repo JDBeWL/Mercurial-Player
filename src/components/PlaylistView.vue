@@ -325,7 +325,7 @@ const removeTrackByPath = (path: string): void => {
   position: fixed;
   top: 0;
   right: 0;
-  max-width: 400px;
+  width: 400px;
   height: 100%;
   background-color: var(--md-sys-color-surface);
   /* box-shadow: var(--md-sys-elevation-level2); */
