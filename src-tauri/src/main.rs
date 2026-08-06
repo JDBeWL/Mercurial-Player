@@ -77,6 +77,8 @@ fn main() {
     );
 
     // 根据独占模式设置创建播放器
+    // wasapi_player 仅在 Windows 上使用,非 Windows 平台会触发 unused_variables
+    #[allow(unused_variables)]
     let (sink, output_stream, wasapi_player) = {
         if exclusive_mode_enabled {
             create_exclusive_mode_player(&device_name)
