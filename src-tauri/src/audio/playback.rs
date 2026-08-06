@@ -811,6 +811,7 @@ pub async fn play_track_exclusive(
 /// 根据采样率计算解码chunk 大小
 /// 目标是保持约~21ms的处理块（1024@48kHz）
 #[must_use]
+#[cfg(windows)]
 const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
     match sample_rate {
         0..=32000 => 512,        // ≤32kHz
@@ -1205,6 +1206,7 @@ fn decode_and_push_to_wasapi(
 
 /// 5.1/7.1环绕声到立体声的专业混音
 /// 使用ITU-R BS.775-1标准的下混系数
+#[cfg(windows)]
 fn downmix_surround_to_stereo(samples: &[f32], src_ch: usize, frame: usize) -> (f32, f32) {
     let start = frame * src_ch;
 
@@ -1254,6 +1256,7 @@ fn downmix_surround_to_stereo(samples: &[f32], src_ch: usize, frame: usize) -> (
 
 /// 通道转换(in-place 版本):写入预分配缓冲区,避免每帧堆分配。
 /// out 会被 clear 并填充结果。
+#[cfg(windows)]
 fn convert_channels_into(samples: &[f32], src_ch: u16, target_ch: u16, out: &mut Vec<f32>) {
     out.clear();
     if src_ch == target_ch {

@@ -176,6 +176,7 @@ fn remove_font_style_suffix(name: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "windows")]
     use super::*;
 
     #[test]

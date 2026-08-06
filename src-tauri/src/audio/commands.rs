@@ -145,38 +145,38 @@ pub fn pause_track(state: State<AppState>) -> Result<(), String> {
             } else {
                 return Err("WASAPI player not initialized".to_string());
             }
+            return Ok(());
         }
         #[cfg(not(windows))]
         {
             return Err("Exclusive mode is only supported on Windows".to_string());
         }
+    }
+    // 共享模式:fade 启用时启动淡出线程,否则直接 pause
+    if state.player.fade.enabled.load(Ordering::SeqCst) {
+        let target_vol = *state
+            .player
+            .output
+            .target_volume
+            .lock()
+            .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
+        spawn_shared_fade(
+            Arc::clone(&state.player.output.sink),
+            target_vol,
+            -1,
+            Arc::clone(&state.player.fade.generation),
+            Box::new(|p| p.pause()),
+        );
     } else {
-        // 共享模式:fade 启用时启动淡出线程,否则直接 pause
-        if state.player.fade.enabled.load(Ordering::SeqCst) {
-            let target_vol = *state
-                .player
-                .output
-                .target_volume
-                .lock()
-                .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
-            spawn_shared_fade(
-                Arc::clone(&state.player.output.sink),
-                target_vol,
-                -1,
-                Arc::clone(&state.player.fade.generation),
-                Box::new(|p| p.pause()),
-            );
-        } else {
-            // fade 禁用:取消任何残留的 fade 线程,直接 pause
-            state.player.fade.generation.fetch_add(1, Ordering::SeqCst);
-            let player = state
-                .player
-                .output
-                .sink
-                .lock()
-                .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
-            player.pause();
-        }
+        // fade 禁用:取消任何残留的 fade 线程,直接 pause
+        state.player.fade.generation.fetch_add(1, Ordering::SeqCst);
+        let player = state
+            .player
+            .output
+            .sink
+            .lock()
+            .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
+        player.pause();
     }
 
     Ok(())
@@ -210,49 +210,49 @@ pub fn resume_track(state: State<AppState>) -> Result<(), String> {
             } else {
                 return Err("WASAPI player not initialized".to_string());
             }
+            return Ok(());
         }
         #[cfg(not(windows))]
         {
             return Err("Exclusive mode is only supported on Windows".to_string());
         }
-    } else {
-        // 共享模式:fade 启用时先取消正在进行的 fade,再将音量设为 0,立即 play(),然后启动淡入线程
-        // fade 禁用时直接 play()(取消残留 fade 线程以防其 pause() 把新播放暂停)
-        state.player.fade.generation.fetch_add(1, Ordering::SeqCst);
-        let player = state
+    }
+    // 共享模式:fade 启用时先取消正在进行的 fade,再将音量设为 0,立即 play(),然后启动淡入线程
+    // fade 禁用时直接 play()(取消残留 fade 线程以防其 pause() 把新播放暂停)
+    state.player.fade.generation.fetch_add(1, Ordering::SeqCst);
+    let player = state
+        .player
+        .output
+        .sink
+        .lock()
+        .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
+    if state.player.fade.enabled.load(Ordering::SeqCst) {
+        player.set_volume(0.0);
+        player.play();
+        drop(player);
+        let target_vol = *state
             .player
             .output
-            .sink
+            .target_volume
             .lock()
-            .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
-        if state.player.fade.enabled.load(Ordering::SeqCst) {
-            player.set_volume(0.0);
-            player.play();
-            drop(player);
-            let target_vol = *state
-                .player
-                .output
-                .target_volume
-                .lock()
-                .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
-            spawn_shared_fade(
-                Arc::clone(&state.player.output.sink),
-                target_vol,
-                1,
-                Arc::clone(&state.player.fade.generation),
-                Box::new(|_| {}),
-            );
-        } else {
-            // fade 禁用:恢复目标音量并直接 play
-            let target_vol = *state
-                .player
-                .output
-                .target_volume
-                .lock()
-                .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
-            player.set_volume(target_vol);
-            player.play();
-        }
+            .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
+        spawn_shared_fade(
+            Arc::clone(&state.player.output.sink),
+            target_vol,
+            1,
+            Arc::clone(&state.player.fade.generation),
+            Box::new(|_| {}),
+        );
+    } else {
+        // fade 禁用:恢复目标音量并直接 play
+        let target_vol = *state
+            .player
+            .output
+            .target_volume
+            .lock()
+            .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
+        player.set_volume(target_vol);
+        player.play();
     }
 
     Ok(())
@@ -299,20 +299,20 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), String> {
             } else {
                 return Err("WASAPI player not initialized".to_string());
             }
+            return Ok(());
         }
         #[cfg(not(windows))]
         {
             return Err("Exclusive mode is only supported on Windows".to_string());
         }
-    } else {
-        let player = state
-            .player
-            .output
-            .sink
-            .lock()
-            .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
-        player.set_volume(volume);
     }
+    let player = state
+        .player
+        .output
+        .sink
+        .lock()
+        .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
+    player.set_volume(volume);
 
     Ok(())
 }
@@ -523,6 +523,7 @@ async fn switch_to_wasapi_exclusive(
 }
 
 #[cfg(not(windows))]
+#[allow(clippy::unused_async)] // 必须 async 以与 Windows 版本签名一致(调用方使用 .await)
 async fn switch_to_wasapi_exclusive(
     _app: &AppHandle,
     _state: &State<'_, AppState>,
@@ -789,6 +790,7 @@ pub fn get_exclusive_mode(state: State<AppState>) -> Result<bool, String> {
 }
 
 #[command]
+#[allow(clippy::branches_sharing_code)] // 非 Windows 下 if/else 均返回 "standard",但 Windows 下有不同分支
 pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInfo, String> {
     let current_device_name = state
         .player
@@ -823,30 +825,28 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
         .map(|g| *g)
         .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
 
-    let audio_mode_status = {
-        if is_exclusive_mode {
-            #[cfg(windows)]
-            {
-                let wasapi_active = state
-                    .player
-                    .output
-                    .wasapi_player
-                    .try_lock()
-                    .map(|g| g.is_some())
-                    .unwrap_or(false);
-                if wasapi_active {
-                    "exclusive"
-                } else {
-                    "standard"
-                }
-            }
-            #[cfg(not(windows))]
-            {
+    let audio_mode_status = if is_exclusive_mode {
+        #[cfg(windows)]
+        {
+            let wasapi_active = state
+                .player
+                .output
+                .wasapi_player
+                .try_lock()
+                .map(|g| g.is_some())
+                .unwrap_or(false);
+            if wasapi_active {
+                "exclusive"
+            } else {
                 "standard"
             }
-        } else {
+        }
+        #[cfg(not(windows))]
+        {
             "standard"
         }
+    } else {
+        "standard"
     }
     .to_string();
 

@@ -296,21 +296,21 @@ fn pause_playback(state: &State<AppState>) -> Result<(), String> {
             } else {
                 return Err("WASAPI player not initialized".to_string());
             }
+            return Ok(());
         }
         #[cfg(not(windows))]
         {
             let _ = exclusive_mode;
             return Err("Exclusive mode is only supported on Windows".to_string());
         }
-    } else {
-        let player = state
-            .player
-            .output
-            .sink
-            .lock()
-            .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
-        player.pause();
     }
+    let player = state
+        .player
+        .output
+        .sink
+        .lock()
+        .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
+    player.pause();
     Ok(())
 }
 
