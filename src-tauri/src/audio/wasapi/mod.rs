@@ -5,9 +5,7 @@
 mod exclusive;
 mod player;
 
-pub use exclusive::{
-    AudioCommand, AudioResponse, PlaybackState, WasapiExclusivePlayback,
-};
+pub use exclusive::{AudioCommand, AudioResponse, PlaybackState, WasapiExclusivePlayback};
 pub use player::{
-    check_device_exclusive_support, get_exclusive_capable_devices, WasapiExclusivePlayer,
+    WasapiExclusivePlayer, check_device_exclusive_support, get_exclusive_capable_devices,
 };

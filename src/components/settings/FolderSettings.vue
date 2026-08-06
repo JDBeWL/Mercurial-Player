@@ -14,7 +14,7 @@
     </div>
 
     <div v-else class="folder-list">
-      <div v-for="(folder, index) in musicDirectories" :key="index" class="folder-item">
+      <div v-for="(folder, index) in musicDirectories" :key="folder" class="folder-item">
         <span class="material-symbols-rounded folder-icon">folder</span>
         <span class="folder-path">{{ folder }}</span>
         <button

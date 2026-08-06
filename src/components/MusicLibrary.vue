@@ -37,7 +37,7 @@
         <div class="list">
           <div
             v-for="(file, index) in searchResults"
-            :key="`search-${index}`"
+            :key="file.path"
             class="list-item"
             @click="playFile(file)"
           >
@@ -47,7 +47,8 @@
                 :src="convertFileSrc(file.coverPath)"
                 :alt="file.displayTitle || file.name"
                 class="list-item-cover"
-                loading="lazy"
+                :loading="index < 3 ? 'eager' : 'lazy'"
+                :fetchpriority="index === 0 ? 'high' : 'auto'"
                 decoding="async"
               />
               <div v-else class="list-item-cover-placeholder">
@@ -111,8 +112,8 @@
           </div>
           <div class="list">
             <div
-              v-for="(playlist, index) in enhancedPlaylists"
-              :key="`playlist-${index}`"
+              v-for="playlist in enhancedPlaylists"
+              :key="playlist.path || playlist.name"
               class="list-item"
               @click="loadPlaylist(playlist)"
             >

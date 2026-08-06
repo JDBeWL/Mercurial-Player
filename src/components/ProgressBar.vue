@@ -9,7 +9,7 @@
       @mouseleave="handleMouseLeave"
       @mousemove="handleMouseMoveHover"
     >
-      <div ref="progressBar" class="progress-bar">
+      <div class="progress-bar">
         <div class="progress-bar-fill" :style="{ width: `${displayPercent}%` }"></div>
         <div class="progress-bar-handle" :style="{ left: `${displayPercent}%` }"></div>
         <!-- 悬停/拖动时间提示 - 跟随真实滑柄位置 -->
@@ -32,7 +32,6 @@ import { computed, ref, onUnmounted, watch } from 'vue'
 import { usePlayerStore } from '../stores/player'
 
 const playerStore = usePlayerStore()
-const progressBar = ref<HTMLElement | null>(null)
 const progressBarWrapper = ref<HTMLElement | null>(null)
 const isDragging = ref(false)
 const isHovering = ref(false)

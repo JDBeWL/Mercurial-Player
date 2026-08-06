@@ -1,16 +1,55 @@
 // Re-export mocks from setup
-export { mockInvoke, mockOpen } from '../setup'
-import { mockInvoke, mockOpen } from '../setup'
+export {
+  mockInvoke,
+  mockOpen,
+  mockStoreGet,
+  mockStoreSet,
+  mockStoreSave,
+  mockShortcutRegister,
+  mockShortcutUnregister,
+  mockShortcutUnregisterAll,
+  mockShortcutIsRegistered,
+  mockWriteFile,
+  mockTauriFetch,
+  mockCheckUpdate,
+  mockRelaunch,
+} from '../setup'
+import {
+  mockInvoke,
+  mockOpen,
+  mockStoreGet,
+  mockStoreSet,
+  mockStoreSave,
+  mockShortcutRegister,
+  mockShortcutUnregister,
+  mockShortcutUnregisterAll,
+  mockShortcutIsRegistered,
+  mockWriteFile,
+  mockTauriFetch,
+  mockCheckUpdate,
+  mockRelaunch,
+} from '../setup'
 
 // Helper to reset all mocks
 export function resetTauriMocks() {
   mockInvoke.mockReset()
   mockOpen.mockReset()
+  mockStoreGet.mockReset()
+  mockStoreSet.mockReset()
+  mockStoreSave.mockReset()
+  mockShortcutRegister.mockReset()
+  mockShortcutUnregister.mockReset()
+  mockShortcutUnregisterAll.mockReset()
+  mockShortcutIsRegistered.mockReset()
+  mockWriteFile.mockReset()
+  mockTauriFetch.mockReset()
+  mockCheckUpdate.mockReset()
+  mockRelaunch.mockReset()
 }
 
 // Helper to setup common invoke responses
-export function setupInvokeMock(command: string, response: any) {
-  mockInvoke.mockImplementation((cmd: string, _args?: any) => {
+export function setupInvokeMock(command: string, response: unknown) {
+  mockInvoke.mockImplementation((cmd: string, _args?: unknown) => {
     if (cmd === command) {
       return Promise.resolve(response)
     }
@@ -19,8 +58,8 @@ export function setupInvokeMock(command: string, response: any) {
 }
 
 // Helper to setup multiple invoke responses
-export function setupInvokeMocks(responses: Record<string, any>) {
-  mockInvoke.mockImplementation((cmd: string, args?: any) => {
+export function setupInvokeMocks(responses: Record<string, unknown>) {
+  mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
     if (cmd in responses) {
       const response = responses[cmd]
       if (typeof response === 'function') {

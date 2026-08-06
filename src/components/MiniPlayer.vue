@@ -202,7 +202,7 @@ const updateDragPosition = (e: MouseEvent): void => {
   background-color: var(--md-sys-color-surface);
   color: var(--md-sys-color-on-surface);
   user-select: none;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Roboto', 'Roboto Fallback', sans-serif;
 }
 
 /* 背景模糊效果 */

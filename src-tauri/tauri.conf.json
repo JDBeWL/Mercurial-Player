@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm run build",
+    "beforeBuildCommand": "pnpm run build:check",
     "frontendDist": "../dist"
   },
   "app": {
@@ -17,15 +17,15 @@
         "userAgent": "Mercurial Player",
         "width": 1250,
         "height": 720,
-        "minWidth": 1200,
-        "minHeight": 680,
+        "minWidth": 900,
+        "minHeight": 600,
         "center": true,
         "decorations": false,
         "transparent": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' asset: http://asset.localhost data: https:; media-src 'self' asset: http://asset.localhost file: blob:; connect-src 'self' https://api.github.com https://github.com https://objects.githubusercontent.com https://github-releases.githubusercontent.com ipc: http://ipc.localhost asset: http://asset.localhost",
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' asset: http://asset.localhost data:; media-src 'self' asset: http://asset.localhost file: blob:; connect-src 'self' https://api.github.com https://github.com https://objects.githubusercontent.com https://github-releases.githubusercontent.com ipc: http://ipc.localhost asset: http://asset.localhost",
       "assetProtocol": {
         "enable": true,
         "scope": [
@@ -36,7 +36,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis", "appimage", "deb", "dmg", "app"],
     "createUpdaterArtifacts": true,
     "icon": [
       "icons/icon.ico",
@@ -60,7 +60,10 @@
       "endpoints": [
         "https://github.com/JDBeWL/Mercurial-Player/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ3NEQxMEJFMjkwQUM2RDQKUldUVXhnb3B2aEJOMTZyM0VHQzQ3d2VCd09oZkpoU3dHNzhEcFIyNU5ra2I4UnpVYk1HZi8wWnUK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ3NEQxMEJFMjkwQUM2RDQKUldUVXhnb3B2aEJOMTZyM0VHQzQ3d2VCd09oZkpoU3dHNzhEcFIyNU5ra2I4UnpVYk1HZi8wWnUK",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

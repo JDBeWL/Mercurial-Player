@@ -35,17 +35,14 @@
     "global-shortcut:default",
     "global-shortcut:allow-is-registered",
     "global-shortcut:allow-register",
-    "global-shortcut:allow-register-all",
     "global-shortcut:allow-unregister",
-    "global-shortcut:allow-unregister-all",
     {
       "identifier": "http:default",
       "allow": [
         { "url": "https://api.github.com/*" },
         { "url": "https://github.com/*" },
         { "url": "https://objects.githubusercontent.com/*" },
-        { "url": "https://github-releases.githubusercontent.com/*" },
-        { "url": "https://*.githubusercontent.com/*" }
+        { "url": "https://github-releases.githubusercontent.com/*" }
       ]
     }
   ],
@@ -58,7 +55,13 @@
       "$APPCONFIG/**",
       "C:/Windows/**",
       "C:/Program Files/**",
-      "C:/Program Files (x86)/**"
+      "C:/Program Files (x86)/**",
+      "/etc/**",
+      "/usr/**",
+      "/System/**",
+      "/proc/**",
+      "/sys/**",
+      "/boot/**"
     ]
   }
 }

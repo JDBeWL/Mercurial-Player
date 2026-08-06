@@ -24,7 +24,7 @@
       <div v-else class="playlist-songs">
         <div class="list">
           <div
-            v-for="track in processedPlaylist"
+            v-for="(track, index) in processedPlaylist"
             :key="track.path"
             v-memo="[track.path, track.path === currentPath, playerStore.isPlaying, track.coverUrl]"
             class="list-item"
@@ -32,7 +32,13 @@
             @click="playTrack(track)"
           >
             <div v-if="track.coverUrl" class="track-cover">
-              <img :src="track.coverUrl" :alt="track.cachedTitle" loading="lazy" decoding="async" />
+              <img
+                :src="track.coverUrl"
+                :alt="track.cachedTitle"
+                :loading="index < 3 ? 'eager' : 'lazy'"
+                :fetchpriority="index === 0 ? 'high' : 'auto'"
+                decoding="async"
+              />
             </div>
             <div v-else class="track-cover-placeholder">
               <span class="material-symbols-rounded">album</span>

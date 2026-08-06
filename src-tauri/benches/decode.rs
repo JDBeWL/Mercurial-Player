@@ -5,14 +5,19 @@
 //! 运行: cargo bench --bench decode
 //! 输出: target/criterion/decode/report/index.html
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use mercurial_player::audio::SymphoniaDecoder;
 use std::io::Write;
 
 /// 生成测试用 WAV 文件 (sine wave)
 ///
 /// 不依赖外部 crate,直接按 RIFF/WAVE 格式手动写入
-fn generate_test_wav(path: &str, duration_secs: f32, sample_rate: u32, channels: u16) -> std::io::Result<()> {
+fn generate_test_wav(
+    path: &str,
+    duration_secs: f32,
+    sample_rate: u32,
+    channels: u16,
+) -> std::io::Result<()> {
     let total_frames = (sample_rate as f32 * duration_secs) as usize;
     let bits_per_sample: u16 = 16;
     let data_size = total_frames * channels as usize * (bits_per_sample as usize / 8);
@@ -118,7 +123,9 @@ fn bench_decode_after_seek(c: &mut Criterion) {
         b.iter(|| {
             let mut decoder = SymphoniaDecoder::new(&path).expect("Failed to create decoder");
             // Seek 到 5 秒位置
-            decoder.seek(std::time::Duration::from_secs(5)).expect("Seek failed");
+            decoder
+                .seek(std::time::Duration::from_secs(5))
+                .expect("Seek failed");
             // 解码剩余 5 秒
             let mut count = 0;
             while black_box(decoder.next()).is_some() {

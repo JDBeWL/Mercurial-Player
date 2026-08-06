@@ -2,8 +2,8 @@
 //!
 //! 提供音频设备的检测、切换和管理功能。
 
-use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::StreamConfig;
+use cpal::traits::{DeviceTrait, HostTrait};
 use serde::Serialize;
 
 /// 表示音频设备信息
@@ -42,14 +42,18 @@ pub fn get_device_friendly_name(device: &cpal::Device) -> Option<String> {
 /// 获取所有可用的音频输出设备
 pub fn get_all_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
     let host = cpal::default_host();
-    let default_device_name = host.default_output_device().and_then(|d| get_device_friendly_name(&d));
+    let default_device_name = host
+        .default_output_device()
+        .and_then(|d| get_device_friendly_name(&d));
 
     let devices = host.output_devices().map_err(|e| e.to_string())?;
     let mut device_infos: Vec<AudioDeviceInfo> = Vec::new();
 
     for device in devices {
         if let Some(name) = get_device_friendly_name(&device) {
-            let is_default = default_device_name.as_ref().is_some_and(|d_name| *d_name == name);
+            let is_default = default_device_name
+                .as_ref()
+                .is_some_and(|d_name| *d_name == name);
             let supports_exclusive_mode = check_wasapi_exclusive_support(&name);
 
             device_infos.push(AudioDeviceInfo {

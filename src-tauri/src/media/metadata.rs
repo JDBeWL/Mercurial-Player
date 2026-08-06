@@ -10,7 +10,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::RwLock;
 use std::time::UNIX_EPOCH;
 
 // ============================================================================
@@ -47,7 +47,9 @@ fn metadata_cache_path() -> PathBuf {
         return PathBuf::from(custom_path).join(METADATA_CACHE_FILENAME);
     }
     // 默认使用系统临时目录
-    std::env::temp_dir().join("mercurial-player").join(METADATA_CACHE_FILENAME)
+    std::env::temp_dir()
+        .join("mercurial-player")
+        .join(METADATA_CACHE_FILENAME)
 }
 
 /// 加载元数据缓存
@@ -61,25 +63,23 @@ fn load_metadata_cache() -> MetadataCache {
     }
 
     match fs::read_to_string(&cache_path) {
-        Ok(content) => {
-            match serde_json::from_str::<MetadataCache>(&content) {
-                Ok(cache) if cache.version == CACHE_VERSION => cache,
-                Ok(_) => {
-                    log::info!("元数据缓存版本不匹配，重新创建");
-                    MetadataCache {
-                        version: CACHE_VERSION,
-                        entries: std::collections::HashMap::new(),
-                    }
-                }
-                Err(e) => {
-                    log::warn!("加载元数据缓存失败: {e}, 将重新创建");
-                    MetadataCache {
-                        version: CACHE_VERSION,
-                        entries: std::collections::HashMap::new(),
-                    }
+        Ok(content) => match serde_json::from_str::<MetadataCache>(&content) {
+            Ok(cache) if cache.version == CACHE_VERSION => cache,
+            Ok(_) => {
+                log::info!("元数据缓存版本不匹配，重新创建");
+                MetadataCache {
+                    version: CACHE_VERSION,
+                    entries: std::collections::HashMap::new(),
                 }
             }
-        }
+            Err(e) => {
+                log::warn!("加载元数据缓存失败: {e}, 将重新创建");
+                MetadataCache {
+                    version: CACHE_VERSION,
+                    entries: std::collections::HashMap::new(),
+                }
+            }
+        },
         Err(e) => {
             log::warn!("读取元数据缓存文件失败: {e}, 将重新创建");
             MetadataCache {
@@ -93,17 +93,17 @@ fn load_metadata_cache() -> MetadataCache {
 /// 保存元数据缓存
 fn save_metadata_cache(cache: &MetadataCache) -> Result<(), String> {
     let cache_path = metadata_cache_path();
-    
+
     // 确保父目录存在
     if let Some(parent) = cache_path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建缓存目录失败: {e}"))?;
     }
 
-    let content = serde_json::to_string_pretty(cache)
-        .map_err(|e| format!("序列化缓存失败: {e}"))?;
-    
+    let content =
+        serde_json::to_string_pretty(cache).map_err(|e| format!("序列化缓存失败: {e}"))?;
+
     fs::write(&cache_path, content).map_err(|e| format!("写入缓存文件失败: {e}"))?;
-    
+
     Ok(())
 }
 
@@ -118,47 +118,41 @@ fn get_file_modified_time(path: &Path) -> Option<u64> {
 
 /// 从缓存获取元数据（如果文件未修改）
 pub fn get_metadata_from_cache(path: &str) -> Option<TrackMetadata> {
-    let cache = get_memory_cache();
-    let cached = cache.entries.get(path)?;
-    
+    let cached = get_cached_entry(path)?;
+
     // 检查文件是否被修改
     let current_modified = get_file_modified_time(Path::new(path))?;
     if current_modified != cached.modified_time {
         log::debug!("文件已修改，缓存失效: {path}");
         return None;
     }
-    
+
     log::debug!("缓存命中: {path}");
-    
-    Some(cached.metadata.clone())
+
+    Some(cached.metadata)
 }
 
-/// 将元数据保存到缓存（立即写入磁盘，适合单条保存）
+/// 将元数据保存到缓存（仅写入内存，由 flush_metadata_cache 统一持久化）
 pub fn save_metadata_to_cache(path: &str, metadata: &TrackMetadata) {
     save_metadata_to_memory_cache(path, metadata);
-    
-    if let Err(e) = flush_memory_cache() {
-        log::warn!("保存元数据缓存到磁盘失败: {e}");
-    } else {
-        log::debug!("元数据已缓存: {path}");
-    }
+    log::debug!("元数据已缓存: {path}");
 }
 
 /// 清理元数据缓存中不存在的文件
 pub fn clean_metadata_cache() -> Result<usize, String> {
     let mut cache = load_metadata_cache();
     let original_count = cache.entries.len();
-    
+
     // 移除不存在的文件
     cache.entries.retain(|path, _| Path::new(path).exists());
-    
+
     let removed_count = original_count - cache.entries.len();
-    
+
     if removed_count > 0 {
         save_metadata_cache(&cache)?;
         log::info!("清理了 {removed_count} 个无效的元数据缓存条目");
     }
-    
+
     Ok(removed_count)
 }
 
@@ -176,40 +170,54 @@ pub fn clear_metadata_cache() -> Result<(), String> {
 pub fn get_metadata_cache_stats() -> (usize, u64) {
     let cache = load_metadata_cache();
     let entry_count = cache.entries.len();
-    
-    let total_size = cache.entries.values()
+
+    let total_size = cache
+        .entries
+        .values()
         .map(|e| size_of_val(&e.metadata) as u64)
         .sum();
-    
+
     (entry_count, total_size)
 }
 
 // 全局自定义缓存路径
-static CUSTOM_CACHE_PATH: Mutex<Option<String>> = Mutex::new(None);
+static CUSTOM_CACHE_PATH: RwLock<Option<String>> = RwLock::new(None);
 
-// 全局内存缓存，用于批量保存
-static MEMORY_CACHE: Mutex<Option<MetadataCache>> = Mutex::new(None);
+// 全局内存缓存，用于批量保存（读多写少，用 RwLock）
+static MEMORY_CACHE: RwLock<Option<MetadataCache>> = RwLock::new(None);
 
-/// 获取内存缓存（如果不存在则加载）
-fn get_memory_cache() -> MetadataCache {
-    if let Ok(lock) = MEMORY_CACHE.lock() {
+/// 从内存缓存中查询单条记录（只克隆单条，不克隆整个 HashMap）
+fn get_cached_entry(path: &str) -> Option<CachedMetadata> {
+    // 快速路径：读锁查询
+    if let Ok(lock) = MEMORY_CACHE.read() {
         if let Some(cache) = lock.as_ref() {
-            return cache.clone();
+            if let Some(entry) = cache.entries.get(path) {
+                return Some(entry.clone());
+            }
+            return None;
         }
     }
+    // 慢速路径：内存缓存未初始化，从磁盘加载
     let cache = load_metadata_cache();
-    if let Ok(mut lock) = MEMORY_CACHE.lock() {
-        *lock = Some(cache.clone());
+    let result = cache.entries.get(path).cloned();
+    if let Ok(mut lock) = MEMORY_CACHE.write() {
+        if lock.is_none() {
+            *lock = Some(cache);
+        }
     }
-    cache
+    result
 }
 
-/// 将内存缓存持久化到磁盘
+/// 将内存缓存持久化到磁盘（在锁外执行 I/O，不阻塞其他读者）
 fn flush_memory_cache() -> Result<(), String> {
-    if let Ok(lock) = MEMORY_CACHE.lock() {
-        if let Some(cache) = lock.as_ref() {
-            return save_metadata_cache(cache);
-        }
+    // 读锁下克隆缓存快照，然后释放锁
+    let snapshot = {
+        let lock = lock_or_log!(MEMORY_CACHE.read());
+        lock.as_ref().map(|cache| cache.clone())
+    };
+    // 在锁外执行磁盘 I/O
+    if let Some(cache) = snapshot {
+        return save_metadata_cache(&cache);
     }
     Ok(())
 }
@@ -225,15 +233,14 @@ pub fn save_metadata_to_memory_cache(path: &str, metadata: &TrackMetadata) {
                 .unwrap_or_default()
                 .as_secs(),
         };
-        
-        if let Ok(mut lock) = MEMORY_CACHE.lock() {
-            if lock.is_none() {
-                *lock = Some(load_metadata_cache());
-            }
-            if let Some(cache) = lock.as_mut() {
-                cache.entries.insert(path.to_string(), cached);
-                log::debug!("元数据已加入内存缓存: {path}");
-            }
+
+        let mut lock = lock_or_log!(MEMORY_CACHE.write());
+        if lock.is_none() {
+            *lock = Some(load_metadata_cache());
+        }
+        if let Some(cache) = lock.as_mut() {
+            cache.entries.insert(path.to_string(), cached);
+            log::debug!("元数据已加入内存缓存: {path}");
         }
     }
 }
@@ -245,14 +252,13 @@ pub fn flush_metadata_cache() -> Result<(), String> {
 
 /// 设置自定义封面缓存路径
 pub fn set_cover_cache_path(path: Option<String>) {
-    if let Ok(mut cache_path) = CUSTOM_CACHE_PATH.lock() {
-        *cache_path = path;
-    }
+    let mut cache_path = lock_or_log!(CUSTOM_CACHE_PATH.write());
+    *cache_path = path;
 }
 
 /// 获取自定义封面缓存路径
 pub fn get_cover_cache_path_setting() -> Option<String> {
-    CUSTOM_CACHE_PATH.lock().ok().and_then(|p| p.clone())
+    lock_or_log!(CUSTOM_CACHE_PATH.read()).clone()
 }
 
 /// 单个音轨的元数据
@@ -284,7 +290,10 @@ pub struct Playlist {
 impl Playlist {
     #[must_use]
     pub const fn new(name: String) -> Self {
-        Self { name, files: Vec::new() }
+        Self {
+            name,
+            files: Vec::new(),
+        }
     }
 
     pub fn add_track(&mut self, track: TrackMetadata) {
@@ -303,7 +312,9 @@ fn cover_cache_dir() -> PathBuf {
         return PathBuf::from(custom_path).join("cover-cache");
     }
     // 默认使用系统临时目录
-    std::env::temp_dir().join("mercurial-player").join("cover-cache")
+    std::env::temp_dir()
+        .join("mercurial-player")
+        .join("cover-cache")
 }
 
 // ============================================================================
@@ -326,7 +337,7 @@ struct CacheFileInfo {
 /// 清理过期的缓存文件
 fn clean_expired_cache_files() -> Result<usize, String> {
     let cache_dir = cover_cache_dir();
-    
+
     if !cache_dir.exists() {
         return Ok(0);
     }
@@ -337,8 +348,7 @@ fn clean_expired_cache_files() -> Result<usize, String> {
         .map_err(|e| format!("获取系统时间失败: {e}"))?
         .as_secs();
 
-    let entries = fs::read_dir(&cache_dir)
-        .map_err(|e| format!("读取缓存目录失败: {e}"))?;
+    let entries = fs::read_dir(&cache_dir).map_err(|e| format!("读取缓存目录失败: {e}"))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| format!("读取目录条目失败: {e}"))?;
@@ -349,7 +359,7 @@ fn clean_expired_cache_files() -> Result<usize, String> {
                 if let Ok(modified) = metadata.modified() {
                     if let Ok(duration) = modified.duration_since(UNIX_EPOCH) {
                         let file_age = current_time.saturating_sub(duration.as_secs());
-                        
+
                         if file_age > CACHE_EXPIRE_SECONDS {
                             if fs::remove_file(&path).is_ok() {
                                 cleaned_count += 1;
@@ -378,8 +388,7 @@ fn get_cache_files_sorted() -> Result<Vec<CacheFileInfo>, String> {
         return Ok(files);
     }
 
-    let entries = fs::read_dir(&cache_dir)
-        .map_err(|e| format!("读取缓存目录失败: {e}"))?;
+    let entries = fs::read_dir(&cache_dir).map_err(|e| format!("读取缓存目录失败: {e}"))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| format!("读取目录条目失败: {e}"))?;
@@ -443,21 +452,21 @@ fn clean_cache_by_size(max_cache_size_mb: u64) -> Result<usize, String> {
 pub fn clean_cover_cache(max_cache_size_mb: Option<u64>) -> Result<usize, String> {
     let max_size = max_cache_size_mb.unwrap_or(DEFAULT_MAX_CACHE_SIZE_MB);
     log::info!("开始清理封面缓存（最大大小: {max_size}MB）...");
-    
+
     let mut total_cleaned = 0;
-    
+
     // 清理过期文件
     total_cleaned += clean_expired_cache_files().unwrap_or(0);
-    
+
     // 清理超出大小限制的文件
     total_cleaned += clean_cache_by_size(max_size).unwrap_or(0);
-    
+
     if total_cleaned > 0 {
         log::info!("封面缓存清理完成，共删除 {total_cleaned} 个文件");
     } else {
         log::debug!("封面缓存无需清理");
     }
-    
+
     Ok(total_cleaned)
 }
 
@@ -512,13 +521,13 @@ pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> 
         log::debug!("使用缓存的元数据: {path}");
         return Ok(cached);
     }
-    
+
     // 缓存未命中，提取元数据
     let metadata = get_track_metadata_with_options(path, false)?;
-    
+
     // 保存到内存缓存（不立即写入磁盘，批量保存更高效）
     save_metadata_to_memory_cache(path, &metadata);
-    
+
     Ok(metadata)
 }
 
@@ -527,7 +536,7 @@ pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, String
     // 首先尝试从缓存获取
     if let Some(mut cached) = get_metadata_from_cache(path) {
         log::debug!("使用缓存的元数据: {path}");
-        
+
         // 如果缓存中已有封面路径且封面文件存在，直接返回
         if let Some(ref cover_path) = cached.cover_path {
             if Path::new(cover_path).exists() {
@@ -537,7 +546,7 @@ pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, String
             log::debug!("缓存的封面文件不存在，需要重新提取: {cover_path}");
             cached.cover_path = None;
         }
-        
+
         // 缓存中没有封面或封面文件不存在，补充提取封面
         let file_path = Path::new(path);
         if let Ok(tagged_file) = Probe::open(file_path).and_then(|f| f.read()) {
@@ -547,15 +556,15 @@ pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, String
                 }
             }
         }
-        
+
         // 更新缓存（包含封面路径）
         save_metadata_to_cache(path, &cached);
         return Ok(cached);
     }
-    
+
     // 缓存未命中，提取元数据（不包含封面）
     let mut metadata = get_track_metadata_with_options(path, false)?;
-    
+
     // 提取封面路径
     let file_path = Path::new(path);
     if let Ok(tagged_file) = Probe::open(file_path).and_then(|f| f.read()) {
@@ -565,15 +574,18 @@ pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, String
             }
         }
     }
-    
+
     // 保存到缓存（包含封面路径）
     save_metadata_to_cache(path, &metadata);
-    
+
     Ok(metadata)
 }
 
 /// 获取音轨元数据的统一实现
-fn get_track_metadata_with_options(path: &str, include_cover: bool) -> Result<TrackMetadata, String> {
+fn get_track_metadata_with_options(
+    path: &str,
+    include_cover: bool,
+) -> Result<TrackMetadata, String> {
     let file_path = Path::new(path);
 
     let tagged_file = Probe::open(file_path)
@@ -591,7 +603,11 @@ fn get_track_metadata_with_options(path: &str, include_cover: bool) -> Result<Tr
 
     let mut metadata = TrackMetadata {
         path: path.replace('/', "\\"),
-        name: file_path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+        name: file_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string(),
         duration: if duration > 0.0 { Some(duration) } else { None },
         bitrate: properties.audio_bitrate(),
         sample_rate: properties.sample_rate(),
@@ -624,7 +640,7 @@ fn get_track_metadata_with_options(path: &str, include_cover: bool) -> Result<Tr
 pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, String> {
     let file_path = Path::new(path);
     log::debug!("Getting cover for: {path}");
-    
+
     let tagged_file = Probe::open(file_path)
         .map_err(|e| format!("无法打开文件: {e}"))?
         .read()
@@ -632,8 +648,10 @@ pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, Strin
 
     let primary_tag = tagged_file.primary_tag();
     log::debug!("Primary tag exists: {}", primary_tag.is_some());
-    
-    let has_picture = primary_tag.map(|tag| !tag.pictures().is_empty()).unwrap_or(false);
+
+    let has_picture = primary_tag
+        .map(|tag| !tag.pictures().is_empty())
+        .unwrap_or(false);
     log::debug!("Has picture: {has_picture}");
 
     let cover = primary_tag
@@ -663,7 +681,8 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
         .first()
         .ok_or_else(|| "文件没有封面图片".to_string())?;
 
-    let extension = cover_extension_from_mime(picture.mime_type().map(lofty::picture::MimeType::as_str));
+    let extension =
+        cover_extension_from_mime(picture.mime_type().map(lofty::picture::MimeType::as_str));
 
     let output = Path::new(output_path);
     let final_path = if output.extension().is_none() {

@@ -1,88 +1,90 @@
-//! 妗岄潰姝岃瘝鏄剧ず妯″潡
+//! 桌面歌词显示模块
 //!
-//! 鍦ㄥ睆骞曞簳閮ㄦ樉绀轰竴涓疆椤剁獥鍙ｏ紝灞曠ず褰撳墠鎾斁姝岃瘝銆?
-//! 浣跨敤 Direct2D 娓叉煋锛岀‘淇濇枃瀛楄竟缂樺钩婊戞棤姣涘埡銆?
-//! 鏀寔鐐瑰嚮绌块€忥紙閿佸畾妯″紡锛夊拰椤堕儴鎷栨嫿锛堣В閿佹ā寮忥級銆?
-//! 鎮诞鏃舵樉绀洪攣瀹氭寜閽拰鍏抽棴鎸夐挳銆?
-//! 鏀寔鍙岃姝岃瘝銆?
+//! 在屏幕底部显示一个置顶窗口，展示当前播放歌词。
+//! 使用 Direct2D 渲染，确保文字边缘平滑无毛刺。
+//! 支持点击穿透（锁定模式）和顶部拖拽（解锁模式）。
+//! 悬浮时显示锁定按钮和关闭按钮。
+//! 支持双行歌词。
 
 #![allow(unsafe_code)]
 
-use std::collections::HashMap;
-use std::cell::RefCell;
-use std::mem::size_of;
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::sync::{Arc, Mutex, OnceLock};
-use tauri::command;
-use tauri::Emitter;
 use serde::Deserialize;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::mem::size_of;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::Emitter;
+use tauri::command;
 
-use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_FACTORY_TYPE_SINGLE_THREADED,
-    D2D1_FEATURE_LEVEL_DEFAULT, D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT,
-    D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
-    D2D1CreateFactory, ID2D1DCRenderTarget, ID2D1Factory, ID2D1SolidColorBrush,
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DRAW_TEXT_OPTIONS_NONE,
+    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT, D2D1_RENDER_TARGET_PROPERTIES,
+    D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT,
+    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1DCRenderTarget, ID2D1Factory,
+    ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
-    DWriteCreateFactory, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL,
-    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_MEASURING_MODE_NATURAL,
-    DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER,
-    DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_RANGE, DWRITE_WORD_WRAPPING_NO_WRAP,
-    DWRITE_TEXT_METRICS, DWRITE_HIT_TEST_METRICS, IDWriteFactory, IDWriteFontCollection, IDWriteTextFormat,
-    IDWriteTextLayout,
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_HIT_TEST_METRICS, DWRITE_MEASURING_MODE_NATURAL,
+    DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING,
+    DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory,
+    IDWriteFactory, IDWriteFontCollection, IDWriteTextFormat, IDWriteTextLayout,
 };
+use windows::core::{PCWSTR, w};
 
-
-
+use unicode_segmentation::UnicodeSegmentation;
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, BLENDFUNCTION, CreateCompatibleDC, CreateDIBSection, CreateFontW,
-    DeleteDC, DeleteObject, EndPaint,
-    InvalidateRect, SelectObject, ScreenToClient,
-    SetBkMode, TRANSPARENT,
-    BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
-    FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_NORMAL,
-    HBRUSH, HFONT, HGDIOBJ, PAINTSTRUCT, RGBQUAD,
+    BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, BeginPaint, CreateCompatibleDC, CreateDIBSection,
+    CreateFontW, DIB_RGB_COLORS, DeleteDC, DeleteObject, EndPaint, FONT_CHARSET,
+    FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_NORMAL, HBRUSH, HFONT, HGDIOBJ,
+    InvalidateRect, PAINTSTRUCT, RGBQUAD, ScreenToClient, SelectObject, SetBkMode, TRANSPARENT,
 };
-use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
-use windows_numerics::Vector2;
-use unicode_segmentation::UnicodeSegmentation;
+use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, GetClientRect, GetCursorPos, GetMessageW, GetWindowLongPtrW,
-    GetWindowRect, IsWindowVisible, PostMessageW, PostQuitMessage, RegisterClassW,
-    SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, DispatchMessageW,
-    UpdateLayeredWindow, SetTimer, KillTimer,
-    CS_HREDRAW, CS_VREDRAW, GWL_EXSTYLE, HWND_TOPMOST, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT,
-    HTTRANSPARENT, HICON, HCURSOR,
-    ULW_ALPHA, MSG, SET_WINDOW_POS_FLAGS, SW_HIDE, SW_SHOWNOACTIVATE,
-    WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_NCHITTEST, WM_PAINT, WM_SIZE, WM_USER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WM_TIMER,
+    CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWL_EXSTYLE,
+    GetClientRect, GetCursorPos, GetMessageW, GetWindowLongPtrW, GetWindowRect, HCURSOR, HICON,
+    HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTRANSPARENT, HWND_TOPMOST, IsWindowVisible, KillTimer,
+    MSG, PostMessageW, PostQuitMessage, RegisterClassW, SET_WINDOW_POS_FLAGS, SW_HIDE,
+    SW_SHOWNOACTIVATE, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
+    ULW_ALPHA, UpdateLayeredWindow, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_PAINT, WM_SIZE, WM_TIMER, WM_USER, WNDCLASSW,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
+use windows_numerics::Vector2;
 
 const WM_MOUSELEAVE: u32 = 0x02A3;
 #[allow(non_camel_case_types)]
 type DPI_AWARENESS_CONTEXT = *mut core::ffi::c_void;
 
+/// # Safety
+/// 调用 Win32 `SetThreadDpiAwarenessContext`，传入的句柄必须是有效的 DPI 上下文指针
+/// （如 `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2`）或 `NULL`。仅在拥有消息循环的
+/// 桌面歌词线程上调用，避免跨线程干扰主窗口的 DPI 感知。
 unsafe fn set_thread_dpi_awareness_context(ctx: DPI_AWARENESS_CONTEXT) -> DPI_AWARENESS_CONTEXT {
     #[link(name = "user32")]
     unsafe extern "system" {
-        fn SetThreadDpiAwarenessContext(dpiContext: DPI_AWARENESS_CONTEXT) -> DPI_AWARENESS_CONTEXT;
+        fn SetThreadDpiAwarenessContext(dpiContext: DPI_AWARENESS_CONTEXT)
+        -> DPI_AWARENESS_CONTEXT;
     }
+    // SAFETY: ctx 来自常量或本函数调用者，参数语义符合 Win32 契约
     unsafe { SetThreadDpiAwarenessContext(ctx) }
 }
 
+/// # Safety
+/// 调用 Win32 `GetDpiForWindow`，`hwnd` 必须是有效的窗口句柄。
 unsafe fn get_dpi_for_window(hwnd: HWND) -> u32 {
     #[link(name = "user32")]
     unsafe extern "system" {
         fn GetDpiForWindow(hwnd: HWND) -> u32;
     }
+    // SAFETY: 调用者保证 hwnd 是已创建的窗口句柄
     unsafe { GetDpiForWindow(hwnd) }
 }
 
@@ -147,9 +149,6 @@ pub struct DesktopLyricWord {
     end: f32,
 }
 
-
-
-
 struct SharedLyricState {
     current_line: String,
     sub_line: String,
@@ -189,13 +188,16 @@ struct Direct2DState {
 }
 
 impl Direct2DState {
+    /// # Safety
+    /// 创建 Direct2D / DirectWrite 工厂与 DC 渲染目标。必须在已初始化 COM
+    /// （`CoInitializeEx`）的线程上调用，且仅在同一线程内使用单线程工厂。
     unsafe fn new() -> windows::core::Result<Self> {
-        let d2d_factory: ID2D1Factory = unsafe {
-            D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?
-        };
-        let dwrite_factory: IDWriteFactory = unsafe {
-            DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?
-        };
+        // SAFETY: 调用者保证当前线程已执行 CoInitializeEx
+        let d2d_factory: ID2D1Factory =
+            unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)? };
+        // SAFETY: 同上
+        let dwrite_factory: IDWriteFactory =
+            unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)? };
         let target_props = D2D1_RENDER_TARGET_PROPERTIES {
             r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
             pixelFormat: D2D1_PIXEL_FORMAT {
@@ -207,7 +209,10 @@ impl Direct2DState {
             usage: D2D1_RENDER_TARGET_USAGE_NONE,
             minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
         };
-        let dc_render_target = unsafe { d2d_factory.CreateDCRenderTarget(&raw const target_props)? };
+        // SAFETY: target_props 是栈上局部变量，&raw const 取其地址传给 Win32 后不再使用
+        let dc_render_target =
+            unsafe { d2d_factory.CreateDCRenderTarget(&raw const target_props)? };
+        // SAFETY: dc_render_target 刚创建，调用设置方法符合 COM 契约
         unsafe { dc_render_target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE) };
         Ok(Self {
             dwrite_factory,
@@ -216,10 +221,17 @@ impl Direct2DState {
         })
     }
 
-    unsafe fn text_format(&mut self, font_size_scaled: i32) -> windows::core::Result<IDWriteTextFormat> {
+    /// # Safety
+    /// 创建/缓存 `IDWriteTextFormat`，必须在已初始化 COM 的同一线程调用。
+    /// `font_size_scaled` 会被 `max(1)` 钳制，避免传入 0 或负数。
+    unsafe fn text_format(
+        &mut self,
+        font_size_scaled: i32,
+    ) -> windows::core::Result<IDWriteTextFormat> {
         if let Some(format) = self.text_format_cache.get(&font_size_scaled) {
             return Ok(format.clone());
         }
+        // SAFETY: 字符串字面量 w!() 以 NUL 结尾，font_size 经 max(1) 保证为正
         let format = unsafe {
             self.dwrite_factory.CreateTextFormat(
                 w!("Microsoft YaHei"),
@@ -231,15 +243,20 @@ impl Direct2DState {
                 w!("zh-cn"),
             )?
         };
+        // SAFETY: format 刚创建，设置对齐/换行属性符合 COM 契约
         unsafe {
             let _ = format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
             let _ = format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             let _ = format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         }
-        self.text_format_cache.insert(font_size_scaled, format.clone());
+        self.text_format_cache
+            .insert(font_size_scaled, format.clone());
         Ok(format)
     }
 
+    /// # Safety
+    /// 创建 `IDWriteTextLayout`，`text` 必须是有效的 UTF-16 切片（允许含尾部 NUL），
+    /// width/height 经 `max(1.0)` 钳制。必须在已初始化 COM 的同一线程调用。
     unsafe fn create_layout(
         &mut self,
         text: &[u16],
@@ -248,14 +265,12 @@ impl Direct2DState {
         height: f32,
     ) -> windows::core::Result<IDWriteTextLayout> {
         let text = trim_utf16_nul(text);
+        // SAFETY: 转发到 text_format，契约一致
         let format = unsafe { self.text_format(font_size_scaled)? };
+        // SAFETY: text 是 &[u16]，PCWSTR 要求的 NUL 由 CreateTextLayout 内部处理
         unsafe {
-            self.dwrite_factory.CreateTextLayout(
-                text,
-                &format,
-                width.max(1.0),
-                height.max(1.0),
-            )
+            self.dwrite_factory
+                .CreateTextLayout(text, &format, width.max(1.0), height.max(1.0))
         }
     }
 }
@@ -308,6 +323,8 @@ fn hit_test_text_x(layout: &IDWriteTextLayout, pos: u32, trailing: bool) -> Opti
     let mut x = 0.0f32;
     let mut y = 0.0f32;
     let mut metrics = DWRITE_HIT_TEST_METRICS::default();
+    // SAFETY: layout 是有效 COM 对象；x/y/metrics 均为栈上局部变量，
+    // &raw mut 传给 Win32 写入后在本函数内读取，不存在别名冲突
     unsafe {
         layout
             .HitTestTextPosition(pos, trailing, &raw mut x, &raw mut y, &raw mut metrics)
@@ -433,20 +450,22 @@ fn draw_d2d_lyric_line(
     color_progress: f32,
     line_duration_ms: Option<i64>,
 ) -> Option<bool> {
-    let text_w = measure_text_width_dwrite_with_state(
-        state,
-        text,
-        rect.bottom - rect.top,
-        font_size_scaled,
-    )
-    .unwrap_or_else(|| (rect.right - rect.left).max(1));
+    let text_w =
+        measure_text_width_dwrite_with_state(state, text, rect.bottom - rect.top, font_size_scaled)
+            .unwrap_or_else(|| (rect.right - rect.left).max(1));
     let avail_w = (rect.right - rect.left).max(1);
     let base_speed = (MARQUEE_SPEED_PX_PER_SEC * scale / 96).max(12) as i64;
     let max_scroll = (text_w - avail_w).max(0);
     let (hold_ms, speed) = if max_scroll > 0 {
         if let Some(duration) = line_duration_ms {
             // 动态计算：确保在行结束前滚完
-            let hold = if duration <= 1200 { 100i64 } else if duration <= 2500 { 200 } else { 400.min(duration / 4) };
+            let hold = if duration <= 1200 {
+                100i64
+            } else if duration <= 2500 {
+                200
+            } else {
+                400.min(duration / 4)
+            };
             let budget = (duration - hold).max(200);
             let needed = ((max_scroll as i64 * 1000 + budget - 1) / budget).max(base_speed);
             (hold, needed)
@@ -465,7 +484,12 @@ fn draw_d2d_lyric_line(
     let should_animate = offset < max_scroll;
     let draw_rect = if text_w <= avail_w {
         let left = rect.left + (avail_w - text_w) / 2;
-        RECT { left, top: rect.top, right: left + text_w, bottom: rect.bottom }
+        RECT {
+            left,
+            top: rect.top,
+            right: left + text_w,
+            bottom: rect.bottom,
+        }
     } else {
         RECT {
             left: rect.left - offset,
@@ -476,7 +500,10 @@ fn draw_d2d_lyric_line(
     };
     let width = (draw_rect.right - draw_rect.left).max(1) as f32;
     let height = (draw_rect.bottom - draw_rect.top).max(1) as f32;
-    let origin = Vector2 { X: draw_rect.left as f32, Y: draw_rect.top as f32 };
+    let origin = Vector2 {
+        X: draw_rect.left as f32,
+        Y: draw_rect.top as f32,
+    };
 
     // 单个字符时不使用 clip 方式，直接用颜色插值过渡
     let decoded = String::from_utf16_lossy(trim_utf16_nul(text));
@@ -484,25 +511,57 @@ fn draw_d2d_lyric_line(
     if grapheme_count <= 1 {
         let t = clip_progress.clamp(0.0, 1.0);
         let blended = lerp_d2d_color(text_color, highlight_color, t);
+        // SAFETY: blended 是栈上局部变量，&raw const 仅在该 COM 调用期间被读取
         let brush = unsafe {
-            state.dc_render_target.CreateSolidColorBrush(&raw const blended, None).ok()?
+            state
+                .dc_render_target
+                .CreateSolidColorBrush(&raw const blended, None)
+                .ok()?
         };
-        let layout = unsafe { state.create_layout(text, font_size_scaled, width, height).ok()? };
+        // SAFETY: create_layout 要求 COM 已初始化，调用方在 D2D_STATE 线程上下文
+        let layout = unsafe {
+            state
+                .create_layout(text, font_size_scaled, width, height)
+                .ok()?
+        };
+        // SAFETY: layout/brush 均为刚创建的有效 COM 对象
         unsafe {
-            state.dc_render_target.DrawTextLayout(origin, &layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+            state.dc_render_target.DrawTextLayout(
+                origin,
+                &layout,
+                &brush,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
+            );
         }
         return Some(should_animate);
     }
 
-    let base_layout = unsafe { state.create_layout(text, font_size_scaled, width, height).ok()? };
-    let overlay_layout = unsafe { state.create_layout(text, font_size_scaled, width, height).ok()? };
+    // SAFETY: 同上，create_layout 要求 COM 已初始化
+    let base_layout = unsafe {
+        state
+            .create_layout(text, font_size_scaled, width, height)
+            .ok()?
+    };
+    // SAFETY: 同上
+    let overlay_layout = unsafe {
+        state
+            .create_layout(text, font_size_scaled, width, height)
+            .ok()?
+    };
+    // SAFETY: base_layout/base_brush 均为有效 COM 对象
     unsafe {
-        state.dc_render_target.DrawTextLayout(origin, &base_layout, base_brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+        state.dc_render_target.DrawTextLayout(
+            origin,
+            &base_layout,
+            base_brush,
+            D2D1_DRAW_TEXT_OPTIONS_NONE,
+        );
     }
 
     let current_phase = progress_cluster_phase(text, color_progress).unwrap_or(color_progress);
     let mut current_color = lerp_d2d_color(text_color, highlight_color, current_phase);
     current_color.a = (current_color.a * (0.35 + 0.65 * current_phase)).clamp(0.0, 1.0);
+    // SAFETY: current_color 是栈上局部变量，&raw const 仅在该 COM 调用期间被读取
     let current_brush = unsafe {
         state
             .dc_render_target
@@ -524,21 +583,34 @@ fn draw_d2d_lyric_line(
             right: (draw_rect.left as f32 + clip_x).min(draw_rect.right as f32),
             bottom: draw_rect.bottom as f32,
         };
+        // SAFETY: clip 是栈上局部变量；PushAxisAlignedClip 与 PopAxisAlignedClip
+        // 必须配对，此处成对调用符合 Direct2D 剪裁栈契约
         unsafe {
-            state.dc_render_target.PushAxisAlignedClip(&raw const clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            state.dc_render_target.DrawTextLayout(origin, &overlay_layout, base_brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+            state
+                .dc_render_target
+                .PushAxisAlignedClip(&raw const clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            state.dc_render_target.DrawTextLayout(
+                origin,
+                &overlay_layout,
+                base_brush,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
+            );
             state.dc_render_target.PopAxisAlignedClip();
         }
     } else {
+        // SAFETY: overlay_layout/base_brush 均为有效 COM 对象
         unsafe {
-            state.dc_render_target.DrawTextLayout(origin, &overlay_layout, base_brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+            state.dc_render_target.DrawTextLayout(
+                origin,
+                &overlay_layout,
+                base_brush,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
+            );
         }
     }
 
     Some(should_animate)
 }
-
-
 
 fn render_lyrics_d2d_frame(
     _hwnd: HWND,
@@ -561,10 +633,14 @@ fn render_lyrics_d2d_frame(
     D2D_STATE.with(|cell| {
         let mut state_ref = cell.borrow_mut();
         if state_ref.is_none() {
+            // SAFETY: 该闭包在 desktop-lyrics 消息循环线程执行，该线程已 CoInitializeEx
             let state = unsafe { Direct2DState::new().ok()? };
             *state_ref = Some(state);
         }
         let state = state_ref.as_mut()?;
+        // SAFETY: 所有 COM 调用均在已初始化 COM 的 desktop-lyrics 线程上执行；
+        // &raw const 的局部变量仅在对应 COM 调用期间被读取，无别名冲突；
+        // BeginDraw/EndDraw 配对调用符合 Direct2D 渲染契约
         unsafe {
             state.dc_render_target.BindDC(hdc_mem, client_rect).ok()?;
             state.dc_render_target.BeginDraw();
@@ -578,13 +654,18 @@ fn render_lyrics_d2d_frame(
 
             if is_hovered {
                 let hover_color = d2d_color(0xE0_E0_E0, preset.hover_bg_alpha as f32 / 255.0);
-                let hover_brush = state.dc_render_target.CreateSolidColorBrush(&raw const hover_color, None).ok()?;
+                let hover_brush = state
+                    .dc_render_target
+                    .CreateSolidColorBrush(&raw const hover_color, None)
+                    .ok()?;
                 let bg_rect = D2D1_ROUNDED_RECT {
                     rect: rect_to_d2d(client_rect),
                     radiusX: corner_radius,
                     radiusY: corner_radius,
                 };
-                state.dc_render_target.FillRoundedRectangle(&raw const bg_rect, &hover_brush);
+                state
+                    .dc_render_target
+                    .FillRoundedRectangle(&raw const bg_rect, &hover_brush);
 
                 let btn_text_format = state
                     .dwrite_factory
@@ -606,17 +687,38 @@ fn render_lyrics_d2d_frame(
                 let lock_rect = layout.lock_rect;
                 if !is_locked {
                     let close_bg = d2d_color(0xE5_39_35, 0.16);
-                    let close_brush = state.dc_render_target.CreateSolidColorBrush(&raw const close_bg, None).ok()?;
+                    let close_brush = state
+                        .dc_render_target
+                        .CreateSolidColorBrush(&raw const close_bg, None)
+                        .ok()?;
                     let close_round = rounded_rect_to_d2d(&close_rect, strip_radius);
-                    state.dc_render_target.FillRoundedRectangle(&raw const close_round, &close_brush);
+                    state
+                        .dc_render_target
+                        .FillRoundedRectangle(&raw const close_round, &close_brush);
                 }
-                let lock_bg = if is_locked { d2d_color(0xDD_EF_FF, 0.16) } else { d2d_color(0xDD_EF_FF, 0.10) };
-                let lock_brush = state.dc_render_target.CreateSolidColorBrush(&raw const lock_bg, None).ok()?;
+                let lock_bg = if is_locked {
+                    d2d_color(0xDD_EF_FF, 0.16)
+                } else {
+                    d2d_color(0xDD_EF_FF, 0.10)
+                };
+                let lock_brush = state
+                    .dc_render_target
+                    .CreateSolidColorBrush(&raw const lock_bg, None)
+                    .ok()?;
                 let lock_round = rounded_rect_to_d2d(&lock_rect, strip_radius);
-                state.dc_render_target.FillRoundedRectangle(&raw const lock_round, &lock_brush);
+                state
+                    .dc_render_target
+                    .FillRoundedRectangle(&raw const lock_round, &lock_brush);
 
-                let icon_color = if is_locked { d2d_color(0x1E_88_E5, 1.0) } else { d2d_color(0xE5_39_35, 1.0) };
-                let icon_brush = state.dc_render_target.CreateSolidColorBrush(&raw const icon_color, None).ok()?;
+                let icon_color = if is_locked {
+                    d2d_color(0x1E_88_E5, 1.0)
+                } else {
+                    d2d_color(0xE5_39_35, 1.0)
+                };
+                let icon_brush = state
+                    .dc_render_target
+                    .CreateSolidColorBrush(&raw const icon_color, None)
+                    .ok()?;
                 if !is_locked {
                     state.dc_render_target.DrawText(
                         &[0xE711],
@@ -640,8 +742,14 @@ fn render_lyrics_d2d_frame(
             if !current_line.is_empty() {
                 let text_color = d2d_color(preset.text_color, fade_alpha);
                 let highlight_color = d2d_color(preset.highlight_color, fade_alpha);
-                let base_brush = state.dc_render_target.CreateSolidColorBrush(&raw const text_color, None).ok()?;
-                let highlight_brush = state.dc_render_target.CreateSolidColorBrush(&raw const highlight_color, None).ok()?;
+                let base_brush = state
+                    .dc_render_target
+                    .CreateSolidColorBrush(&raw const text_color, None)
+                    .ok()?;
+                let highlight_brush = state
+                    .dc_render_target
+                    .CreateSolidColorBrush(&raw const highlight_color, None)
+                    .ok()?;
                 let current_vec: Vec<u16> = current_line.encode_utf16().collect();
                 let sub_vec: Vec<u16> = sub_line.encode_utf16().collect();
                 let current = trim_utf16_nul(&current_vec);
@@ -689,17 +797,17 @@ fn render_lyrics_d2d_frame(
     })
 }
 
-
-
-
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
-
 
 pub struct DesktopLyricsManager {
     initialized: bool,
 }
 
+// SAFETY: DesktopLyricsManager 仅含一个 bool 字段，本身无内部可变性。
+// 所有窗口操作（show/hide/set_locked 等）通过 PostMessageW 将请求转发到
+// 桌面歌词消息循环线程执行，不直接触碰 Win32 句柄，因此可安全跨线程共享。
 unsafe impl Send for DesktopLyricsManager {}
+// SAFETY: 同上，所有方法要么读 bool 要么通过消息循环间接操作窗口，无数据竞争
 unsafe impl Sync for DesktopLyricsManager {}
 
 impl Default for DesktopLyricsManager {
@@ -825,6 +933,7 @@ impl DesktopLyricsManager {
     pub fn show(&self) -> Result<(), String> {
         let hwnd = get_hwnd();
         if hwnd != 0 {
+            // SAFETY: hwnd 经 LYRICS_HWND 校验非 0，由消息循环线程创建并有效
             unsafe {
                 let _ = ShowWindow(HWND(hwnd as *mut _), SW_SHOWNOACTIVATE);
                 let _ = SetWindowPos(
@@ -844,6 +953,7 @@ impl DesktopLyricsManager {
     pub fn hide(&self) -> Result<(), String> {
         let hwnd = get_hwnd();
         if hwnd != 0 {
+            // SAFETY: 同 show()，hwnd 经校验有效
             unsafe {
                 let _ = ShowWindow(HWND(hwnd as *mut _), SW_HIDE);
             }
@@ -861,6 +971,8 @@ impl DesktopLyricsManager {
 
         let hwnd = get_hwnd();
         if hwnd != 0 {
+            // SAFETY: hwnd 经校验有效；GetWindowLongPtrW/SetWindowLongPtrW
+            // 仅读写 GWL_EXSTYLE（窗口扩展样式），不涉及窗口过程指针
             unsafe {
                 let style = GetWindowLongPtrW(HWND(hwnd as *mut _), GWL_EXSTYLE);
                 let transparent_bit = WS_EX_TRANSPARENT.0 as isize;
@@ -914,6 +1026,7 @@ impl DesktopLyricsManager {
     pub fn is_visible(&self) -> bool {
         let hwnd = get_hwnd();
         if hwnd != 0 {
+            // SAFETY: hwnd 经校验有效，IsWindowVisible 仅查询窗口可见性，无副作用
             unsafe { IsWindowVisible(HWND(hwnd as *mut _)).as_bool() }
         } else {
             false
@@ -928,6 +1041,8 @@ fn get_hwnd() -> isize {
 fn post_update() {
     let hwnd = get_hwnd();
     if hwnd != 0 {
+        // SAFETY: hwnd 经校验有效；PostMessageW 异步投递消息到目标线程消息队列，
+        // WPARAM/LPARAM 均为 0，不传递所有权，无生命周期问题
         unsafe {
             let _ = PostMessageW(
                 Some(HWND(hwnd as *mut _)),
@@ -988,12 +1103,14 @@ fn desired_window_height(scale: i32, font_size: i32) -> i32 {
     let line_spacing = 8 * scale / 96;
     let font_size_scaled = (font_size * scale / 96).max(18 * scale / 96);
 
-    // 濮嬬粓棰勭暀鍙岃姝岃瘝楂樺害锛岄伩鍏嶆瓕璇?缈昏瘧鍒囨崲鏃剁獥鍙ｆ姈鍔紝涔熼伩鍏嶅ぇ瀛椾綋琚鍓€?
+    // 始终预留双行歌词高度，避免歌词翻译切换时窗口抖动，也避免大字体被裁剪
     let content_h = font_size_scaled * 2 + line_spacing;
     (top_offset + content_h + bottom_padding).max(150 * scale / 96)
 }
 
 fn resize_window_for_font(hwnd: HWND, font_size: i32) {
+    // SAFETY: hwnd 由调用方保证有效；rect 是栈上局部变量，&raw mut 仅在
+    // GetWindowRect 调用期间被写入，随后在本函数内读取，无别名冲突
     unsafe {
         let dpi = get_dpi_for_window(hwnd);
         let scale = dpi as i32;
@@ -1007,7 +1124,7 @@ fn resize_window_for_font(hwnd: HWND, font_size: i32) {
             return;
         }
 
-        // 淇濇寔搴曢儴浣嶇疆涓嶅彉锛屽彧鏍规嵁瀛椾綋澶у皬璋冩暣楂樺害銆?
+        // 保持底部位置不变，只根据字体大小调整高度
         let new_y = rect.bottom - new_h;
         let _ = SetWindowPos(
             hwnd,
@@ -1041,7 +1158,13 @@ fn build_lyrics_layout(client_rect: &RECT, scale: i32, dual_line: bool) -> Lyric
         lower_rect.top = upper_rect.bottom;
     }
 
-    LyricsLayout { close_rect, lock_rect, text_rect, upper_rect, lower_rect }
+    LyricsLayout {
+        close_rect,
+        lock_rect,
+        text_rect,
+        upper_rect,
+        lower_rect,
+    }
 }
 
 fn apply_progress_effects(
@@ -1080,6 +1203,7 @@ fn apply_progress_effects(
         } else {
             base_brush
         };
+        // SAFETY: layout 是有效 COM 对象；brush 引用有效画刷；range 在文本范围内
         let _ = unsafe { layout.SetDrawingEffect(brush, range) };
         utf16_idx += len;
     }
@@ -1106,12 +1230,15 @@ fn measure_text_width_dwrite_with_state(
     if text.is_empty() {
         return Some(0);
     }
+    // SAFETY: create_layout 要求 COM 已初始化，调用方在 D2D_STATE 线程上下文
     let layout = unsafe {
         state
             .create_layout(text, font_size_scaled, 100_000.0, height.max(1) as f32)
             .ok()?
     };
     let mut metrics = DWRITE_TEXT_METRICS::default();
+    // SAFETY: layout 是有效 COM 对象；metrics 是栈上局部变量，&raw mut 仅在
+    // GetMetrics 调用期间被写入，随后读取，无别名冲突
     unsafe { layout.GetMetrics(&raw mut metrics).ok()? };
     Some(metrics.widthIncludingTrailingWhitespace.ceil().max(0.0) as i32)
 }
@@ -1123,248 +1250,321 @@ fn get_cached_font(font_size_scaled: i32) -> HFONT {
             return HFONT(font as *mut core::ffi::c_void);
         }
 
+        // SAFETY: w!("Microsoft YaHei") 是 NUL 结尾的 UTF-16 字面量；
+        // font_size_scaled 可能为负/零，GDI 会按其绝对值处理，无 UB
         let font = unsafe {
             CreateFontW(
-                font_size_scaled, 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0,
-                FONT_CHARSET(1), FONT_OUTPUT_PRECISION(0), FONT_CLIP_PRECISION(0), FONT_QUALITY(6), 0,
+                font_size_scaled,
+                0,
+                0,
+                0,
+                FW_NORMAL.0 as i32,
+                0,
+                0,
+                0,
+                FONT_CHARSET(1),
+                FONT_OUTPUT_PRECISION(0),
+                FONT_CLIP_PRECISION(0),
+                FONT_QUALITY(6),
+                0,
                 w!("Microsoft YaHei"),
             )
         };
         guard.insert(font_size_scaled, font.0 as usize);
         font
     } else {
+        // SAFETY: 同上分支
         unsafe {
             CreateFontW(
-                font_size_scaled, 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0,
-                FONT_CHARSET(1), FONT_OUTPUT_PRECISION(0), FONT_CLIP_PRECISION(0), FONT_QUALITY(6), 0,
+                font_size_scaled,
+                0,
+                0,
+                0,
+                FW_NORMAL.0 as i32,
+                0,
+                0,
+                0,
+                FONT_CHARSET(1),
+                FONT_OUTPUT_PRECISION(0),
+                FONT_CLIP_PRECISION(0),
+                FONT_QUALITY(6),
+                0,
                 w!("Microsoft YaHei"),
             )
         }
     }
 }
 
+/// # Safety
+/// 完整的桌面歌词渲染函数。调用者必须保证：
+/// - `hwnd` 是由本模块消息循环线程创建的有效窗口句柄
+/// - 当前线程已初始化 COM（`CoInitializeEx`）
+/// - 仅在 desktop-lyrics 消息循环线程上调用（D2D/DWrite 单线程访问）
 unsafe fn render_lyrics(hwnd: HWND) {
+    // SAFETY: 见函数级 Safety 文档；内部所有 &raw mut/const 均指向栈上局部变量，
+    // 在对应 Win32/COM 调用返回后才被读取，无别名冲突。GDI 对象（h_bitmap/hdc_mem）
+    // 在使用后通过 DeleteObject/DeleteDC 释放，遵循 GDI 对象生命周期管理契约。
     unsafe {
-    let mut window_rect = RECT::default();
-    let _ = GetWindowRect(hwnd, &raw mut window_rect);
-    let mut client_rect = RECT::default();
-    let _ = GetClientRect(hwnd, &raw mut client_rect);
-    let w = client_rect.right - client_rect.left;
-    let h = client_rect.bottom - client_rect.top;
-    if w <= 0 || h <= 0 {
-        return;
-    }
+        let mut window_rect = RECT::default();
+        let _ = GetWindowRect(hwnd, &raw mut window_rect);
+        let mut client_rect = RECT::default();
+        let _ = GetClientRect(hwnd, &raw mut client_rect);
+        let w = client_rect.right - client_rect.left;
+        let h = client_rect.bottom - client_rect.top;
+        if w <= 0 || h <= 0 {
+            return;
+        }
 
-    let dpi = get_dpi_for_window(hwnd);
-    let scale = dpi as i32;
+        let dpi = get_dpi_for_window(hwnd);
+        let scale = dpi as i32;
 
-    let (is_hovered, is_locked, current_line, sub_line, current_words, is_playing, font_size, preset, mut fade_alpha, fade_pending, render_pending, marquee_start_ms, lyric_progress, mut smooth_lyric_progress, mut visual_time, target_time, visual_time_last_ms) = {
-        if let Some(state) = SHARED_STATE.get() {
-            if let Ok(guard) = state.lock() {
-                (
-                    guard.is_hovered,
-                    guard.is_locked,
-                    guard.current_line.clone(),
-                    guard.sub_line.clone(),
-                    guard.current_words.clone(),
-                    guard.is_playing,
-                    guard.font_size,
-                    guard.color_preset,
-                    guard.fade_alpha,
-                    guard.fade_pending,
-                    guard.render_pending,
-                    guard.marquee_start_ms,
-                    guard.lyric_progress,
-                    guard.smooth_lyric_progress,
-                    guard.visual_time,
-                    guard.target_time,
-                    guard.visual_time_last_ms,
-                )
+        let (
+            is_hovered,
+            is_locked,
+            current_line,
+            sub_line,
+            current_words,
+            is_playing,
+            font_size,
+            preset,
+            mut fade_alpha,
+            fade_pending,
+            render_pending,
+            marquee_start_ms,
+            lyric_progress,
+            mut smooth_lyric_progress,
+            mut visual_time,
+            target_time,
+            visual_time_last_ms,
+        ) = {
+            if let Some(state) = SHARED_STATE.get() {
+                if let Ok(guard) = state.lock() {
+                    (
+                        guard.is_hovered,
+                        guard.is_locked,
+                        guard.current_line.clone(),
+                        guard.sub_line.clone(),
+                        guard.current_words.clone(),
+                        guard.is_playing,
+                        guard.font_size,
+                        guard.color_preset,
+                        guard.fade_alpha,
+                        guard.fade_pending,
+                        guard.render_pending,
+                        guard.marquee_start_ms,
+                        guard.lyric_progress,
+                        guard.smooth_lyric_progress,
+                        guard.visual_time,
+                        guard.target_time,
+                        guard.visual_time_last_ms,
+                    )
+                } else {
+                    return;
+                }
             } else {
                 return;
             }
-        } else {
-            return;
-        }
-    };
+        };
 
-    let now = now_ms();
-    let delta = ((now - visual_time_last_ms).max(0) as f32 / 1000.0).min(0.1);
-    if is_playing {
-        let diff = visual_time - target_time;
-        if diff.abs() > 0.25 {
+        let now = now_ms();
+        let delta = ((now - visual_time_last_ms).max(0) as f32 / 1000.0).min(0.1);
+        if is_playing {
+            let diff = visual_time - target_time;
+            if diff.abs() > 0.25 {
+                visual_time = target_time;
+            } else if diff.abs() > 0.15 {
+                let speed = (1.0 - diff * 2.0).clamp(0.5, 1.5);
+                visual_time += delta * speed;
+            } else {
+                visual_time += delta;
+            }
+        } else {
             visual_time = target_time;
-        } else if diff.abs() > 0.15 {
-            let speed = (1.0 - diff * 2.0).clamp(0.5, 1.5);
-            visual_time += delta * speed;
-        } else {
-            visual_time += delta;
         }
-    } else {
-        visual_time = target_time;
-    }
-    if let Some(state) = SHARED_STATE.get() {
-        if let Ok(mut guard) = state.try_lock() {
-            guard.visual_time = visual_time;
-            guard.visual_time_last_ms = now;
+        if let Some(state) = SHARED_STATE.get() {
+            if let Ok(mut guard) = state.try_lock() {
+                guard.visual_time = visual_time;
+                guard.visual_time_last_ms = now;
+            }
         }
-    }
 
-    let display_progress = karaoke_progress_from_words(&current_words, visual_time, lyric_progress);
-    if current_words.is_empty() {
-        let progress_delta = (display_progress - smooth_lyric_progress).abs();
-        if progress_delta > 0.0001 {
-            smooth_lyric_progress += (display_progress - smooth_lyric_progress) * 0.42;
+        let display_progress =
+            karaoke_progress_from_words(&current_words, visual_time, lyric_progress);
+        if current_words.is_empty() {
+            let progress_delta = (display_progress - smooth_lyric_progress).abs();
+            if progress_delta > 0.0001 {
+                smooth_lyric_progress += (display_progress - smooth_lyric_progress) * 0.42;
+            } else {
+                smooth_lyric_progress = display_progress;
+            }
         } else {
             smooth_lyric_progress = display_progress;
         }
-    } else {
-        smooth_lyric_progress = display_progress;
-    }
-    if let Some(state) = SHARED_STATE.get() {
-        if let Ok(mut guard) = state.try_lock() {
-            guard.smooth_lyric_progress = smooth_lyric_progress;
-        }
-    }
-
-    if fade_pending {
-        fade_alpha = (fade_alpha + 0.06).min(1.0);
-        let done = fade_alpha >= 1.0;
         if let Some(state) = SHARED_STATE.get() {
-            if let Ok(mut guard) = state.lock() {
-                guard.fade_alpha = fade_alpha;
-                if done {
-                    guard.fade_pending = false;
-                    guard.prev_line.clear();
-                    guard.prev_sub_line.clear();
-                }
+            if let Ok(mut guard) = state.try_lock() {
+                guard.smooth_lyric_progress = smooth_lyric_progress;
             }
         }
-        if !done {
-            let _ = InvalidateRect(Some(hwnd), None, false);
+
+        if fade_pending {
+            fade_alpha = (fade_alpha + 0.06).min(1.0);
+            let done = fade_alpha >= 1.0;
+            if let Some(state) = SHARED_STATE.get() {
+                if let Ok(mut guard) = state.lock() {
+                    guard.fade_alpha = fade_alpha;
+                    if done {
+                        guard.fade_pending = false;
+                        guard.prev_line.clear();
+                        guard.prev_sub_line.clear();
+                    }
+                }
+            }
+            if !done {
+                let _ = InvalidateRect(Some(hwnd), None, false);
+            }
         }
-    }
 
-    if !render_pending && !fade_pending && !is_hovered && !current_line.is_empty() && !sub_line.is_empty() {
-        // 浠嶅厑璁稿悗缁枃瀛?缈昏瘧鍙樺寲瑙﹀彂娓叉煋锛屼絾閬垮厤绌洪棽鏃堕噸澶嶈蛋鏁村抚鍚堟垚銆?
-    }
+        if !render_pending
+            && !fade_pending
+            && !is_hovered
+            && !current_line.is_empty()
+            && !sub_line.is_empty()
+        {
+            // 仍允许后续歌词/翻译变化触发渲染，但避免空闲时重复走整帧合成
+        }
 
-    let bmi = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: w,
-            biHeight: -h,
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: 0,
-            biSizeImage: 0,
-            biXPelsPerMeter: 0,
-            biYPelsPerMeter: 0,
-            biClrUsed: 0,
-            biClrImportant: 0,
-        },
-        bmiColors: [RGBQUAD {
-            rgbBlue: 0,
-            rgbGreen: 0,
-            rgbRed: 0,
-            rgbReserved: 0,
-        }],
-    };
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: w,
+                biHeight: -h,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: 0,
+                biSizeImage: 0,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            },
+            bmiColors: [RGBQUAD {
+                rgbBlue: 0,
+                rgbGreen: 0,
+                rgbRed: 0,
+                rgbReserved: 0,
+            }],
+        };
 
-    let mut p_bits: *mut core::ffi::c_void = std::ptr::null_mut();
-    let h_bitmap = match CreateDIBSection(None, &raw const bmi, DIB_RGB_COLORS, &raw mut p_bits, None, 0) {
-        Ok(h) => h,
-        Err(e) => {
-            log::error!("Desktop lyrics: CreateDIBSection failed: {e}");
+        let mut p_bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let h_bitmap = match CreateDIBSection(
+            None,
+            &raw const bmi,
+            DIB_RGB_COLORS,
+            &raw mut p_bits,
+            None,
+            0,
+        ) {
+            Ok(h) => h,
+            Err(e) => {
+                log::error!("Desktop lyrics: CreateDIBSection failed: {e}");
+                return;
+            }
+        };
+
+        if p_bits.is_null() {
+            let _ = DeleteObject(HGDIOBJ(h_bitmap.0));
             return;
         }
-    };
 
-    if p_bits.is_null() {
-        let _ = DeleteObject(HGDIOBJ(h_bitmap.0));
-        return;
-    }
+        let hdc_mem = CreateCompatibleDC(None);
+        let old_bitmap = SelectObject(hdc_mem, HGDIOBJ(h_bitmap.0));
 
-    let hdc_mem = CreateCompatibleDC(None);
-    let old_bitmap = SelectObject(hdc_mem, HGDIOBJ(h_bitmap.0));
+        SetBkMode(hdc_mem, TRANSPARENT);
 
-    SetBkMode(hdc_mem, TRANSPARENT);
+        let font_size_scaled = font_size * scale / 96;
+        // 调用 get_cached_font 是为了预热字体缓存(有副作用),返回值未使用
+        let _ = get_cached_font(font_size_scaled);
 
-    let font_size_scaled = font_size * scale / 96;
-    // 调用 get_cached_font 是为了预热字体缓存(有副作用),返回值未使用
-    let _ = get_cached_font(font_size_scaled);
+        let current_words_animating = is_playing && !current_words.is_empty();
+        let display_progress =
+            karaoke_progress_from_words(&current_words, visual_time, lyric_progress);
+        let line_duration_ms = current_words
+            .iter()
+            .filter(|w| !w.text.is_empty() && w.end > w.start)
+            .map(|w| w.end)
+            .reduce(f32::max)
+            .map(|end| {
+                let start = current_words
+                    .iter()
+                    .filter(|w| !w.text.is_empty() && w.end > w.start)
+                    .map(|w| w.start)
+                    .reduce(f32::min)
+                    .unwrap_or(end);
+                ((end - start).max(0.0) * 1000.0) as i64
+            });
+        let d2d_should_animate_scroll = render_lyrics_d2d_frame(
+            hwnd,
+            hdc_mem,
+            &client_rect,
+            scale,
+            is_hovered,
+            is_locked,
+            &current_line,
+            &sub_line,
+            font_size,
+            preset,
+            fade_alpha,
+            marquee_start_ms,
+            display_progress,
+            smooth_lyric_progress,
+            line_duration_ms,
+        )
+        .unwrap_or(false);
+        let should_animate_scroll = current_words_animating || d2d_should_animate_scroll;
 
-    let current_words_animating = is_playing && !current_words.is_empty();
-    let display_progress = karaoke_progress_from_words(&current_words, visual_time, lyric_progress);
-    let line_duration_ms = current_words
-        .iter()
-        .filter(|w| !w.text.is_empty() && w.end > w.start)
-        .map(|w| w.end)
-        .reduce(f32::max)
-        .map(|end| {
-            let start = current_words.iter()
-                .filter(|w| !w.text.is_empty() && w.end > w.start)
-                .map(|w| w.start)
-                .reduce(f32::min)
-                .unwrap_or(end);
-            ((end - start).max(0.0) * 1000.0) as i64
-        });
-    let d2d_should_animate_scroll = render_lyrics_d2d_frame(
-        hwnd,
-        hdc_mem,
-        &client_rect,
-        scale,
-        is_hovered,
-        is_locked,
-        &current_line,
-        &sub_line,
-        font_size,
-        preset,
-        fade_alpha,
-        marquee_start_ms,
-        display_progress,
-        smooth_lyric_progress,
-        line_duration_ms,
-    )
-    .unwrap_or(false);
-    let should_animate_scroll = current_words_animating || d2d_should_animate_scroll;
+        let pt_dst = POINT {
+            x: window_rect.left,
+            y: window_rect.top,
+        };
+        let pt_src = POINT { x: 0, y: 0 };
+        let sz = SIZE { cx: w, cy: h };
+        let blend = BLENDFUNCTION {
+            BlendOp: 0,
+            BlendFlags: 0,
+            SourceConstantAlpha: 255,
+            AlphaFormat: 1,
+        };
+        let _ = UpdateLayeredWindow(
+            hwnd,
+            None,
+            Some(&raw const pt_dst),
+            Some(&raw const sz),
+            Some(hdc_mem),
+            Some(&raw const pt_src),
+            COLORREF(0),
+            Some(&raw const blend),
+            ULW_ALPHA,
+        );
 
-    let pt_dst = POINT { x: window_rect.left, y: window_rect.top };
-    let pt_src = POINT { x: 0, y: 0 };
-    let sz = SIZE { cx: w, cy: h };
-    let blend = BLENDFUNCTION {
-        BlendOp: 0,
-        BlendFlags: 0,
-        SourceConstantAlpha: 255,
-        AlphaFormat: 1,
-    };
-    let _ = UpdateLayeredWindow(
-        hwnd,
-        None,
-        Some(&raw const pt_dst),
-        Some(&raw const sz),
-        Some(hdc_mem),
-        Some(&raw const pt_src),
-        COLORREF(0),
-        Some(&raw const blend),
-        ULW_ALPHA,
-    );
-
-    if let Some(state) = SHARED_STATE.get() {
-        if let Ok(mut guard) = state.try_lock() {
-            guard.marquee_active = should_animate_scroll;
-            guard.render_pending = false;
+        if let Some(state) = SHARED_STATE.get() {
+            if let Ok(mut guard) = state.try_lock() {
+                guard.marquee_active = should_animate_scroll;
+                guard.render_pending = false;
+            }
         }
-    }
 
-    let _ = SelectObject(hdc_mem, old_bitmap);
-    let _ = DeleteObject(HGDIOBJ(h_bitmap.0));
-    let _ = DeleteDC(hdc_mem);
-
+        let _ = SelectObject(hdc_mem, old_bitmap);
+        let _ = DeleteObject(HGDIOBJ(h_bitmap.0));
+        let _ = DeleteDC(hdc_mem);
     }
 }
 
 fn run_message_loop(_state: Arc<Mutex<SharedLyricState>>) {
+    // SAFETY: 本函数在专属的 desktop-lyrics 线程上运行，所有 Win32 调用均在该线程：
+    // - CoInitializeEx 在线程入口调用，CoUninitialize 在退出时配对
+    // - RegisterClassW/CreateWindowExW 注册的窗口过程由本线程消息泵分发
+    // - &raw const/mut 均指向栈上局部变量，在 Win32 调用返回后才读取，无别名
+    // - SetTimer 回调由本线程消息泵处理（回调指针为 None，走 WM_TIMER）
     unsafe {
         let _ = set_thread_dpi_awareness_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let com_initialized = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
@@ -1429,8 +1629,7 @@ fn run_message_loop(_state: Arc<Mutex<SharedLyricState>>) {
         let y = work_area.bottom - window_h - 10;
 
         let hwnd = match CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
-                | WS_EX_TRANSPARENT,
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
             class_name,
             w!("Desktop Lyrics"),
             WS_POPUP,
@@ -1452,7 +1651,7 @@ fn run_message_loop(_state: Arc<Mutex<SharedLyricState>>) {
 
         let _ = LYRICS_HWND.set(hwnd.0 as isize);
 
-        // 鍚姩瀹氭椂鍣細16ms 妫€娴嬩竴娆★紝浣嗗彧鏈夋粴鍔?娣″叆/鎮诞鍙樺寲鏃舵墠閲嶇粯
+        // 启动定时器：16ms 检测一次，但只有滚动/淡入/悬浮变化时才重绘
         let _ = SetTimer(Some(hwnd), HOVER_TIMER_ID, 16, None);
 
         let mut msg = MSG::default();
@@ -1468,6 +1667,10 @@ fn run_message_loop(_state: Arc<Mutex<SharedLyricState>>) {
     }
 }
 
+/// # Safety
+/// Win32 窗口过程回调。由系统在 desktop-lyrics 消息循环线程上调用，
+/// `hwnd` 是本模块创建的窗口句柄。各消息处理分支内的 unsafe 块均仅调用
+/// 线程安全的 Win32 API 或操作栈上局部变量。
 unsafe extern "system" fn window_proc(
     hwnd: HWND,
     msg: u32,
@@ -1477,6 +1680,7 @@ unsafe extern "system" fn window_proc(
     match msg {
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => unsafe {
+            // SAFETY: ps 是栈上局部变量，BeginPaint/EndPaint 配对调用
             let mut ps = PAINTSTRUCT::default();
             let _ = BeginPaint(hwnd, &raw mut ps);
             render_lyrics(hwnd);
@@ -1484,21 +1688,29 @@ unsafe extern "system" fn window_proc(
             LRESULT(0)
         },
         WM_DL_UPDATE => unsafe {
+            // SAFETY: hwnd 有效，InvalidateRect 仅标记重绘区域
             let _ = InvalidateRect(Some(hwnd), None, false);
             LRESULT(0)
         },
         WM_SIZE => unsafe {
+            // SAFETY: 同上
             let _ = InvalidateRect(Some(hwnd), None, false);
             LRESULT(0)
         },
         WM_TIMER => unsafe {
+            // SAFETY: pt/rect/client_rect 均为栈上局部变量，&raw mut 仅在对应
+            // Win32 调用期间被写入；GetWindowLongPtrW/SetWindowLongPtrW 仅操作
+            // GWL_EXSTYLE，不涉及窗口过程指针
             if wparam.0 == HOVER_TIMER_ID {
                 let mut pt = POINT::default();
                 let _ = GetCursorPos(&raw mut pt);
                 let mut rect = RECT::default();
                 let _ = GetWindowRect(hwnd, &raw mut rect);
 
-                let is_inside = pt.x >= rect.left && pt.x < rect.right && pt.y >= rect.top && pt.y < rect.bottom;
+                let is_inside = pt.x >= rect.left
+                    && pt.x < rect.right
+                    && pt.y >= rect.top
+                    && pt.y < rect.bottom;
 
                 if let Some(state) = SHARED_STATE.get() {
                     if let Ok(mut guard) = state.try_lock() {
@@ -1546,6 +1758,7 @@ unsafe extern "system" fn window_proc(
             LRESULT(0)
         },
         WM_DPICHANGED => unsafe {
+            // SAFETY: lparam 指向系统提供的 RECT，在窗口过程调用期间有效
             let rect = &*(lparam.0 as *const RECT);
             let _ = SetWindowPos(
                 hwnd,
@@ -1559,7 +1772,8 @@ unsafe extern "system" fn window_proc(
             LRESULT(0)
         },
         WM_MOUSEMOVE => unsafe {
-            // 褰撻潪閿佸畾妯″紡鏃讹紝WM_MOUSEMOVE 涔熻兘姝ｅ父宸ヤ綔
+            // 非锁定模式下 WM_MOUSEMOVE 能正常工作
+            // SAFETY: hwnd 有效，InvalidateRect 仅标记重绘区域
             if let Some(state) = SHARED_STATE.get() {
                 if let Ok(mut guard) = state.try_lock() {
                     if !guard.is_hovered {
@@ -1572,6 +1786,8 @@ unsafe extern "system" fn window_proc(
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },
         WM_LBUTTONUP => unsafe {
+            // SAFETY: rect 是栈上局部变量，&raw mut 仅在 GetClientRect 期间写入；
+            // GetWindowLongPtrW/SetWindowLongPtrW 仅操作 GWL_EXSTYLE
             let x = (lparam.0 & 0xFFFF) as i16 as i32;
             let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
             let mut rect = RECT::default();
@@ -1620,6 +1836,7 @@ unsafe extern "system" fn window_proc(
             LRESULT(0)
         },
         WM_MOUSELEAVE => unsafe {
+            // SAFETY: hwnd 有效，InvalidateRect 仅标记重绘区域
             if let Some(state) = SHARED_STATE.get() {
                 if let Ok(mut guard) = state.try_lock() {
                     guard.is_hovered = false;
@@ -1629,6 +1846,8 @@ unsafe extern "system" fn window_proc(
             LRESULT(0)
         },
         WM_NCHITTEST => unsafe {
+            // SAFETY: rect/screen_pt 均为栈上局部变量，&raw mut 仅在对应 Win32
+            // 调用期间被写入；ScreenToClient 将屏幕坐标转为客户区坐标
             if let Some(state) = SHARED_STATE.get() {
                 if let Ok(guard) = state.try_lock() {
                     let x = (lparam.0 & 0xFFFF) as i16 as i32;
@@ -1650,7 +1869,9 @@ unsafe extern "system" fn window_proc(
                         return LRESULT(HTTRANSPARENT as isize);
                     }
 
-                    if point_in_rect(screen_pt.x, screen_pt.y, &close_rect) || point_in_rect(screen_pt.x, screen_pt.y, &lock_rect) {
+                    if point_in_rect(screen_pt.x, screen_pt.y, &close_rect)
+                        || point_in_rect(screen_pt.x, screen_pt.y, &lock_rect)
+                    {
                         return LRESULT(HTCLIENT as isize);
                     }
 
@@ -1668,23 +1889,30 @@ unsafe extern "system" fn window_proc(
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },
         WM_CLOSE => unsafe {
+            // SAFETY: hwnd 有效，ShowWindow 仅修改窗口可见性
             let _ = ShowWindow(hwnd, SW_HIDE);
             LRESULT(0)
         },
         WM_DESTROY => unsafe {
+            // SAFETY: hwnd 有效；KillTimer 注销本窗口创建的定时器；
+            // PostQuitMessage 向本线程消息队列投递 WM_QUIT 以退出消息循环
             let _ = KillTimer(Some(hwnd), HOVER_TIMER_ID);
             PostQuitMessage(0);
             LRESULT(0)
         },
-        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+        _ => unsafe {
+            // SAFETY: 转发未处理的消息给默认窗口过程
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        },
     }
 }
 
 static DESKTOP_LYRICS_MANAGER: OnceLock<Arc<Mutex<DesktopLyricsManager>>> = OnceLock::new();
 
 pub fn get_desktop_lyrics_manager() -> Arc<Mutex<DesktopLyricsManager>> {
-    Arc::clone(DESKTOP_LYRICS_MANAGER
-        .get_or_init(|| Arc::new(Mutex::new(DesktopLyricsManager::new()))))
+    Arc::clone(
+        DESKTOP_LYRICS_MANAGER.get_or_init(|| Arc::new(Mutex::new(DesktopLyricsManager::new()))),
+    )
 }
 
 #[command]
@@ -1713,7 +1941,14 @@ pub fn update_desktop_lyric(
 ) -> Result<(), String> {
     let manager = get_desktop_lyrics_manager();
     let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
-    guard.update_lyric(&current_line, &sub_line, progress, words, current_time, is_playing)
+    guard.update_lyric(
+        &current_line,
+        &sub_line,
+        progress,
+        words,
+        current_time,
+        is_playing,
+    )
 }
 
 #[command]
@@ -1736,7 +1971,6 @@ pub fn set_desktop_lyrics_color_preset(preset: String) -> Result<(), String> {
     let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard.set_color_preset(&preset)
 }
-
 
 #[command]
 pub fn is_desktop_lyrics_visible() -> Result<bool, String> {

@@ -1,8 +1,6 @@
 //! 插件系统 Tauri 命令
 
-use super::manager::{
-    self, PluginManifest,
-};
+use super::manager::{self, PluginManifest};
 use serde::{Deserialize, Serialize};
 use tauri::command;
 
@@ -60,8 +58,7 @@ pub fn uninstall_plugin(plugin_id: &str) -> Result<(), String> {
 /// 获取插件目录路径
 #[command]
 pub fn get_plugins_directory() -> Result<String, String> {
-    manager::get_plugins_dir()
-        .map(|p| p.to_string_lossy().to_string())
+    manager::get_plugins_dir().map(|p| p.to_string_lossy().to_string())
 }
 
 /// 在文件管理器中打开插件目录
@@ -78,41 +75,34 @@ pub fn open_plugins_directory() -> Result<(), String> {
 /// 保存截图到程序目录下的 screenshots 文件夹
 #[command]
 pub fn save_screenshot(filename: &str, data: Vec<u8>) -> Result<String, String> {
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("无法获取可执行文件路径: {e}"))?;
-    let exe_dir = exe_path.parent()
-        .ok_or("无法获取可执行文件目录")?;
-    
+    let exe_path = std::env::current_exe().map_err(|e| format!("无法获取可执行文件路径: {e}"))?;
+    let exe_dir = exe_path.parent().ok_or("无法获取可执行文件目录")?;
+
     let screenshots_dir = exe_dir.join("screenshots");
-    
+
     // 创建目录（如果不存在）
     if !screenshots_dir.exists() {
-        std::fs::create_dir_all(&screenshots_dir)
-            .map_err(|e| format!("无法创建截图目录: {e}"))?;
+        std::fs::create_dir_all(&screenshots_dir).map_err(|e| format!("无法创建截图目录: {e}"))?;
     }
-    
+
     let file_path = screenshots_dir.join(filename);
-    
-    std::fs::write(&file_path, &data)
-        .map_err(|e| format!("无法保存截图: {e}"))?;
-    
+
+    std::fs::write(&file_path, &data).map_err(|e| format!("无法保存截图: {e}"))?;
+
     Ok(file_path.to_string_lossy().to_string())
 }
 
 /// 打开截图目录
 #[command]
 pub fn open_screenshots_directory() -> Result<(), String> {
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("无法获取可执行文件路径: {e}"))?;
-    let exe_dir = exe_path.parent()
-        .ok_or("无法获取可执行文件目录")?;
+    let exe_path = std::env::current_exe().map_err(|e| format!("无法获取可执行文件路径: {e}"))?;
+    let exe_dir = exe_path.parent().ok_or("无法获取可执行文件目录")?;
 
     let screenshots_dir = exe_dir.join("screenshots");
 
     // 创建目录（如果不存在）
     if !screenshots_dir.exists() {
-        std::fs::create_dir_all(&screenshots_dir)
-            .map_err(|e| format!("无法创建截图目录: {e}"))?;
+        std::fs::create_dir_all(&screenshots_dir).map_err(|e| format!("无法创建截图目录: {e}"))?;
     }
 
     tauri_plugin_opener::reveal_item_in_dir(&screenshots_dir)

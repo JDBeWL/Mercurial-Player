@@ -12,7 +12,11 @@ export default [
   // JS 推荐规则
   js.configs.recommended,
 
-  // TypeScript 推荐规则（非类型检查版本，无需 tsconfig project 引用，启动快）
+  // TypeScript 推荐规则（非类型检查版本）
+  // 未使用 recommendedTypeChecked 因为：
+  // 1. 现有代码库有大量 any 使用，启用后产生 400+ 错误
+  // 2. ESLint 10 + typescript-eslint 8 的 parserServices 对配置文件有兼容性问题
+  // 后续可逐步修复类型安全问题后再升级到 recommendedTypeChecked
   ...tseslint.configs.recommended,
 
   // Vue 推荐规则（flat config 格式）
@@ -28,20 +32,29 @@ export default [
     },
   },
 
-  // 测试文件：声明 vitest 全局变量（vitest.config.ts 中 globals: true）
+  // 测试文件：声明完整的 vitest 全局变量（vitest.config.ts 中 globals: true）
+  // 包含 vi/vitest 等 API，避免手动声明遗漏
   {
     files: ['tests/**/*.ts', 'src/**/*.{test,spec}.ts'],
     languageOptions: {
       globals: {
         describe: 'readonly',
         it: 'readonly',
+        test: 'readonly',
         expect: 'readonly',
         beforeEach: 'readonly',
         afterEach: 'readonly',
         beforeAll: 'readonly',
         afterAll: 'readonly',
         vi: 'readonly',
+        vitest: 'readonly',
       },
+    },
+    rules: {
+      // 允许测试中使用 any（mock 场景常见）
+      '@typescript-eslint/no-explicit-any': 'off',
+      // 测试文件中允许未使用的变量（describe/it 回调参数等）
+      '@typescript-eslint/no-unused-vars': 'off',
     },
   },
 
@@ -53,8 +66,8 @@ export default [
       'no-undef': 'off',
       // Vue: 允许单词组件名（如 Settings、PlayerControls）
       'vue/multi-word-component-names': 'off',
-      // TS: 允许使用 any（Tauri API 返回值等场景需要）
-      '@typescript-eslint/no-explicit-any': 'off',
+      // TS: any 仅警告（Tauri API 返回值等场景需要），测试文件中完全允许
+      '@typescript-eslint/no-explicit-any': 'warn',
       // TS: 未使用变量仅警告，允许以 _ 前缀显式忽略
       '@typescript-eslint/no-unused-vars': [
         'warn',
@@ -64,8 +77,8 @@ export default [
           caughtErrorsIgnorePattern: '^_',
         },
       ],
-      // TS: ban-ts-comment 仅警告（@ts-ignore 在某些快速原型场景中仍有用）
-      '@typescript-eslint/ban-ts-comment': 'warn',
+      // TS: 禁止 @ts-ignore（应使用 @ts-expect-error 带原因），阻断 CI
+      '@typescript-eslint/ban-ts-comment': 'error',
       // TS: Function 类型仅警告
       '@typescript-eslint/no-unsafe-function-type': 'warn',
       // 允许 console（项目使用 logger，但开发调试时偶尔需要 console）

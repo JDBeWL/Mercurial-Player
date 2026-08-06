@@ -7,7 +7,9 @@ use std::f32::consts::PI;
 use std::sync::{Arc, RwLock};
 
 pub const EQ_BAND_COUNT: usize = 10;
-pub const EQ_FREQUENCIES: [f32; EQ_BAND_COUNT] = [31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
+pub const EQ_FREQUENCIES: [f32; EQ_BAND_COUNT] = [
+    31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
+];
 pub const EQ_Q_VALUES: [f32; EQ_BAND_COUNT] = [0.7, 0.7, 0.8, 0.9, 1.0, 1.0, 1.1, 1.2, 1.3, 1.4];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +23,11 @@ pub struct EqBand {
 
 impl Default for EqBand {
     fn default() -> Self {
-        Self { frequency: 1000.0, gain: 0.0, q: 1.0 }
+        Self {
+            frequency: 1000.0,
+            gain: 0.0,
+            q: 1.0,
+        }
     }
 }
 
@@ -33,16 +39,76 @@ pub struct EqPreset {
 }
 
 impl EqPreset {
-    #[must_use] pub fn flat() -> Self { Self { name: "Flat".to_string(), gains: [0.0; EQ_BAND_COUNT] } }
-    #[must_use] pub fn bass_boost() -> Self { Self { name: "Bass Boost".to_string(), gains: [4.0, 3.5, 2.5, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] } }
-    #[must_use] pub fn treble_boost() -> Self { Self { name: "Treble Boost".to_string(), gains: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.5, 2.5, 3.5, 4.0] } }
-    #[must_use] pub fn vocal() -> Self { Self { name: "Vocal".to_string(), gains: [-1.5, -1.0, 0.0, 1.5, 2.5, 2.5, 2.0, 0.5, 0.0, -0.5] } }
-    #[must_use] pub fn rock() -> Self { Self { name: "Rock".to_string(), gains: [3.5, 2.5, 1.5, 0.0, -0.5, 0.0, 1.5, 2.0, 2.5, 3.0] } }
-    #[must_use] pub fn pop() -> Self { Self { name: "Pop".to_string(), gains: [-0.5, 0.0, 1.5, 2.0, 2.5, 2.0, 0.5, 0.0, -0.5, -1.0] } }
-    #[must_use] pub fn jazz() -> Self { Self { name: "Jazz".to_string(), gains: [2.0, 1.5, 0.5, 1.0, -1.0, -1.0, 0.0, 1.5, 2.0, 2.5] } }
-    #[must_use] pub fn classical() -> Self { Self { name: "Classical".to_string(), gains: [2.5, 2.0, 1.5, 0.5, -0.5, -0.5, 0.0, 1.5, 2.0, 2.5] } }
-    #[must_use] pub fn electronic() -> Self { Self { name: "Electronic".to_string(), gains: [3.5, 3.0, 0.5, 0.0, -1.0, 1.0, 0.5, 2.0, 2.5, 3.5] } }
-    #[must_use] pub fn acoustic() -> Self { Self { name: "Acoustic".to_string(), gains: [2.0, 1.5, 0.5, 0.5, 1.5, 1.5, 1.5, 2.0, 1.5, 0.5] } }
+    #[must_use]
+    pub fn flat() -> Self {
+        Self {
+            name: "Flat".to_string(),
+            gains: [0.0; EQ_BAND_COUNT],
+        }
+    }
+    #[must_use]
+    pub fn bass_boost() -> Self {
+        Self {
+            name: "Bass Boost".to_string(),
+            gains: [4.0, 3.5, 2.5, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        }
+    }
+    #[must_use]
+    pub fn treble_boost() -> Self {
+        Self {
+            name: "Treble Boost".to_string(),
+            gains: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.5, 2.5, 3.5, 4.0],
+        }
+    }
+    #[must_use]
+    pub fn vocal() -> Self {
+        Self {
+            name: "Vocal".to_string(),
+            gains: [-1.5, -1.0, 0.0, 1.5, 2.5, 2.5, 2.0, 0.5, 0.0, -0.5],
+        }
+    }
+    #[must_use]
+    pub fn rock() -> Self {
+        Self {
+            name: "Rock".to_string(),
+            gains: [3.5, 2.5, 1.5, 0.0, -0.5, 0.0, 1.5, 2.0, 2.5, 3.0],
+        }
+    }
+    #[must_use]
+    pub fn pop() -> Self {
+        Self {
+            name: "Pop".to_string(),
+            gains: [-0.5, 0.0, 1.5, 2.0, 2.5, 2.0, 0.5, 0.0, -0.5, -1.0],
+        }
+    }
+    #[must_use]
+    pub fn jazz() -> Self {
+        Self {
+            name: "Jazz".to_string(),
+            gains: [2.0, 1.5, 0.5, 1.0, -1.0, -1.0, 0.0, 1.5, 2.0, 2.5],
+        }
+    }
+    #[must_use]
+    pub fn classical() -> Self {
+        Self {
+            name: "Classical".to_string(),
+            gains: [2.5, 2.0, 1.5, 0.5, -0.5, -0.5, 0.0, 1.5, 2.0, 2.5],
+        }
+    }
+    #[must_use]
+    pub fn electronic() -> Self {
+        Self {
+            name: "Electronic".to_string(),
+            gains: [3.5, 3.0, 0.5, 0.0, -1.0, 1.0, 0.5, 2.0, 2.5, 3.5],
+        }
+    }
+    #[must_use]
+    pub fn acoustic() -> Self {
+        Self {
+            name: "Acoustic".to_string(),
+            gains: [2.0, 1.5, 0.5, 0.5, 1.5, 1.5, 1.5, 2.0, 1.5, 0.5],
+        }
+    }
 }
 
 #[must_use]
@@ -71,21 +137,35 @@ pub struct BiquadCoefficients {
 
 impl Default for BiquadCoefficients {
     fn default() -> Self {
-        Self { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 }
+        Self {
+            b0: 1.0,
+            b1: 0.0,
+            b2: 0.0,
+            a1: 0.0,
+            a2: 0.0,
+        }
     }
 }
 
 impl BiquadCoefficients {
     #[must_use]
     pub fn peaking_eq(sample_rate: f32, frequency: f32, gain_db: f32, q: f32) -> Self {
-        if gain_db.abs() < 0.001 { return Self::default(); }
+        if gain_db.abs() < 0.001 {
+            return Self::default();
+        }
         let a = 10.0_f32.powf(gain_db / 40.0);
         let omega = 2.0 * PI * frequency / sample_rate;
         let (sin_omega, cos_omega) = (omega.sin(), omega.cos());
         let alpha = sin_omega / (2.0 * q);
         let (b0, b1, b2) = (1.0 + alpha * a, -2.0 * cos_omega, 1.0 - alpha * a);
         let (a0, a1, a2) = (1.0 + alpha / a, -2.0 * cos_omega, 1.0 - alpha / a);
-        Self { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
+        Self {
+            b0: b0 / a0,
+            b1: b1 / a0,
+            b2: b2 / a0,
+            a1: a1 / a0,
+            a2: a2 / a0,
+        }
     }
 }
 
@@ -99,7 +179,9 @@ pub struct BiquadState {
 
 impl BiquadState {
     pub fn process(&mut self, input: f32, coeffs: &BiquadCoefficients) -> f32 {
-        let output = coeffs.b0 * input + coeffs.b1 * self.x1 + coeffs.b2 * self.x2 - coeffs.a1 * self.y1 - coeffs.a2 * self.y2;
+        let output = coeffs.b0 * input + coeffs.b1 * self.x1 + coeffs.b2 * self.x2
+            - coeffs.a1 * self.y1
+            - coeffs.a2 * self.y2;
         self.x2 = self.x1;
         self.x1 = input;
         self.y2 = self.y1;
@@ -122,7 +204,11 @@ pub struct EqSettings {
 
 impl Default for EqSettings {
     fn default() -> Self {
-        Self { enabled: false, gains: [0.0; EQ_BAND_COUNT], preamp: 0.0 }
+        Self {
+            enabled: false,
+            gains: [0.0; EQ_BAND_COUNT],
+            preamp: 0.0,
+        }
     }
 }
 
@@ -154,15 +240,22 @@ impl Equalizer {
     }
 
     pub fn update_coefficients(&mut self) {
-        let settings = self.settings.read().unwrap();
+        let settings = lock_or_log!(self.settings.read());
         for (i, &freq) in EQ_FREQUENCIES.iter().enumerate() {
-            self.coefficients[i] = BiquadCoefficients::peaking_eq(self.sample_rate, freq, settings.gains[i], EQ_Q_VALUES[i]);
+            self.coefficients[i] = BiquadCoefficients::peaking_eq(
+                self.sample_rate,
+                freq,
+                settings.gains[i],
+                EQ_Q_VALUES[i],
+            );
         }
     }
 
     pub fn process_sample(&mut self, input: f32, channel: usize) -> f32 {
-        let settings = self.settings.read().unwrap();
-        if !settings.enabled { return input; }
+        let settings = lock_or_log!(self.settings.read());
+        if !settings.enabled {
+            return input;
+        }
         let preamp_gain = 10.0_f32.powf(settings.preamp / 20.0);
         let mut sample = input * preamp_gain;
         drop(settings);
@@ -173,8 +266,10 @@ impl Equalizer {
     }
 
     pub fn process_buffer(&mut self, buffer: &mut [f32]) {
-        let settings = self.settings.read().unwrap();
-        if !settings.enabled { return; }
+        let settings = lock_or_log!(self.settings.read());
+        if !settings.enabled {
+            return;
+        }
         let preamp_gain = 10.0_f32.powf(settings.preamp / 20.0);
         drop(settings);
         for (i, sample) in buffer.iter_mut().enumerate() {
@@ -196,28 +291,28 @@ impl Equalizer {
     }
 
     pub fn set_gains(&mut self, gains: [f32; EQ_BAND_COUNT]) {
-        self.settings.write().unwrap().gains = gains;
+        lock_or_log!(self.settings.write()).gains = gains;
         self.update_coefficients();
     }
 
     pub fn set_band_gain(&mut self, band: usize, gain: f32) {
         if band < EQ_BAND_COUNT {
-            self.settings.write().unwrap().gains[band] = gain.clamp(-8.0, 8.0);
+            lock_or_log!(self.settings.write()).gains[band] = gain.clamp(-8.0, 8.0);
             self.update_coefficients();
         }
     }
 
     pub fn set_preamp(&mut self, preamp: f32) {
-        self.settings.write().unwrap().preamp = preamp.clamp(-8.0, 8.0);
+        lock_or_log!(self.settings.write()).preamp = preamp.clamp(-8.0, 8.0);
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
-        self.settings.write().unwrap().enabled = enabled;
+        lock_or_log!(self.settings.write()).enabled = enabled;
     }
 
     #[must_use]
     pub fn get_settings(&self) -> EqSettings {
-        self.settings.read().unwrap().clone()
+        lock_or_log!(self.settings.read()).clone()
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: u32) {
@@ -256,7 +351,9 @@ pub struct GlobalEqualizer {
 impl GlobalEqualizer {
     #[must_use]
     pub fn new() -> Self {
-        Self { settings: Arc::new(RwLock::new(EqSettings::default())) }
+        Self {
+            settings: Arc::new(RwLock::new(EqSettings::default())),
+        }
     }
 
     #[must_use]
@@ -266,29 +363,29 @@ impl GlobalEqualizer {
 
     #[must_use]
     pub fn get_settings(&self) -> EqSettings {
-        self.settings.read().unwrap().clone()
+        lock_or_log!(self.settings.read()).clone()
     }
 
     pub fn set_settings(&self, settings: EqSettings) {
-        *self.settings.write().unwrap() = settings;
+        *lock_or_log!(self.settings.write()) = settings;
     }
 
     pub fn set_enabled(&self, enabled: bool) {
-        self.settings.write().unwrap().enabled = enabled;
+        lock_or_log!(self.settings.write()).enabled = enabled;
     }
 
     pub fn set_gains(&self, gains: [f32; EQ_BAND_COUNT]) {
-        self.settings.write().unwrap().gains = gains;
+        lock_or_log!(self.settings.write()).gains = gains;
     }
 
     pub fn set_band_gain(&self, band: usize, gain: f32) {
         if band < EQ_BAND_COUNT {
-            self.settings.write().unwrap().gains[band] = gain.clamp(-8.0, 8.0);
+            lock_or_log!(self.settings.write()).gains[band] = gain.clamp(-8.0, 8.0);
         }
     }
 
     pub fn set_preamp(&self, preamp: f32) {
-        self.settings.write().unwrap().preamp = preamp.clamp(-8.0, 8.0);
+        lock_or_log!(self.settings.write()).preamp = preamp.clamp(-8.0, 8.0);
     }
 }
 
@@ -328,8 +425,14 @@ mod tests {
     #[test]
     fn test_peaking_eq_nonzero_gain_not_identity() {
         let coeffs = BiquadCoefficients::peaking_eq(48000.0, 1000.0, 6.0, 1.0);
-        assert!(!approx_eq(coeffs.b0, 1.0), "b0 should differ from 1.0 with non-zero gain");
-        assert!(!approx_eq(coeffs.b1, 0.0), "b1 should differ from 0.0 with non-zero gain");
+        assert!(
+            !approx_eq(coeffs.b0, 1.0),
+            "b0 should differ from 1.0 with non-zero gain"
+        );
+        assert!(
+            !approx_eq(coeffs.b1, 0.0),
+            "b1 should differ from 0.0 with non-zero gain"
+        );
         // peaking EQ 归一化后 a1 == b1
         assert!(approx_eq(coeffs.a1, coeffs.b1));
     }
@@ -347,7 +450,13 @@ mod tests {
     #[test]
     fn test_biquad_reset_clears_state() {
         let mut state = BiquadState::default();
-        let coeffs = BiquadCoefficients { b0: 0.5, b1: 0.5, b2: 0.0, a1: 0.0, a2: 0.0 };
+        let coeffs = BiquadCoefficients {
+            b0: 0.5,
+            b1: 0.5,
+            b2: 0.0,
+            a1: 0.0,
+            a2: 0.0,
+        };
         // 处理若干样本填充状态
         let _ = state.process(1.0, &coeffs);
         let _ = state.process(0.5, &coeffs);
@@ -355,7 +464,10 @@ mod tests {
         state.reset();
         let identity = BiquadCoefficients::default();
         let y = state.process(0.7, &identity);
-        assert!(approx_eq(y, 0.7), "after reset, identity output {y} != input 0.7");
+        assert!(
+            approx_eq(y, 0.7),
+            "after reset, identity output {y} != input 0.7"
+        );
     }
 
     #[test]
@@ -409,7 +521,10 @@ mod tests {
         let mut eq = Equalizer::new(48000, 2);
         eq.set_band_gain(0, 100.0);
         let settings = eq.get_settings();
-        assert!(approx_eq(settings.gains[0], 8.0), "gain over +8 should clamp to 8");
+        assert!(
+            approx_eq(settings.gains[0], 8.0),
+            "gain over +8 should clamp to 8"
+        );
     }
 
     #[test]
@@ -417,7 +532,10 @@ mod tests {
         let mut eq = Equalizer::new(48000, 2);
         eq.set_band_gain(0, -100.0);
         let settings = eq.get_settings();
-        assert!(approx_eq(settings.gains[0], -8.0), "gain below -8 should clamp to -8");
+        assert!(
+            approx_eq(settings.gains[0], -8.0),
+            "gain below -8 should clamp to -8"
+        );
     }
 
     #[test]
@@ -469,7 +587,12 @@ mod tests {
             EqPreset::acoustic(),
         ];
         for preset in &presets {
-            assert_eq!(preset.gains.len(), EQ_BAND_COUNT, "preset {} gains length wrong", preset.name);
+            assert_eq!(
+                preset.gains.len(),
+                EQ_BAND_COUNT,
+                "preset {} gains length wrong",
+                preset.name
+            );
         }
     }
 
@@ -495,10 +618,18 @@ mod tests {
     fn test_soft_clip_above_threshold_compresses() {
         // |x| > 0.9 时压缩,输出幅度减小且符号保持
         // 上限为 0.97 (给 DAC 留 3% 余量)
-        for &x in &[0.91_f32, 0.95, 1.0, 1.5, 2.0, 10.0, -0.91, -0.95, -1.0, -1.5, -2.0] {
+        for &x in &[
+            0.91_f32, 0.95, 1.0, 1.5, 2.0, 10.0, -0.91, -0.95, -1.0, -1.5, -2.0,
+        ] {
             let y = soft_clip(x);
-            assert!(y.abs() < x.abs(), "soft_clip should reduce magnitude: |{x}| -> |{y}|");
-            assert!(y.abs() <= 0.97 + 1e-5, "soft_clip output |{y}| should be <= 0.97");
+            assert!(
+                y.abs() < x.abs(),
+                "soft_clip should reduce magnitude: |{x}| -> |{y}|"
+            );
+            assert!(
+                y.abs() <= 0.97 + 1e-5,
+                "soft_clip output |{y}| should be <= 0.97"
+            );
             assert!(x * y >= 0.0, "soft_clip should preserve sign: x={x}, y={y}");
         }
     }
@@ -507,8 +638,14 @@ mod tests {
     fn test_soft_clip_ceiling_at_extreme_input() {
         // 极端输入应趋近上限 0.97 而非 1.0
         let y = soft_clip(100.0);
-        assert!(y < 0.971, "soft_clip(100) = {y}, should approach 0.97 ceiling");
-        assert!(y > 0.969, "soft_clip(100) = {y}, should be close to 0.97 ceiling");
+        assert!(
+            y < 0.971,
+            "soft_clip(100) = {y}, should approach 0.97 ceiling"
+        );
+        assert!(
+            y > 0.969,
+            "soft_clip(100) = {y}, should be close to 0.97 ceiling"
+        );
     }
 
     #[test]
@@ -522,12 +659,21 @@ mod tests {
         // 阈值处函数值连续: 两侧增量应近似 eps
         let diff_below = (below - at).abs();
         let diff_above = (above - at).abs();
-        assert!(diff_below <= eps * 1.05, "should be continuous at threshold from below: diff={diff_below}, eps={eps}");
-        assert!(diff_above <= eps * 1.05, "should be continuous at threshold from above: diff={diff_above}, eps={eps}");
+        assert!(
+            diff_below <= eps * 1.05,
+            "should be continuous at threshold from below: diff={diff_below}, eps={eps}"
+        );
+        assert!(
+            diff_above <= eps * 1.05,
+            "should be continuous at threshold from above: diff={diff_above}, eps={eps}"
+        );
         // 导数连续: 两侧斜率应接近 (tanh 在 over=0 时斜率=1,与线性段匹配)
         let slope_below = diff_below / eps;
         let slope_above = diff_above / eps;
-        assert!((slope_below - slope_above).abs() < 0.05, "slopes should be close: below={slope_below}, above={slope_above}");
+        assert!(
+            (slope_below - slope_above).abs() < 0.05,
+            "slopes should be close: below={slope_below}, above={slope_above}"
+        );
     }
 
     #[test]
@@ -537,7 +683,10 @@ mod tests {
         let mut buffer = original;
         eq.process_buffer(&mut buffer);
         for (i, (a, b)) in original.iter().zip(buffer.iter()).enumerate() {
-            assert!(approx_eq(*a, *b), "buffer[{i}] changed when disabled: {a} -> {b}");
+            assert!(
+                approx_eq(*a, *b),
+                "buffer[{i}] changed when disabled: {a} -> {b}"
+            );
         }
     }
 
@@ -573,7 +722,13 @@ mod tests {
         }
 
         // 确认 EQ 启用时 buffer 确实被修改
-        let any_changed = original.iter().zip(buffer.iter()).any(|(a, b)| (a - b).abs() > 1e-4);
-        assert!(any_changed, "process_buffer should modify samples with EQ enabled");
+        let any_changed = original
+            .iter()
+            .zip(buffer.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-4);
+        assert!(
+            any_changed,
+            "process_buffer should modify samples with EQ enabled"
+        );
     }
 }

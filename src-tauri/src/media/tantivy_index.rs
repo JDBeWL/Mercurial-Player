@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::{
-    Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value, FAST, STORED,
+    FAST, Field, IndexRecordOption, STORED, Schema, TextFieldIndexing, TextOptions, Value,
 };
 use tantivy::{Index, IndexReader, IndexWriter, TantivyDocument, Term};
 
@@ -27,20 +27,19 @@ const INDEX_DIR_NAME: &str = "tantivy-index";
 // ============================================================================
 
 /// 全局索引管理器
+/// 外层 Mutex 保护初始化/重置；内层 Arc<Mutex> 允许初始化后多线程并发访问索引。
+/// 初始化时全程持锁（check-create-write 在同一锁内），避免 check-then-create 竞态。
 static INDEX_MANAGER: Mutex<Option<Arc<Mutex<TantivyIndexManager>>>> = Mutex::new(None);
 
 /// 获取或创建索引管理器
 fn get_index_manager() -> Result<Arc<Mutex<TantivyIndexManager>>, String> {
-    if let Ok(lock) = INDEX_MANAGER.lock() {
-        if let Some(manager) = lock.as_ref() {
-            return Ok(Arc::clone(manager));
-        }
+    let mut guard = crate::lock_or_log!(INDEX_MANAGER.lock());
+    if let Some(manager) = guard.as_ref() {
+        return Ok(Arc::clone(manager));
     }
-
+    // 持锁创建，保证全局唯一初始化
     let manager = Arc::new(Mutex::new(TantivyIndexManager::new()?));
-    if let Ok(mut lock) = INDEX_MANAGER.lock() {
-        *lock = Some(Arc::clone(&manager));
-    }
+    *guard = Some(Arc::clone(&manager));
     Ok(manager)
 }
 
@@ -81,8 +80,7 @@ impl TantivyIndexManager {
         let index = if index_dir.join("meta.json").exists() {
             Index::open_in_dir(&index_dir).map_err(|e| format!("打开索引失败: {e}"))?
         } else {
-            Index::create_in_dir(&index_dir, schema)
-                .map_err(|e| format!("创建索引失败: {e}"))?
+            Index::create_in_dir(&index_dir, schema).map_err(|e| format!("创建索引失败: {e}"))?
         };
 
         let reader = index
@@ -174,7 +172,7 @@ impl TantivyIndexManager {
         if self.writer.is_none() {
             let writer = self
                 .index
-                .writer(50_000_000)
+                .writer(15_000_000)
                 .map_err(|e| format!("创建索引写入器失败: {e}"))?;
             self.writer = Some(writer);
         }
@@ -308,7 +306,9 @@ fn index_dir_path() -> PathBuf {
     if let Some(custom_path) = super::metadata::get_cover_cache_path_setting() {
         return PathBuf::from(custom_path).join(INDEX_DIR_NAME);
     }
-    std::env::temp_dir().join("mercurial-player").join(INDEX_DIR_NAME)
+    std::env::temp_dir()
+        .join("mercurial-player")
+        .join(INDEX_DIR_NAME)
 }
 
 /// 添加或更新音轨到索引
@@ -367,9 +367,7 @@ pub fn rebuild_tantivy_index() -> Result<(), String> {
     fs::create_dir_all(&index_dir).map_err(|e| format!("创建索引目录失败: {e}"))?;
 
     // 重置全局索引管理器
-    if let Ok(mut lock) = INDEX_MANAGER.lock() {
-        *lock = None;
-    }
+    *crate::lock_or_log!(INDEX_MANAGER.lock()) = None;
 
     // 重新初始化
     let _manager = get_index_manager()?;
@@ -386,9 +384,7 @@ pub fn clear_tantivy_index() -> Result<(), String> {
     }
 
     // 重置全局索引管理器
-    if let Ok(mut lock) = INDEX_MANAGER.lock() {
-        *lock = None;
-    }
+    *crate::lock_or_log!(INDEX_MANAGER.lock()) = None;
 
     log::info!("Tantivy 索引已清除");
     Ok(())

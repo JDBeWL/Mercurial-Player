@@ -2,7 +2,7 @@
 //!
 //! 提供目录读取、文件检查等功能。
 
-use super::metadata::{flush_metadata_cache, get_track_metadata_internal, Playlist};
+use super::metadata::{Playlist, flush_metadata_cache, get_track_metadata_internal};
 use super::tantivy_index;
 use crate::config::AppConfig;
 use rayon::prelude::*;
@@ -53,9 +53,10 @@ pub fn get_audio_files_from_dir(path: &str) -> Result<Playlist, String> {
         })
         .collect();
 
-    let playlist_name = dir
-        .file_name()
-        .map_or_else(|| "Unknown".to_string(), |s| s.to_string_lossy().to_string());
+    let playlist_name = dir.file_name().map_or_else(
+        || "Unknown".to_string(),
+        |s| s.to_string_lossy().to_string(),
+    );
 
     Ok(Playlist {
         name: playlist_name,
@@ -64,7 +65,10 @@ pub fn get_audio_files_from_dir(path: &str) -> Result<Playlist, String> {
 }
 
 /// 获取多个目录中的所有音频文件，并创建播放列表
-pub fn get_all_audio_files_from_dirs(paths: &[String], config: &AppConfig) -> Result<Vec<Playlist>, String> {
+pub fn get_all_audio_files_from_dirs(
+    paths: &[String],
+    config: &AppConfig,
+) -> Result<Vec<Playlist>, String> {
     let mut all_playlists: Vec<Playlist> = Vec::new();
 
     for path in paths {
@@ -74,21 +78,23 @@ pub fn get_all_audio_files_from_dirs(paths: &[String], config: &AppConfig) -> Re
             continue;
         }
 
-        if config.directory_scan.enable_subdirectory_scan && config.playlist.folder_based_playlists {
-            let playlists = scan_with_folder_playlists(dir, config.directory_scan.max_depth as usize);
+        if config.directory_scan.enable_subdirectory_scan && config.playlist.folder_based_playlists
+        {
+            let playlists =
+                scan_with_folder_playlists(dir, config.directory_scan.max_depth as usize);
             all_playlists.extend(playlists);
         } else if let Some(playlist) = scan_single_playlist(dir) {
             all_playlists.push(playlist);
         }
     }
-    
+
     // 扫描完成后，批量保存内存缓存到磁盘
     if let Err(e) = flush_metadata_cache() {
         log::warn!("批量保存元数据缓存失败: {e}");
     } else {
         log::info!("元数据缓存已批量保存到磁盘");
     }
-    
+
     // 将所有音轨添加到 Tantivy 索引
     let all_tracks: Vec<_> = all_playlists.iter().flat_map(|p| p.files.clone()).collect();
     if !all_tracks.is_empty() {
@@ -145,9 +151,10 @@ fn scan_with_folder_playlists(dir: &Path, max_depth: usize) -> Vec<Playlist> {
 
 /// 扫描目录创建单个播放列表（完整模式，包含封面）
 fn scan_single_playlist(dir: &Path) -> Option<Playlist> {
-    let playlist_name = dir
-        .file_name()
-        .map_or_else(|| "Unknown".to_string(), |s| s.to_string_lossy().to_string());
+    let playlist_name = dir.file_name().map_or_else(
+        || "Unknown".to_string(),
+        |s| s.to_string_lossy().to_string(),
+    );
 
     let audio_files: Vec<_> = WalkDir::new(dir)
         .into_iter()
@@ -205,7 +212,7 @@ pub fn write_lyrics_file_internal(path: &str, content: &str) -> Result<(), Strin
     {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {e}"))?;
     }
-    
+
     fs::write(path, content).map_err(|e| format!("Failed to write file: {e}"))
 }
 

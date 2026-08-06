@@ -18,4 +18,3 @@ pub fn update_taskbar_state(is_playing: bool) -> Result<(), String> {
 pub fn set_taskbar_stopped() -> Result<(), String> {
     update_playback_state(TaskbarPlaybackState::Stopped)
 }
-

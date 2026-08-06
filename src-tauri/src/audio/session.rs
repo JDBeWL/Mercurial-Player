@@ -8,8 +8,8 @@
 //! 文件被替换: 视为新文件,从 0 开始播放
 //! 全部通过: 恢复到 position_secs
 
-use crate::config::manager::{LastSession, TrackSnapshot, LAST_SESSION_MAX_AGE_SECS};
 use crate::AppState;
+use crate::config::manager::{LAST_SESSION_MAX_AGE_SECS, LastSession, TrackSnapshot};
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -80,9 +80,9 @@ pub struct ResumeResult {
 /// 校验并恢复上次播放会话
 ///
 /// 调用流程: 前端启动时调用此命令 -> 根据返回结果决定 UI 状态和是否调用 play_track
-pub fn try_resume_last_session(
+pub async fn try_resume_last_session(
     app: &AppHandle,
-    state: &State<AppState>,
+    state: &State<'_, AppState>,
 ) -> Result<ResumeResult, String> {
     let mut config = state.config_manager.load_config()?;
 
@@ -107,7 +107,11 @@ pub fn try_resume_last_session(
     // 过期检查 (30 天)
     let now = now_secs();
     if now.saturating_sub(session.saved_at) > LAST_SESSION_MAX_AGE_SECS {
-        log::info!("Last session expired (saved_at={}, now={})", session.saved_at, now);
+        log::info!(
+            "Last session expired (saved_at={}, now={})",
+            session.saved_at,
+            now
+        );
         // 持久化清除
         let _ = state.config_manager.save_config(&config);
         return Ok(ResumeResult {
@@ -149,7 +153,9 @@ pub fn try_resume_last_session(
     }
 
     // L2: 文件大小 + 修改时间校验 (检测文件被替换)
-    let (actual_size, actual_mtime) = if let Some(meta) = get_file_metadata(&session.track_path) { meta } else {
+    let (actual_size, actual_mtime) = if let Some(meta) = get_file_metadata(&session.track_path) {
+        meta
+    } else {
         // 文件存在但无法读取 metadata (权限问题等)
         // 视为不可用,清除记录
         log::warn!(
@@ -171,8 +177,7 @@ pub fn try_resume_last_session(
         });
     };
 
-    let file_replaced =
-        actual_size != session.file_size || actual_mtime != session.file_mtime;
+    let file_replaced = actual_size != session.file_size || actual_mtime != session.file_mtime;
 
     // 实际恢复位置: 文件被替换则从 0 开始,否则用原位置
     let resume_position = if file_replaced {
@@ -216,7 +221,7 @@ pub fn try_resume_last_session(
     };
 
     let play_result = if exclusive_mode {
-        crate::audio::playback::play_track_exclusive(app, state, &path, position)
+        crate::audio::playback::play_track_exclusive(app, state, &path, position).await
     } else {
         crate::audio::playback::play_track_shared(app, state, &path, position)
     };
@@ -346,7 +351,9 @@ pub fn save_last_session(
 
     // L2 校验需要文件大小和修改时间
     // 如果文件不存在或无法读取,则不保存 (避免无效记录)
-    let (file_size, file_mtime) = if let Some(meta) = get_file_metadata(&track_path) { meta } else {
+    let (file_size, file_mtime) = if let Some(meta) = get_file_metadata(&track_path) {
+        meta
+    } else {
         log::warn!("Cannot save last session: file metadata unreadable for {track_path}");
         return Ok(()); // 不视为错误,只是不保存
     };

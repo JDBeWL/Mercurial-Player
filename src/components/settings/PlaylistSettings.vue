@@ -189,7 +189,7 @@ const toggleSetting = async (
   color: var(--md-sys-color-on-surface);
   font-size: 14px;
   font-weight: 400;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Roboto', 'Roboto Fallback', sans-serif;
   min-height: 48px;
   box-sizing: border-box;
   transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);

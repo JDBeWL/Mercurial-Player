@@ -1,8 +1,8 @@
 //! EQ 均衡器相关的 Tauri 命令
 
-use super::processor::{get_all_presets, EqPreset, EqSettings, EQ_BAND_COUNT, EQ_FREQUENCIES};
+use super::processor::{EQ_BAND_COUNT, EQ_FREQUENCIES, EqPreset, EqSettings, get_all_presets};
 use crate::AppState;
-use tauri::{command, State};
+use tauri::{State, command};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,16 +41,16 @@ pub fn get_eq_settings(state: State<AppState>) -> EqSettings {
 #[command]
 pub fn set_eq_enabled(state: State<AppState>, enabled: bool) -> Result<(), String> {
     state.equalizer.set_enabled(enabled);
-    if let Ok(mut eq) = state.player.equalizer.lock() {
-        eq.set_enabled(enabled);
-    }
     Ok(())
 }
 
 #[command]
 pub fn set_eq_gains(state: State<AppState>, gains: Vec<f32>) -> Result<(), String> {
     if gains.len() != EQ_BAND_COUNT {
-        return Err(format!("Expected {EQ_BAND_COUNT} gains, got {}", gains.len()));
+        return Err(format!(
+            "Expected {EQ_BAND_COUNT} gains, got {}",
+            gains.len()
+        ));
     }
 
     let mut gains_array = [0.0f32; EQ_BAND_COUNT];
@@ -59,9 +59,6 @@ pub fn set_eq_gains(state: State<AppState>, gains: Vec<f32>) -> Result<(), Strin
     }
 
     state.equalizer.set_gains(gains_array);
-    if let Ok(mut eq) = state.player.equalizer.lock() {
-        eq.set_gains(gains_array);
-    }
     Ok(())
 }
 
@@ -73,9 +70,6 @@ pub fn set_eq_band_gain(state: State<AppState>, band: usize, gain: f32) -> Resul
 
     let clamped_gain = gain.clamp(-8.0, 8.0);
     state.equalizer.set_band_gain(band, clamped_gain);
-    if let Ok(mut eq) = state.player.equalizer.lock() {
-        eq.set_band_gain(band, clamped_gain);
-    }
     Ok(())
 }
 
@@ -83,9 +77,6 @@ pub fn set_eq_band_gain(state: State<AppState>, band: usize, gain: f32) -> Resul
 pub fn set_eq_preamp(state: State<AppState>, preamp: f32) -> Result<(), String> {
     let clamped_preamp = preamp.clamp(-8.0, 8.0);
     state.equalizer.set_preamp(clamped_preamp);
-    if let Ok(mut eq) = state.player.equalizer.lock() {
-        eq.set_preamp(clamped_preamp);
-    }
     Ok(())
 }
 
@@ -103,20 +94,12 @@ pub fn apply_eq_preset(state: State<AppState>, preset_name: String) -> Result<()
         .ok_or_else(|| format!("Preset not found: {preset_name}"))?;
 
     state.equalizer.set_gains(preset.gains);
-    if let Ok(mut eq) = state.player.equalizer.lock() {
-        eq.set_gains(preset.gains);
-    }
     Ok(())
 }
 
 #[command]
 pub fn reset_eq(state: State<AppState>) -> Result<(), String> {
     let default_settings = EqSettings::default();
-    state.equalizer.set_settings(default_settings.clone());
-    if let Ok(mut eq) = state.player.equalizer.lock() {
-        eq.set_gains(default_settings.gains);
-        eq.set_preamp(default_settings.preamp);
-        eq.set_enabled(default_settings.enabled);
-    }
+    state.equalizer.set_settings(default_settings);
     Ok(())
 }

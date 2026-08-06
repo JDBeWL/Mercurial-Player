@@ -213,7 +213,6 @@ const fn default_volume() -> f32 {
     0.5
 }
 
-
 impl Default for DirectoryScanConfig {
     fn default() -> Self {
         Self {
@@ -235,7 +234,12 @@ impl Default for TitleExtractionConfig {
         Self {
             prefer_metadata: true,
             separator: "-".to_string(),
-            custom_separators: vec!["-".to_string(), "_".to_string(), ".".to_string(), " ".to_string()],
+            custom_separators: vec![
+                "-".to_string(),
+                "_".to_string(),
+                ".".to_string(),
+                " ".to_string(),
+            ],
             hide_file_extension: true,
             parse_artist_title: true,
         }
@@ -315,7 +319,10 @@ impl ConfigManager {
 
     fn get_app_config_dir() -> Result<String, Box<dyn std::error::Error>> {
         let exe_path = std::env::current_exe()?;
-        let exe_dir = exe_path.parent().ok_or("无法获取可执行文件目录")?.to_path_buf();
+        let exe_dir = exe_path
+            .parent()
+            .ok_or("无法获取可执行文件目录")?
+            .to_path_buf();
         let config_path = exe_dir.join("config");
         Ok(config_path.to_string_lossy().to_string())
     }
@@ -331,6 +338,9 @@ impl ConfigManager {
     pub fn initialize_config_files(&self) -> Result<(), String> {
         std::fs::create_dir_all(&self.config_dir).map_err(|e| format!("创建配置目录失败: {e}"))?;
 
+        // 清理上次崩溃/断电可能残留的 .tmp 文件，避免需要手动清理
+        self.cleanup_temp_files();
+
         let default_config_path = self.get_default_config_path();
         let user_config_path = self.get_user_config_path();
 
@@ -345,6 +355,31 @@ impl ConfigManager {
         }
 
         Ok(())
+    }
+
+    /// 清理 config 目录下残留的 .tmp 文件
+    ///
+    /// save_config_to_file 使用「先写 .tmp 再 rename」的原子写入模式,
+    /// 如果进程在 write 后、rename 前崩溃/断电/被 kill,
+    /// .tmp 文件会残留。此方法在启动时扫描并清除这些残留,
+    /// 避免用户需要手动清理。
+    fn cleanup_temp_files(&self) {
+        let Ok(entries) = std::fs::read_dir(&self.config_dir) else {
+            return;
+        };
+        let mut cleaned = 0;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "tmp") {
+                if std::fs::remove_file(&path).is_ok() {
+                    cleaned += 1;
+                    log::debug!("清理残留临时文件: {}", path.display());
+                }
+            }
+        }
+        if cleaned > 0 {
+            log::info!("启动时清理了 {cleaned} 个残留临时文件");
+        }
     }
 
     pub fn load_config(&self) -> Result<AppConfig, String> {
@@ -380,7 +415,8 @@ impl ConfigManager {
     }
 
     fn load_config_from_file(file_path: &str) -> Result<AppConfig, String> {
-        let content = std::fs::read_to_string(file_path).map_err(|e| format!("Failed to read config file: {e}"))?;
+        let content = std::fs::read_to_string(file_path)
+            .map_err(|e| format!("Failed to read config file: {e}"))?;
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse config file: {e}"))
     }
 
@@ -393,11 +429,22 @@ impl ConfigManager {
     }
 
     fn save_config_to_file(config: &AppConfig, file_path: &str) -> Result<(), String> {
-        let content = serde_json::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {e}"))?;
-        // 原子写入:先写临时文件,再 rename 替换,避免写入过程中崩溃/断电导致配置文件损坏
+        use std::io::Write;
+        let content = serde_json::to_string_pretty(config)
+            .map_err(|e| format!("Failed to serialize config: {e}"))?;
+        // 原子写入:先写临时文件,sync_all 确保数据落盘,再 rename 替换。
+        // 避免写入过程中崩溃/断电导致配置文件损坏;
+        // sync_all 确保 rename 前数据已落盘,避免 rename 后断电导致内容丢失。
+        // 即使进程在此期间崩溃,.tmp 残留也会在下次启动时被 cleanup_temp_files 清理。
         let tmp_path = format!("{file_path}.tmp");
-        std::fs::write(&tmp_path, &content)
-            .map_err(|e| format!("Failed to write temp config file: {e}"))?;
+        {
+            let mut file = std::fs::File::create(&tmp_path)
+                .map_err(|e| format!("Failed to create temp config file: {e}"))?;
+            file.write_all(content.as_bytes())
+                .map_err(|e| format!("Failed to write temp config file: {e}"))?;
+            file.sync_all()
+                .map_err(|e| format!("Failed to sync temp config file: {e}"))?;
+        }
         std::fs::rename(&tmp_path, file_path).map_err(|e| {
             // rename 失败时尝试清理临时文件,避免残留
             let _ = std::fs::remove_file(&tmp_path);
@@ -492,7 +539,10 @@ mod tests {
         let config = AppConfig::default();
         let json = serde_json::to_string(&config).expect("serialize failed");
         // camelCase 字段应出现在 JSON 中
-        assert!(json.contains("\"musicDirectories\""), "missing camelCase field musicDirectories");
+        assert!(
+            json.contains("\"musicDirectories\""),
+            "missing camelCase field musicDirectories"
+        );
         assert!(json.contains("\"directoryScan\""));
         assert!(json.contains("\"titleExtraction\""));
         assert!(json.contains("\"exclusiveMode\""));

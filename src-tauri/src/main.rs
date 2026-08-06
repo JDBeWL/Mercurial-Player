@@ -21,9 +21,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use mercurial_player::{
-    AppState, AudioOutputState, DecodeThreadState, FadeControl, PlayerState,
-    TrackState, VisualizationState, audio,
-    config,
+    AppState, AudioOutputState, DecodeThreadState, FadeControl, PlayerState, TrackState,
+    VisualizationState, audio, config,
     config::ConfigManager,
     equalizer,
     equalizer::{Equalizer, GlobalEqualizer},
@@ -31,7 +30,7 @@ use mercurial_player::{
 };
 
 #[cfg(windows)]
-use mercurial_player::audio::{WasapiExclusivePlayback, DeviceMonitor};
+use mercurial_player::audio::{DeviceMonitor, WasapiExclusivePlayback};
 
 #[cfg(not(windows))]
 use mercurial_player::{Placeholder, audio::DeviceMonitor};
@@ -40,7 +39,7 @@ use mercurial_player::{Placeholder, audio::DeviceMonitor};
 use mercurial_player::taskbar;
 
 use cpal::traits::HostTrait;
-use rodio::stream::{MixerDeviceSink, DeviceSinkBuilder};
+use rodio::stream::{DeviceSinkBuilder, MixerDeviceSink};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
 
@@ -73,7 +72,9 @@ fn main() {
         .map(|c| (c.audio.exclusive_mode, c.audio.fade_enabled))
         .unwrap_or((false, true));
 
-    log::info!("Loaded exclusive mode from config: {exclusive_mode_enabled}, fade enabled: {fade_enabled}");
+    log::info!(
+        "Loaded exclusive mode from config: {exclusive_mode_enabled}, fade enabled: {fade_enabled}"
+    );
 
     // 根据独占模式设置创建播放器
     let (sink, output_stream, wasapi_player) = {
@@ -95,9 +96,13 @@ fn main() {
                 exclusive_mode: Arc::new(Mutex::new(
                     exclusive_mode_enabled && {
                         #[cfg(windows)]
-                        { wasapi_player.is_some() }
+                        {
+                            wasapi_player.is_some()
+                        }
                         #[cfg(not(windows))]
-                        { false }
+                        {
+                            false
+                        }
                     },
                 )),
                 wasapi_player: {
@@ -164,7 +169,7 @@ fn main() {
                     .load_config()
                     .ok()
                     .map(|config| config.general.cover_cache_size_mb);
-                
+
                 match metadata::clean_cover_cache(max_cache_size_mb) {
                     Ok(count) => {
                         if count > 0 {
@@ -230,7 +235,7 @@ fn main() {
                 })
                 .level_for("wasapi", log::LevelFilter::Warn)
                 .level_for("symphonia", log::LevelFilter::Info)
-                .build()
+                .build(),
         )
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
@@ -359,7 +364,9 @@ fn main() {
 
 /// 创建独占模式播放器
 #[cfg(windows)]
-fn create_exclusive_mode_player(device_name: &str) -> (rodio::Player, MixerDeviceSink, Option<PlatformPlayer>) {
+fn create_exclusive_mode_player(
+    device_name: &str,
+) -> (rodio::Player, MixerDeviceSink, Option<PlatformPlayer>) {
     log::info!("Starting in WASAPI exclusive mode");
 
     // 创建一个空的rodio sink
@@ -388,7 +395,9 @@ fn create_exclusive_mode_player(device_name: &str) -> (rodio::Player, MixerDevic
 
 /// 创建独占模式播放器（非Windows平台回退到共享模式）
 #[cfg(not(windows))]
-fn create_exclusive_mode_player(_device_name: &str) -> (rodio::Player, MixerDeviceSink, Option<PlatformPlayer>) {
+fn create_exclusive_mode_player(
+    _device_name: &str,
+) -> (rodio::Player, MixerDeviceSink, Option<PlatformPlayer>) {
     log::warn!("Exclusive mode is only supported on Windows, falling back to shared mode");
     let mixer_sink = DeviceSinkBuilder::from_default_device()
         .expect("Failed to create default device sink builder")
@@ -405,7 +414,7 @@ fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
     use std::sync::OnceLock;
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, SetWindowLongPtrW, GWLP_WNDPROC, WM_COMMAND, WNDPROC,
+        CallWindowProcW, GWLP_WNDPROC, SetWindowLongPtrW, WM_COMMAND, WNDPROC,
     };
 
     // 存储原始窗口过程和app handle
@@ -479,7 +488,9 @@ fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
 }
 
 /// 创建共享模式播放器
-fn create_shared_mode_player(device: &cpal::Device) -> (rodio::Player, MixerDeviceSink, Option<PlatformPlayer>) {
+fn create_shared_mode_player(
+    device: &cpal::Device,
+) -> (rodio::Player, MixerDeviceSink, Option<PlatformPlayer>) {
     log::info!("Starting in shared mode");
 
     // 从选定的设备创建音频输出流

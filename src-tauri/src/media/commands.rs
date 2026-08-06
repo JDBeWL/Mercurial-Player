@@ -7,14 +7,14 @@ use super::filesystem::{
     read_lyrics_file_internal, write_lyrics_file_internal,
 };
 use super::metadata::{
-    clean_cover_cache, clear_metadata_cache, extract_cover_internal, flush_metadata_cache,
-    get_metadata_cache_stats, get_track_cover_path_internal, get_track_metadata_internal,
-    set_cover_cache_path, Playlist, TrackMetadata,
+    Playlist, TrackMetadata, clean_cover_cache, clear_metadata_cache, extract_cover_internal,
+    flush_metadata_cache, get_metadata_cache_stats, get_track_cover_path_internal,
+    get_track_metadata_internal, set_cover_cache_path,
 };
-use super::tantivy_index;
 use super::netease;
+use super::tantivy_index;
 use crate::AppState;
-use tauri::{command, State};
+use tauri::{State, command};
 
 /// 读取指定目录中的子目录列表
 #[command]
@@ -30,7 +30,10 @@ pub fn get_audio_files(path: String) -> Result<Playlist, String> {
 
 /// 获取多个目录中的所有音频文件，并创建播放列表
 #[command]
-pub fn get_all_audio_files(state: State<AppState>, paths: Vec<String>) -> Result<Vec<Playlist>, String> {
+pub fn get_all_audio_files(
+    state: State<AppState>,
+    paths: Vec<String>,
+) -> Result<Vec<Playlist>, String> {
     let config = state.config_manager.load_config()?;
     get_all_audio_files_from_dirs(&paths, &config)
 }
@@ -128,7 +131,10 @@ pub fn flush_metadata_cache_command() -> Result<(), String> {
 
 /// 搜索音轨
 #[command]
-pub fn search_tracks_command(query: String, limit: Option<usize>) -> Result<Vec<TrackMetadata>, String> {
+pub fn search_tracks_command(
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<TrackMetadata>, String> {
     tantivy_index::search_tracks(&query, limit.unwrap_or(50))
 }
 

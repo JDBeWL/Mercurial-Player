@@ -1,4 +1,4 @@
-import { ref, watch, type Ref } from 'vue'
+import { ref, watch, markRaw, type Ref } from 'vue'
 import { usePlayerStore } from '@/stores/player'
 import { useConfigStore } from '@/stores/config'
 import { FileUtils } from '@/utils/fileUtils'
@@ -155,7 +155,8 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
       const content = await FileUtils.readFile(lyricsPath)
       const ext = FileUtils.getFileExtension(lyricsPath) as 'lrc' | 'ass' | 'srt'
       // 使用统一的异步解析器
-      const parsed = await LyricsParser.parseAsync(content, ext)
+      // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
+      const parsed = markRaw(await LyricsParser.parseAsync(content, ext))
       sharedLyrics.value = parsed
       _playerStore.lyrics = parsed
       sharedLyricsSource.value = 'local'
@@ -164,7 +165,8 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
       const track = _playerStore.currentTrack
       const onlineLrc = await fetchOnlineLyrics(track)
       if (onlineLrc) {
-        const parsed = await LyricsParser.parseAsync(onlineLrc, 'lrc')
+        // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
+        const parsed = markRaw(await LyricsParser.parseAsync(onlineLrc, 'lrc'))
         sharedLyrics.value = parsed
         _playerStore.lyrics = parsed
         sharedLyricsSource.value = 'online'
@@ -208,7 +210,12 @@ function initializeSharedWatchers(): void {
   _playerStore = usePlayerStore()
   _configStore = useConfigStore()
 
-  watch(() => _playerStore!.currentTrack?.path, loadLyrics, { immediate: true })
+  const stopWatchTrackPath = watch(
+    () => _playerStore!.currentTrack?.path,
+    loadLyrics,
+    { immediate: true },
+  )
+  sharedWatchStopFns.push(stopWatchTrackPath)
 
   // activeIndex 更新逻辑 - 使用节流避免高频更新
   let lastActiveIndexUpdate = 0
@@ -273,7 +280,8 @@ export function useLyrics() {
     try {
       const onlineLrc = await fetchOnlineLyrics(track)
       if (onlineLrc) {
-        const parsed = await LyricsParser.parseAsync(onlineLrc, 'lrc')
+        // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
+        const parsed = markRaw(await LyricsParser.parseAsync(onlineLrc, 'lrc'))
         sharedLyrics.value = parsed
         playerStore.lyrics = parsed
         sharedLyricsSource.value = 'online'

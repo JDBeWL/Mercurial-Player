@@ -5,8 +5,8 @@
 //! 运行: cargo bench --bench equalizer
 //! 输出: target/criterion/equalizer/report/index.html
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use mercurial_player::equalizer::{Equalizer, EQ_BAND_COUNT};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use mercurial_player::equalizer::{EQ_BAND_COUNT, Equalizer};
 
 /// 生成测试用音频采样 (440Hz sine wave)
 fn generate_samples(count: usize, sample_rate: u32) -> Vec<f32> {
@@ -20,7 +20,12 @@ fn generate_samples(count: usize, sample_rate: u32) -> Vec<f32> {
 }
 
 /// 创建已配置的 Equalizer
-fn make_eq(sample_rate: u32, channels: u16, enabled: bool, gains: [f32; EQ_BAND_COUNT]) -> Equalizer {
+fn make_eq(
+    sample_rate: u32,
+    channels: u16,
+    enabled: bool,
+    gains: [f32; EQ_BAND_COUNT],
+) -> Equalizer {
     let mut eq = Equalizer::new(sample_rate, channels);
     eq.set_enabled(enabled);
     eq.set_gains(gains);
@@ -65,7 +70,12 @@ fn bench_process_sample(c: &mut Criterion) {
     // 启用 EQ,Bass Boost 预设 (有实际增益)
     group.bench_function("enabled_bass_boost", |b| {
         b.iter(|| {
-            let mut eq = make_eq(sample_rate, channels, true, [6.0, 4.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+            let mut eq = make_eq(
+                sample_rate,
+                channels,
+                true,
+                [6.0, 4.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            );
             for (i, s) in samples.iter().enumerate() {
                 let channel = i % channels as usize;
                 eq.process_sample(black_box(*s), channel);
@@ -95,7 +105,12 @@ fn bench_process_buffer(c: &mut Criterion) {
             &batch_size,
             |b, &batch_size| {
                 b.iter(|| {
-                    let mut eq = make_eq(sample_rate, channels, true, [6.0, 4.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+                    let mut eq = make_eq(
+                        sample_rate,
+                        channels,
+                        true,
+                        [6.0, 4.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    );
                     let mut buf = samples.clone();
                     // 处理整个 1 秒数据,每次 batch_size 个样本
                     for chunk in buf.chunks_mut(batch_size) {
@@ -116,7 +131,10 @@ fn bench_apply_preset(c: &mut Criterion) {
 
     let presets = [
         ("flat", [0.0; EQ_BAND_COUNT]),
-        ("bass_boost", [6.0, 4.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        (
+            "bass_boost",
+            [6.0, 4.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        ),
         ("vocal", [0.0, 0.0, 2.0, 4.0, 4.0, 4.0, 3.0, 2.0, 0.0, 0.0]),
     ];
 
@@ -131,5 +149,10 @@ fn bench_apply_preset(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_process_sample, bench_process_buffer, bench_apply_preset);
+criterion_group!(
+    benches,
+    bench_process_sample,
+    bench_process_buffer,
+    bench_apply_preset
+);
 criterion_main!(benches);

@@ -8,7 +8,7 @@ import {
   Hct,
 } from '@material/material-color-utilities'
 import logger from '../utils/logger'
-import { validateThemeContrast } from '../utils/themeContrastValidator'
+import { validateThemeContrast, enforceThemeContrast } from '../utils/themeContrastValidator'
 import { useConfigStore } from './config'
 import type { TonalVariants, HarmonyColors, ThemePreference } from '@/types'
 
@@ -343,12 +343,12 @@ export const useThemeStore = defineStore('theme', {
 
       logger.debug('Theme applied:', cacheKey, isGray ? '(gray mode)' : '')
 
-      // 验证颜色对比度
+      // 强制 WCAG 2.1 AA 合规：验证关键颜色对，主动修复未达标的对比度
+      enforceThemeContrast()
+
+      // 异步记录对比度验证结果（用于调试）
       setTimeout(() => {
-        const results = validateThemeContrast(this.isDarkMode)
-        if (results.failed.length > 0) {
-          logger.warn('主题颜色对比度不符合 WCAG 标准:', results.failed)
-        }
+        validateThemeContrast(this.isDarkMode)
       }, 50)
     },
 

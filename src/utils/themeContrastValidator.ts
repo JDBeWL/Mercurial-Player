@@ -3,7 +3,7 @@
  * 在应用主题时验证颜色对比度是否符合 WCAG 标准
  */
 
-import { checkContrast, getColorFromCSSVar } from './colorContrast'
+import { checkContrast, getColorFromCSSVar, adjustColorForContrast } from './colorContrast'
 import logger from './logger'
 
 interface ValidationResult {
@@ -200,4 +200,98 @@ export function setupThemeContrastValidation(): void {
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
     validateThemeContrast(isDark)
   }, 100)
+}
+
+/**
+ * 强制执行 WCAG 2.1 AA 合规
+ *
+ * 验证当前主题的关键颜色对，对未达标的 required 组合调用
+ * adjustColorForContrast 主动调整 foreground 并回写 CSS 变量，
+ * 确保所有关键文本/容器对比度满足 WCAG 2.1 AA 标准。
+ *
+ * @returns 修复的颜色对数量
+ */
+export function enforceThemeContrast(): number {
+  const root = document.documentElement
+  let fixedCount = 0
+
+  // 复用 validateThemeContrast 的配置，但这里需要同步处理
+  const colorPairs: ColorPairConfig[] = [
+    {
+      name: 'On Surface on Background',
+      foreground: '--md-sys-color-on-surface',
+      background: '--md-sys-color-background',
+      largeText: false,
+      required: true,
+    },
+    {
+      name: 'On Surface Variant on Surface',
+      foreground: '--md-sys-color-on-surface-variant',
+      background: '--md-sys-color-surface',
+      largeText: false,
+      required: true,
+    },
+    {
+      name: 'On Background on Background',
+      foreground: '--md-sys-color-on-background',
+      background: '--md-sys-color-background',
+      largeText: false,
+      required: true,
+    },
+    {
+      name: 'On Primary Container on Primary Container',
+      foreground: '--md-sys-color-on-primary-container',
+      background: '--md-sys-color-primary-container',
+      largeText: false,
+      required: true,
+    },
+    {
+      name: 'On Secondary Container on Secondary Container',
+      foreground: '--md-sys-color-on-secondary-container',
+      background: '--md-sys-color-secondary-container',
+      largeText: false,
+      required: true,
+    },
+    {
+      name: 'On Error Container on Error Container',
+      foreground: '--md-sys-color-on-error-container',
+      background: '--md-sys-color-error-container',
+      largeText: false,
+      required: true,
+    },
+    {
+      name: 'Headline on Background (Large)',
+      foreground: '--md-sys-color-on-background',
+      background: '--md-sys-color-background',
+      largeText: true,
+      required: true,
+    },
+  ]
+
+  for (const { name, foreground, background, largeText } of colorPairs) {
+    const fgColor = getColorFromCSSVar(foreground)
+    const bgColor = getColorFromCSSVar(background)
+
+    if (!fgColor || !bgColor) continue
+
+    const check = checkContrast(fgColor, bgColor, { level: 'AA', largeText })
+    if (!check.pass) {
+      // 主动调整 foreground 颜色以满足对比度要求
+      const adjusted = adjustColorForContrast(fgColor, bgColor, {
+        level: 'AA',
+        largeText,
+      })
+      root.style.setProperty(foreground, adjusted)
+      fixedCount++
+      logger.info(
+        `WCAG 修复: ${name} 对比度 ${check.ratio}:1 → 已调整 foreground (${fgColor} → ${adjusted})`,
+      )
+    }
+  }
+
+  if (fixedCount > 0) {
+    logger.info(`WCAG 2.1 强制合规完成，共修复 ${fixedCount} 个颜色对`)
+  }
+
+  return fixedCount
 }

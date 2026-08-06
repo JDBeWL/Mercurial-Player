@@ -5,18 +5,19 @@
 use super::manager::AppConfig;
 use crate::AppState;
 use std::path::Path;
-use tauri::{command, State};
+use tauri::{State, command};
 
 /// 验证路径是否安全（不在敏感目录中）
 fn is_path_safe(path: &str) -> Result<(), String> {
     let path = Path::new(path);
-    
+
     // 规范化路径
-    let canonical = path.canonicalize()
+    let canonical = path
+        .canonicalize()
         .map_err(|_| "无法解析路径，请确保目录存在".to_string())?;
     let path_str = canonical.to_string_lossy().to_lowercase();
-    
-    // Windows 敏感目录
+
+    // Windows 敏感目录（用 starts_with 精确匹配，避免子串误判）
     #[cfg(target_os = "windows")]
     {
         let forbidden = [
@@ -24,43 +25,50 @@ fn is_path_safe(path: &str) -> Result<(), String> {
             "c:\\program files",
             "c:\\program files (x86)",
             "c:\\programdata",
-            "\\.ssh",
-            "\\.gnupg",
-            "\\appdata\\roaming\\microsoft",
+            "c:\\users\\all users",
         ];
-        for pattern in &forbidden {
-            if path_str.contains(pattern) {
+        for prefix in &forbidden {
+            if path_str.starts_with(prefix) {
                 return Err("安全限制：不允许添加系统敏感目录".to_string());
             }
         }
+        // 用户级敏感目录（检查路径组件）
+        let components: Vec<&str> = canonical
+            .components()
+            .filter_map(|c| c.as_os_str().to_str())
+            .collect();
+        let lower_components: Vec<String> =
+            components.iter().map(|c| c.to_lowercase()).collect();
+        for sensitive in &[".ssh", ".gnupg"] {
+            if lower_components.iter().any(|c| c == sensitive) {
+                return Err("安全限制：不允许添加系统敏感目录".to_string());
+            }
+        }
+        // AppData\Roaming\Microsoft 下含凭据等敏感数据
+        let path_lower = path_str.replace('/', "\\");
+        if path_lower.contains("\\appdata\\roaming\\microsoft\\") {
+            return Err("安全限制：不允许添加系统敏感目录".to_string());
+        }
     }
-    
+
     // macOS/Linux 敏感目录
     #[cfg(not(target_os = "windows"))]
     {
         let forbidden = [
-            "/etc",
-            "/usr",
-            "/bin",
-            "/sbin",
-            "/var",
-            "/system",
-            "/.ssh",
-            "/.gnupg",
-            "/.config",
+            "/etc", "/usr", "/bin", "/sbin", "/var", "/system", "/.ssh", "/.gnupg", "/.config",
         ];
-        for pattern in &forbidden {
-            if path_str.contains(pattern) {
-                return Err(format!("安全限制：不允许添加系统敏感目录"));
+        for prefix in &forbidden {
+            if path_str.starts_with(prefix) {
+                return Err("安全限制：不允许添加系统敏感目录".to_string());
             }
         }
     }
-    
+
     // 确保是目录
     if !canonical.is_dir() {
         return Err("指定的路径不是一个目录".to_string());
     }
-    
+
     Ok(())
 }
 
@@ -84,7 +92,11 @@ pub fn save_config(state: State<AppState>, config: AppConfig) -> Result<(), Stri
 
 /// 导出配置到指定路径
 #[command]
-pub fn export_config(state: State<AppState>, config: AppConfig, file_path: String) -> Result<(), String> {
+pub fn export_config(
+    state: State<AppState>,
+    config: AppConfig,
+    file_path: String,
+) -> Result<(), String> {
     state.config_manager.export_config(&config, &file_path)
 }
 
@@ -105,7 +117,7 @@ pub fn reset_config(state: State<AppState>) -> Result<AppConfig, String> {
 pub fn add_music_directory(state: State<AppState>, path: String) -> Result<Vec<String>, String> {
     // 验证路径安全性
     is_path_safe(&path)?;
-    
+
     let mut config = state.config_manager.load_config()?;
     if !config.music_directories.contains(&path) {
         config.music_directories.push(path);
@@ -125,12 +137,15 @@ pub fn remove_music_directory(state: State<AppState>, path: String) -> Result<Ve
 
 /// 设置音乐目录列表
 #[command]
-pub fn set_music_directories(state: State<AppState>, paths: Vec<String>) -> Result<Vec<String>, String> {
+pub fn set_music_directories(
+    state: State<AppState>,
+    paths: Vec<String>,
+) -> Result<Vec<String>, String> {
     // 验证所有路径的安全性
     for path in &paths {
         is_path_safe(path)?;
     }
-    
+
     let mut config = state.config_manager.load_config()?;
     config.music_directories = paths;
     state.config_manager.save_config(&config)?;

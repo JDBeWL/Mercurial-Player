@@ -2,9 +2,27 @@
 //!
 //! 导出所有公共模块和类型。
 
+/// 获取锁, poison 错误时记录日志并返回内部数据(而非 panic)
+///
+/// 支持 `Mutex::lock()`、`RwLock::read()`、`RwLock::write()`，
+/// 三者均返回 `Result<T, PoisonError<T>>`。
+macro_rules! lock_or_log {
+    ($lock:expr) => {
+        match $lock {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!("锁中毒, 自动恢复: {}", poisoned);
+                poisoned.into_inner()
+            }
+        }
+    };
+}
+pub(crate) use lock_or_log;
+
 pub mod audio;
 pub mod config;
 pub mod equalizer;
+pub mod error;
 pub mod media;
 pub mod plugins;
 pub mod system;
@@ -152,8 +170,6 @@ pub struct PlayerState {
     pub fade: FadeControl,
 }
 
-
-
 /// 应用程序状态
 ///
 /// 包含整个应用程序的全局状态
@@ -166,12 +182,10 @@ pub struct AppState {
     pub equalizer: GlobalEqualizer,
 }
 
-
-
 // 重新导出常用类型
-pub use audio::{AudioDeviceInfo, PlaybackStatus, SymphoniaDecoder};
 #[cfg(windows)]
 pub use audio::PlaybackState;
+pub use audio::{AudioDeviceInfo, PlaybackStatus, SymphoniaDecoder};
 pub use config::AppConfig;
 pub use equalizer::EqSettings;
 pub use media::{Playlist, TrackMetadata};

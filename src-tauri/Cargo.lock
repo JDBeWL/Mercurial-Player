@@ -3024,10 +3024,13 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-store",
  "tauri-plugin-updater",
+ "tokio",
  "unicode-segmentation",
  "walkdir",
  "wasapi",
  "windows 0.62.2",
+ "windows-core 0.62.2",
+ "windows-implement",
  "windows-numerics 0.3.1",
  "winreg 0.56.0",
 ]

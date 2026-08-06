@@ -1,9 +1,9 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2022",
     "useDefineForClassFields": true,
     "module": "ESNext",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
 
     /* Bundler mode */
@@ -14,11 +14,12 @@
     "noEmit": true,
     "jsx": "preserve",
 
-    /* Linting */
+    /* Linting - 与 ESLint 标准对齐,让 typecheck 也能捕获未使用代码 */
     "strict": true,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
     "allowJs": true,
     "checkJs": false,
     "ignoreDeprecations": "6.0",

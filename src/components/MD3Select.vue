@@ -151,7 +151,7 @@ const handleOtherSelectOpen = (event: Event): void => {
   color: var(--md-sys-color-on-surface);
   font-size: 14px;
   font-weight: 400;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Roboto', 'Roboto Fallback', sans-serif;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
   outline: none;
@@ -251,7 +251,7 @@ const handleOtherSelectOpen = (event: Event): void => {
   color: var(--md-sys-color-on-surface);
   font-size: 14px;
   font-weight: 400;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Roboto', 'Roboto Fallback', sans-serif;
   position: relative;
   background-color: transparent;
 }

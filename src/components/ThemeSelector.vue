@@ -112,6 +112,7 @@ const colorCategories: ColorCategory[] = [
   { id: 'red', name: '红色系' },
   { id: 'orange', name: '橙色系' },
   { id: 'green', name: '绿色系' },
+  { id: 'monet', name: '莫奈' },
   { id: 'neutral', name: '中性色' },
 ]
 
@@ -188,6 +189,18 @@ const colorPresets: ColorPreset[] = [
   { hex: '#009688', name: '青绿', category: 'green' },
   { hex: '#00897B', name: '深青绿', category: 'green' },
   { hex: '#26A69A', name: '薄荷绿', category: 'green' },
+
+  // 莫奈系 - 印象派光影，取自莫奈代表画作
+  { hex: '#4A7A7C', name: '睡莲青', category: 'monet' },
+  { hex: '#B878A0', name: '睡莲粉', category: 'monet' },
+  { hex: '#C97757', name: '印象橙', category: 'monet' },
+  { hex: '#5470A0', name: '印象蓝', category: 'monet' },
+  { hex: '#B08840', name: '干草金', category: 'monet' },
+  { hex: '#7E6492', name: '黄昏紫', category: 'monet' },
+  { hex: '#BC8569', name: '教堂蜜', category: 'monet' },
+  { hex: '#5E5285', name: '鸢尾紫', category: 'monet' },
+  { hex: '#6B7B8A', name: '雾灰蓝', category: 'monet' },
+  { hex: '#4E7E5E', name: '水面绿', category: 'monet' },
 
   // 中性色 - 稳重、专业、简约
   { hex: '#2C2C2C', name: '鬼方佳代子', category: 'neutral' },

@@ -20,6 +20,11 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
+// Roboto 字体自托管 (替代 Google Fonts CDN),仅导入使用到的权重
+import '@fontsource/roboto/300.css'
+import '@fontsource/roboto/400.css'
+import '@fontsource/roboto/500.css'
+import '@fontsource/roboto/700.css'
 import './style.css'
 import i18n from './i18n'
 import logger from './utils/logger'

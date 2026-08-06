@@ -24,20 +24,12 @@ const getConfig = () => {
 }
 
 /**
- * 绘制圆角矩形
+ * 绘制圆角矩形路径（使用原生 Canvas API，Chrome 99+/Safari 17+ 支持）
+ * 自动 beginPath，调用方直接 fill() 或 clip() 即可
  */
 const roundRect = (ctx, x, y, w, h, r) => {
   ctx.beginPath()
-  ctx.moveTo(x + r, y)
-  ctx.lineTo(x + w - r, y)
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r)
-  ctx.lineTo(x + w, y + h - r)
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
-  ctx.lineTo(x + r, y + h)
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r)
-  ctx.lineTo(x, y + r)
-  ctx.quadraticCurveTo(x, y, x + r, y)
-  ctx.closePath()
+  ctx.roundRect(x, y, w, h, r)
 }
 
 /**
@@ -78,8 +70,161 @@ const wrapText = (ctx, text, x, y, maxWidth, lineHeight, dryRun = false) => {
   }
 }
 
+/**
+ * 截断文本并添加省略号
+ */
+const truncateText = (ctx, text, maxWidth) => {
+  if (ctx.measureText(text).width <= maxWidth) {
+    return text
+  }
+  let truncated = text
+  while (ctx.measureText(truncated + '...').width > maxWidth && truncated.length > 0) {
+    truncated = truncated.slice(0, -1)
+  }
+  return truncated + '...'
+}
+
 // 让出主线程的辅助函数
 const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+/**
+ * 从歌词数据中提取当前歌词文本和翻译
+ * 抽取自 generateClassicImage 和 generateCompactImage 的公共逻辑
+ */
+const getCurrentLyricText = (lyrics, lyricIndex) => {
+  let mainText = ''
+  let transText = ''
+
+  if (lyrics && lyrics.length > 0) {
+    let currentLyric = null
+    if (lyricIndex >= 0 && lyricIndex < lyrics.length) {
+      currentLyric = lyrics[lyricIndex]
+    } else {
+      currentLyric = lyrics[0]
+    }
+    if (currentLyric) {
+      const firstText = currentLyric.texts?.[0]
+      const secondText = currentLyric.texts?.[1]
+
+      if (typeof firstText === 'object' && firstText !== null) {
+        mainText = firstText.text || ''
+      } else if (typeof firstText === 'string') {
+        mainText = firstText
+      } else if (currentLyric.text) {
+        mainText = currentLyric.text
+      }
+
+      if (typeof secondText === 'object' && secondText !== null) {
+        transText = secondText.text || ''
+      } else if (typeof secondText === 'string') {
+        transText = secondText
+      } else if (currentLyric.translation) {
+        transText = currentLyric.translation
+      }
+    }
+  }
+
+  return { mainText, transText }
+}
+
+/**
+ * 获取主题颜色（抽取自两个生成函数的公共逻辑）
+ * @param {boolean} isDark - 是否深色模式，用于回退颜色
+ */
+const getThemeColors = (isDark = false) => {
+  return {
+    bgColor:
+      api.theme.getCSSVariable('md-sys-color-background') ||
+      (isDark ? '#121212' : '#fefefe'),
+    primaryColor:
+      api.theme.getCSSVariable('md-sys-color-primary') || '#6750a4',
+    onBgColor:
+      api.theme.getCSSVariable('md-sys-color-on-background') ||
+      (isDark ? '#e6e1e5' : '#1c1b1f'),
+    onSurfaceVariant:
+      api.theme.getCSSVariable('md-sys-color-on-surface-variant') ||
+      (isDark ? '#cac4d0' : '#49454f'),
+    surfaceContainer:
+      api.theme.getCSSVariable('md-sys-color-surface-container') ||
+      (isDark ? '#211f26' : '#f3edf7'),
+  }
+}
+
+/**
+ * 加载封面图片
+ * 使用 api.player.getCoverPath() 直接从后端获取封面路径，
+ * 不依赖 store 的异步加载时序。
+ * @returns {Promise<HTMLImageElement|null>}
+ */
+const loadCoverImage = async () => {
+  const coverPath = await api.player.getCoverPath()
+
+  if (!coverPath) {
+    api.log.warn('未能获取到封面路径，将使用占位符')
+    return null
+  }
+
+  try {
+    return await api.utils.loadImage(coverPath)
+  } catch (e) {
+    api.log.debug('封面加载失败:', e)
+    return null
+  }
+}
+
+/**
+ * 绘制模糊封面背景（抽取自两个生成函数的公共逻辑）
+ * @param {Array<[number, string, string]>} [gradientStops] - 渐变遮罩停止点
+ *   格式: [[offset, darkColor, lightColor], ...]，默认使用经典布局的遮罩
+ */
+const drawBlurredBackground = (ctx, coverImg, width, height, config, isDark, gradientStops) => {
+  if (!config.showCover || !coverImg) return
+
+  ctx.save()
+  ctx.globalAlpha = config.coverOpacity
+  ctx.filter = `blur(${config.coverBlur}px)`
+
+  const scale = Math.max(width / coverImg.width, height / coverImg.height) * 1.2
+  const scaledW = coverImg.width * scale
+  const scaledH = coverImg.height * scale
+  const offsetX = (width - scaledW) / 2
+  const offsetY = (height - scaledH) / 2
+
+  ctx.drawImage(coverImg, offsetX, offsetY, scaledW, scaledH)
+  ctx.restore()
+
+  // 渐变遮罩
+  const stops = gradientStops || [
+    [0, 'rgba(18,18,18,0.7)', 'rgba(254,254,254,0.7)'],
+    [0.5, 'rgba(18,18,18,0.5)', 'rgba(254,254,254,0.5)'],
+    [1, 'rgba(18,18,18,0.9)', 'rgba(254,254,254,0.9)'],
+  ]
+  const gradient = ctx.createLinearGradient(0, 0, 0, height)
+  for (const [offset, darkColor, lightColor] of stops) {
+    gradient.addColorStop(offset, isDark ? darkColor : lightColor)
+  }
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, width, height)
+}
+
+/**
+ * 计算文本行数（不绘制，用于高度预估）
+ */
+const calculateLineCount = (ctx, text, maxWidth) => {
+  if (!text) return 0
+  let lineCount = 1
+  let line = ''
+  for (const char of text) {
+    const testLine = line + char
+    if (ctx.measureText(testLine).width > maxWidth && line.length > 0) {
+      lineCount++
+      line = char
+    } else {
+      line = testLine
+    }
+  }
+  return lineCount
+}
 
 /**
  * 生成经典布局分享图片
@@ -105,85 +250,22 @@ const generateClassicImage = async (options = {}) => {
     return null
   }
 
-  // 获取当前歌词
-  let currentLyric = null
-  let mainText = ''
-  let transText = ''
-
-  if (lyrics && lyrics.length > 0) {
-    if (lyricIndex >= 0 && lyricIndex < lyrics.length) {
-      currentLyric = lyrics[lyricIndex]
-    } else {
-      currentLyric = lyrics[0]
-    }
-    if (currentLyric) {
-      // 处理 texts 数组中的对象格式: { text: string }[]
-      // 或直接字符串格式: string[]
-      // 或单个 text 属性: string
-      const firstText = currentLyric.texts?.[0]
-      const secondText = currentLyric.texts?.[1]
-
-      // 从第一个元素获取主歌词
-      if (typeof firstText === 'object' && firstText !== null) {
-        mainText = firstText.text || ''
-      } else if (typeof firstText === 'string') {
-        mainText = firstText
-      } else if (currentLyric.text) {
-        mainText = currentLyric.text
-      }
-
-      // 从第二个元素获取翻译歌词
-      if (typeof secondText === 'object' && secondText !== null) {
-        transText = secondText.text || ''
-      } else if (typeof secondText === 'string') {
-        transText = secondText
-      } else if (currentLyric.translation) {
-        transText = currentLyric.translation
-      }
-    }
-  }
+  // 获取当前歌词（使用公共抽取函数）
+  const { mainText, transText } = getCurrentLyricText(lyrics, lyricIndex)
 
   // 让出主线程，避免长时间阻塞
   await yieldToMain()
 
-  // 计算歌词需要的行数来决定高度
+  // 计算歌词需要的行数来决定高度（使用公共计算函数）
   const tempCanvas = api.utils.createCanvas(width, 100)
   const tempCtx = tempCanvas.ctx
   const maxLyricWidth = width - padding * 2
 
-  // 计算主歌词行数
   tempCtx.font = `bold 56px ${config.fontFamily}`
-  let mainLines = 0
-  if (mainText) {
-    mainLines = 1
-    let line = ''
-    for (const char of mainText) {
-      const testLine = line + char
-      if (tempCtx.measureText(testLine).width > maxLyricWidth && line.length > 0) {
-        mainLines++
-        line = char
-      } else {
-        line = testLine
-      }
-    }
-  }
+  const mainLines = calculateLineCount(tempCtx, mainText, maxLyricWidth)
 
-  // 计算翻译行数
   tempCtx.font = `52px ${config.fontFamily}`
-  let transLines = 0
-  if (transText) {
-    transLines = 1
-    let line = ''
-    for (const char of transText) {
-      const testLine = line + char
-      if (tempCtx.measureText(testLine).width > maxLyricWidth && line.length > 0) {
-        transLines++
-        line = char
-      } else {
-        line = testLine
-      }
-    }
-  }
+  const transLines = calculateLineCount(tempCtx, transText, maxLyricWidth)
 
   // 动态计算高度
   const coverSize = Math.min(width - padding * 2, 400)
@@ -206,16 +288,9 @@ const generateClassicImage = async (options = {}) => {
   // 创建画布
   const { canvas, ctx } = api.utils.createCanvas(width, height)
 
-  // 直接获取 CSS 变量值，确保颜色一致
-  const bgColor =
-    api.theme.getCSSVariable('md-sys-color-background') || (isDark ? '#121212' : '#fefefe')
-  let primaryColor = api.theme.getCSSVariable('md-sys-color-primary') || '#6750a4'
-  const onBgColor =
-    api.theme.getCSSVariable('md-sys-color-on-background') || (isDark ? '#e6e1e5' : '#1c1b1f')
-  const onSurfaceVariant =
-    api.theme.getCSSVariable('md-sys-color-on-surface-variant') || (isDark ? '#cac4d0' : '#49454f')
-  const surfaceContainer =
-    api.theme.getCSSVariable('md-sys-color-surface-container') || (isDark ? '#211f26' : '#f3edf7')
+  // 获取主题颜色（使用公共抽取函数）
+  const { bgColor, primaryColor, onBgColor, onSurfaceVariant, surfaceContainer } =
+    getThemeColors(isDark)
 
   // 绘制纯色背景
   ctx.fillStyle = bgColor
@@ -224,42 +299,11 @@ const generateClassicImage = async (options = {}) => {
   // 让出主线程
   await yieldToMain()
 
-  // 预加载封面图片（只加载一次）
-  let coverImg = null
-  const coverPath = state.currentTrack.coverPath || state.currentTrack.cover
-  if (coverPath) {
-    try {
-      coverImg = await api.utils.loadImage(coverPath)
-    } catch (e) {
-      api.log.debug('封面加载失败:', e)
-    }
-  }
+  // 预加载封面图片（使用公共加载函数）
+  const coverImg = await loadCoverImage()
 
-  // 绘制封面背景（模糊效果）
-  if (config.showCover && coverImg) {
-    // 绘制模糊背景
-    ctx.save()
-    ctx.globalAlpha = config.coverOpacity
-    ctx.filter = `blur(${config.coverBlur}px)`
-
-    // 计算覆盖整个画布的尺寸
-    const scale = Math.max(width / coverImg.width, height / coverImg.height) * 1.2
-    const scaledW = coverImg.width * scale
-    const scaledH = coverImg.height * scale
-    const offsetX = (width - scaledW) / 2
-    const offsetY = (height - scaledH) / 2
-
-    ctx.drawImage(coverImg, offsetX, offsetY, scaledW, scaledH)
-    ctx.restore()
-
-    // 添加渐变遮罩
-    const gradient = ctx.createLinearGradient(0, 0, 0, height)
-    gradient.addColorStop(0, isDark ? 'rgba(18,18,18,0.7)' : 'rgba(254,254,254,0.7)')
-    gradient.addColorStop(0.5, isDark ? 'rgba(18,18,18,0.5)' : 'rgba(254,254,254,0.5)')
-    gradient.addColorStop(1, isDark ? 'rgba(18,18,18,0.9)' : 'rgba(254,254,254,0.9)')
-    ctx.fillStyle = gradient
-    ctx.fillRect(0, 0, width, height)
-  }
+  // 绘制封面背景（模糊效果，使用公共绘制函数）
+  drawBlurredBackground(ctx, coverImg, width, height, config, isDark)
 
   // 让出主线程
   await yieldToMain()
@@ -416,38 +460,8 @@ const generateCompactImage = async (options = {}) => {
     return null
   }
 
-  // 获取当前歌词
-  let mainText = ''
-  let transText = ''
-
-  if (lyrics && lyrics.length > 0) {
-    let currentLyric = null
-    if (lyricIndex >= 0 && lyricIndex < lyrics.length) {
-      currentLyric = lyrics[lyricIndex]
-    } else {
-      currentLyric = lyrics[0]
-    }
-    if (currentLyric) {
-      const firstText = currentLyric.texts?.[0]
-      const secondText = currentLyric.texts?.[1]
-
-      if (typeof firstText === 'object' && firstText !== null) {
-        mainText = firstText.text || ''
-      } else if (typeof firstText === 'string') {
-        mainText = firstText
-      } else if (currentLyric.text) {
-        mainText = currentLyric.text
-      }
-
-      if (typeof secondText === 'object' && secondText !== null) {
-        transText = secondText.text || ''
-      } else if (typeof secondText === 'string') {
-        transText = secondText
-      } else if (currentLyric.translation) {
-        transText = currentLyric.translation
-      }
-    }
-  }
+  // 获取当前歌词（使用公共抽取函数）
+  const { mainText, transText } = getCurrentLyricText(lyrics, lyricIndex)
 
   await yieldToMain()
 
@@ -456,42 +470,16 @@ const generateCompactImage = async (options = {}) => {
   const bottomAreaHeight = 280 // 底部区域高度（封面+信息+进度条）
   const hasLyrics = mainText.length > 0
 
-  // 计算歌词行数
+  // 计算歌词行数（使用公共计算函数）
   const maxLyricWidth = width - padding * 2
   const tempCanvas = api.utils.createCanvas(width, 100)
   const tempCtx = tempCanvas.ctx
 
   tempCtx.font = `bold 56px ${config.fontFamily}`
-  let mainLines = 0
-  if (mainText) {
-    mainLines = 1
-    let line = ''
-    for (const char of mainText) {
-      const testLine = line + char
-      if (tempCtx.measureText(testLine).width > maxLyricWidth && line.length > 0) {
-        mainLines++
-        line = char
-      } else {
-        line = testLine
-      }
-    }
-  }
+  const mainLines = calculateLineCount(tempCtx, mainText, maxLyricWidth)
 
   tempCtx.font = `52px ${config.fontFamily}`
-  let transLines = 0
-  if (transText) {
-    transLines = 1
-    let line = ''
-    for (const char of transText) {
-      const testLine = line + char
-      if (tempCtx.measureText(testLine).width > maxLyricWidth && line.length > 0) {
-        transLines++
-        line = char
-      } else {
-        line = testLine
-      }
-    }
-  }
+  const transLines = calculateLineCount(tempCtx, transText, maxLyricWidth)
 
   // 动态计算高度
   const lyricAreaHeight = hasLyrics
@@ -507,16 +495,9 @@ const generateCompactImage = async (options = {}) => {
   // 创建画布
   const { canvas, ctx } = api.utils.createCanvas(width, height)
 
-  // 获取颜色
-  const bgColor =
-    api.theme.getCSSVariable('md-sys-color-background') || (isDark ? '#121212' : '#fefefe')
-  const primaryColor = api.theme.getCSSVariable('md-sys-color-primary') || '#6750a4'
-  const onBgColor =
-    api.theme.getCSSVariable('md-sys-color-on-background') || (isDark ? '#e6e1e5' : '#1c1b1f')
-  const onSurfaceVariant =
-    api.theme.getCSSVariable('md-sys-color-on-surface-variant') || (isDark ? '#cac4d0' : '#49454f')
-  const surfaceContainer =
-    api.theme.getCSSVariable('md-sys-color-surface-container') || (isDark ? '#211f26' : '#f3edf7')
+  // 获取主题颜色（使用公共抽取函数）
+  const { bgColor, primaryColor, onBgColor, onSurfaceVariant, surfaceContainer } =
+    getThemeColors(isDark)
 
   // 绘制纯色背景
   ctx.fillStyle = bgColor
@@ -524,40 +505,15 @@ const generateCompactImage = async (options = {}) => {
 
   await yieldToMain()
 
-  // 预加载封面图片
-  let coverImg = null
-  const compactCoverPath = state.currentTrack.coverPath || state.currentTrack.cover
-  if (compactCoverPath) {
-    try {
-      coverImg = await api.utils.loadImage(compactCoverPath)
-    } catch (e) {
-      api.log.debug('封面加载失败:', e)
-    }
-  }
+  // 预加载封面图片（使用公共加载函数）
+  const coverImg = await loadCoverImage()
 
-  // 绘制封面背景（模糊效果）
-  if (config.showCover && coverImg) {
-    ctx.save()
-    ctx.globalAlpha = config.coverOpacity
-    ctx.filter = `blur(${config.coverBlur}px)`
-
-    const scale = Math.max(width / coverImg.width, height / coverImg.height) * 1.2
-    const scaledW = coverImg.width * scale
-    const scaledH = coverImg.height * scale
-    const offsetX = (width - scaledW) / 2
-    const offsetY = (height - scaledH) / 2
-
-    ctx.drawImage(coverImg, offsetX, offsetY, scaledW, scaledH)
-    ctx.restore()
-
-    // 添加渐变遮罩
-    const gradient = ctx.createLinearGradient(0, 0, 0, height)
-    gradient.addColorStop(0, isDark ? 'rgba(18,18,18,0.6)' : 'rgba(254,254,254,0.6)')
-    gradient.addColorStop(0.7, isDark ? 'rgba(18,18,18,0.7)' : 'rgba(254,254,254,0.7)')
-    gradient.addColorStop(1, isDark ? 'rgba(18,18,18,0.95)' : 'rgba(254,254,254,0.95)')
-    ctx.fillStyle = gradient
-    ctx.fillRect(0, 0, width, height)
-  }
+  // 绘制封面背景（模糊效果，使用公共绘制函数，紧凑布局使用更深的底部遮罩）
+  drawBlurredBackground(ctx, coverImg, width, height, config, isDark, [
+    [0, 'rgba(18,18,18,0.6)', 'rgba(254,254,254,0.6)'],
+    [0.7, 'rgba(18,18,18,0.7)', 'rgba(254,254,254,0.7)'],
+    [1, 'rgba(18,18,18,0.95)', 'rgba(254,254,254,0.95)'],
+  ])
 
   await yieldToMain()
 
@@ -700,20 +656,6 @@ const generateCompactImage = async (options = {}) => {
 }
 
 /**
- * 截断文本并添加省略号
- */
-const truncateText = (ctx, text, maxWidth) => {
-  if (ctx.measureText(text).width <= maxWidth) {
-    return text
-  }
-  let truncated = text
-  while (ctx.measureText(truncated + '...').width > maxWidth && truncated.length > 0) {
-    truncated = truncated.slice(0, -1)
-  }
-  return truncated + '...'
-}
-
-/**
  * 生成分享图片（入口函数，根据配置选择布局）
  */
 const generateImage = async (options = {}) => {
@@ -733,10 +675,11 @@ const plugin = {
     api.log.info('歌词截图分享插件已激活')
 
     // 注册快捷键 - 统一操作
+    // 注意：避免使用 Ctrl+Shift+C/S，这些在 WebView2 中会被 DevTools/另存为拦截
     api.shortcuts.register({
       id: 'lyrics-share-copy',
       name: '复制歌词图片',
-      key: 'Ctrl+Shift+C',
+      key: 'Alt+Shift+C',
       description: '将当前歌词生成分享图片并复制到剪贴板',
       action: () => this.copyImage(),
     })
@@ -744,7 +687,7 @@ const plugin = {
     api.shortcuts.register({
       id: 'lyrics-share-save',
       name: '保存歌词图片',
-      key: 'Ctrl+Shift+S',
+      key: 'Alt+Shift+S',
       description: '将当前歌词生成分享图片并保存到本地',
       action: () => this.saveImage(),
     })
@@ -761,7 +704,7 @@ const plugin = {
     // 注册操作按钮 - 统一操作
     api.ui.registerActionButton({
       id: 'lyrics-share-copy-btn',
-      name: '复制图片 (Ctrl+Shift+C)',
+      name: '复制图片 (Alt+Shift+C)',
       icon: 'content_copy',
       location: 'lyrics',
       action: () => this.copyImage(),
@@ -769,7 +712,7 @@ const plugin = {
 
     api.ui.registerActionButton({
       id: 'lyrics-share-save-btn',
-      name: '保存图片 (Ctrl+Shift+S)',
+      name: '保存图片 (Alt+Shift+S)',
       icon: 'save',
       location: 'lyrics',
       action: () => this.saveImage(),

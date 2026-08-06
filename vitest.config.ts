@@ -18,6 +18,18 @@ export default defineConfig({
         inline: ['@material/material-color-utilities'],
       },
     },
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.ts'],
+      exclude: ['src/**/*.d.ts', 'src/types/**', 'src/**/*.test.ts', 'src/**/*.spec.ts'],
+      // 初始阈值设低,逐步提升
+      thresholds: {
+        lines: 40,
+        branches: 30,
+        functions: 30,
+        statements: 40,
+      },
+    },
   },
   resolve: {
     alias: {

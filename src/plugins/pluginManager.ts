@@ -59,6 +59,7 @@ export interface PluginAPI {
     getState: () => PlayerState
     getLyrics: () => Promise<LyricLine[] | null>
     getCurrentLyricIndex: () => number
+    getCoverPath: () => Promise<string | null>
     play: () => void
     pause: () => void
     togglePlay: () => void

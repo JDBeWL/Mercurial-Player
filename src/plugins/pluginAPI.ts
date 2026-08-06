@@ -4,9 +4,9 @@
  */
 
 import { readonly } from 'vue'
-import { invoke, convertFileSrc } from '@tauri-apps/api/core'
+import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
-import { writeFile } from '@tauri-apps/plugin-fs'
+import { writeFile, readFile } from '@tauri-apps/plugin-fs'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import {
   PluginPermission,
@@ -241,6 +241,27 @@ export function createPluginAPI(
         }))
 
         store.lyrics = storeLyrics as any
+      },
+
+      async getCoverPath(): Promise<string | null> {
+        requirePermission(PluginPermission.PLAYER_READ, 'player.getCoverPath')
+        const store = getPlayerStore()
+
+        // 先检查 store 中是否已有 coverPath（可能已异步加载完成）
+        if (store.currentTrack?.coverPath) {
+          return store.currentTrack.coverPath
+        }
+
+        // store 中没有，直接调用后端获取（不依赖 store 的异步加载时序）
+        const trackPath = store.currentTrack?.path
+        if (!trackPath) return null
+
+        try {
+          return await invoke<string | null>('get_track_cover_path', { path: trackPath })
+        } catch (e) {
+          logger.error(`[Plugin:${pluginId}] 获取封面路径失败:`, e)
+          return null
+        }
       },
     },
 
@@ -579,20 +600,41 @@ export function createPluginAPI(
         return canvas.toDataURL(type, quality)
       },
 
-      loadImage(src: string): Promise<HTMLImageElement> {
-        return new Promise((resolve, reject) => {
-          const img = new Image()
-          img.crossOrigin = 'anonymous'
-          img.onload = () => resolve(img)
-          img.onerror = (e) =>
-            reject(new Error(`图片加载失败: ${(e as ErrorEvent).message || src}`))
-          // 自动转换本地文件路径为 Tauri 可访问的 URL
-          const url =
-            src.startsWith('http') || src.startsWith('data:') || src.startsWith('asset:')
-              ? src
-              : convertFileSrc(src)
-          img.src = url
-        })
+      async loadImage(src: string): Promise<HTMLImageElement> {
+        // 对于 http/data/asset URL，直接加载（外部图片）
+        if (src.startsWith('http') || src.startsWith('data:') || src.startsWith('asset:')) {
+          return new Promise((resolve, reject) => {
+            const img = new Image()
+            img.crossOrigin = 'anonymous'
+            img.onload = () => resolve(img)
+            img.onerror = (e) =>
+              reject(new Error(`图片加载失败: ${(e as ErrorEvent).message || src}`))
+            img.src = src
+          })
+        }
+
+        // 对于本地文件路径，通过 readFile + Blob 加载
+        // 避免 convertFileSrc + crossOrigin 导致的 CORS 问题（asset 协议不返回 CORS 头）
+        // 同时 Blob URL 是同源的，不会 taint Canvas
+        try {
+          const data = await readFile(src)
+          const blob = new Blob([data])
+          const url = URL.createObjectURL(blob)
+          return await new Promise((resolve, reject) => {
+            const img = new Image()
+            img.onload = () => {
+              URL.revokeObjectURL(url)
+              resolve(img)
+            }
+            img.onerror = (e) => {
+              URL.revokeObjectURL(url)
+              reject(new Error(`图片加载失败: ${(e as ErrorEvent).message || src}`))
+            }
+            img.src = url
+          })
+        } catch (e) {
+          throw new Error(`图片加载失败: ${e instanceof Error ? e.message : String(e)}`)
+        }
       },
 
       blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {

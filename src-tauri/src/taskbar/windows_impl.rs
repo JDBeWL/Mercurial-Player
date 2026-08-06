@@ -8,15 +8,15 @@ use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, BITMAPINFO,
-    BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, RGBQUAD,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
+    DeleteDC, DeleteObject, RGBQUAD,
 };
+use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::UI::Shell::{
-    ITaskbarList3, TaskbarList, THUMBBUTTON, THUMBBUTTONMASK, THB_BITMAP,
-    THB_FLAGS, THB_TOOLTIP, THBF_DISMISSONCLICK, THBF_ENABLED,
+    ITaskbarList3, THB_BITMAP, THB_FLAGS, THB_TOOLTIP, THBF_DISMISSONCLICK, THBF_ENABLED,
+    THUMBBUTTON, THUMBBUTTONMASK, TaskbarList,
 };
 use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetSystemMetrics, HICON, SM_CXSMICON};
 
@@ -51,7 +51,6 @@ struct TaskbarIcons {
     pause_icon: Option<HICON>,
     next_icon: Option<HICON>,
 }
-
 
 impl Drop for TaskbarIcons {
     fn drop(&mut self) {
@@ -208,7 +207,9 @@ impl TaskbarManager {
 
         let (icon, tooltip) = match state {
             TaskbarPlaybackState::Playing => (self.icons.pause_icon, "暂停\0"),
-            TaskbarPlaybackState::Paused | TaskbarPlaybackState::Stopped => (self.icons.play_icon, "播放\0"),
+            TaskbarPlaybackState::Paused | TaskbarPlaybackState::Stopped => {
+                (self.icons.play_icon, "播放\0")
+            }
         };
 
         let tooltip_utf16: Vec<u16> = tooltip.encode_utf16().collect();
@@ -261,7 +262,7 @@ fn get_icon_size() -> i32 {
 /// 创建上一首图标 (|◀)
 fn create_prev_icon() -> Result<HICON, String> {
     let size = get_icon_size();
-    
+
     create_icon_from_pixels(size, size, |x, y, w, h| {
         let scale = w as f32 / 16.0;
         let cy = h as f32 / 2.0;
@@ -286,7 +287,7 @@ fn create_prev_icon() -> Result<HICON, String> {
 /// 创建播放图标 (▶)
 fn create_play_icon() -> Result<HICON, String> {
     let size = get_icon_size();
-    
+
     create_icon_from_pixels(size, size, |x, y, w, h| {
         let scale = w as f32 / 16.0;
         let cx = 5.0 * scale;
@@ -302,7 +303,7 @@ fn create_play_icon() -> Result<HICON, String> {
 /// 创建暂停图标 (❚❚)
 fn create_pause_icon() -> Result<HICON, String> {
     let size = get_icon_size();
-    
+
     create_icon_from_pixels(size, size, |x, y, w, h| {
         let scale = w as f32 / 16.0;
         let cy = h as f32 / 2.0;
@@ -326,7 +327,7 @@ fn create_pause_icon() -> Result<HICON, String> {
 /// 创建下一首图标 (▶|)
 fn create_next_icon() -> Result<HICON, String> {
     let size = get_icon_size();
-    
+
     create_icon_from_pixels(size, size, |x, y, w, h| {
         let scale = w as f32 / 16.0;
         let cy = h as f32 / 2.0;
@@ -377,8 +378,15 @@ where
         };
 
         let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-        let hbm = CreateDIBSection(Some(hdc), &raw const bmi, DIB_RGB_COLORS, &raw mut bits, None, 0)
-            .map_err(|e| format!("Failed to create DIB section: {e}"))?;
+        let hbm = CreateDIBSection(
+            Some(hdc),
+            &raw const bmi,
+            DIB_RGB_COLORS,
+            &raw mut bits,
+            None,
+            0,
+        )
+        .map_err(|e| format!("Failed to create DIB section: {e}"))?;
 
         if bits.is_null() {
             let _ = DeleteDC(hdc);
@@ -455,8 +463,15 @@ where
         };
 
         let mut mask_bits: *mut std::ffi::c_void = std::ptr::null_mut();
-        let mask_hbm = CreateDIBSection(Some(hdc), &raw const mask_bmi, DIB_RGB_COLORS, &raw mut mask_bits, None, 0)
-            .map_err(|e| format!("Failed to create mask DIB section: {e}"))?;
+        let mask_hbm = CreateDIBSection(
+            Some(hdc),
+            &raw const mask_bmi,
+            DIB_RGB_COLORS,
+            &raw mut mask_bits,
+            None,
+            0,
+        )
+        .map_err(|e| format!("Failed to create mask DIB section: {e}"))?;
 
         if !mask_bits.is_null() {
             let mask_pixels =
@@ -483,8 +498,9 @@ where
             hbmColor: hbm,
         };
 
-        let hicon = windows::Win32::UI::WindowsAndMessaging::CreateIconIndirect(&raw const iconinfo)
-            .map_err(|e| format!("Failed to create icon: {e}"))?;
+        let hicon =
+            windows::Win32::UI::WindowsAndMessaging::CreateIconIndirect(&raw const iconinfo)
+                .map_err(|e| format!("Failed to create icon: {e}"))?;
 
         // 清理
         let _ = DeleteObject(hbm.into());
@@ -517,4 +533,3 @@ pub fn update_playback_state(state: TaskbarPlaybackState) -> Result<(), String> 
         .map_err(|e| format!("Failed to lock taskbar manager: {e}"))?;
     guard.update_playback_state(state)
 }
-

@@ -1,7 +1,7 @@
 //! 音频播放模块
 //!
 //! 提供音频播放、暂停、恢复、音量控制等功能。
-//! 
+//!
 //! 使用SIMD友好的批量处理
 //! 预计算查找表避免热路径上的数学运算
 //! 无锁设计减少线程竞争
@@ -10,30 +10,17 @@ use super::decoder::{LockFreeSymphoniaSource, SymphoniaDecoder};
 
 #[cfg(windows)]
 use super::wasapi::PlaybackState;
-use crate::equalizer::{EqSettings, EQ_BAND_COUNT};
 use crate::AppState;
+use crate::equalizer::{EQ_BAND_COUNT, EqSettings};
 use rodio::Source;
 use spectrum_analyzer::scaling::divide_by_N_sqrt;
-use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
+use spectrum_analyzer::{FrequencyLimit, samples_fft_to_spectrum};
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
-
-/// 获取锁,poison 错误时记录日志并返回内部数据(而非 panic)
-macro_rules! lock_or_log {
-    ($mutex:expr) => {
-        match $mutex.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                log::warn!("Mutex poisoned, recovering: {}", poisoned);
-                poisoned.into_inner()
-            }
-        }
-    };
-}
 
 // ============================================================================
 // 预计算查找表
@@ -43,14 +30,15 @@ macro_rules! lock_or_log {
 const SOFT_CLIP_TABLE_SIZE: usize = 2001;
 
 /// 预计算的软削波查找表
-static SOFT_CLIP_TABLE: std::sync::LazyLock<[f32; SOFT_CLIP_TABLE_SIZE]> = std::sync::LazyLock::new(|| {
-    let mut table = [0.0f32; SOFT_CLIP_TABLE_SIZE];
-    for (i, item) in table.iter_mut().enumerate() {
-        let x = i as f32 / 1000.0; // 0.0到2.0
-        *item = compute_soft_clip(x);
-    }
-    table
-});
+static SOFT_CLIP_TABLE: std::sync::LazyLock<[f32; SOFT_CLIP_TABLE_SIZE]> =
+    std::sync::LazyLock::new(|| {
+        let mut table = [0.0f32; SOFT_CLIP_TABLE_SIZE];
+        for (i, item) in table.iter_mut().enumerate() {
+            let x = i as f32 / 1000.0; // 0.0到2.0
+            *item = compute_soft_clip(x);
+        }
+        table
+    });
 
 /// 计算软削波值（用于生成查找表）
 #[inline]
@@ -69,12 +57,12 @@ fn compute_soft_clip(x: f32) -> f32 {
 fn soft_clip_fast(x: f32) -> f32 {
     let sign = x.signum();
     let abs_x = x.abs();
-    
+
     // 快速路径：大多数采样在[-0.95, 0.95]范围内
     if abs_x <= 0.95 {
         return x;
     }
-    
+
     // 查表路径
     let index = ((abs_x * 1000.0) as usize).min(SOFT_CLIP_TABLE_SIZE - 1);
     sign * SOFT_CLIP_TABLE[index]
@@ -83,14 +71,15 @@ fn soft_clip_fast(x: f32) -> f32 {
 /// Preamp增益查找表（-8dB到+8dB，精度0.1dB）
 const PREAMP_TABLE_SIZE: usize = 161;
 
-static PREAMP_TABLE: std::sync::LazyLock<[f32; PREAMP_TABLE_SIZE]> = std::sync::LazyLock::new(|| {
-    let mut table = [0.0f32; PREAMP_TABLE_SIZE];
-    for (i, item) in table.iter_mut().enumerate() {
-        let db = (i as f32 - 80.0) / 10.0; // -8.0 到 +8.0 dB
-        *item = 10.0_f32.powf(db / 20.0);
-    }
-    table
-});
+static PREAMP_TABLE: std::sync::LazyLock<[f32; PREAMP_TABLE_SIZE]> =
+    std::sync::LazyLock::new(|| {
+        let mut table = [0.0f32; PREAMP_TABLE_SIZE];
+        for (i, item) in table.iter_mut().enumerate() {
+            let db = (i as f32 - 80.0) / 10.0; // -8.0 到 +8.0 dB
+            *item = 10.0_f32.powf(db / 20.0);
+        }
+        table
+    });
 
 /// 快速dB到线性增益转换
 #[inline(always)]
@@ -107,10 +96,12 @@ const BATCH_SIZE: usize = 64;
 /// 公式: hann[i] = 0.5 - 0.5 * cos(2π * i / N)
 fn precompute_hann_window(size: usize) -> Vec<f32> {
     let n = size as f32;
-    (0..size).map(|i| {
-        let angle = 2.0 * std::f32::consts::PI * (i as f32) / n;
-        0.5 - 0.5 * angle.cos()
-    }).collect()
+    (0..size)
+        .map(|i| {
+            let angle = 2.0 * std::f32::consts::PI * (i as f32) / n;
+            0.5 - 0.5 * angle.cos()
+        })
+        .collect()
 }
 
 #[derive(Debug, serde::Serialize, Clone)]
@@ -124,7 +115,11 @@ pub struct PlaybackStatus {
 impl PlaybackStatus {
     #[must_use]
     pub const fn new(is_playing: bool, position_secs: f32, volume: f32) -> Self {
-        Self { is_playing, position_secs, volume }
+        Self {
+            is_playing,
+            position_secs,
+            volume,
+        }
     }
 }
 
@@ -139,9 +134,17 @@ pub struct SpectrumUpdateEvent {
 pub struct TrackEndedEvent {}
 
 #[inline]
-fn emit_spectrum_update(app: &AppHandle, data: &[f32]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn emit_spectrum_update(
+    app: &AppHandle,
+    data: &[f32],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 直接发送数据数组，减少JSON包装开销
-    app.emit("spectrum-update", SpectrumUpdateEvent { data: data.to_vec() })?;
+    app.emit(
+        "spectrum-update",
+        SpectrumUpdateEvent {
+            data: data.to_vec(),
+        },
+    )?;
     Ok(())
 }
 
@@ -157,7 +160,10 @@ pub struct PlaybackPositionEvent {
     pub position: f32, // 秒
 }
 
-fn emit_playback_position(app: &AppHandle, position: f32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn emit_playback_position(
+    app: &AppHandle,
+    position: f32,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     app.emit("playback-position", PlaybackPositionEvent { position })?;
     Ok(())
 }
@@ -214,14 +220,21 @@ impl BatchEqProcessor {
     fn update_coefficients(&mut self, settings: &EqSettings) {
         use crate::equalizer::{BiquadCoefficients, EQ_FREQUENCIES, EQ_Q_VALUES};
         for (i, &freq) in EQ_FREQUENCIES.iter().enumerate() {
-            self.coefficients[i] = BiquadCoefficients::peaking_eq(self.sample_rate, freq, settings.gains[i], EQ_Q_VALUES[i]);
+            self.coefficients[i] = BiquadCoefficients::peaking_eq(
+                self.sample_rate,
+                freq,
+                settings.gains[i],
+                EQ_Q_VALUES[i],
+            );
         }
     }
 
     /// 批量处理采样 - 合并三阶段循环为单次遍历,提升 cache 局部性
     #[inline]
     fn process_batch(&mut self, samples: &mut [f32]) {
-        if !self.cached_enabled { return; }
+        if !self.cached_enabled {
+            return;
+        }
 
         let preamp = self.cached_preamp_multiplier;
         let channels = self.channels;
@@ -289,15 +302,22 @@ const fn calculate_fft_size(sample_rate: u32) -> usize {
     // 公式：fft_size = sample_rate * 0.0427
     // FFT大小必须是2的幂次
     match sample_rate {
-        0..=32000 => 1024,      // ≤32kHz: 1024 样本
-        32001..=64000 => 2048,  // 44.1k/48k: 2048 样本
+        0..=32000 => 1024,       // ≤32kHz: 1024 样本
+        32001..=64000 => 2048,   // 44.1k/48k: 2048 样本
         64001..=128_000 => 4096, // 88.2k/96k: 4096 样本
-        _ => 8192,              // 176.4k/192k/384k: 8192 样本
+        _ => 8192,               // 176.4k/192k/384k: 8192 样本
     }
 }
 
 impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
-    pub fn new(input: I, waveform_data: Arc<Mutex<Vec<f32>>>, spectrum_data: Arc<Mutex<Vec<f32>>>, app_handle: Option<AppHandle>, target_fps: Arc<AtomicU64>, enable_vertical_sync: Arc<AtomicBool>) -> Self {
+    pub fn new(
+        input: I,
+        waveform_data: Arc<Mutex<Vec<f32>>>,
+        spectrum_data: Arc<Mutex<Vec<f32>>>,
+        app_handle: Option<AppHandle>,
+        target_fps: Arc<AtomicU64>,
+        enable_vertical_sync: Arc<AtomicBool>,
+    ) -> Self {
         let (sr, ch) = (input.sample_rate().get(), input.channels().get());
         let fft_size = calculate_fft_size(sr);
         Self {
@@ -326,11 +346,12 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             enable_vertical_sync,
         }
     }
-    
+
     /// 设置初始播放位置（用于seek操作）
     #[must_use]
     pub fn with_start_position(mut self, position_secs: f32) -> Self {
-        self.samples_played = (position_secs * self.sample_rate as f32 * self.channels as f32) as u64;
+        self.samples_played =
+            (position_secs * self.sample_rate as f32 * self.channels as f32) as u64;
         self
     }
 
@@ -342,7 +363,7 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         }
         self
     }
-    
+
     /// 批量从输入源读取采样并处理
     #[inline]
     fn refill_batch(&mut self) -> bool {
@@ -364,7 +385,8 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
 
         // 更新EQ设置（每批次检查一次，而不是每512采样）
         self.eq_update_counter += 1;
-        if self.eq_update_counter >= 8 { // 每8批次 = 512采样
+        if self.eq_update_counter >= 8 {
+            // 每8批次 = 512采样
             self.eq_update_counter = 0;
             if let Ok(s) = self.eq_settings.try_read() {
                 self.eq_processor.update_settings(&s);
@@ -395,19 +417,19 @@ impl<I: Source<Item = f32> + Send> Iterator for VisualizationSource<I> {
                 return None;
             }
         }
-        
+
         let processed = self.pending_processed[self.pending_index];
         self.pending_index += 1;
         self.samples_played += 1;
-        
+
         // 添加到可视化缓冲区
         self.buffer.push(processed);
-        
+
         // FFT和事件发送逻辑（仅在缓冲区满时执行）
         if self.buffer.len() >= self.fft_size {
             self.process_visualization();
         }
-        
+
         Some(processed)
     }
 }
@@ -420,19 +442,20 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        
+
         // 发送播放位置（每100ms一次）
         let last_pos_emit = self.last_position_emit_time.load(Ordering::Relaxed);
         if now - last_pos_emit >= 100 {
             self.last_position_emit_time.store(now, Ordering::Relaxed);
             if let Some(ref app) = self.app_handle {
-                let position = self.samples_played as f32 / (self.sample_rate as f32 * self.channels as f32);
+                let position =
+                    self.samples_played as f32 / (self.sample_rate as f32 * self.channels as f32);
                 let _ = emit_playback_position(app, position);
             }
         }
-        
+
         let last_fft = self.last_fft_time.load(Ordering::Relaxed);
-        
+
         // 根据垂直同步设置决定FFT频率
         let enable_vsync = self.enable_vertical_sync.load(Ordering::Relaxed);
         let target_fps = self.target_fps.load(Ordering::Relaxed).max(1);
@@ -440,18 +463,18 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         // 保留 enable_vsync 标志供未来扩展真实屏幕刷新率读取
         let _ = enable_vsync;
         let fft_interval_ms = 1000 / target_fps;
-        
+
         // 限制FFT计算和发送频率
         if now - last_fft >= fft_interval_ms {
             self.last_fft_time.store(now, Ordering::Relaxed);
             self.compute_spectrum();
         }
-        
+
         // 保留后半部分数据用于重叠分析
         let half = self.buffer.len() / 2;
         self.buffer.drain(..half);
     }
-    
+
     /// 计算频谱数据
     #[inline(never)]
     fn compute_spectrum(&mut self) {
@@ -471,43 +494,45 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             ) {
                 // 重置频谱缓冲区
                 self.spectrum_buffer.fill(0.0);
-                
+
                 // AE风格：线性频率分布
                 const NUM_BINS: usize = 128;
                 const FREQ_MIN: f32 = 20.0;
                 const FREQ_MAX: f32 = 16000.0;
                 const FREQ_STEP: f32 = (FREQ_MAX - FREQ_MIN) / NUM_BINS as f32;
-                
+
                 for (freq, value) in spectrum.data() {
                     let f = freq.val();
-                    if !(FREQ_MIN..=FREQ_MAX).contains(&f) { continue; }
-                    
+                    if !(FREQ_MIN..=FREQ_MAX).contains(&f) {
+                        continue;
+                    }
+
                     let bin = ((f - FREQ_MIN) / FREQ_STEP).floor() as usize;
                     let bin = bin.min(NUM_BINS - 1);
-                    
+
                     let v = value.val();
                     if v > self.spectrum_buffer[bin] {
                         self.spectrum_buffer[bin] = v;
                     }
                 }
-                
+
                 // AE风格的平滑：快速上升，缓慢下降
                 for i in 0..128 {
                     let target = self.spectrum_buffer[i];
                     let current = self.prev_spectrum[i];
-                    
+
                     self.prev_spectrum[i] = if target > current {
                         current * 0.3 + target * 0.7 // 快速上升
                     } else {
                         current * 0.85 + target * 0.15 // 缓慢下降
                     };
                 }
-                
+
                 spec.clear();
                 spec.extend_from_slice(&self.prev_spectrum);
             }
         }
-        
+
         // 发送事件 - 与FFT计算同步，不再单独节流
         if let Some(ref app) = self.app_handle {
             let _ = emit_spectrum_update(app, &self.prev_spectrum);
@@ -516,28 +541,41 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
 }
 
 impl<I: Source<Item = f32> + Send> Source for VisualizationSource<I> {
-    fn current_span_len(&self) -> Option<usize> { self.input.current_span_len() }
-    fn channels(&self) -> std::num::NonZero<u16> { self.input.channels() }
-    fn sample_rate(&self) -> std::num::NonZero<u32> { self.input.sample_rate() }
-    fn total_duration(&self) -> Option<Duration> { self.input.total_duration() }
+    fn current_span_len(&self) -> Option<usize> {
+        self.input.current_span_len()
+    }
+    fn channels(&self) -> std::num::NonZero<u16> {
+        self.input.channels()
+    }
+    fn sample_rate(&self) -> std::num::NonZero<u32> {
+        self.input.sample_rate()
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        self.input.total_duration()
+    }
 }
 
 /// 播放音轨（共享模式）
-pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, position: Option<f32>) -> Result<(), String> {
+pub fn play_track_shared(
+    app: &AppHandle,
+    state: &State<AppState>,
+    path: &str,
+    position: Option<f32>,
+) -> Result<(), String> {
     let player = &state.player;
     // 取消任何正在进行的淡入淡出,防止其 on_complete(pause) 在新歌播放后执行
     player.fade.generation.fetch_add(1, Ordering::SeqCst);
     // 先读取 target_volume 再锁 sink,避免嵌套锁死锁风险
-    let vol = *lock_or_log!(player.output.target_volume);
+    let vol = *lock_or_log!(player.output.target_volume.lock());
     {
-        let player_lock = lock_or_log!(player.output.sink);
+        let player_lock = lock_or_log!(player.output.sink.lock());
         // 直接停止，不做淡出（淡出会阻塞主线程）
         // 新音源会有fade_in效果来平滑过渡
         player_lock.stop();
         player_lock.set_volume(vol);
     }
-    *lock_or_log!(player.track.current_path) = Some(path.to_string());
-    *lock_or_log!(player.track.current_source) = None;
+    *lock_or_log!(player.track.current_path.lock()) = Some(path.to_string());
+    *lock_or_log!(player.track.current_source.lock()) = None;
     let (waveform, spectrum, eq_settings, target_fps, enable_vertical_sync) = (
         Arc::clone(&player.visualization.waveform_data),
         Arc::clone(&player.visualization.spectrum_data),
@@ -557,20 +595,34 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
             let _ = dec.prefill_buffer();
             log::debug!("Symphonia decoder: {path}");
             Box::new(
-                VisualizationSource::new(LockFreeSymphoniaSource::new(dec), waveform, spectrum, Some(app.clone()), target_fps, enable_vertical_sync)
-                    .with_start_position(start_pos)
-                    .with_eq_settings(eq_settings)
-                    .fade_in(Duration::from_millis(80)) // 稍长的淡入来补偿没有淡出
+                VisualizationSource::new(
+                    LockFreeSymphoniaSource::new(dec),
+                    waveform,
+                    spectrum,
+                    Some(app.clone()),
+                    target_fps,
+                    enable_vertical_sync,
+                )
+                .with_start_position(start_pos)
+                .with_eq_settings(eq_settings)
+                .fade_in(Duration::from_millis(80)), // 稍长的淡入来补偿没有淡出
             )
         }
         Err(e) => {
             log::warn!("Symphonia decoder failed, fallback to rodio: {e}");
             let file = File::open(path).map_err(|e| e.to_string())?;
             Box::new(
-                VisualizationSource::new(rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?, waveform, spectrum, Some(app.clone()), target_fps, enable_vertical_sync)
-                    .with_start_position(position.unwrap_or(0.0))
-                    .with_eq_settings(eq_settings)
-                    .fade_in(Duration::from_millis(80))
+                VisualizationSource::new(
+                    rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?,
+                    waveform,
+                    spectrum,
+                    Some(app.clone()),
+                    target_fps,
+                    enable_vertical_sync,
+                )
+                .with_start_position(position.unwrap_or(0.0))
+                .with_eq_settings(eq_settings)
+                .fade_in(Duration::from_millis(80)),
             )
         }
     };
@@ -581,36 +633,49 @@ pub fn play_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, p
     // 导致高采样率音频以错误的速率播放（降速）。
     // 解决方案：在 append 之前手动将 source 重采样到 mixer 的采样率。
     let resampled: Box<dyn Source<Item = f32> + Send> = {
-        let stream_guard = lock_or_log!(player.output.output_stream);
+        let stream_guard = lock_or_log!(player.output.output_stream.lock());
         if let Some(ref mixer_sink) = *stream_guard {
             let mixer_sr = mixer_sink.config().sample_rate();
             let mixer_ch = mixer_sink.config().channel_count();
             #[cfg(debug_assertions)]
             let source_sr = source.sample_rate();
             #[cfg(debug_assertions)]
-            println!("Source sample_rate: {source_sr}, Mixer sample_rate: {mixer_sr}, Mixer channels: {mixer_ch}");
-            Box::new(rodio::source::UniformSourceIterator::new(source, mixer_ch, mixer_sr))
+            println!(
+                "Source sample_rate: {source_sr}, Mixer sample_rate: {mixer_sr}, Mixer channels: {mixer_ch}"
+            );
+            Box::new(rodio::source::UniformSourceIterator::new(
+                source, mixer_ch, mixer_sr,
+            ))
         } else {
             log::warn!("No output stream available, skipping manual resample");
             source
         }
     };
 
-    let player_lock = lock_or_log!(player.output.sink);
+    let player_lock = lock_or_log!(player.output.sink.lock());
     player_lock.append(resampled);
     player_lock.play();
     Ok(())
 }
 
 /// 播放音轨（独占模式）
+///
+/// 异步实现：等待淡出/解码线程启动/缓冲区填充的 sleep 改用 `tokio::time::sleep`,
+/// 避免阻塞 Tauri 命令线程导致前端 UI 卡顿（原本最坏阻塞 ~600ms）。
+/// 解码推送线程内部仍有自己的 sleep，那是后台线程内的等待，不在此处理。
 #[cfg(windows)]
-pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str, position: Option<f32>) -> Result<(), String> {
+pub async fn play_track_exclusive(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    path: &str,
+    position: Option<f32>,
+) -> Result<(), String> {
     let player = &state.player;
     // 递增代际计数器取消旧解码推送线程(替代 stop 布尔标志,避免 70ms 窗口内状态不一致)
     player.decode.generation.fetch_add(1, Ordering::SeqCst);
     let new_thread_id = player.decode.id.fetch_add(1, Ordering::SeqCst) + 1;
     {
-        if let Some(ref wasapi) = *lock_or_log!(player.output.wasapi_player) {
+        if let Some(ref wasapi) = *lock_or_log!(player.output.wasapi_player.lock()) {
             // 切歌淡出:50ms 平滑过渡到静音,消除 audible click
             // 音频线程内部完成淡出后会自动 stop_stream + clear_buffer
             // fade 禁用时直接 stop + clear_buffer
@@ -624,26 +689,31 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
     }
     // fade 启用时等待淡出完成(50ms) + 旧解码线程退出(20ms buffer)
     // fade 禁用时只等旧解码线程退出
-    let wait_ms = if player.fade.enabled.load(Ordering::SeqCst) { 70 } else { 50 };
-    std::thread::sleep(Duration::from_millis(wait_ms));
+    let wait_ms = if player.fade.enabled.load(Ordering::SeqCst) {
+        70
+    } else {
+        50
+    };
+    tokio::time::sleep(Duration::from_millis(wait_ms)).await;
     // 兜底:确保缓冲区被清空(防止淡出未完成的极端情况)
     {
-        if let Some(ref wasapi) = *lock_or_log!(player.output.wasapi_player) {
+        if let Some(ref wasapi) = *lock_or_log!(player.output.wasapi_player.lock()) {
             let _ = wasapi.clear_buffer();
         }
     }
 
     let (target_sr, target_ch) = {
-        let g = lock_or_log!(player.output.wasapi_player);
+        let g = lock_or_log!(player.output.wasapi_player.lock());
         let wasapi = g.as_ref().ok_or("WASAPI player not initialized")?;
         (wasapi.get_sample_rate(), wasapi.get_channels())
     };
     if position.is_none() {
-        *lock_or_log!(player.track.current_path) = Some(path.to_string());
+        *lock_or_log!(player.track.current_path.lock()) = Some(path.to_string());
     }
     log::info!("WASAPI Exclusive: {path} @ {target_sr}Hz, {target_ch} ch");
 
-    let mut decoder = SymphoniaDecoder::new(path).map_err(|e| format!("Failed to create decoder: {e}"))?;
+    let mut decoder =
+        SymphoniaDecoder::new(path).map_err(|e| format!("Failed to create decoder: {e}"))?;
     if let Some(t) = position {
         if let Err(e) = decoder.seek(Duration::from_secs_f32(t)) {
             log::warn!("Seek failed for track, starting from beginning: {e}");
@@ -670,30 +740,58 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
     std::thread::spawn(move || {
         thread_started_clone.store(true, Ordering::SeqCst);
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            decode_and_push_to_wasapi(source, wasapi_clone, waveform, spectrum, app_clone, generation, thread_id, new_thread_id, src_sr, src_ch.get(), target_sr, target_ch, eq_settings, start_pos);
+            decode_and_push_to_wasapi(
+                source,
+                wasapi_clone,
+                waveform,
+                spectrum,
+                app_clone,
+                generation,
+                thread_id,
+                new_thread_id,
+                src_sr,
+                src_ch.get(),
+                target_sr,
+                target_ch,
+                eq_settings,
+                start_pos,
+            );
         }));
     });
 
     // 等待解码线程启动
     let mut wait = 0;
     while !thread_started.load(Ordering::SeqCst) && wait < 20 {
-        std::thread::sleep(Duration::from_millis(5));
+        tokio::time::sleep(Duration::from_millis(5)).await;
         wait += 1;
     }
 
     // 等待缓冲区有足够数据再开始播放，避免音频开头欠载
+    // 注意:不能在持有 wasapi_player 锁守卫的情况下 await(守卫非 Send),
+    // 因此每次检查后立即释放锁再 sleep。
     {
-        if let Some(ref wasapi) = *lock_or_log!(player.output.wasapi_player) {
-            // 等待至少200ms的音频数据（约 1/5 秒）
-            let min_buffer_samples = target_sr as usize * target_ch as usize / 5;
-            let mut buffer_wait = 0;
-            while wasapi.get_buffer_size() < min_buffer_samples && buffer_wait < 50 {
-                std::thread::sleep(Duration::from_millis(10));
-                buffer_wait += 1;
+        // 等待至少200ms的音频数据（约 1/5 秒）
+        let min_buffer_samples = target_sr as usize * target_ch as usize / 5;
+        let mut buffer_wait = 0;
+        loop {
+            let current_size = {
+                let g = lock_or_log!(player.output.wasapi_player.lock());
+                g.as_ref().map_or(0, |p| p.get_buffer_size())
+            };
+            if current_size >= min_buffer_samples || buffer_wait >= 50 {
+                break;
             }
-            // 额外等待一小段时间确保数据稳定
-            std::thread::sleep(Duration::from_millis(20));
-            wasapi.start().map_err(|e| format!("Failed to start WASAPI: {e:?}"))?;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            buffer_wait += 1;
+        }
+        // 额外等待一小段时间确保数据稳定
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        // 启动播放(重新获取锁,不跨 await)
+        let g = lock_or_log!(player.output.wasapi_player.lock());
+        if let Some(ref wasapi) = *g {
+            wasapi
+                .start()
+                .map_err(|e| format!("Failed to start WASAPI: {e:?}"))?;
         }
     }
     Ok(())
@@ -701,7 +799,12 @@ pub fn play_track_exclusive(app: &AppHandle, state: &State<AppState>, path: &str
 
 /// 播放音轨（独占模式）
 #[cfg(not(windows))]
-pub fn play_track_exclusive(_app: &AppHandle, _state: &State<AppState>, _path: &str, _position: Option<f32>) -> Result<(), String> {
+pub async fn play_track_exclusive(
+    _app: &AppHandle,
+    _state: &State<'_, AppState>,
+    _path: &str,
+    _position: Option<f32>,
+) -> Result<(), String> {
     Err("Exclusive mode is only supported on Windows".to_string())
 }
 
@@ -710,10 +813,10 @@ pub fn play_track_exclusive(_app: &AppHandle, _state: &State<AppState>, _path: &
 #[must_use]
 const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
     match sample_rate {
-        0..=32000 => 512,       // ≤32kHz
-        32001..=64000 => 1024,  // 44.1k/48k
+        0..=32000 => 512,        // ≤32kHz
+        32001..=64000 => 1024,   // 44.1k/48k
         64001..=128_000 => 2048, // 88.2k/96k
-        _ => 4096,              // 176.4k/192k/384k
+        _ => 4096,               // 176.4k/192k/384k
     }
 }
 
@@ -735,7 +838,10 @@ impl EqProcessor {
     fn new(sample_rate: u32, channels: u16) -> Self {
         Self {
             coefficients: vec![crate::equalizer::BiquadCoefficients::default(); EQ_BAND_COUNT],
-            states: vec![vec![crate::equalizer::BiquadState::default(); channels as usize]; EQ_BAND_COUNT],
+            states: vec![
+                vec![crate::equalizer::BiquadState::default(); channels as usize];
+                EQ_BAND_COUNT
+            ],
             sample_rate: sample_rate as f32,
             channels: channels as usize,
             cached_enabled: false,
@@ -746,7 +852,7 @@ impl EqProcessor {
     fn update_settings(&mut self, settings: &EqSettings) {
         self.cached_enabled = settings.enabled;
         self.cached_preamp_multiplier = 10.0_f32.powf(settings.preamp / 20.0);
-        
+
         if settings.enabled {
             self.update_coefficients(settings);
         }
@@ -755,13 +861,20 @@ impl EqProcessor {
     fn update_coefficients(&mut self, settings: &EqSettings) {
         use crate::equalizer::{BiquadCoefficients, EQ_FREQUENCIES, EQ_Q_VALUES};
         for (i, &freq) in EQ_FREQUENCIES.iter().enumerate() {
-            self.coefficients[i] = BiquadCoefficients::peaking_eq(self.sample_rate, freq, settings.gains[i], EQ_Q_VALUES[i]);
+            self.coefficients[i] = BiquadCoefficients::peaking_eq(
+                self.sample_rate,
+                freq,
+                settings.gains[i],
+                EQ_Q_VALUES[i],
+            );
         }
     }
 
     #[inline(always)]
     fn process_sample_cached(&mut self, input: f32, channel: usize) -> f32 {
-        if !self.cached_enabled { return input; }
+        if !self.cached_enabled {
+            return input;
+        }
         let mut sample = input * self.cached_preamp_multiplier;
         for (band, coeffs) in self.coefficients.iter().enumerate() {
             sample = self.states[band][channel].process(sample, coeffs);
@@ -792,11 +905,18 @@ fn decode_and_push_to_wasapi(
     eq_settings: Arc<RwLock<EqSettings>>,
     start_position: f32,
 ) {
-    use rubato::{Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType, WindowFunction};
     use audioadapter_buffers::direct::SequentialSliceOfVecs;
+    use rubato::{
+        Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
+        WindowFunction,
+    };
     // 记录启动时的代际,循环中检测代际变化即退出(替代 stop 布尔标志)
     let my_generation = generation.load(Ordering::SeqCst);
-    if generation.load(Ordering::SeqCst) != my_generation || thread_id_ref.load(Ordering::SeqCst) != my_id { return; }
+    if generation.load(Ordering::SeqCst) != my_generation
+        || thread_id_ref.load(Ordering::SeqCst) != my_id
+    {
+        return;
+    }
 
     let mut eq_proc = EqProcessor::new(src_sr, src_ch);
     if let Ok(settings) = eq_settings.read() {
@@ -819,8 +939,11 @@ fn decode_and_push_to_wasapi(
             chunk_size,
             src_ch as usize,
             FixedAsync::Input,
-        ).ok()
-    } else { None };
+        )
+        .ok()
+    } else {
+        None
+    };
 
     let mut input_frames: Vec<Vec<f32>> = vec![Vec::with_capacity(chunk_size); src_ch as usize];
     // 精确计算最大输出缓冲区大小
@@ -829,16 +952,17 @@ fn decode_and_push_to_wasapi(
     // rubato 4.0: 预分配输出帧 buffer (复用,避免每次循环堆分配)
     // 每通道预留 max_output_frames + chunk_size 作为安全余量 (rubato 启动延迟可能导致首帧输出更多)
     let output_frames_capacity = max_output_frames + chunk_size;
-    let mut output_frames_resampled: Vec<Vec<f32>> = vec![Vec::with_capacity(output_frames_capacity); src_ch as usize];
+    let mut output_frames_resampled: Vec<Vec<f32>> =
+        vec![Vec::with_capacity(output_frames_capacity); src_ch as usize];
     // 复用 interleaved 缓冲区,避免每帧堆分配
     let samples_needed = chunk_size * src_ch as usize;
     let mut interleaved: Vec<f32> = Vec::with_capacity(samples_needed);
     // 通道转换用复用缓冲区
     let mut converted_buffer: Vec<f32> = Vec::with_capacity(max_output_frames * target_ch as usize);
-    
+
     // 播放位置追踪
     let mut last_position_emit_time: u64 = 0;
-    
+
     // 发送播放位置的闭包
     let emit_position = |last_time: &mut u64| {
         let now = std::time::SystemTime::now()
@@ -847,27 +971,41 @@ fn decode_and_push_to_wasapi(
             .as_millis() as u64;
         if now - *last_time >= 100 {
             *last_time = now;
-            let samples_played = lock_or_log!(wasapi)
+            let samples_played = lock_or_log!(wasapi.lock())
                 .as_ref()
                 .map_or(0, |p| p.get_samples_written());
-            let position = start_position + samples_played as f32 / (target_sr as f32 * target_ch as f32);
+            let position =
+                start_position + samples_played as f32 / (target_sr as f32 * target_ch as f32);
             let _ = emit_playback_position(&app, position);
         }
     };
 
     loop {
-        if generation.load(Ordering::SeqCst) != my_generation || thread_id_ref.load(Ordering::SeqCst) != my_id || lock_or_log!(wasapi).is_none() { break; }
-        for ch in &mut input_frames { ch.clear(); }
+        if generation.load(Ordering::SeqCst) != my_generation
+            || thread_id_ref.load(Ordering::SeqCst) != my_id
+            || lock_or_log!(wasapi.lock()).is_none()
+        {
+            break;
+        }
+        for ch in &mut input_frames {
+            ch.clear();
+        }
 
         // 复用 interleaved 缓冲区
         interleaved.clear();
         let mut eof = false;
         for _ in 0..samples_needed {
-            if let Some(s) = source.next() { interleaved.push(s); }
-            else { eof = true; break; }
+            if let Some(s) = source.next() {
+                interleaved.push(s);
+            } else {
+                eof = true;
+                break;
+            }
         }
-        if interleaved.is_empty() { break; }
-        
+        if interleaved.is_empty() {
+            break;
+        }
+
         // 发送播放位置
         emit_position(&mut last_position_emit_time);
 
@@ -909,13 +1047,26 @@ fn decode_and_push_to_wasapi(
                 match SequentialSliceOfVecs::new(&input_frames, src_ch as usize, chunk_size) {
                     Ok(input_adapter) => {
                         // 清空并预分配输出 buffer
-                        for ch in &mut output_frames_resampled { ch.clear(); ch.resize(output_frames_capacity, 0.0); }
-                        match SequentialSliceOfVecs::new_mut(&mut output_frames_resampled, src_ch as usize, output_frames_capacity) {
+                        for ch in &mut output_frames_resampled {
+                            ch.clear();
+                            ch.resize(output_frames_capacity, 0.0);
+                        }
+                        match SequentialSliceOfVecs::new_mut(
+                            &mut output_frames_resampled,
+                            src_ch as usize,
+                            output_frames_capacity,
+                        ) {
                             Ok(mut output_adapter) => {
                                 let indexing = Indexing::new();
-                                match r.process_into_buffer(&input_adapter, &mut output_adapter, Some(&indexing)) {
+                                match r.process_into_buffer(
+                                    &input_adapter,
+                                    &mut output_adapter,
+                                    Some(&indexing),
+                                ) {
                                     Ok((_in_used, out_written)) => {
-                                        for ch in &mut output_frames_resampled { ch.truncate(out_written); }
+                                        for ch in &mut output_frames_resampled {
+                                            ch.truncate(out_written);
+                                        }
                                         Cow::Owned(output_frames_resampled.clone())
                                     }
                                     Err(_) => Cow::Borrowed(&input_frames),
@@ -934,13 +1085,26 @@ fn decode_and_push_to_wasapi(
                 let frames_in = input_frames[0].len();
                 match SequentialSliceOfVecs::new(&input_frames, src_ch as usize, frames_in) {
                     Ok(input_adapter) => {
-                        for ch in &mut output_frames_resampled { ch.clear(); ch.resize(output_frames_capacity, 0.0); }
-                        match SequentialSliceOfVecs::new_mut(&mut output_frames_resampled, src_ch as usize, output_frames_capacity) {
+                        for ch in &mut output_frames_resampled {
+                            ch.clear();
+                            ch.resize(output_frames_capacity, 0.0);
+                        }
+                        match SequentialSliceOfVecs::new_mut(
+                            &mut output_frames_resampled,
+                            src_ch as usize,
+                            output_frames_capacity,
+                        ) {
                             Ok(mut output_adapter) => {
                                 let indexing = Indexing::new();
-                                match r.process_into_buffer(&input_adapter, &mut output_adapter, Some(&indexing)) {
+                                match r.process_into_buffer(
+                                    &input_adapter,
+                                    &mut output_adapter,
+                                    Some(&indexing),
+                                ) {
                                     Ok((_in_used, out_written)) => {
-                                        for ch in &mut output_frames_resampled { ch.truncate(out_written); }
+                                        for ch in &mut output_frames_resampled {
+                                            ch.truncate(out_written);
+                                        }
                                         Cow::Owned(output_frames_resampled.clone())
                                     }
                                     Err(_) => Cow::Borrowed(&input_frames),
@@ -980,29 +1144,55 @@ fn decode_and_push_to_wasapi(
             // 缓冲区容量约为 target_sr * target_ch * 4 秒,保持在 2 秒以下
             let max_buffer = target_sr as usize * target_ch as usize * 2;
             loop {
-                if generation.load(Ordering::SeqCst) != my_generation || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
+                if generation.load(Ordering::SeqCst) != my_generation
+                    || thread_id_ref.load(Ordering::SeqCst) != my_id
+                {
+                    break;
+                }
                 // 用 condvar 等待 50ms 超时,期间 WASAPI 消费端 notify 会唤醒本线程
-                let has_space = lock_or_log!(wasapi).as_ref().is_none_or(|p| p.wait_for_buffer_space(max_buffer, Duration::from_millis(50)));
-                if has_space { break; }
+                let has_space = lock_or_log!(wasapi.lock())
+                    .as_ref()
+                    .is_none_or(|p| p.wait_for_buffer_space(max_buffer, Duration::from_millis(50)));
+                if has_space {
+                    break;
+                }
                 // 等待时继续发送播放位置
                 emit_position(&mut last_position_emit_time);
             }
-            if generation.load(Ordering::SeqCst) != my_generation || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
+            if generation.load(Ordering::SeqCst) != my_generation
+                || thread_id_ref.load(Ordering::SeqCst) != my_id
+            {
+                break;
+            }
 
-            if let Some(ref p) = *lock_or_log!(wasapi) {
-                if p.push_samples(final_out).is_err() { break; }
+            if let Some(ref p) = *lock_or_log!(wasapi.lock()) {
+                if p.push_samples(final_out).is_err() {
+                    break;
+                }
             }
         }
 
         if eof && interleaved.len() < samples_needed {
             loop {
-                if generation.load(Ordering::SeqCst) != my_generation || thread_id_ref.load(Ordering::SeqCst) != my_id { break; }
-                let buf_size = lock_or_log!(wasapi).as_ref().map_or(0, |p| p.get_buffer_size());
-                if buf_size == 0 { break; }
+                if generation.load(Ordering::SeqCst) != my_generation
+                    || thread_id_ref.load(Ordering::SeqCst) != my_id
+                {
+                    break;
+                }
+                let buf_size = lock_or_log!(wasapi.lock())
+                    .as_ref()
+                    .map_or(0, |p| p.get_buffer_size());
+                if buf_size == 0 {
+                    break;
+                }
                 std::thread::sleep(Duration::from_millis(50));
             }
-            if generation.load(Ordering::SeqCst) == my_generation && thread_id_ref.load(Ordering::SeqCst) == my_id {
-                if let Some(ref p) = *lock_or_log!(wasapi) { let _ = p.stop(); }
+            if generation.load(Ordering::SeqCst) == my_generation
+                && thread_id_ref.load(Ordering::SeqCst) == my_id
+            {
+                if let Some(ref p) = *lock_or_log!(wasapi.lock()) {
+                    let _ = p.stop();
+                }
                 let _ = emit_track_ended(&app);
             }
             break;
@@ -1017,21 +1207,21 @@ fn decode_and_push_to_wasapi(
 /// 使用ITU-R BS.775-1标准的下混系数
 fn downmix_surround_to_stereo(samples: &[f32], src_ch: usize, frame: usize) -> (f32, f32) {
     let start = frame * src_ch;
-    
+
     let fl = samples[start];
     let fr = samples[start + 1];
     let fc = if src_ch > 2 { samples[start + 2] } else { 0.0 };
     let _lfe = if src_ch > 3 { samples[start + 3] } else { 0.0 };
-    
+
     const CENTER_MIX: f32 = 0.707;
     const SURROUND_MIX: f32 = 0.707;
     const BACK_MIX: f32 = 0.5;
-    
+
     let (mut left, mut right) = (fl, fr);
-    
+
     left += fc * CENTER_MIX;
     right += fc * CENTER_MIX;
-    
+
     match src_ch {
         6 => {
             let sl = samples[start + 4];
@@ -1049,16 +1239,16 @@ fn downmix_surround_to_stereo(samples: &[f32], src_ch: usize, frame: usize) -> (
         }
         _ => {}
     }
-    
+
     let normalize = match src_ch {
         6 => 0.707,
         8 => 0.667,
         _ => 0.8,
     };
-    
+
     (
         (left * normalize).clamp(-1.0, 1.0),
-        (right * normalize).clamp(-1.0, 1.0)
+        (right * normalize).clamp(-1.0, 1.0),
     )
 }
 
@@ -1094,7 +1284,11 @@ fn convert_channels_into(samples: &[f32], src_ch: u16, target_ch: u16, out: &mut
             _ => {
                 // 其他情况:简单截取或填充
                 for ch in 0..tgt {
-                    out.push(if ch < src { samples[start + ch] } else { samples[start] });
+                    out.push(if ch < src {
+                        samples[start + ch]
+                    } else {
+                        samples[start]
+                    });
                 }
             }
         }
@@ -1102,12 +1296,18 @@ fn convert_channels_into(samples: &[f32], src_ch: u16, target_ch: u16, out: &mut
 }
 
 /// Seek共享模式
-pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, time: f32) -> Result<(), String> {
+pub fn seek_track_shared(
+    app: &AppHandle,
+    state: &State<AppState>,
+    path: &str,
+    time: f32,
+) -> Result<(), String> {
     let player = &state.player;
     // 取消任何正在进行的淡入淡出,防止其 on_complete(pause) 在 seek 后执行
     player.fade.generation.fetch_add(1, Ordering::SeqCst);
     let eq_settings = state.equalizer.get_settings_handle();
-    let mut decoder = SymphoniaDecoder::new(path).map_err(|e| format!("Failed to create decoder: {e}"))?;
+    let mut decoder =
+        SymphoniaDecoder::new(path).map_err(|e| format!("Failed to create decoder: {e}"))?;
     decoder.seek(Duration::from_secs_f32(time))?;
     let _ = decoder.prefill_buffer();
     let source: Box<dyn Source<Item = f32> + Send> = Box::new(
@@ -1121,28 +1321,30 @@ pub fn seek_track_shared(app: &AppHandle, state: &State<AppState>, path: &str, t
         )
         .with_start_position(time)
         .with_eq_settings(eq_settings)
-        .fade_in(Duration::from_millis(50)) // seek时使用较短的淡入
+        .fade_in(Duration::from_millis(50)), // seek时使用较短的淡入
     );
 
     // 手动重采样到 mixer 采样率（同 play_track_shared 的修复）
     let resampled: Box<dyn Source<Item = f32> + Send> = {
-        let stream_guard = lock_or_log!(player.output.output_stream);
+        let stream_guard = lock_or_log!(player.output.output_stream.lock());
         if let Some(ref mixer_sink) = *stream_guard {
             let mixer_sr = mixer_sink.config().sample_rate();
             let mixer_ch = mixer_sink.config().channel_count();
-            Box::new(rodio::source::UniformSourceIterator::new(source, mixer_ch, mixer_sr))
+            Box::new(rodio::source::UniformSourceIterator::new(
+                source, mixer_ch, mixer_sr,
+            ))
         } else {
             source
         }
     };
 
     {
-        let sink = lock_or_log!(player.output.sink);
+        let sink = lock_or_log!(player.output.sink.lock());
         // 直接停止，不做阻塞的淡出
         sink.stop();
-        sink.set_volume(*lock_or_log!(player.output.target_volume));
+        sink.set_volume(*lock_or_log!(player.output.target_volume.lock()));
     }
-    let sink = lock_or_log!(player.output.sink);
+    let sink = lock_or_log!(player.output.sink.lock());
     sink.append(resampled);
     sink.play();
     Ok(())
@@ -1178,7 +1380,12 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
             guard
                 .as_ref()
                 // Stopping/Pausing 期间音频仍在淡出(可听见),视为正在播放
-                .map(|wasapi| matches!(wasapi.get_state(), PlaybackState::Playing | PlaybackState::Stopping | PlaybackState::Pausing))
+                .map(|wasapi| {
+                    matches!(
+                        wasapi.get_state(),
+                        PlaybackState::Playing | PlaybackState::Stopping | PlaybackState::Pausing
+                    )
+                })
                 .ok_or_else(|| "WASAPI player not initialized".to_string())?
         }
         #[cfg(not(windows))]

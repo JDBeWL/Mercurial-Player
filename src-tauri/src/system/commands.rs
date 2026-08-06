@@ -4,7 +4,7 @@
 
 use crate::AppState;
 use std::collections::HashMap;
-use tauri::{command, AppHandle, LogicalSize, Manager, Size, State};
+use tauri::{AppHandle, LogicalSize, Manager, Size, State, command};
 
 /// 获取应用版本信息
 #[command]
@@ -13,11 +13,20 @@ pub fn get_app_version(app: AppHandle) -> String {
 }
 
 /// 迷你模式窗口尺寸
-const MINI_SIZE: LogicalSize<f64> = LogicalSize { width: 300.0, height: 100.0 };
+const MINI_SIZE: LogicalSize<f64> = LogicalSize {
+    width: 300.0,
+    height: 100.0,
+};
 /// 默认窗口尺寸
-const DEFAULT_SIZE: LogicalSize<f64> = LogicalSize { width: 1250.0, height: 720.0 };
+const DEFAULT_SIZE: LogicalSize<f64> = LogicalSize {
+    width: 1250.0,
+    height: 720.0,
+};
 /// 最小窗口尺寸
-const MIN_SIZE: LogicalSize<f64> = LogicalSize { width: 1200.0, height: 700.0 };
+const MIN_SIZE: LogicalSize<f64> = LogicalSize {
+    width: 1200.0,
+    height: 700.0,
+};
 
 /// 获取系统信息
 #[command]
@@ -29,7 +38,10 @@ pub fn get_system_info() -> Result<HashMap<String, String>, String> {
     info.insert("family".to_string(), std::env::consts::FAMILY.to_string());
 
     if let Some(music_dir) = dirs::audio_dir() {
-        info.insert("music_dir".to_string(), music_dir.to_string_lossy().to_string());
+        info.insert(
+            "music_dir".to_string(),
+            music_dir.to_string_lossy().to_string(),
+        );
     }
 
     Ok(info)
@@ -99,8 +111,12 @@ pub async fn set_mini_mode(app_handle: AppHandle, enable: bool) -> Result<(), St
 fn enable_mini_mode(window: &tauri::WebviewWindow) -> Result<(), String> {
     let mini_size = Size::Logical(MINI_SIZE);
 
-    window.set_min_size(Some(mini_size)).map_err(|e| e.to_string())?;
-    window.set_max_size(Some(mini_size)).map_err(|e| e.to_string())?;
+    window
+        .set_min_size(Some(mini_size))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_max_size(Some(mini_size))
+        .map_err(|e| e.to_string())?;
     window.set_size(mini_size).map_err(|e| e.to_string())?;
     window.set_resizable(false).map_err(|e| e.to_string())?;
     window.set_always_on_top(true).map_err(|e| e.to_string())?;
@@ -111,9 +127,15 @@ fn enable_mini_mode(window: &tauri::WebviewWindow) -> Result<(), String> {
 fn disable_mini_mode(window: &tauri::WebviewWindow) -> Result<(), String> {
     window.set_always_on_top(false).map_err(|e| e.to_string())?;
     window.set_resizable(true).map_err(|e| e.to_string())?;
-    window.set_max_size(None::<Size>).map_err(|e| e.to_string())?;
-    window.set_size(Size::Logical(DEFAULT_SIZE)).map_err(|e| e.to_string())?;
-    window.set_min_size(Some(Size::Logical(MIN_SIZE))).map_err(|e| e.to_string())?;
+    window
+        .set_max_size(None::<Size>)
+        .map_err(|e| e.to_string())?;
+    window
+        .set_size(Size::Logical(DEFAULT_SIZE))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_min_size(Some(Size::Logical(MIN_SIZE)))
+        .map_err(|e| e.to_string())?;
     window.center().map_err(|e| e.to_string())?;
 
     Ok(())
@@ -165,7 +187,8 @@ pub fn get_screen_refresh_rate() -> Result<u32, String> {
 /// 安全打开外部链接（仅允许 HTTPS 且主机在白名单内）
 #[command]
 pub fn open_external_url(state: State<AppState>, url: String) -> Result<(), String> {
-    let parsed = tauri_plugin_http::reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
+    let parsed =
+        tauri_plugin_http::reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
 
     if parsed.scheme() != "https" {
         return Err("Only HTTPS URLs are allowed".to_string());
@@ -196,10 +219,9 @@ pub fn open_external_url(state: State<AppState>, url: String) -> Result<(), Stri
             ]
         });
 
-    if !allowed_hosts
-        .iter()
-        .any(|allowed| host.eq_ignore_ascii_case(allowed) || host.ends_with(&format!(".{allowed}").to_lowercase()))
-    {
+    if !allowed_hosts.iter().any(|allowed| {
+        host.eq_ignore_ascii_case(allowed) || host.ends_with(&format!(".{allowed}").to_lowercase())
+    }) {
         return Err(format!("Host not allowed: {host}"));
     }
 
@@ -208,4 +230,3 @@ pub fn open_external_url(state: State<AppState>, url: String) -> Result<(), Stri
 
     Ok(())
 }
-

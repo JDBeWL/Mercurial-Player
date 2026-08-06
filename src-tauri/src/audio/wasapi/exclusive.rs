@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-use crossbeam_channel::{bounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, bounded};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -13,7 +13,9 @@ use std::time::Duration;
 
 /// 音频线程命令
 pub enum AudioCommand {
-    Initialize { device_name: Option<String> },
+    Initialize {
+        device_name: Option<String>,
+    },
     Start,
     Stop,
     Pause,
@@ -23,19 +25,28 @@ pub enum AudioCommand {
     Shutdown,
     /// 带淡出的停止(用于切歌/退出场景)
     /// 参数:淡出时长(毫秒)
-    StopWithFadeOut { duration_ms: u32 },
+    StopWithFadeOut {
+        duration_ms: u32,
+    },
     /// 带淡出的暂停(用于用户暂停)
     /// 参数:淡出时长(毫秒)
-    PauseWithFadeOut { duration_ms: u32 },
+    PauseWithFadeOut {
+        duration_ms: u32,
+    },
     /// 带淡入的恢复(用于用户恢复)
     /// 参数:淡入时长(毫秒)
-    ResumeWithFadeIn { duration_ms: u32 },
+    ResumeWithFadeIn {
+        duration_ms: u32,
+    },
 }
 
 impl std::fmt::Debug for AudioCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Initialize { device_name } => f.debug_struct("Initialize").field("device_name", device_name).finish(),
+            Self::Initialize { device_name } => f
+                .debug_struct("Initialize")
+                .field("device_name", device_name)
+                .finish(),
             Self::Start => write!(f, "Start"),
             Self::Stop => write!(f, "Stop"),
             Self::Pause => write!(f, "Pause"),
@@ -43,9 +54,18 @@ impl std::fmt::Debug for AudioCommand {
             Self::SetVolume(arg0) => f.debug_tuple("SetVolume").field(arg0).finish(),
             Self::ClearBuffer => write!(f, "ClearBuffer"),
             Self::Shutdown => write!(f, "Shutdown"),
-            Self::StopWithFadeOut { duration_ms } => f.debug_struct("StopWithFadeOut").field("duration_ms", duration_ms).finish(),
-            Self::PauseWithFadeOut { duration_ms } => f.debug_struct("PauseWithFadeOut").field("duration_ms", duration_ms).finish(),
-            Self::ResumeWithFadeIn { duration_ms } => f.debug_struct("ResumeWithFadeIn").field("duration_ms", duration_ms).finish(),
+            Self::StopWithFadeOut { duration_ms } => f
+                .debug_struct("StopWithFadeOut")
+                .field("duration_ms", duration_ms)
+                .finish(),
+            Self::PauseWithFadeOut { duration_ms } => f
+                .debug_struct("PauseWithFadeOut")
+                .field("duration_ms", duration_ms)
+                .finish(),
+            Self::ResumeWithFadeIn { duration_ms } => f
+                .debug_struct("ResumeWithFadeIn")
+                .field("duration_ms", duration_ms)
+                .finish(),
         }
     }
 }
@@ -88,7 +108,11 @@ enum FadeAction {
 /// 音频线程响应
 #[derive(Debug)]
 pub enum AudioResponse {
-    Initialized { sample_rate: u32, channels: u16, device_name: String },
+    Initialized {
+        sample_rate: u32,
+        channels: u16,
+        device_name: String,
+    },
     InitFailed(String),
     Ok,
     Error(String),
@@ -144,7 +168,10 @@ impl WasapiExclusivePlayback {
         let samples_written = Arc::new(AtomicU64::new(0));
         // 初始使用默认48kHz立体声的缓冲区大小，初始化后会调整
         let initial_capacity = calculate_wasapi_buffer_capacity(48000, 2);
-        let sample_buffer = Arc::new((Mutex::new(VecDeque::with_capacity(initial_capacity)), Condvar::new()));
+        let sample_buffer = Arc::new((
+            Mutex::new(VecDeque::with_capacity(initial_capacity)),
+            Condvar::new(),
+        ));
         let sample_rate = Arc::new(AtomicU32::new(48000));
 
         let state_clone = Arc::clone(&state);
@@ -155,7 +182,16 @@ impl WasapiExclusivePlayback {
         let sample_rate_clone = Arc::clone(&sample_rate);
 
         let audio_thread = thread::spawn(move || {
-            audio_thread_main(command_rx, response_tx, state_clone, volume_clone, is_running_clone, sample_buffer_clone, samples_written_clone, sample_rate_clone);
+            audio_thread_main(
+                command_rx,
+                response_tx,
+                state_clone,
+                volume_clone,
+                is_running_clone,
+                sample_buffer_clone,
+                samples_written_clone,
+                sample_rate_clone,
+            );
         });
 
         Self {
@@ -174,27 +210,33 @@ impl WasapiExclusivePlayback {
 
     pub fn initialize(&self, device_name: Option<&str>) -> Result<(u32, u16, String), String> {
         self.command_tx
-            .send(AudioCommand::Initialize { device_name: device_name.map(String::from) })
+            .send(AudioCommand::Initialize {
+                device_name: device_name.map(String::from),
+            })
             .map_err(|e| format!("Failed to send initialize command: {e}"))?;
 
         // 使用超时接收响应，防止无限等待
         match self.response_rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(AudioResponse::Initialized { sample_rate, channels, device_name }) => {
+            Ok(AudioResponse::Initialized {
+                sample_rate,
+                channels,
+                device_name,
+            }) => {
                 self.sample_rate.store(sample_rate, Ordering::SeqCst);
                 self.channels.store(u32::from(channels), Ordering::SeqCst);
-                *self.state.lock().unwrap() = PlaybackState::Stopped;
-                
+                *lock_or_log!(self.state.lock()) = PlaybackState::Stopped;
+
                 // 根据实际采样率和声道数调整缓冲区容量
                 let new_capacity = calculate_wasapi_buffer_capacity(sample_rate, channels);
                 let (buffer, _) = &*self.sample_buffer;
-                let mut buf = buffer.lock().unwrap();
+                let mut buf = lock_or_log!(buffer.lock());
                 // 如果新容量更大，预留更多空间
                 let current_capacity = buf.capacity();
                 if new_capacity > current_capacity {
                     buf.reserve(new_capacity - current_capacity);
                 }
                 drop(buf);
-                
+
                 Ok((sample_rate, channels, device_name))
             }
             Ok(AudioResponse::InitFailed(e)) => Err(e),
@@ -204,22 +246,29 @@ impl WasapiExclusivePlayback {
                 // 清空可能残留的过时响应,避免影响后续命令
                 while self.response_rx.try_recv().is_ok() {}
                 // 超时后设备未成功初始化,重置状态为 Uninitialized
-                *self.state.lock().unwrap() = PlaybackState::Uninitialized;
-                Err("Device initialization timeout - device may be in use or unavailable".to_string())
+                *lock_or_log!(self.state.lock()) = PlaybackState::Uninitialized;
+                Err(
+                    "Device initialization timeout - device may be in use or unavailable"
+                        .to_string(),
+                )
             }
             Err(e) => Err(format!("Failed to receive response: {e}")),
         }
     }
 
     pub fn start(&self) -> Result<(), String> {
-        self.command_tx.send(AudioCommand::Start).map_err(|e| format!("Failed to send start command: {e}"))?;
-        *self.state.lock().unwrap() = PlaybackState::Playing;
+        self.command_tx
+            .send(AudioCommand::Start)
+            .map_err(|e| format!("Failed to send start command: {e}"))?;
+        *lock_or_log!(self.state.lock()) = PlaybackState::Playing;
         Ok(())
     }
 
     pub fn stop(&self) -> Result<(), String> {
-        self.command_tx.send(AudioCommand::Stop).map_err(|e| format!("Failed to send stop command: {e}"))?;
-        *self.state.lock().unwrap() = PlaybackState::Stopped;
+        self.command_tx
+            .send(AudioCommand::Stop)
+            .map_err(|e| format!("Failed to send stop command: {e}"))?;
+        *lock_or_log!(self.state.lock()) = PlaybackState::Stopped;
         Ok(())
     }
 
@@ -231,7 +280,7 @@ impl WasapiExclusivePlayback {
             .send(AudioCommand::StopWithFadeOut { duration_ms })
             .map_err(|e| format!("Failed to send stop_with_fade_out command: {e}"))?;
         // 状态标记为 Stopping,表示音频线程仍在淡出;淡出完成后由 FadeAction::Stop 转为 Stopped
-        *self.state.lock().unwrap() = PlaybackState::Stopping;
+        *lock_or_log!(self.state.lock()) = PlaybackState::Stopping;
         Ok(())
     }
 
@@ -245,7 +294,7 @@ impl WasapiExclusivePlayback {
         self.command_tx
             .send(AudioCommand::Pause)
             .map_err(|e| format!("Failed to send pause command: {e}"))?;
-        *self.state.lock().unwrap() = PlaybackState::Paused;
+        *lock_or_log!(self.state.lock()) = PlaybackState::Paused;
         Ok(())
     }
 
@@ -255,7 +304,7 @@ impl WasapiExclusivePlayback {
             .send(AudioCommand::PauseWithFadeOut { duration_ms })
             .map_err(|e| format!("Failed to send pause_with_fade_out command: {e}"))?;
         // 状态标记为 Pausing,表示音频线程仍在淡出;淡出完成后由 FadeAction::Pause 转为 Paused
-        *self.state.lock().unwrap() = PlaybackState::Pausing;
+        *lock_or_log!(self.state.lock()) = PlaybackState::Pausing;
         Ok(())
     }
 
@@ -269,7 +318,7 @@ impl WasapiExclusivePlayback {
         self.command_tx
             .send(AudioCommand::Resume)
             .map_err(|e| format!("Failed to send resume command: {e}"))?;
-        *self.state.lock().unwrap() = PlaybackState::Playing;
+        *lock_or_log!(self.state.lock()) = PlaybackState::Playing;
         Ok(())
     }
 
@@ -278,19 +327,21 @@ impl WasapiExclusivePlayback {
         self.command_tx
             .send(AudioCommand::ResumeWithFadeIn { duration_ms })
             .map_err(|e| format!("Failed to send resume_with_fade_in command: {e}"))?;
-        *self.state.lock().unwrap() = PlaybackState::Playing;
+        *lock_or_log!(self.state.lock()) = PlaybackState::Playing;
         Ok(())
     }
 
     pub fn set_volume(&self, vol: f32) -> Result<(), String> {
         let vol = vol.clamp(0.0, 1.0);
-        *self.volume.lock().unwrap() = vol;
-        self.command_tx.send(AudioCommand::SetVolume(vol)).map_err(|e| format!("Failed to send volume command: {e}"))
+        *lock_or_log!(self.volume.lock()) = vol;
+        self.command_tx
+            .send(AudioCommand::SetVolume(vol))
+            .map_err(|e| format!("Failed to send volume command: {e}"))
     }
 
     pub fn push_samples(&self, samples: &[f32]) -> Result<(), String> {
         let (buffer, cvar) = &*self.sample_buffer;
-        let mut buf = buffer.lock().unwrap();
+        let mut buf = lock_or_log!(buffer.lock());
         // 预先 reserve 避免多次扩容(VecDeque 的 extend 走迭代器路径无 slice 特化)
         buf.reserve(samples.len());
         // 使用 extend_from_slice 的等价:VecDeque 在 stable 上无该 API,手动 push_back
@@ -306,7 +357,7 @@ impl WasapiExclusivePlayback {
     /// WASAPI 消费线程每次消费后会 notify_one,因此生产者会被及时唤醒。
     pub fn wait_for_buffer_space(&self, max_samples: usize, timeout: Duration) -> bool {
         let (buffer, cvar) = &*self.sample_buffer;
-        let guard = buffer.lock().unwrap();
+        let guard = lock_or_log!(buffer.lock());
         if guard.len() < max_samples {
             return true;
         }
@@ -319,14 +370,14 @@ impl WasapiExclusivePlayback {
 
     pub fn clear_buffer(&self) -> Result<(), String> {
         let (buffer, _) = &*self.sample_buffer;
-        buffer.lock().unwrap().clear();
+        lock_or_log!(buffer.lock()).clear();
         self.samples_written.store(0, Ordering::SeqCst);
         Ok(())
     }
 
     #[must_use]
     pub fn get_state(&self) -> PlaybackState {
-        *self.state.lock().unwrap()
+        *lock_or_log!(self.state.lock())
     }
 
     #[must_use]
@@ -341,7 +392,7 @@ impl WasapiExclusivePlayback {
 
     #[must_use]
     pub fn get_volume(&self) -> f32 {
-        *self.volume.lock().unwrap()
+        *lock_or_log!(self.volume.lock())
     }
 
     /// 获取已写入硬件的采样数
@@ -358,7 +409,7 @@ impl WasapiExclusivePlayback {
     #[must_use]
     pub fn get_buffer_size(&self) -> usize {
         let (buffer, _) = &*self.sample_buffer;
-        buffer.lock().unwrap().len()
+        lock_or_log!(buffer.lock()).len()
     }
 }
 
@@ -432,7 +483,7 @@ fn audio_thread_main(
                         is_playing = true;
                         fade_state = FadeState::Idle;
                         fade_factor = 1.0;
-                        *state.lock().unwrap() = PlaybackState::Playing;
+                        *lock_or_log!(state.lock()) = PlaybackState::Playing;
                     }
                 }
             }
@@ -442,8 +493,8 @@ fn audio_thread_main(
                     is_playing = false;
                     fade_state = FadeState::Idle;
                     fade_factor = 1.0;
-                    *state.lock().unwrap() = PlaybackState::Stopped;
-                    sample_buffer.0.lock().unwrap().clear();
+                    *lock_or_log!(state.lock()) = PlaybackState::Stopped;
+                    lock_or_log!(sample_buffer.0.lock()).clear();
                 }
             }
             Ok(AudioCommand::Pause) => {
@@ -453,7 +504,7 @@ fn audio_thread_main(
                     is_playing = false;
                     fade_state = FadeState::Idle;
                     fade_factor = 1.0;
-                    *state.lock().unwrap() = PlaybackState::Paused;
+                    *lock_or_log!(state.lock()) = PlaybackState::Paused;
                 }
             }
             Ok(AudioCommand::Resume) => {
@@ -463,7 +514,7 @@ fn audio_thread_main(
                         is_playing = true;
                         fade_state = FadeState::Idle;
                         fade_factor = 1.0;
-                        *state.lock().unwrap() = PlaybackState::Playing;
+                        *lock_or_log!(state.lock()) = PlaybackState::Playing;
                     }
                 }
             }
@@ -472,7 +523,7 @@ fn audio_thread_main(
                 // 注意：wasapi crate的AudioClient没有直接的音量控制方法
                 // 音量在process_audio_output中通过软件乘法应用
             }
-            Ok(AudioCommand::ClearBuffer) => sample_buffer.0.lock().unwrap().clear(),
+            Ok(AudioCommand::ClearBuffer) => lock_or_log!(sample_buffer.0.lock()).clear(),
             Ok(AudioCommand::Shutdown) => break,
             Ok(AudioCommand::StopWithFadeOut { duration_ms }) => {
                 // 切歌/退出场景:启动淡出,完成后 stop_stream + clear_buffer
@@ -510,7 +561,7 @@ fn audio_thread_main(
                             remaining_frames: frames,
                             total_frames: frames,
                         };
-                        *state.lock().unwrap() = PlaybackState::Playing;
+                        *lock_or_log!(state.lock()) = PlaybackState::Playing;
                     }
                 }
             }
@@ -521,7 +572,12 @@ fn audio_thread_main(
         // 更新淡入淡出状态(每帧推进一次)
         match fade_state {
             FadeState::Idle => {}
-            FadeState::FadingOut { target_factor, ref mut remaining_frames, total_frames, on_complete } => {
+            FadeState::FadingOut {
+                target_factor,
+                ref mut remaining_frames,
+                total_frames,
+                on_complete,
+            } => {
                 if *remaining_frames > 0 {
                     let progress = 1.0 - (*remaining_frames as f32 / total_frames as f32);
                     fade_factor = 1.0 - progress * (1.0 - target_factor);
@@ -538,22 +594,26 @@ fn audio_thread_main(
                                 let _ = client.stop_stream();
                                 is_playing = false;
                                 // 不重置 fade_factor,resume 时从 0 渐升
-                                *state.lock().unwrap() = PlaybackState::Paused;
+                                *lock_or_log!(state.lock()) = PlaybackState::Paused;
                             }
                         }
                         FadeAction::Stop => {
                             if let Some(ref client) = audio_client {
                                 let _ = client.stop_stream();
                                 is_playing = false;
-                                sample_buffer.0.lock().unwrap().clear();
+                                lock_or_log!(sample_buffer.0.lock()).clear();
                             }
-                            fade_factor = 1.0;  // 重置为 1.0,准备下一次播放
-                            *state.lock().unwrap() = PlaybackState::Stopped;
+                            fade_factor = 1.0; // 重置为 1.0,准备下一次播放
+                            *lock_or_log!(state.lock()) = PlaybackState::Stopped;
                         }
                     }
                 }
             }
-            FadeState::FadingIn { target_factor, ref mut remaining_frames, total_frames } => {
+            FadeState::FadingIn {
+                target_factor,
+                ref mut remaining_frames,
+                total_frames,
+            } => {
                 if *remaining_frames > 0 {
                     let progress = 1.0 - (*remaining_frames as f32 / total_frames as f32);
                     fade_factor = progress * target_factor;
@@ -586,8 +646,12 @@ fn audio_thread_main(
             // 按实际处理的帧数推进淡入淡出剩余帧计数
             if frames_processed > 0 {
                 match &mut fade_state {
-                    FadeState::FadingOut { remaining_frames, .. }
-                    | FadeState::FadingIn { remaining_frames, .. } => {
+                    FadeState::FadingOut {
+                        remaining_frames, ..
+                    }
+                    | FadeState::FadingIn {
+                        remaining_frames, ..
+                    } => {
                         *remaining_frames = remaining_frames.saturating_sub(frames_processed);
                     }
                     FadeState::Idle => {}
@@ -637,11 +701,15 @@ fn handle_initialize(
                         });
                     }
                     Err(e) => {
-                        let _ = response_tx.send(AudioResponse::InitFailed(format!("Failed to get event handle: {e:?}")));
+                        let _ = response_tx.send(AudioResponse::InitFailed(format!(
+                            "Failed to get event handle: {e:?}"
+                        )));
                     }
                 },
                 Err(e) => {
-                    let _ = response_tx.send(AudioResponse::InitFailed(format!("Failed to get render client: {e:?}")));
+                    let _ = response_tx.send(AudioResponse::InitFailed(format!(
+                        "Failed to get render client: {e:?}"
+                    )));
                 }
             }
         }
@@ -680,7 +748,7 @@ fn process_audio_output(
                     reusable_samples.reserve(samples_needed);
 
                     {
-                        let mut buf = buffer.lock().unwrap();
+                        let mut buf = lock_or_log!(buffer.lock());
                         for _ in 0..samples_needed {
                             let sample = buf.pop_front().unwrap_or_else(|| {
                                 underrun_count += 1;
@@ -699,22 +767,35 @@ fn process_audio_output(
 
                     // 记录欠载情况
                     if underrun_count > samples_needed / 2 {
-                        log::warn!("WASAPI buffer underrun: {underrun_count}/{samples_needed} samples");
+                        log::warn!(
+                            "WASAPI buffer underrun: {underrun_count}/{samples_needed} samples"
+                        );
                     }
 
                     // 通知等待的生产者 (有空间了)
                     cvar.notify_one();
 
                     // 复用 Vec<u8> 缓冲区
-                    convert_samples_to_bytes_into(reusable_samples, current_bits, current_sample_type_is_float, reusable_bytes);
+                    convert_samples_to_bytes_into(
+                        reusable_samples,
+                        current_bits,
+                        current_sample_type_is_float,
+                        reusable_bytes,
+                    );
 
-                    if rc.write_to_device(frames_available as usize, reusable_bytes, None).is_ok() {
+                    if rc
+                        .write_to_device(frames_available as usize, reusable_bytes, None)
+                        .is_ok()
+                    {
                         // 更新已写入硬件的采样数
-                        samples_written.fetch_add((frames_available as usize * current_channels as usize) as u64, Ordering::SeqCst);
+                        samples_written.fetch_add(
+                            (frames_available as usize * current_channels as usize) as u64,
+                            Ordering::SeqCst,
+                        );
                         return frames_available as usize;
                     }
                     *is_playing = false;
-                    *state.lock().unwrap() = PlaybackState::Stopped;
+                    *lock_or_log!(state.lock()) = PlaybackState::Stopped;
                 }
             }
         }
@@ -722,28 +803,58 @@ fn process_audio_output(
     0
 }
 
-fn initialize_exclusive_device(device_name: Option<&str>) -> Result<(wasapi::AudioClient, (u32, u16, String, u16, bool)), String> {
+fn initialize_exclusive_device(
+    device_name: Option<&str>,
+) -> Result<(wasapi::AudioClient, (u32, u16, String, u16, bool)), String> {
     use wasapi::{DeviceEnumerator, Direction, SampleType, ShareMode, StreamMode, WaveFormat};
 
-    let enumerator = DeviceEnumerator::new().map_err(|e| format!("Failed to create device enumerator: {e:?}"))?;
+    let enumerator = DeviceEnumerator::new()
+        .map_err(|e| format!("Failed to create device enumerator: {e:?}"))?;
 
     let device = if let Some(name) = device_name {
-        let collection = enumerator.get_device_collection(&Direction::Render).map_err(|e| format!("Failed to get device collection: {e:?}"))?;
-        collection.into_iter().flatten().find(|device| device.get_friendlyname().is_ok_and(|n| n == name)).ok_or_else(|| format!("Device not found: {name}"))?
+        let collection = enumerator
+            .get_device_collection(&Direction::Render)
+            .map_err(|e| format!("Failed to get device collection: {e:?}"))?;
+        collection
+            .into_iter()
+            .flatten()
+            .find(|device| device.get_friendlyname().is_ok_and(|n| n == name))
+            .ok_or_else(|| format!("Device not found: {name}"))?
     } else {
-        enumerator.get_default_device(&Direction::Render).map_err(|e| format!("Failed to get default device: {e:?}"))?
+        enumerator
+            .get_default_device(&Direction::Render)
+            .map_err(|e| format!("Failed to get default device: {e:?}"))?
     };
 
-    let device_name = device.get_friendlyname().unwrap_or_else(|_| "Unknown".to_string());
-    let mut audio_client = device.get_iaudioclient().map_err(|e| format!("Failed to get audio client: {e:?}"))?;
+    let device_name = device
+        .get_friendlyname()
+        .unwrap_or_else(|_| "Unknown".to_string());
+    let mut audio_client = device
+        .get_iaudioclient()
+        .map_err(|e| format!("Failed to get audio client: {e:?}"))?;
 
-    let default_format = audio_client.get_mixformat().map_err(|e| format!("Failed to get mix format: {e:?}"))?;
+    let default_format = audio_client
+        .get_mixformat()
+        .map_err(|e| format!("Failed to get mix format: {e:?}"))?;
     let default_sample_rate = default_format.get_samplespersec() as usize;
     let default_channels = default_format.get_nchannels() as usize;
 
     log::info!("Device default format: {default_sample_rate}Hz, {default_channels} channels");
 
-    let sample_rates_to_try: [usize; 12] = [default_sample_rate, 384_000, 352_800, 192_000, 176_400, 96_000, 88_200, 48_000, 44_100, 32_000, 22_050, 16_000];
+    let sample_rates_to_try: [usize; 12] = [
+        default_sample_rate,
+        384_000,
+        352_800,
+        192_000,
+        176_400,
+        96_000,
+        88_200,
+        48_000,
+        44_100,
+        32_000,
+        22_050,
+        16_000,
+    ];
     let bit_depths: [(usize, bool); 4] = [(32, true), (32, false), (24, false), (16, false)];
     let channels_to_try: [usize; 2] = [default_channels, 2];
 
@@ -752,39 +863,67 @@ fn initialize_exclusive_device(device_name: Option<&str>) -> Result<(wasapi::Aud
     'outer: for &sample_rate in &sample_rates_to_try {
         for &channels in &channels_to_try {
             for &(bits, is_float) in &bit_depths {
-                let sample_type = if is_float { SampleType::Float } else { SampleType::Int };
-                let wave_format = WaveFormat::new(bits, bits, &sample_type, sample_rate, channels, None);
+                let sample_type = if is_float {
+                    SampleType::Float
+                } else {
+                    SampleType::Int
+                };
+                let wave_format =
+                    WaveFormat::new(bits, bits, &sample_type, sample_rate, channels, None);
 
-                if audio_client.is_supported(&wave_format, &ShareMode::Exclusive).is_ok() {
-                    found_format = Some((wave_format, sample_rate as u32, channels as u16, bits as u16, is_float));
+                if audio_client
+                    .is_supported(&wave_format, &ShareMode::Exclusive)
+                    .is_ok()
+                {
+                    found_format = Some((
+                        wave_format,
+                        sample_rate as u32,
+                        channels as u16,
+                        bits as u16,
+                        is_float,
+                    ));
                     break 'outer;
                 }
             }
         }
     }
 
-    let (wave_format, sample_rate, channels, bits, is_float) = found_format.ok_or_else(|| "No supported exclusive format found".to_string())?;
+    let (wave_format, sample_rate, channels, bits, is_float) =
+        found_format.ok_or_else(|| "No supported exclusive format found".to_string())?;
 
-    let (_default_period, min_period) = audio_client.get_device_period().map_err(|e| format!("Failed to get device period: {e:?}"))?;
+    let (_default_period, min_period) = audio_client
+        .get_device_period()
+        .map_err(|e| format!("Failed to get device period: {e:?}"))?;
 
-    let stream_mode = StreamMode::EventsExclusive { period_hns: min_period };
+    let stream_mode = StreamMode::EventsExclusive {
+        period_hns: min_period,
+    };
 
     // 尝试初始化独占模式，添加重试机制
     let mut last_error = None;
     for attempt in 1..=3 {
         match audio_client.initialize_client(&wave_format, &Direction::Render, &stream_mode) {
             Ok(()) => {
-                log::info!("WASAPI Exclusive Mode initialized: {device_name} @ {sample_rate}Hz, {channels} channels, {bits} bits, float: {is_float}");
-                return Ok((audio_client, (sample_rate, channels, device_name, bits, is_float)));
+                log::info!(
+                    "WASAPI Exclusive Mode initialized: {device_name} @ {sample_rate}Hz, {channels} channels, {bits} bits, float: {is_float}"
+                );
+                return Ok((
+                    audio_client,
+                    (sample_rate, channels, device_name, bits, is_float),
+                ));
             }
             Err(e) => {
                 last_error = Some(e);
                 if attempt < 3 {
-                    log::warn!("Exclusive mode initialization attempt {attempt} failed, retrying...");
+                    log::warn!(
+                        "Exclusive mode initialization attempt {attempt} failed, retrying..."
+                    );
                     thread::sleep(Duration::from_millis(100 * attempt as u64));
-                    
+
                     // 重新获取audio client
-                    audio_client = device.get_iaudioclient().map_err(|e| format!("Failed to get audio client on retry: {e:?}"))?;
+                    audio_client = device
+                        .get_iaudioclient()
+                        .map_err(|e| format!("Failed to get audio client on retry: {e:?}"))?;
                 }
             }
         }
@@ -803,275 +942,276 @@ fn initialize_exclusive_device(device_name: Option<&str>) -> Result<(wasapi::Aud
 #[allow(unsafe_code)]
 mod simd_convert {
     /// 将 f32 采样转换为指定格式的字节,写入复用 buffer(零分配)
-    pub fn convert_samples_to_bytes_into(samples: &[f32], bits: u16, is_float: bool, out: &mut Vec<u8>) {
-    // 预先计算所需容量,避免多次扩容
-    let bytes_per_sample = match bits {
-        16 => 2,
-        24 => 3,
-        32 => 4,
-        _ => 4,
-    };
-    out.clear();
-    out.reserve(samples.len() * bytes_per_sample);
+    pub fn convert_samples_to_bytes_into(
+        samples: &[f32],
+        bits: u16,
+        is_float: bool,
+        out: &mut Vec<u8>,
+    ) {
+        // 预先计算所需容量,避免多次扩容
+        let bytes_per_sample = match bits {
+            16 => 2,
+            24 => 3,
+            32 => 4,
+            _ => 4,
+        };
+        out.clear();
+        out.reserve(samples.len() * bytes_per_sample);
 
-    match (bits, is_float) {
-        (32, true) => {
-            // 32-bit float: f32 的内存表示即 LE 字节,可整块 memcpy
-            // 安全性: f32 与 [u8; 4] 都是 POD,size 一致(f32 恒为 4 字节)
-            let bytes = unsafe {
-                core::slice::from_raw_parts(
-                    samples.as_ptr().cast::<u8>(),
-                    samples.len() * 4,
-                )
-            };
-            out.extend_from_slice(bytes);
-        }
-        (32, false) => {
-            // f32 → i32 (AVX2 加速,无 AVX2 时回落 SSE2)
-            #[cfg(target_arch = "x86_64")]
-            {
-                if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
-                    unsafe { f32_to_i32_bytes_avx2(samples, out) };
+        match (bits, is_float) {
+            (32, true) => {
+                // 32-bit float: f32 的内存表示即 LE 字节,可整块 memcpy
+                // 安全性: f32 与 [u8; 4] 都是 POD,size 一致(f32 恒为 4 字节)
+                let bytes = unsafe {
+                    core::slice::from_raw_parts(samples.as_ptr().cast::<u8>(), samples.len() * 4)
+                };
+                out.extend_from_slice(bytes);
+            }
+            (32, false) => {
+                // f32 → i32 (AVX2 加速,无 AVX2 时回落 SSE2)
+                #[cfg(target_arch = "x86_64")]
+                {
+                    if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma")
+                    {
+                        unsafe { f32_to_i32_bytes_avx2(samples, out) };
+                        return;
+                    }
+                    // SSE2 是 x86_64 baseline,所有 64 位 Intel/AMD CPU 必然支持
+                    unsafe { f32_to_i32_bytes_sse2(samples, out) };
                     return;
                 }
-                // SSE2 是 x86_64 baseline,所有 64 位 Intel/AMD CPU 必然支持
-                unsafe { f32_to_i32_bytes_sse2(samples, out) };
-                return;
+                #[allow(unreachable_code)]
+                for &s in samples {
+                    let int_val = (s.clamp(-1.0, 1.0) * i32::MAX as f32) as i32;
+                    out.extend_from_slice(&int_val.to_le_bytes());
+                }
             }
-            #[allow(unreachable_code)]
-            for &s in samples {
-                let int_val = (s.clamp(-1.0, 1.0) * i32::MAX as f32) as i32;
-                out.extend_from_slice(&int_val.to_le_bytes());
+            (24, _) => {
+                // 24-bit: 字节打包(取 i32 低 3 字节)难以 SIMD 化,暂用标量
+                for &s in samples {
+                    let int_val = (s.clamp(-1.0, 1.0) * 8_388_607.0) as i32;
+                    let bytes = int_val.to_le_bytes();
+                    out.extend_from_slice(&bytes[0..3]);
+                }
             }
-        }
-        (24, _) => {
-            // 24-bit: 字节打包(取 i32 低 3 字节)难以 SIMD 化,暂用标量
-            for &s in samples {
-                let int_val = (s.clamp(-1.0, 1.0) * 8_388_607.0) as i32;
-                let bytes = int_val.to_le_bytes();
-                out.extend_from_slice(&bytes[0..3]);
-            }
-        }
-        (16, _) => {
-            // f32 → i16 (AVX2 加速,无 AVX2 时回落 SSE2)
-            #[cfg(target_arch = "x86_64")]
-            {
-                if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
-                    unsafe { f32_to_i16_bytes_avx2(samples, out) };
+            (16, _) => {
+                // f32 → i16 (AVX2 加速,无 AVX2 时回落 SSE2)
+                #[cfg(target_arch = "x86_64")]
+                {
+                    if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma")
+                    {
+                        unsafe { f32_to_i16_bytes_avx2(samples, out) };
+                        return;
+                    }
+                    unsafe { f32_to_i16_bytes_sse2(samples, out) };
                     return;
                 }
-                unsafe { f32_to_i16_bytes_sse2(samples, out) };
-                return;
+                #[allow(unreachable_code)]
+                for &s in samples {
+                    let int_val = (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+                    out.extend_from_slice(&int_val.to_le_bytes());
+                }
             }
-            #[allow(unreachable_code)]
-            for &s in samples {
-                let int_val = (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
-                out.extend_from_slice(&int_val.to_le_bytes());
+            _ => {
+                // 兜底:按 32-bit float 处理
+                let bytes = unsafe {
+                    core::slice::from_raw_parts(samples.as_ptr().cast::<u8>(), samples.len() * 4)
+                };
+                out.extend_from_slice(bytes);
             }
         }
-        _ => {
-            // 兜底:按 32-bit float 处理
-            let bytes = unsafe {
-                core::slice::from_raw_parts(
-                    samples.as_ptr().cast::<u8>(),
-                    samples.len() * 4,
-                )
-            };
-            out.extend_from_slice(bytes);
+    }
+
+    // ============================================================
+    // SIMD 优化: f32 → i16/i32 字节流
+    // ============================================================
+    // 三层分发架构(运行时由 is_x86_feature_detected! 选择):
+    // 1. AVX2 + FMA path (Haswell 2013+ / Zen 2017+) - 一次 8/16 个 f32,最快
+    // 2. SSE2 path (所有 x86_64 CPU,含老至强) - 一次 4/8 个 f32,中等加速
+    // 3. 标量 fallback (非 x86_64 平台) - 逐样本循环
+    //
+    // 关键技术细节:
+    // - _mm_cvtps_epi32 / _mm256_cvtps_epi32 在输入超过 i32 范围时返回 0x80000000
+    //   (saturation indefinite),故 i32 路径必须先 clamp 到 2147483520.0
+    //   (小于 2^31 的最大 f32 = 2^31 - 128)
+    // - _mm256_packs_epi32 存在 256-bit lane 交错,需 _mm256_permute4x64_epi64(0xD8) 修复
+    //   SSE2 的 _mm_packs_epi32 只有 128-bit 单 lane,无交错问题
+    // - 舍入模式: Rust `as i32/i16` 是 truncation-toward-zero,
+    //   MXCSR 默认 RNE (round to nearest even),在 .5 边界处差 1 LSB
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2,fma")]
+    #[allow(unsafe_op_in_unsafe_fn)] // 整个函数由 target_feature 限定为 unsafe,内联 unsafe 块冗余
+    #[allow(clippy::wildcard_imports)] // SIMD intrinsics 数量多,逐个导入冗长
+    pub(super) unsafe fn f32_to_i16_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
+        use core::arch::x86_64::*;
+
+        let one = _mm256_set1_ps(1.0);
+        let neg_one = _mm256_set1_ps(-1.0);
+        let scale = _mm256_set1_ps(i16::MAX as f32); // 32767.0
+
+        let mut i = 0;
+        let chunk = 16; // 16 个 f32 → 32 bytes (i16)
+
+        while i + chunk <= samples.len() {
+            let a = _mm256_loadu_ps(samples.as_ptr().add(i));
+            let b = _mm256_loadu_ps(samples.as_ptr().add(i + 8));
+
+            // clamp(-1, 1) * scale
+            let a = _mm256_mul_ps(_mm256_max_ps(neg_one, _mm256_min_ps(one, a)), scale);
+            let b = _mm256_mul_ps(_mm256_max_ps(neg_one, _mm256_min_ps(one, b)), scale);
+
+            // f32 → i32 (round to nearest even)
+            let a_i32 = _mm256_cvtps_epi32(a);
+            let b_i32 = _mm256_cvtps_epi32(b);
+
+            // pack i32 → i16 (saturating) + 修复 lane 交错
+            // packs_epi32(a, b) 输出顺序: [a0..3, b0..3, a4..7, b4..7]
+            // permute 0xD8 (= 0b11_01_10_00) 重排为: [a0..7, b0..7]
+            let packed = _mm256_packs_epi32(a_i32, b_i32);
+            let packed = _mm256_permute4x64_epi64(packed, 0xD8);
+
+            // __m256i → [u8; 32]: 同 size(32B) POD 转换
+            let bytes: [u8; 32] = core::mem::transmute(packed);
+            out.extend_from_slice(&bytes);
+
+            i += chunk;
+        }
+
+        // 处理剩余尾部
+        while i < samples.len() {
+            let int_val = (samples[i].clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+            out.extend_from_slice(&int_val.to_le_bytes());
+            i += 1;
         }
     }
-}
 
-// ============================================================
-// SIMD 优化: f32 → i16/i32 字节流
-// ============================================================
-// 三层分发架构(运行时由 is_x86_feature_detected! 选择):
-// 1. AVX2 + FMA path (Haswell 2013+ / Zen 2017+) - 一次 8/16 个 f32,最快
-// 2. SSE2 path (所有 x86_64 CPU,含老至强) - 一次 4/8 个 f32,中等加速
-// 3. 标量 fallback (非 x86_64 平台) - 逐样本循环
-//
-// 关键技术细节:
-// - _mm_cvtps_epi32 / _mm256_cvtps_epi32 在输入超过 i32 范围时返回 0x80000000
-//   (saturation indefinite),故 i32 路径必须先 clamp 到 2147483520.0
-//   (小于 2^31 的最大 f32 = 2^31 - 128)
-// - _mm256_packs_epi32 存在 256-bit lane 交错,需 _mm256_permute4x64_epi64(0xD8) 修复
-//   SSE2 的 _mm_packs_epi32 只有 128-bit 单 lane,无交错问题
-// - 舍入模式: Rust `as i32/i16` 是 truncation-toward-zero,
-//   MXCSR 默认 RNE (round to nearest even),在 .5 边界处差 1 LSB
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2,fma")]
+    #[allow(unsafe_op_in_unsafe_fn)]
+    #[allow(clippy::wildcard_imports)]
+    pub(super) unsafe fn f32_to_i32_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
+        use core::arch::x86_64::*;
 
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2,fma")]
-#[allow(unsafe_op_in_unsafe_fn)] // 整个函数由 target_feature 限定为 unsafe,内联 unsafe 块冗余
-#[allow(clippy::wildcard_imports)] // SIMD intrinsics 数量多,逐个导入冗长
-pub(super) unsafe fn f32_to_i16_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
-    use core::arch::x86_64::*;
+        let one = _mm256_set1_ps(1.0);
+        let neg_one = _mm256_set1_ps(-1.0);
+        let scale = _mm256_set1_ps(i32::MAX as f32); // 2147483648.0 (f32 精度损失)
+        // 2147483648.0 触发 cvtps_epi32 的 saturation indefinite(返回 0x80000000)
+        // 故 clamp 到 2147483520.0(小于 2^31 的最大 f32 = 2^31 - 128)
+        let max_safe = _mm256_set1_ps(2_147_483_520.0);
+        let min_safe = _mm256_set1_ps(-2_147_483_648.0);
 
-    let one = _mm256_set1_ps(1.0);
-    let neg_one = _mm256_set1_ps(-1.0);
-    let scale = _mm256_set1_ps(i16::MAX as f32); // 32767.0
+        let mut i = 0;
+        let chunk = 8; // 8 个 f32 → 32 bytes (i32)
 
-    let mut i = 0;
-    let chunk = 16; // 16 个 f32 → 32 bytes (i16)
+        while i + chunk <= samples.len() {
+            let a = _mm256_loadu_ps(samples.as_ptr().add(i));
+            // clamp(-1, 1) * scale,再 clamp 到 i32 安全范围
+            let a = _mm256_mul_ps(_mm256_max_ps(neg_one, _mm256_min_ps(one, a)), scale);
+            let a = _mm256_max_ps(min_safe, _mm256_min_ps(max_safe, a));
+            let a_i32 = _mm256_cvtps_epi32(a);
 
-    while i + chunk <= samples.len() {
-        let a = _mm256_loadu_ps(samples.as_ptr().add(i));
-        let b = _mm256_loadu_ps(samples.as_ptr().add(i + 8));
+            let bytes: [u8; 32] = core::mem::transmute(a_i32);
+            out.extend_from_slice(&bytes);
 
-        // clamp(-1, 1) * scale
-        let a = _mm256_mul_ps(_mm256_max_ps(neg_one, _mm256_min_ps(one, a)), scale);
-        let b = _mm256_mul_ps(_mm256_max_ps(neg_one, _mm256_min_ps(one, b)), scale);
+            i += chunk;
+        }
 
-        // f32 → i32 (round to nearest even)
-        let a_i32 = _mm256_cvtps_epi32(a);
-        let b_i32 = _mm256_cvtps_epi32(b);
-
-        // pack i32 → i16 (saturating) + 修复 lane 交错
-        // packs_epi32(a, b) 输出顺序: [a0..3, b0..3, a4..7, b4..7]
-        // permute 0xD8 (= 0b11_01_10_00) 重排为: [a0..7, b0..7]
-        let packed = _mm256_packs_epi32(a_i32, b_i32);
-        let packed = _mm256_permute4x64_epi64(packed, 0xD8);
-
-        // __m256i → [u8; 32]: 同 size(32B) POD 转换
-        let bytes: [u8; 32] = core::mem::transmute(packed);
-        out.extend_from_slice(&bytes);
-
-        i += chunk;
+        while i < samples.len() {
+            let int_val = (samples[i].clamp(-1.0, 1.0) * i32::MAX as f32) as i32;
+            out.extend_from_slice(&int_val.to_le_bytes());
+            i += 1;
+        }
     }
 
-    // 处理剩余尾部
-    while i < samples.len() {
-        let int_val = (samples[i].clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
-        out.extend_from_slice(&int_val.to_le_bytes());
-        i += 1;
-    }
-}
+    // ============================================================
+    // SSE2 path: 所有 x86_64 CPU 的兜底加速(baseline feature)
+    // 一次处理 4/8 个 f32,适用范围: 老 Xeon(Nehalem/Westmere/Sandy/Ivy Bridge)等
+    // ============================================================
 
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2,fma")]
-#[allow(unsafe_op_in_unsafe_fn)]
-#[allow(clippy::wildcard_imports)]
-pub(super) unsafe fn f32_to_i32_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
-    use core::arch::x86_64::*;
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "sse2")]
+    #[allow(unsafe_op_in_unsafe_fn)]
+    #[allow(clippy::wildcard_imports)]
+    pub(super) unsafe fn f32_to_i16_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
+        use core::arch::x86_64::*;
 
-    let one = _mm256_set1_ps(1.0);
-    let neg_one = _mm256_set1_ps(-1.0);
-    let scale = _mm256_set1_ps(i32::MAX as f32); // 2147483648.0 (f32 精度损失)
-    // 2147483648.0 触发 cvtps_epi32 的 saturation indefinite(返回 0x80000000)
-    // 故 clamp 到 2147483520.0(小于 2^31 的最大 f32 = 2^31 - 128)
-    let max_safe = _mm256_set1_ps(2_147_483_520.0);
-    let min_safe = _mm256_set1_ps(-2_147_483_648.0);
+        let one = _mm_set1_ps(1.0);
+        let neg_one = _mm_set1_ps(-1.0);
+        let scale = _mm_set1_ps(i16::MAX as f32);
 
-    let mut i = 0;
-    let chunk = 8; // 8 个 f32 → 32 bytes (i32)
+        let mut i = 0;
+        let chunk = 8; // 8 个 f32 → 16 bytes (i16)
 
-    while i + chunk <= samples.len() {
-        let a = _mm256_loadu_ps(samples.as_ptr().add(i));
-        // clamp(-1, 1) * scale,再 clamp 到 i32 安全范围
-        let a = _mm256_mul_ps(_mm256_max_ps(neg_one, _mm256_min_ps(one, a)), scale);
-        let a = _mm256_max_ps(min_safe, _mm256_min_ps(max_safe, a));
-        let a_i32 = _mm256_cvtps_epi32(a);
+        while i + chunk <= samples.len() {
+            let a = _mm_loadu_ps(samples.as_ptr().add(i));
+            let b = _mm_loadu_ps(samples.as_ptr().add(i + 4));
 
-        let bytes: [u8; 32] = core::mem::transmute(a_i32);
-        out.extend_from_slice(&bytes);
+            let a = _mm_mul_ps(_mm_max_ps(neg_one, _mm_min_ps(one, a)), scale);
+            let b = _mm_mul_ps(_mm_max_ps(neg_one, _mm_min_ps(one, b)), scale);
 
-        i += chunk;
-    }
+            let a_i32 = _mm_cvtps_epi32(a);
+            let b_i32 = _mm_cvtps_epi32(b);
 
-    while i < samples.len() {
-        let int_val = (samples[i].clamp(-1.0, 1.0) * i32::MAX as f32) as i32;
-        out.extend_from_slice(&int_val.to_le_bytes());
-        i += 1;
-    }
-}
+            // SSE2 packs_epi32 输出顺序: [a0..3, b0..3] - 单 lane 无交错
+            let packed = _mm_packs_epi32(a_i32, b_i32);
+            let bytes: [u8; 16] = core::mem::transmute(packed);
+            out.extend_from_slice(&bytes);
 
-// ============================================================
-// SSE2 path: 所有 x86_64 CPU 的兜底加速(baseline feature)
-// 一次处理 4/8 个 f32,适用范围: 老 Xeon(Nehalem/Westmere/Sandy/Ivy Bridge)等
-// ============================================================
+            i += chunk;
+        }
 
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse2")]
-#[allow(unsafe_op_in_unsafe_fn)]
-#[allow(clippy::wildcard_imports)]
-pub(super) unsafe fn f32_to_i16_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
-    use core::arch::x86_64::*;
-
-    let one = _mm_set1_ps(1.0);
-    let neg_one = _mm_set1_ps(-1.0);
-    let scale = _mm_set1_ps(i16::MAX as f32);
-
-    let mut i = 0;
-    let chunk = 8; // 8 个 f32 → 16 bytes (i16)
-
-    while i + chunk <= samples.len() {
-        let a = _mm_loadu_ps(samples.as_ptr().add(i));
-        let b = _mm_loadu_ps(samples.as_ptr().add(i + 4));
-
-        let a = _mm_mul_ps(_mm_max_ps(neg_one, _mm_min_ps(one, a)), scale);
-        let b = _mm_mul_ps(_mm_max_ps(neg_one, _mm_min_ps(one, b)), scale);
-
-        let a_i32 = _mm_cvtps_epi32(a);
-        let b_i32 = _mm_cvtps_epi32(b);
-
-        // SSE2 packs_epi32 输出顺序: [a0..3, b0..3] - 单 lane 无交错
-        let packed = _mm_packs_epi32(a_i32, b_i32);
-        let bytes: [u8; 16] = core::mem::transmute(packed);
-        out.extend_from_slice(&bytes);
-
-        i += chunk;
+        while i < samples.len() {
+            let int_val = (samples[i].clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+            out.extend_from_slice(&int_val.to_le_bytes());
+            i += 1;
+        }
     }
 
-    while i < samples.len() {
-        let int_val = (samples[i].clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
-        out.extend_from_slice(&int_val.to_le_bytes());
-        i += 1;
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "sse2")]
+    #[allow(unsafe_op_in_unsafe_fn)]
+    #[allow(clippy::wildcard_imports)]
+    pub(super) unsafe fn f32_to_i32_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
+        use core::arch::x86_64::*;
+
+        let one = _mm_set1_ps(1.0);
+        let neg_one = _mm_set1_ps(-1.0);
+        let scale = _mm_set1_ps(i32::MAX as f32);
+        let max_safe = _mm_set1_ps(2_147_483_520.0);
+        let min_safe = _mm_set1_ps(-2_147_483_648.0);
+
+        let mut i = 0;
+        let chunk = 4; // 4 个 f32 → 16 bytes (i32)
+
+        while i + chunk <= samples.len() {
+            let a = _mm_loadu_ps(samples.as_ptr().add(i));
+            let a = _mm_mul_ps(_mm_max_ps(neg_one, _mm_min_ps(one, a)), scale);
+            let a = _mm_max_ps(min_safe, _mm_min_ps(max_safe, a));
+            let a_i32 = _mm_cvtps_epi32(a);
+
+            let bytes: [u8; 16] = core::mem::transmute(a_i32);
+            out.extend_from_slice(&bytes);
+
+            i += chunk;
+        }
+
+        while i < samples.len() {
+            let int_val = (samples[i].clamp(-1.0, 1.0) * i32::MAX as f32) as i32;
+            out.extend_from_slice(&int_val.to_le_bytes());
+            i += 1;
+        }
     }
-}
 
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse2")]
-#[allow(unsafe_op_in_unsafe_fn)]
-#[allow(clippy::wildcard_imports)]
-pub(super) unsafe fn f32_to_i32_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
-    use core::arch::x86_64::*;
-
-    let one = _mm_set1_ps(1.0);
-    let neg_one = _mm_set1_ps(-1.0);
-    let scale = _mm_set1_ps(i32::MAX as f32);
-    let max_safe = _mm_set1_ps(2_147_483_520.0);
-    let min_safe = _mm_set1_ps(-2_147_483_648.0);
-
-    let mut i = 0;
-    let chunk = 4; // 4 个 f32 → 16 bytes (i32)
-
-    while i + chunk <= samples.len() {
-        let a = _mm_loadu_ps(samples.as_ptr().add(i));
-        let a = _mm_mul_ps(_mm_max_ps(neg_one, _mm_min_ps(one, a)), scale);
-        let a = _mm_max_ps(min_safe, _mm_min_ps(max_safe, a));
-        let a_i32 = _mm_cvtps_epi32(a);
-
-        let bytes: [u8; 16] = core::mem::transmute(a_i32);
-        out.extend_from_slice(&bytes);
-
-        i += chunk;
-    }
-
-    while i < samples.len() {
-        let int_val = (samples[i].clamp(-1.0, 1.0) * i32::MAX as f32) as i32;
-        out.extend_from_slice(&int_val.to_le_bytes());
-        i += 1;
-    }
-}
-
-// 模块关闭:使用 simd_convert::convert_samples_to_bytes_into 访问
+    // 模块关闭:使用 simd_convert::convert_samples_to_bytes_into 访问
 }
 
 pub use simd_convert::convert_samples_to_bytes_into;
 
 #[cfg(test)]
 mod simd_tests {
-    use super::*;
     use super::simd_convert::*;
+    use super::*;
 
     /// 验证 AVX2 路径与标量路径产生相同字节流(允许 i32 路径 1 LSB 差异)
     /// 样本总数对齐到 16 的倍数,确保 SSE2(chunk=8) 和 AVX2(chunk=16)
@@ -1151,11 +1291,7 @@ mod simd_tests {
         // i32 路径: SIMD 用 2147483520.0 作上限,标量用 i32::MAX as f32 饱和
         // 输入 = 1.0 时:标量得 i32::MAX(2147483647),SIMD 得 2147483520,差 127
         // 逐字节比较,允许差异时跳过
-        assert_eq!(
-            scalar_out.len(),
-            simd_out.len(),
-            "输出长度不一致"
-        );
+        assert_eq!(scalar_out.len(), simd_out.len(), "输出长度不一致");
 
         let scalar_i32: Vec<i32> = scalar_out
             .chunks_exact(4)

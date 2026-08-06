@@ -26,7 +26,9 @@ impl WasapiExclusivePlayer {
             ("Default Device".to_string(), sr, ch)
         };
 
-        log::info!("WASAPI Exclusive Mode available: {actual_device_name} @ {sample_rate}Hz, {channels} channels");
+        log::info!(
+            "WASAPI Exclusive Mode available: {actual_device_name} @ {sample_rate}Hz, {channels} channels"
+        );
 
         Ok(Self {
             device_name: actual_device_name,
@@ -53,8 +55,8 @@ impl WasapiExclusivePlayer {
 }
 
 fn check_device_format(device_name: Option<&str>) -> Result<(u32, u16), String> {
-    let enumerator =
-        DeviceEnumerator::new().map_err(|e| format!("Failed to create device enumerator: {e:?}"))?;
+    let enumerator = DeviceEnumerator::new()
+        .map_err(|e| format!("Failed to create device enumerator: {e:?}"))?;
 
     let device = if let Some(name) = device_name {
         let collection = enumerator
@@ -91,10 +93,17 @@ fn get_exclusive_format(audio_client: &AudioClient) -> Result<(u32, u16), String
     ];
 
     for (sample_rate, channels, bits) in FORMATS_TO_TRY {
-        let sample_type = if bits == 32 { SampleType::Float } else { SampleType::Int };
+        let sample_type = if bits == 32 {
+            SampleType::Float
+        } else {
+            SampleType::Int
+        };
         let wave_format = WaveFormat::new(bits, bits, &sample_type, sample_rate, channels, None);
 
-        if audio_client.is_supported(&wave_format, &ShareMode::Exclusive).is_ok() {
+        if audio_client
+            .is_supported(&wave_format, &ShareMode::Exclusive)
+            .is_ok()
+        {
             return Ok((sample_rate as u32, channels as u16));
         }
     }
@@ -112,8 +121,8 @@ pub fn check_device_exclusive_support(device_name: Option<&str>) -> Result<bool,
 pub fn get_exclusive_capable_devices() -> Result<Vec<String>, String> {
     let _ = wasapi::initialize_mta();
 
-    let enumerator =
-        DeviceEnumerator::new().map_err(|e| format!("Failed to create device enumerator: {e:?}"))?;
+    let enumerator = DeviceEnumerator::new()
+        .map_err(|e| format!("Failed to create device enumerator: {e:?}"))?;
 
     let collection = enumerator
         .get_device_collection(&Direction::Render)

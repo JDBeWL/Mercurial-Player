@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { markRaw } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { type UnlistenFn } from '@tauri-apps/api/event'
 import FileUtils from '../utils/fileUtils'
@@ -6,7 +7,6 @@ import LyricsParser from '../utils/lyricsParser'
 import logger from '../utils/logger'
 import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
 import { classifyAudioInvokeError } from '../utils/audioErrorClassifier'
-import { LRUCache } from '@/utils/lruCache'
 import { useConfigStore } from './config'
 import { useMusicLibraryStore } from './musicLibrary'
 import {
@@ -17,20 +17,15 @@ import {
   setupDeviceListeners,
   unregisterGlobalShortcuts,
 } from './playerListeners'
+import {
+  generateShuffleOrder,
+  isShuffleOrderValid,
+  getNextShuffleIndex,
+  getPreviousShuffleIndex,
+  adjustShuffleAfterRemove,
+} from './shuffle'
+import { PlayerCacheManager } from './playerCache'
 import type { Track, AudioInfo, LyricLine, RepeatMode, ResumeResult, TrackSnapshot } from '@/types'
-
-interface TrackMetadata {
-  title: string
-  artist: string
-  album: string
-  duration: number
-  coverPath?: string
-  bitrate: number | null
-  sampleRate: number | null
-  channels: number | null
-  bitDepth: number | null
-  format: string | null
-}
 
 interface PlayerState {
   currentTrack: Track | null
@@ -50,9 +45,8 @@ interface PlayerState {
   _isLoading: boolean
   _statusPollId: ReturnType<typeof setTimeout> | null
   lastTrackIndex: number
-  _fileExistsCache: LRUCache<boolean> | null
-  _metadataCache: LRUCache<TrackMetadata> | null
-  _cleanupTimerId: ReturnType<typeof setInterval> | null
+  /** 缓存管理器 (文件存在性 + 元数据 LRU 缓存),用 any 避免 Pinia 响应式对 class 私有字段的类型问题 */
+  _cacheManager: PlayerCacheManager | null
   _isDestroyed: boolean
   _isInitializing: boolean
   _initPromise: Promise<void> | null
@@ -117,12 +111,8 @@ export const usePlayerStore = defineStore('player', {
     _statusPollId: null,
     lastTrackIndex: -1,
 
-    // 缓存 - 使用 LRU 缓存，限制大小
-    _fileExistsCache: null,
-    _metadataCache: null,
-
-    // 清理定时器
-    _cleanupTimerId: null,
+    // 缓存管理器
+    _cacheManager: null,
 
     // 销毁标志
     _isDestroyed: false,
@@ -184,57 +174,27 @@ export const usePlayerStore = defineStore('player', {
   actions: {
     // --- 缓存管理 ---
 
-    _getFileExistsCache(): LRUCache<boolean> {
-      if (!this._fileExistsCache) {
-        this._fileExistsCache = new LRUCache<boolean>(200, 30000) as any
+    _getCacheManager(): PlayerCacheManager {
+      if (!this._cacheManager) {
+        this._cacheManager = markRaw(new PlayerCacheManager()) as any
       }
-      return this._fileExistsCache as LRUCache<boolean>
+      return this._cacheManager as PlayerCacheManager
     },
 
-    _getMetadataCache(): LRUCache<TrackMetadata> {
-      if (!this._metadataCache) {
-        this._metadataCache = new LRUCache<TrackMetadata>(500, 300000) as any
-      }
-      return this._metadataCache as LRUCache<TrackMetadata>
+    _getFileExistsCache() {
+      return this._getCacheManager().getFileExistsCache()
+    },
+
+    _getMetadataCache() {
+      return this._getCacheManager().getMetadataCache()
     },
 
     _startCleanupTask(): void {
-      if (this._cleanupTimerId) return
-
-      this._cleanupTimerId = setInterval(() => {
-        this._cleanupCaches()
-      }, 300000)
+      this._getCacheManager().startCleanupTask()
     },
 
     _stopCleanupTask(): void {
-      if (this._cleanupTimerId) {
-        clearInterval(this._cleanupTimerId)
-        this._cleanupTimerId = null
-      }
-    },
-
-    async _cleanupCaches(): Promise<void> {
-      const CHUNK_SIZE = 50
-
-      if (this._fileExistsCache) {
-        const keys = Array.from(this._fileExistsCache.keys())
-        for (let i = 0; i < keys.length; i++) {
-          this._fileExistsCache.get(keys[i])
-          if (i > 0 && i % CHUNK_SIZE === 0) {
-            await new Promise((resolve) => setTimeout(resolve, 0))
-          }
-        }
-      }
-      if (this._metadataCache) {
-        const keys = Array.from(this._metadataCache.keys())
-        for (let i = 0; i < keys.length; i++) {
-          this._metadataCache.get(keys[i])
-          if (i > 0 && i % CHUNK_SIZE === 0) {
-            await new Promise((resolve) => setTimeout(resolve, 0))
-          }
-        }
-      }
-      logger.debug('Cache cleanup completed')
+      this._cacheManager?.stopCleanupTask()
     },
 
     // --- 初始化 ---
@@ -901,12 +861,8 @@ export const usePlayerStore = defineStore('player', {
       this.lyrics = null
       this.currentLyricIndex = -1
 
-      if (this._fileExistsCache) {
-        this._fileExistsCache.clear()
-      }
-      if (this._metadataCache) {
-        this._metadataCache.clear()
-      }
+      this._cacheManager?.destroy()
+      this._cacheManager = null
       if (this._cacheAbortController) {
         this._cacheAbortController.abort()
         this._cacheAbortController = null
@@ -930,19 +886,15 @@ export const usePlayerStore = defineStore('player', {
         if (this.playlist.length <= 1) {
           nextIndex = 0
         } else {
-          // 懒生成:第一次或顺序失效时重新洗牌
-          if (!this._isShuffleOrderValid()) {
-            this._regenerateShuffleOrder()
-          }
-          // 走到末尾:重新洗牌继续 (手动触发时不应停止,自动结束的停止逻辑由 _onEnded 处理)
-          if (this._shufflePosition >= this._shuffleOrder.length - 1) {
-            this._regenerateShuffleOrder()
-            nextIndex = this._shuffleOrder[0]
-            this._shufflePosition = 0
-          } else {
-            this._shufflePosition++
-            nextIndex = this._shuffleOrder[this._shufflePosition]
-          }
+          const result = getNextShuffleIndex(
+            this._shuffleOrder,
+            this._shufflePosition,
+            this.playlist.length,
+            this.currentTrackIndex,
+          )
+          this._shuffleOrder = result.order
+          this._shufflePosition = result.position
+          nextIndex = result.index
           // 记入历史栈,用于 previousTrack 回溯
           this._shuffleHistory.push(this.currentTrackIndex)
         }
@@ -962,24 +914,18 @@ export const usePlayerStore = defineStore('player', {
       if (this.isShuffle) {
         if (this.playlist.length <= 1) {
           prevIndex = 0
-        } else if (this._shuffleHistory.length > 0) {
-          // 优先从历史栈弹出,真正回到上一首
-          prevIndex = this._shuffleHistory.pop()!
-          // 同步调整 _shufflePosition
-          if (this._shufflePosition > 0) this._shufflePosition--
         } else {
-          // 历史栈空:走到洗牌序列上一首,如果已在起点则重新洗牌取最后一首
-          if (!this._isShuffleOrderValid()) {
-            this._regenerateShuffleOrder()
-          }
-          if (this._shufflePosition > 0) {
-            this._shufflePosition--
-            prevIndex = this._shuffleOrder[this._shufflePosition]
-          } else {
-            // 在起点之前:回绕到序列末尾
-            this._shufflePosition = this._shuffleOrder.length - 1
-            prevIndex = this._shuffleOrder[this._shufflePosition]
-          }
+          const result = getPreviousShuffleIndex(
+            this._shuffleOrder,
+            this._shufflePosition,
+            this._shuffleHistory,
+            this.playlist.length,
+            this.currentTrackIndex,
+          )
+          this._shuffleOrder = result.order
+          this._shufflePosition = result.position
+          this._shuffleHistory = result.history
+          prevIndex = result.index
         }
       } else {
         prevIndex = this.currentTrackIndex - 1
@@ -1070,7 +1016,9 @@ export const usePlayerStore = defineStore('player', {
       if (this.isShuffle) {
         this.repeatMode = 'none'
         // 立即生成洗牌顺序,以当前曲目为起点
-        this._regenerateShuffleOrder()
+        const result = generateShuffleOrder(this.playlist.length, this.currentTrackIndex)
+        this._shuffleOrder = result.order
+        this._shufflePosition = result.position
         this._shuffleHistory = []
       } else {
         // 关闭 shuffle 时作废洗牌顺序,但保留历史栈以便恢复
@@ -1079,57 +1027,17 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
-    /**
-     * 用 Knuth (Fisher-Yates-Knuth) 算法生成洗牌顺序
-     * 算法: 从后往前遍历 [n-1..1], 每次从 [0..i] 中随机取一个与 i 交换
-     * 时间复杂度 O(n), 空间 O(n), 保证 n! 种排列等概率出现
-     *
-     * 以当前曲目为起点: 把当前 index 放到序列第 0 位,只对剩余 n-1 首洗牌
-     */
     _regenerateShuffleOrder(): void {
-      const n = this.playlist.length
-      if (n === 0) {
-        this._shuffleOrder = []
-        this._shufflePosition = -1
-        return
-      }
-
-      // 1. 生成 [0, 1, ..., n-1]
-      const order = Array.from({ length: n }, (_, i) => i)
-
-      // 2. Knuth shuffle: for i = n-1 downto 1, swap(order[i], order[rand(0..i)])
-      for (let i = n - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1))
-        const tmp = order[i]
-        order[i] = order[j]
-        order[j] = tmp
-      }
-
-      // 3. 以当前曲目为起点:把 currentTrackIndex 移到第 0 位
-      const cur = this.currentTrackIndex
-      if (cur >= 0 && cur < n) {
-        const curPos = order.indexOf(cur)
-        if (curPos > 0) {
-          // 把当前位置与第 0 位交换
-          const tmp = order[0]
-          order[0] = order[curPos]
-          order[curPos] = tmp
-        }
-      }
-
-      this._shuffleOrder = order
-      this._shufflePosition = 0
+      const result = generateShuffleOrder(this.playlist.length, this.currentTrackIndex)
+      this._shuffleOrder = result.order
+      this._shufflePosition = result.position
     },
 
-    /**
-     * 校验洗牌顺序是否仍然有效
-     * 失效条件: 序列长度与当前 playlist 不一致 (playlist 变化/重置)
-     */
     _isShuffleOrderValid(): boolean {
-      return (
-        this._shuffleOrder.length === this.playlist.length &&
-        this._shuffleOrder.length > 0 &&
-        this._shufflePosition >= 0
+      return isShuffleOrderValid(
+        this._shuffleOrder,
+        this._shufflePosition,
+        this.playlist.length,
       )
     },
 
@@ -1185,16 +1093,15 @@ export const usePlayerStore = defineStore('player', {
         // 同步更新 shuffle 顺序，避免 _shuffleOrder.length 与 playlist.length 不一致
         // 导致 _isShuffleOrderValid() 返回 false，进而造成 shuffle 模式下单曲列表无限重播
         if (this._shuffleOrder.length > 0) {
-          // 被删 index 在 _shuffleOrder 中的位置 (用于后续校正 _shufflePosition)
-          const removedPos = this._shuffleOrder.indexOf(index)
-          // 移除被删 index,并将大于该 index 的值减 1 (保持索引一致性)
-          this._shuffleOrder = this._shuffleOrder
-            .filter((i) => i !== index)
-            .map((i) => (i > index ? i - 1 : i))
-          // 若被删条目位于当前播放位置之前,当前条目前移一位,_shufflePosition 需同步减 1
-          if (removedPos !== -1 && removedPos < this._shufflePosition) {
-            this._shufflePosition--
-          }
+          const adjusted = adjustShuffleAfterRemove(
+            this._shuffleOrder,
+            this._shufflePosition,
+            this._shuffleHistory,
+            index,
+          )
+          this._shuffleOrder = adjusted.order
+          this._shufflePosition = adjusted.position
+          this._shuffleHistory = adjusted.history
         }
       }
     },
@@ -1423,7 +1330,9 @@ export const usePlayerStore = defineStore('player', {
             return
           }
 
-          this.lyrics = parsedLyrics
+          // markRaw: 歌词数据只整体替换、不修改内部字段,
+          // 无需深度响应式代理 (大歌词可达数百行,深度代理开销显著)
+          this.lyrics = markRaw(parsedLyrics)
         } else if (this.currentTrack?.path === trackPath) {
           this.lyrics = null
         }
@@ -1459,6 +1368,8 @@ export const usePlayerStore = defineStore('player', {
 
       this.stopStatusPolling()
       this._stopCleanupTask()
+      this._cacheManager?.destroy()
+      this._cacheManager = null
 
       if (this._trackEndedUnlisten) {
         this._trackEndedUnlisten()
@@ -1513,14 +1424,6 @@ export const usePlayerStore = defineStore('player', {
         // 忽略错误
       }
 
-      if (this._fileExistsCache) {
-        this._fileExistsCache.clear()
-        this._fileExistsCache = null
-      }
-      if (this._metadataCache) {
-        this._metadataCache.clear()
-        this._metadataCache = null
-      }
       if (this._cacheAbortController) {
         this._cacheAbortController.abort()
         this._cacheAbortController = null

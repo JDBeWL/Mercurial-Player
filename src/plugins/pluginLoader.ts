@@ -21,7 +21,7 @@ interface PluginManifest {
   description?: string
   permissions?: PluginPermissionType[]
   main?: string
-  autoActivate?: boolean
+  auto_activate?: boolean
 }
 
 // 安装结果类型
@@ -136,7 +136,7 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
       main: mainFn,
     })
 
-    if (manifest.autoActivate !== false) {
+    if (manifest.auto_activate !== false) {
       await pluginManager.activate(manifest.id)
     }
 

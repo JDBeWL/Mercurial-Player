@@ -2,10 +2,10 @@
 //!
 //! 包含播放控制、设备管理等命令。
 
-use super::device::{get_all_audio_devices, AudioDeviceInfo};
+use super::device::{AudioDeviceInfo, get_all_audio_devices};
 use super::playback::{
-    check_track_finished, get_status, play_track_exclusive, play_track_shared, seek_track_shared,
-    PlaybackStatus,
+    PlaybackStatus, check_track_finished, get_status, play_track_exclusive, play_track_shared,
+    seek_track_shared,
 };
 
 #[cfg(windows)]
@@ -13,10 +13,10 @@ use super::wasapi::WasapiExclusivePlayback;
 
 use crate::AppState;
 use cpal::traits::HostTrait;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
-use tauri::{command, AppHandle, State};
+use tauri::{AppHandle, State, command};
 
 // ============================================================================
 // 共享模式淡入淡出辅助
@@ -79,7 +79,7 @@ pub fn get_waveform_data(state: State<AppState>) -> Result<Vec<f32>, String> {
     // 使用 try_lock 避免阻塞主线程
     match state.player.visualization.waveform_data.try_lock() {
         Ok(data) => Ok(data.clone()),
-        Err(_) => Ok(Vec::new()) // 锁被占用时返回空数据，避免阻塞
+        Err(_) => Ok(Vec::new()), // 锁被占用时返回空数据，避免阻塞
     }
 }
 
@@ -88,18 +88,27 @@ pub fn get_spectrum_data(state: State<AppState>) -> Result<Vec<f32>, String> {
     // 使用 try_lock 避免阻塞主线程
     match state.player.visualization.spectrum_data.try_lock() {
         Ok(data) => Ok(data.clone()),
-        Err(_) => Ok(vec![0.0; 128]) // 锁被占用时返回默认数据，避免阻塞
+        Err(_) => Ok(vec![0.0; 128]), // 锁被占用时返回默认数据，避免阻塞
     }
 }
 
 #[command]
-pub fn play_track(app: AppHandle, state: State<AppState>, path: String, position: Option<f32>) -> Result<(), String> {
-    let exclusive_mode = state.player.output.exclusive_mode.lock()
+pub async fn play_track(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    position: Option<f32>,
+) -> Result<(), String> {
+    let exclusive_mode = state
+        .player
+        .output
+        .exclusive_mode
+        .lock()
         .map(|g| *g)
         .map_err(|e| format!("Failed to acquire exclusive mode lock: {e}"))?;
 
     if exclusive_mode {
-        play_track_exclusive(&app, &state, &path, position)
+        play_track_exclusive(&app, &state, &path, position).await
     } else {
         play_track_shared(&app, &state, &path, position)
     }
@@ -308,9 +317,6 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), String> {
     Ok(())
 }
 
-
-
-
 #[command]
 pub fn get_playback_status(state: State<AppState>) -> Result<PlaybackStatus, String> {
     get_status(&state)
@@ -322,19 +328,31 @@ pub fn is_track_finished(state: State<AppState>) -> Result<bool, String> {
 }
 
 #[command]
-pub fn seek_track(app: AppHandle, state: State<AppState>, time: f32) -> Result<(), String> {
+pub async fn seek_track(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    time: f32,
+) -> Result<(), String> {
     // 用 lock() 阻塞等待:用户拖动进度条时不应失败
-    let path = state.player.track.current_path.lock()
+    let path = state
+        .player
+        .track
+        .current_path
+        .lock()
         .map_err(|e| format!("Failed to acquire current path lock: {e}"))?
         .clone()
         .ok_or("No track currently loaded")?;
 
-    let exclusive_mode = state.player.output.exclusive_mode.lock()
+    let exclusive_mode = state
+        .player
+        .output
+        .exclusive_mode
+        .lock()
         .map(|g| *g)
         .map_err(|e| format!("Failed to acquire exclusive mode lock: {e}"))?;
 
     if exclusive_mode {
-        play_track_exclusive(&app, &state, &path, Some(time))
+        play_track_exclusive(&app, &state, &path, Some(time)).await
     } else {
         seek_track_shared(&app, &state, &path, time)
     }
@@ -350,21 +368,25 @@ pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
 }
 
 #[command]
-pub fn set_audio_device(
+pub async fn set_audio_device(
     app: AppHandle,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     device_name: String,
     current_time: Option<f32>,
 ) -> Result<(), String> {
     log::info!("Attempting to switch to audio device: {device_name}");
 
     // 用 lock() 阻塞等待:播放期间切换设备不应失败
-    let exclusive_mode = state.player.output.exclusive_mode.lock()
+    let exclusive_mode = state
+        .player
+        .output
+        .exclusive_mode
+        .lock()
         .map(|g| *g)
         .map_err(|e| format!("Failed to acquire exclusive mode lock: {e}"))?;
 
     let result = if exclusive_mode {
-        switch_to_wasapi_exclusive(&app, &state, &device_name, current_time)
+        switch_to_wasapi_exclusive(&app, &state, &device_name, current_time).await
     } else {
         switch_to_shared_mode(&app, &state, &device_name, current_time)
     };
@@ -380,9 +402,9 @@ pub fn set_audio_device(
 }
 
 #[cfg(windows)]
-fn switch_to_wasapi_exclusive(
+async fn switch_to_wasapi_exclusive(
     app: &AppHandle,
-    state: &State<AppState>,
+    state: &State<'_, AppState>,
     device_name: &str,
     current_time: Option<f32>,
 ) -> Result<(), String> {
@@ -391,18 +413,30 @@ fn switch_to_wasapi_exclusive(
     // 1. 先记录当前播放路径 (在停止旧播放器前)
     // 用 lock() 阻塞等待:播放期间解码线程会周期性持有这些锁
     let current_path = {
-        let old_player = state.player.output.sink.lock()
+        let old_player = state
+            .player
+            .output
+            .sink
+            .lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
         old_player.stop();
-        
-        state.player.track.current_path.lock()
+
+        state
+            .player
+            .track
+            .current_path
+            .lock()
             .map_err(|e| format!("Failed to acquire current path lock: {e}"))?
             .clone()
     };
 
     // 2. 停止旧的 cpal sink (从共享模式切换过来的场景)
     {
-        let player = state.player.output.sink.lock()
+        let player = state
+            .player
+            .output
+            .sink
+            .lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
         player.stop();
         player.clear();
@@ -411,7 +445,11 @@ fn switch_to_wasapi_exclusive(
     // 3. 确保旧的 WASAPI 播放器被正确清理
     // 用 lock() 阻塞等待:切换期间解码线程会周期性持有此锁
     {
-        let mut old_wasapi = state.player.output.wasapi_player.lock()
+        let mut old_wasapi = state
+            .player
+            .output
+            .wasapi_player
+            .lock()
             .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
         // take() 会获取所有权，drop 会自动清理线程和资源
         let _ = old_wasapi.take();
@@ -421,16 +459,26 @@ fn switch_to_wasapi_exclusive(
 
     match wasapi_playback.initialize(Some(device_name)) {
         Ok((sample_rate, channels, actual_device_name)) => {
-            log::info!("WASAPI Exclusive initialized: {actual_device_name} @ {sample_rate}Hz, {channels} channels");
+            log::info!(
+                "WASAPI Exclusive initialized: {actual_device_name} @ {sample_rate}Hz, {channels} channels"
+            );
 
             {
-                let mut wasapi_guard = state.player.output.wasapi_player.lock()
+                let mut wasapi_guard = state
+                    .player
+                    .output
+                    .wasapi_player
+                    .lock()
                     .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
                 *wasapi_guard = Some(wasapi_playback);
             }
 
             {
-                let mut device_name_guard = state.player.output.current_device_name.lock()
+                let mut device_name_guard = state
+                    .player
+                    .output
+                    .current_device_name
+                    .lock()
                     .map_err(|e| format!("Failed to acquire current device name lock: {e}"))?;
                 *device_name_guard = device_name.to_string();
             }
@@ -440,11 +488,19 @@ fn switch_to_wasapi_exclusive(
             // 因为此时 exclusive_mode 标志尚未更新 (仍为旧值 false),
             // 若用 play_track 会错误路由到 play_track_shared
             if let Some(path) = current_path {
-                play_track_exclusive(app, state, &path, current_time)?;
+                play_track_exclusive(app, state, &path, current_time).await?;
                 // play_track_exclusive 不会读 target_volume,需要手动同步音量
-                let vol = *state.player.output.target_volume.lock()
+                let vol = *state
+                    .player
+                    .output
+                    .target_volume
+                    .lock()
                     .map_err(|e| format!("Failed to acquire target volume lock: {e}"))?;
-                let wasapi_guard = state.player.output.wasapi_player.lock()
+                let wasapi_guard = state
+                    .player
+                    .output
+                    .wasapi_player
+                    .lock()
                     .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
                 if let Some(ref wasapi) = *wasapi_guard {
                     let _ = wasapi.set_volume(vol);
@@ -459,15 +515,17 @@ fn switch_to_wasapi_exclusive(
             if let Ok(mut exclusive_mode_guard) = state.player.output.exclusive_mode.lock() {
                 *exclusive_mode_guard = false;
             }
-            Err(format!("Failed to initialize WASAPI exclusive mode: {e}. The device may be in use by another application."))
+            Err(format!(
+                "Failed to initialize WASAPI exclusive mode: {e}. The device may be in use by another application."
+            ))
         }
     }
 }
 
 #[cfg(not(windows))]
-fn switch_to_wasapi_exclusive(
+async fn switch_to_wasapi_exclusive(
     _app: &AppHandle,
-    _state: &State<AppState>,
+    _state: &State<'_, AppState>,
     _device_name: &str,
     _current_time: Option<f32>,
 ) -> Result<(), String> {
@@ -485,12 +543,20 @@ fn switch_to_shared_mode(
     // 1. 先记录当前播放状态和路径 (在停止旧播放器前)
     // 用 lock() 阻塞等待:播放期间解码线程会周期性持有这些锁,try_lock 会失败
     let (is_playing, volume, current_path) = {
-        let old_player = state.player.output.sink.lock()
+        let old_player = state
+            .player
+            .output
+            .sink
+            .lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
         let playing = !old_player.is_paused();
         let vol = old_player.volume();
         old_player.stop();
-        let current_path = state.player.track.current_path.lock()
+        let current_path = state
+            .player
+            .track
+            .current_path
+            .lock()
             .map_err(|e| format!("Failed to acquire current path lock: {e}"))?
             .clone();
         (playing, vol, current_path)
@@ -500,7 +566,11 @@ fn switch_to_shared_mode(
     // 必须在打开新的 cpal stream 之前完成,否则设备仍被独占模式占用
     // 用 lock() 阻塞等待:解码线程会周期性持有此锁调用 push_samples 等
     {
-        let mut wasapi_guard = state.player.output.wasapi_player.lock()
+        let mut wasapi_guard = state
+            .player
+            .output
+            .wasapi_player
+            .lock()
             .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
         if let Some(wasapi) = wasapi_guard.as_ref() {
             let _ = wasapi.stop();
@@ -536,22 +606,22 @@ fn switch_to_shared_mode(
                 }
             };
             match rodio::stream::DeviceSinkBuilder::from_device(dev) {
-                Ok(builder) => {
-                    match builder.open_stream() {
-                        Ok(s) => {
-                            if attempt > 1 {
-                                log::info!("cpal stream opened after {attempt} attempts");
-                            }
-                            sink = Some(s);
-                            break;
+                Ok(builder) => match builder.open_stream() {
+                    Ok(s) => {
+                        if attempt > 1 {
+                            log::info!("cpal stream opened after {attempt} attempts");
                         }
-                        Err(e) => {
-                            last_err = Some(format!("Failed to create mixer sink: {e}. The device may be in use by another application."));
-                            log::warn!("cpal open_stream attempt {attempt}/5 failed: {e}");
-                            std::thread::sleep(Duration::from_millis(50));
-                        }
+                        sink = Some(s);
+                        break;
                     }
-                }
+                    Err(e) => {
+                        last_err = Some(format!(
+                            "Failed to create mixer sink: {e}. The device may be in use by another application."
+                        ));
+                        log::warn!("cpal open_stream attempt {attempt}/5 failed: {e}");
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                },
                 Err(e) => {
                     last_err = Some(format!("Failed to create device sink builder: {e}"));
                     log::warn!("cpal DeviceSinkBuilder attempt {attempt}/5 failed: {e}");
@@ -561,7 +631,10 @@ fn switch_to_shared_mode(
         }
         match sink {
             Some(s) => s,
-            None => return Err(last_err.unwrap_or_else(|| "Failed to create mixer sink after retries".to_string())),
+            None => {
+                return Err(last_err
+                    .unwrap_or_else(|| "Failed to create mixer sink after retries".to_string()));
+            }
         }
     };
 
@@ -570,7 +643,11 @@ fn switch_to_shared_mode(
     // 5. 替换播放器
     // 用 lock() 阻塞等待:确保热切换期间能成功替换播放器
     {
-        let mut player_guard = state.player.output.sink.lock()
+        let mut player_guard = state
+            .player
+            .output
+            .sink
+            .lock()
             .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
         *player_guard = new_player;
         player_guard.set_volume(volume);
@@ -582,13 +659,21 @@ fn switch_to_shared_mode(
     }
 
     {
-        let mut output_stream_guard = state.player.output.output_stream.lock()
+        let mut output_stream_guard = state
+            .player
+            .output
+            .output_stream
+            .lock()
             .map_err(|e| format!("Failed to acquire output stream lock: {e}"))?;
         *output_stream_guard = Some(new_mixer_sink);
     }
 
     {
-        let mut device_name_guard = state.player.output.current_device_name.lock()
+        let mut device_name_guard = state
+            .player
+            .output
+            .current_device_name
+            .lock()
             .map_err(|e| format!("Failed to acquire current device name lock: {e}"))?;
         *device_name_guard = device_name.to_string();
     }
@@ -606,16 +691,20 @@ fn switch_to_shared_mode(
 }
 
 #[command]
-pub fn toggle_exclusive_mode(
+pub async fn toggle_exclusive_mode(
     app: AppHandle,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     enabled: bool,
     current_time: Option<f32>,
 ) -> Result<(), String> {
     log::info!("Toggling exclusive mode: {enabled}");
 
     // 用 lock() 阻塞等待:用户切换独占模式时不应失败,即使播放期间
-    let prev_exclusive = state.player.output.exclusive_mode.lock()
+    let prev_exclusive = state
+        .player
+        .output
+        .exclusive_mode
+        .lock()
         .map(|g| *g)
         .map_err(|e| format!("Failed to acquire exclusive mode lock: {e}"))?;
     if prev_exclusive == enabled {
@@ -624,7 +713,11 @@ pub fn toggle_exclusive_mode(
     }
 
     // 获取当前设备名 (用于热切换)
-    let device_name = state.player.output.current_device_name.lock()
+    let device_name = state
+        .player
+        .output
+        .current_device_name
+        .lock()
         .map_err(|e| format!("Failed to acquire current device name lock: {e}"))?
         .clone();
     if device_name.is_empty() {
@@ -646,7 +739,7 @@ pub fn toggle_exclusive_mode(
 
     // 热切换到目标模式
     let result = if enabled {
-        switch_to_wasapi_exclusive(&app, &state, &device_name, current_time)
+        switch_to_wasapi_exclusive(&app, &state, &device_name, current_time).await
     } else {
         switch_to_shared_mode(&app, &state, &device_name, current_time)
     };
@@ -655,7 +748,11 @@ pub fn toggle_exclusive_mode(
         Ok(()) => {
             // 更新 exclusive_mode 标志 (必须成功,否则状态不一致)
             {
-                let mut guard = state.player.output.exclusive_mode.lock()
+                let mut guard = state
+                    .player
+                    .output
+                    .exclusive_mode
+                    .lock()
                     .map_err(|e| format!("Failed to acquire exclusive mode lock: {e}"))?;
                 *guard = enabled;
             }
@@ -673,39 +770,56 @@ pub fn toggle_exclusive_mode(
                 config.audio.exclusive_mode = prev_exclusive;
                 let _ = state.config_manager.save_config(&config);
             }
-            Err(format!("Failed to switch exclusive mode: {e}. The device may be in use by another application."))
+            Err(format!(
+                "Failed to switch exclusive mode: {e}. The device may be in use by another application."
+            ))
         }
     }
 }
 
 #[command]
 pub fn get_exclusive_mode(state: State<AppState>) -> Result<bool, String> {
-    state.player.output.exclusive_mode.try_lock()
+    state
+        .player
+        .output
+        .exclusive_mode
+        .try_lock()
         .map(|g| *g)
         .map_err(|_| "Failed to acquire exclusive mode lock".to_string())
 }
 
 #[command]
 pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInfo, String> {
-    let current_device_name = state.player.output.current_device_name.try_lock()
+    let current_device_name = state
+        .player
+        .output
+        .current_device_name
+        .try_lock()
         .map_err(|_| "Failed to acquire current device name lock".to_string())?
         .clone();
 
     let host = cpal::default_host();
-    let default_device_name = host.default_output_device().and_then(|d| super::device::get_device_friendly_name(&d));
+    let default_device_name = host
+        .default_output_device()
+        .and_then(|d| super::device::get_device_friendly_name(&d));
 
     let is_default = default_device_name.is_some_and(|d_name| d_name == current_device_name);
     let supports_exclusive_mode = {
         #[cfg(windows)]
         {
-            super::wasapi::check_device_exclusive_support(Some(&current_device_name)).unwrap_or(false)
+            super::wasapi::check_device_exclusive_support(Some(&current_device_name))
+                .unwrap_or(false)
         }
         #[cfg(not(windows))]
         {
             false
         }
     };
-    let is_exclusive_mode = state.player.output.exclusive_mode.try_lock()
+    let is_exclusive_mode = state
+        .player
+        .output
+        .exclusive_mode
+        .try_lock()
         .map(|g| *g)
         .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
 
@@ -713,10 +827,18 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
         if is_exclusive_mode {
             #[cfg(windows)]
             {
-                let wasapi_active = state.player.output.wasapi_player.try_lock()
+                let wasapi_active = state
+                    .player
+                    .output
+                    .wasapi_player
+                    .try_lock()
                     .map(|g| g.is_some())
                     .unwrap_or(false);
-                if wasapi_active { "exclusive" } else { "standard" }
+                if wasapi_active {
+                    "exclusive"
+                } else {
+                    "standard"
+                }
             }
             #[cfg(not(windows))]
             {
@@ -743,11 +865,11 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
 
 /// 启动时调用,根据配置中的 last_session 校验并恢复播放
 #[command]
-pub fn resume_last_session(
+pub async fn resume_last_session(
     app: AppHandle,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<super::session::ResumeResult, String> {
-    super::session::try_resume_last_session(&app, &state)
+    super::session::try_resume_last_session(&app, &state).await
 }
 
 /// 保存上次播放会话 (前端节流写入调用)
@@ -789,15 +911,26 @@ pub fn set_target_fps(state: State<AppState>, fps: u32) -> Result<(), String> {
     }
     // 限制最大刷新率为 240fps，防止过高频率
     let clamped_fps = fps.min(240);
-    state.player.visualization.target_fps.store(clamped_fps as u64, Ordering::Relaxed);
+    state
+        .player
+        .visualization
+        .target_fps
+        .store(clamped_fps as u64, Ordering::Relaxed);
     log::info!("Target FPS set to {clamped_fps}");
     Ok(())
 }
 
 #[command]
 pub fn set_vertical_sync(state: State<AppState>, enabled: bool) -> Result<(), String> {
-    state.player.visualization.enable_vertical_sync.store(enabled, Ordering::Relaxed);
-    log::info!("Vertical sync {}", if enabled { "enabled" } else { "disabled" });
+    state
+        .player
+        .visualization
+        .enable_vertical_sync
+        .store(enabled, Ordering::Relaxed);
+    log::info!(
+        "Vertical sync {}",
+        if enabled { "enabled" } else { "disabled" }
+    );
     Ok(())
 }
 
