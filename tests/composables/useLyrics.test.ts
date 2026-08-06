@@ -73,7 +73,7 @@ vi.mock('@/stores/config', () => ({
 
 import { useLyrics } from '@/composables/useLyrics'
 import { mockInvoke, resetTauriMocks } from '../mocks/tauri'
-import type { LyricLine, Track } from '@/types'
+import type { LyricLine } from '@/types'
 
 /** 等待 watcher 的 loadLyrics 完成 */
 async function waitForLoadComplete() {

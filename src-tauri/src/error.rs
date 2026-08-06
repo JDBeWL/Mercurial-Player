@@ -5,7 +5,7 @@
 //! ## 示例
 //!
 //! ```no_run
-//! use crate::error::AppError;
+//! use mercurial_player::error::AppError;
 //!
 //! fn read_config(path: &str) -> Result<String, AppError> {
 //!     std::fs::read_to_string(path).map_err(AppError::from) // io::Error -> AppError

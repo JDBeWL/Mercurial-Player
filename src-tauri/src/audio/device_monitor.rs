@@ -261,26 +261,26 @@ mod windows_impl {
     #![allow(unsafe_code)]
     #![allow(clippy::ref_as_ptr)]
 
-    use super::{find_fallback_device, get_default_device_name, DeviceChangeEvent};
+    use super::{DeviceChangeEvent, find_fallback_device, get_default_device_name};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
     use tauri::{AppHandle, Emitter};
 
-    use windows::core::{PCWSTR, PWSTR};
     use windows::Win32::Foundation::PROPERTYKEY;
     use windows::Win32::Media::Audio::{
-        eRender, EDataFlow, ERole, IMMDeviceEnumerator, IMMNotificationClient,
-        IMMNotificationClient_Impl, MMDeviceEnumerator, DEVICE_STATE, DEVICE_STATE_DISABLED,
-        DEVICE_STATE_NOTPRESENT, DEVICE_STATE_UNPLUGGED,
-    };
-    use windows::Win32::System::Com::{
-        CLSCTX_ALL, CoInitializeEx, CoUninitialize, CoCreateInstance, CoTaskMemFree,
-        COINIT_MULTITHREADED, STGM_READ,
+        DEVICE_STATE, DEVICE_STATE_DISABLED, DEVICE_STATE_NOTPRESENT, DEVICE_STATE_UNPLUGGED,
+        EDataFlow, ERole, IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl,
+        MMDeviceEnumerator, eRender,
     };
     use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
+    use windows::Win32::System::Com::{
+        CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+        CoUninitialize, STGM_READ,
+    };
     use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
+    use windows::core::{PCWSTR, PWSTR};
 
     /// PKEY_Device_FriendlyName = {a45c254e-df08-4e93-bf1a-d1c97c2b3e08}, 14
     ///
@@ -334,8 +334,7 @@ mod windows_impl {
             let device = unsafe { self.enumerator.GetDevice(device_id).ok()? };
 
             // SAFETY: device 是有效的 IMMDevice，OpenPropertyStore 在同一线程调用
-            let prop_store: IPropertyStore =
-                unsafe { device.OpenPropertyStore(STGM_READ).ok()? };
+            let prop_store: IPropertyStore = unsafe { device.OpenPropertyStore(STGM_READ).ok()? };
 
             // SAFETY: key 是常量指针，PROPVARIANT 由 GetValue 写入
             let prop_variant = unsafe { prop_store.GetValue(&PKEY_DEVICE_FRIENDLY_NAME).ok()? };
@@ -555,18 +554,15 @@ mod windows_impl {
             }
 
             // 创建 IMMDeviceEnumerator 实例
-            let enumerator: IMMDeviceEnumerator = match CoCreateInstance(
-                &MMDeviceEnumerator,
-                None,
-                CLSCTX_ALL,
-            ) {
-                Ok(enumerator) => enumerator,
-                Err(e) => {
-                    log::error!("Device monitor: CoCreateInstance failed: {e}");
-                    CoUninitialize();
-                    return;
-                }
-            };
+            let enumerator: IMMDeviceEnumerator =
+                match CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) {
+                    Ok(enumerator) => enumerator,
+                    Err(e) => {
+                        log::error!("Device monitor: CoCreateInstance failed: {e}");
+                        CoUninitialize();
+                        return;
+                    }
+                };
 
             // 初始化 previous_default 缓存（与轮询实现保持一致）
             let host = cpal::default_host();
@@ -628,8 +624,7 @@ mod windows_impl {
             assert_eq!(guid.data2, 0xdf08, "data2 mismatch");
             assert_eq!(guid.data3, 0x4e93, "data3 mismatch");
             assert_eq!(
-                guid.data4,
-                expected_data4,
+                guid.data4, expected_data4,
                 "data4 byte order mismatch — GUID::from_u128 reverses Data4 on little-endian"
             );
             assert_eq!(PKEY_DEVICE_FRIENDLY_NAME.pid, 14, "pid mismatch");

@@ -1209,9 +1209,9 @@ mod simd_convert {
 pub use simd_convert::convert_samples_to_bytes_into;
 
 #[cfg(test)]
+#[allow(unsafe_code)] // 测试 SIMD intrinsics 需要 unsafe
 mod simd_tests {
     use super::simd_convert::*;
-    use super::*;
 
     /// 验证 AVX2 路径与标量路径产生相同字节流(允许 i32 路径 1 LSB 差异)
     /// 样本总数对齐到 16 的倍数,确保 SSE2(chunk=8) 和 AVX2(chunk=16)
@@ -1266,11 +1266,7 @@ mod simd_tests {
             // (Rust as 是 truncation-toward-zero, MXCSR 默认 RNE),最大差异 1 LSB
             assert!(
                 diff <= 1,
-                "i16 差异过大 at {}: scalar={}, simd={}, diff={}",
-                i,
-                s,
-                v,
-                diff
+                "i16 差异过大 at {i}: scalar={s}, simd={v}, diff={diff}"
             );
         }
     }
@@ -1307,11 +1303,7 @@ mod simd_tests {
             // SIMD scale 比标量小最多 128,允许 1 LSB 误差
             assert!(
                 diff <= 128,
-                "i32 差异过大 at {}: scalar={}, simd={}, diff={}",
-                i,
-                s,
-                v,
-                diff
+                "i32 差异过大 at {i}: scalar={s}, simd={v}, diff={diff}"
             );
         }
     }
@@ -1373,11 +1365,7 @@ mod simd_tests {
             // 标量 `as i16` 是 truncation-toward-zero,.5 边界处差 1 LSB
             assert!(
                 diff <= 1,
-                "SSE2 i16 差异过大 at {}: scalar={}, sse2={}, diff={}",
-                i,
-                s,
-                v,
-                diff
+                "SSE2 i16 差异过大 at {i}: scalar={s}, sse2={v}, diff={diff}"
             );
         }
     }
@@ -1412,11 +1400,7 @@ mod simd_tests {
             // SSE2 i32 路径同样 clamp 到 2147483520.0,与 AVX2 path 行为一致
             assert!(
                 diff <= 128,
-                "SSE2 i32 差异过大 at {}: scalar={}, sse2={}, diff={}",
-                i,
-                s,
-                v,
-                diff
+                "SSE2 i32 差异过大 at {i}: scalar={s}, sse2={v}, diff={diff}"
             );
         }
     }

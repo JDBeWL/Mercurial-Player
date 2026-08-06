@@ -322,7 +322,7 @@ describe('PlayerControls.vue', () => {
       const popup = wrapper.find('.volume-slider-popup')
       // v-show 控制可见性，元素存在但 display:none
       expect(popup.exists()).toBe(true)
-      expect(popup.element.style.display).toBe('none')
+      expect((popup.element as HTMLElement).style.display).toBe('none')
     })
 
     it('鼠标悬停时显示音量弹出框', async () => {
@@ -332,7 +332,7 @@ describe('PlayerControls.vue', () => {
       await container.trigger('mouseenter')
       await nextTick()
       const popup = wrapper.find('.volume-slider-popup')
-      expect(popup.element.style.display).not.toBe('none')
+      expect((popup.element as HTMLElement).style.display).not.toBe('none')
     })
 
     it('音量滑块填充高度随 volume 变化', async () => {

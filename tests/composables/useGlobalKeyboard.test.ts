@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, beforeEach, expect, vi, afterEach } from 'vitest'
-import { defineComponent, h, nextTick } from 'vue'
+import { defineComponent, h } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
 
 // Mock player store

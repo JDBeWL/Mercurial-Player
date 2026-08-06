@@ -24,7 +24,12 @@ async fn send_with_retry(
             tokio::time::sleep(delay).await;
             log::debug!("重试请求 (第 {attempt} 次)...");
         }
-        match request_builder.try_clone().ok_or("请求不可重试")?.send().await {
+        match request_builder
+            .try_clone()
+            .ok_or("请求不可重试")?
+            .send()
+            .await
+        {
             Ok(resp) => return Ok(resp),
             Err(e) => {
                 last_err = format!("{e}");
@@ -150,13 +155,7 @@ pub async fn search_songs(
         ("offset", &offset.to_string()),
     ];
 
-    let response = send_with_retry(
-        client
-            .post(url)
-            .headers(build_headers())
-            .form(&params),
-    )
-    .await?;
+    let response = send_with_retry(client.post(url).headers(build_headers()).form(&params)).await?;
 
     let status = response.status();
     let response_text = response

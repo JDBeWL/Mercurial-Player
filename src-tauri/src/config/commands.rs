@@ -37,8 +37,7 @@ fn is_path_safe(path: &str) -> Result<(), String> {
             .components()
             .filter_map(|c| c.as_os_str().to_str())
             .collect();
-        let lower_components: Vec<String> =
-            components.iter().map(|c| c.to_lowercase()).collect();
+        let lower_components: Vec<String> = components.iter().map(|c| c.to_lowercase()).collect();
         for sensitive in &[".ssh", ".gnupg"] {
             if lower_components.iter().any(|c| c == sensitive) {
                 return Err("安全限制：不允许添加系统敏感目录".to_string());

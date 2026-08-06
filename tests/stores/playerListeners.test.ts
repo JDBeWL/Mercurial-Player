@@ -69,10 +69,12 @@ import {
   unregisterGlobalShortcuts,
   setupDeviceListeners,
 } from '@/stores/playerListeners'
-import type { Track } from '@/types'
+
+/** 从 setup 函数签名推导 PlayerStore 类型 */
+type PlayerStore = Parameters<typeof setupTrackEndedListener>[0]
 
 /** 创建 mock player store */
-function createMockStore() {
+function createMockStore(): PlayerStore {
   return {
     _isDestroyed: false,
     isPlaying: false,
@@ -83,7 +85,7 @@ function createMockStore() {
     nextTrack: vi.fn(),
     pause: vi.fn(),
     _switchAudioDevice: vi.fn().mockResolvedValue(undefined),
-  }
+  } as unknown as PlayerStore
 }
 
 /** 触发指定事件的 listen 回调 */
