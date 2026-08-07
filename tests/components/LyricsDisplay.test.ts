@@ -10,7 +10,7 @@ import type { LyricLine, Track } from '@/types'
 const mocks = vi.hoisted(() => ({
   playerStore: null as unknown,
   configStore: null as unknown,
-  lyricsState: null as any,
+  lyricsState: null as unknown as Record<string, unknown>,
 }))
 
 vi.mock('@/stores/player', () => ({

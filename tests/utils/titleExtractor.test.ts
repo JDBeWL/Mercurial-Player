@@ -38,7 +38,7 @@ describe('TitleExtractor', () => {
 
     it('should return empty string for empty input', () => {
       expect(TitleExtractor.cleanTitle('')).toBe('')
-      expect(TitleExtractor.cleanTitle(null as any)).toBe('')
+      expect(TitleExtractor.cleanTitle(null as unknown as string)).toBe('')
     })
   })
 
@@ -71,6 +71,27 @@ describe('TitleExtractor', () => {
       expect(result.artist).toBe('')
       expect(result.title).toBe('Artist - Song')
     })
+
+    it('should not split on bare spaces (regression: space was a default separator)', () => {
+      const result = TitleExtractor.parseFromFileName('/music/My Song.mp3')
+      expect(result.artist).toBe('')
+      expect(result.title).toBe('My Song')
+    })
+
+    it('should not split on dots when separator is dash (regression)', () => {
+      const result = TitleExtractor.parseFromFileName('/music/01. Track Name.mp3')
+      expect(result.artist).toBe('')
+      expect(result.title).toBe('01. Track Name')
+    })
+
+    it('should only use the configured separator, not all separators', () => {
+      // separator 为 '_' 时,不应尝试 '-' 分割
+      const result = TitleExtractor.parseFromFileName('/music/Artist-Song.mp3', {
+        separator: '_',
+      })
+      expect(result.artist).toBe('')
+      expect(result.title).toBe('Artist-Song')
+    })
   })
 
   describe('testParse', () => {
@@ -94,21 +115,6 @@ describe('TitleExtractor', () => {
     })
   })
 
-  describe('isValidSeparator', () => {
-    it('should validate separators', () => {
-      expect(TitleExtractor.isValidSeparator('-')).toBe(true)
-      expect(TitleExtractor.isValidSeparator(' - ')).toBe(true)
-      expect(TitleExtractor.isValidSeparator('')).toBe(false)
-      expect(TitleExtractor.isValidSeparator('   ')).toBe(false)
-    })
-  })
-
-  describe('getValidSeparators', () => {
-    it('should filter valid separators', () => {
-      const result = TitleExtractor.getValidSeparators(['-', '', '_', '   ', '.'])
-      expect(result).toEqual(['-', '_', '.'])
-    })
-  })
 })
 
 describe('extractTitle (with Tauri mock)', () => {

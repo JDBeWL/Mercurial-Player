@@ -43,6 +43,7 @@ vi.mock('@/utils/titleExtractor', () => ({
 
 import { PlaylistManager } from '@/utils/playlistManager'
 import { invoke } from '@tauri-apps/api/core'
+import type { Track } from '@/types'
 
 const invokeMock = vi.mocked(invoke)
 
@@ -97,7 +98,7 @@ describe('PlaylistManager', () => {
         name: 'music',
         depth: 0,
         subdirectories: [],
-        audioFiles: [{ path: '/music/song1.mp3' }, { path: '/music/song2.mp3' }] as any,
+        audioFiles: [{ path: '/music/song1.mp3' }, { path: '/music/song2.mp3' }] as unknown as Track[],
       }
       expect(PlaylistManager.countAudioFiles(node)).toBe(2)
     })
@@ -113,10 +114,10 @@ describe('PlaylistManager', () => {
             name: 'rock',
             depth: 1,
             subdirectories: [],
-            audioFiles: [{ path: '/music/rock/song.mp3' }] as any,
+            audioFiles: [{ path: '/music/rock/song.mp3' }] as unknown as Track[],
           },
         ],
-        audioFiles: [{ path: '/music/song.mp3' }] as any,
+        audioFiles: [{ path: '/music/song.mp3' }] as unknown as Track[],
       }
       expect(PlaylistManager.countAudioFiles(node)).toBe(2)
     })
@@ -171,15 +172,15 @@ describe('PlaylistManager', () => {
             name: 'rock',
             depth: 1,
             subdirectories: [],
-            audioFiles: [{ path: '/music/rock/song1.mp3' }] as any,
+            audioFiles: [{ path: '/music/rock/song1.mp3' }] as unknown as Track[],
           },
         ],
-        audioFiles: [{ path: '/music/song2.mp3' }] as any,
+        audioFiles: [{ path: '/music/song2.mp3' }] as unknown as Track[],
       }
       const result = PlaylistManager.collectAllAudioFiles(node)
       expect(result).toHaveLength(2)
-      expect(result.map((f: any) => f.path)).toContain('/music/song2.mp3')
-      expect(result.map((f: any) => f.path)).toContain('/music/rock/song1.mp3')
+      expect(result.map((f: Track) => f.path)).toContain('/music/song2.mp3')
+      expect(result.map((f: Track) => f.path)).toContain('/music/rock/song1.mp3')
     })
   })
 
@@ -259,7 +260,7 @@ describe('PlaylistManager', () => {
         name: 'music',
         depth: 0,
         subdirectories: [],
-        audioFiles: [{ path: '/music/song.mp3' }] as any,
+        audioFiles: [{ path: '/music/song.mp3' }] as unknown as Track[],
       }
       expect(PlaylistManager.isFinalAudioDirectory(node)).toBe(true)
     })
@@ -275,10 +276,10 @@ describe('PlaylistManager', () => {
             name: 'rock',
             depth: 1,
             subdirectories: [],
-            audioFiles: [{ path: '/music/rock/song.mp3' }] as any,
+            audioFiles: [{ path: '/music/rock/song.mp3' }] as unknown as Track[],
           },
         ],
-        audioFiles: [{ path: '/music/song.mp3' }] as any,
+        audioFiles: [{ path: '/music/song.mp3' }] as unknown as Track[],
       }
       expect(PlaylistManager.isFinalAudioDirectory(node)).toBe(false)
     })
@@ -297,7 +298,7 @@ describe('PlaylistManager', () => {
             audioFiles: [],
           },
         ],
-        audioFiles: [{ path: '/music/song.mp3' }] as any,
+        audioFiles: [{ path: '/music/song.mp3' }] as unknown as Track[],
       }
       expect(PlaylistManager.isFinalAudioDirectory(node)).toBe(true)
     })
@@ -314,7 +315,7 @@ describe('PlaylistManager', () => {
         name: 'music',
         depth: 0,
         subdirectories: [],
-        audioFiles: [{ path: '/music/song.mp3' }] as any,
+        audioFiles: [{ path: '/music/song.mp3' }] as unknown as Track[],
       }
       expect(PlaylistManager.hasAudioFilesInSubtree(node)).toBe(true)
     })
@@ -330,7 +331,7 @@ describe('PlaylistManager', () => {
             name: 'rock',
             depth: 1,
             subdirectories: [],
-            audioFiles: [{ path: '/music/rock/song.mp3' }] as any,
+            audioFiles: [{ path: '/music/rock/song.mp3' }] as unknown as Track[],
           },
         ],
         audioFiles: [],
@@ -360,9 +361,9 @@ describe('PlaylistManager', () => {
     })
 
     it('should scan directory and return tree', async () => {
-      invokeMock.mockImplementation((cmd: string, args?: any) => {
+      invokeMock.mockImplementation((cmd: string, args?: unknown) => {
         if (cmd === 'read_directory') {
-          if (args.path === '/music') return Promise.resolve(['/music/rock'])
+          if ((args as Record<string, unknown> | undefined)?.path === '/music') return Promise.resolve(['/music/rock'])
           return Promise.resolve([])
         }
         if (cmd === 'get_audio_files') {
@@ -386,7 +387,7 @@ describe('PlaylistManager', () => {
     })
 
     it('should ignore hidden folders', async () => {
-      invokeMock.mockImplementation((cmd: string, _args?: any) => {
+      invokeMock.mockImplementation((cmd: string, _args?: unknown) => {
         if (cmd === 'read_directory') {
           return Promise.resolve(['/music/.git', '/music/rock'])
         }
@@ -433,7 +434,7 @@ describe('PlaylistManager', () => {
         name: 'rock',
         depth: 1,
         subdirectories: [],
-        audioFiles: [{ path: '/music/rock/song.mp3', name: 'song' }] as any,
+        audioFiles: [{ path: '/music/rock/song.mp3', name: 'song' }] as unknown as Track[],
       }
 
       const result = await PlaylistManager.generatePlaylistsFromTree(tree, {})
@@ -454,10 +455,10 @@ describe('PlaylistManager', () => {
             name: 'rock',
             depth: 1,
             subdirectories: [],
-            audioFiles: [{ path: '/music/rock/song1.mp3', name: 'song1' }] as any,
+            audioFiles: [{ path: '/music/rock/song1.mp3', name: 'song1' }] as unknown as Track[],
           },
         ],
-        audioFiles: [{ path: '/music/song2.mp3', name: 'song2' }] as any,
+        audioFiles: [{ path: '/music/song2.mp3', name: 'song2' }] as unknown as Track[],
       }
 
       const result = await PlaylistManager.generatePlaylistsFromTree(tree, {
@@ -472,7 +473,7 @@ describe('PlaylistManager', () => {
 
   describe('searchAudioFiles', () => {
     it('should search by title', async () => {
-      invokeMock.mockImplementation((cmd: string, _args?: any) => {
+      invokeMock.mockImplementation((cmd: string, _args?: unknown) => {
         if (cmd === 'read_directory') return Promise.resolve([])
         if (cmd === 'get_audio_files') {
           return Promise.resolve({
@@ -492,7 +493,7 @@ describe('PlaylistManager', () => {
     })
 
     it('should search by artist', async () => {
-      invokeMock.mockImplementation((cmd: string, _args?: any) => {
+      invokeMock.mockImplementation((cmd: string, _args?: unknown) => {
         if (cmd === 'read_directory') return Promise.resolve([])
         if (cmd === 'get_audio_files') {
           return Promise.resolve({
@@ -514,9 +515,9 @@ describe('PlaylistManager', () => {
 
   describe('getPlaylistByPath', () => {
     it('should return playlist for matching path', async () => {
-      invokeMock.mockImplementation((cmd: string, args?: any) => {
+      invokeMock.mockImplementation((cmd: string, args?: unknown) => {
         if (cmd === 'read_directory') {
-          if (args.path === '/music') return Promise.resolve(['/music/rock'])
+          if ((args as Record<string, unknown> | undefined)?.path === '/music') return Promise.resolve(['/music/rock'])
           return Promise.resolve([])
         }
         if (cmd === 'get_audio_files') {
@@ -534,7 +535,7 @@ describe('PlaylistManager', () => {
     })
 
     it('should return null for non-matching path', async () => {
-      invokeMock.mockImplementation((cmd: string, _args?: any) => {
+      invokeMock.mockImplementation((cmd: string, _args?: unknown) => {
         if (cmd === 'read_directory') return Promise.resolve([])
         if (cmd === 'get_audio_files') return Promise.resolve({ files: [] })
         return Promise.resolve([])
@@ -548,9 +549,9 @@ describe('PlaylistManager', () => {
 
   describe('getDirectoryStats', () => {
     it('should return directory statistics', async () => {
-      invokeMock.mockImplementation((cmd: string, args?: any) => {
+      invokeMock.mockImplementation((cmd: string, args?: unknown) => {
         if (cmd === 'read_directory') {
-          if (args.path === '/music') return Promise.resolve(['/music/rock'])
+          if ((args as Record<string, unknown> | undefined)?.path === '/music') return Promise.resolve(['/music/rock'])
           return Promise.resolve([])
         }
         if (cmd === 'get_audio_files') {

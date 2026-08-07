@@ -12,7 +12,7 @@ vi.mock('@/utils/logger', () => ({
 }))
 
 describe('validateThemeContrast', () => {
-  let originalGetComputedStyle: any
+  let originalGetComputedStyle: typeof window.getComputedStyle
 
   beforeEach(() => {
     originalGetComputedStyle = window.getComputedStyle
@@ -27,7 +27,7 @@ describe('validateThemeContrast', () => {
     window.getComputedStyle = () =>
       ({
         getPropertyValue: () => '',
-      }) as any
+      }) as unknown as CSSStyleDeclaration
 
     const result = validateThemeContrast()
 
@@ -57,7 +57,7 @@ describe('validateThemeContrast', () => {
           }
           return colors[varName] || ''
         },
-      }) as any
+      }) as unknown as CSSStyleDeclaration
 
     const result = validateThemeContrast()
 
@@ -85,7 +85,7 @@ describe('validateThemeContrast', () => {
           }
           return colors[varName] || ''
         },
-      }) as any
+      }) as unknown as CSSStyleDeclaration
 
     const result = validateThemeContrast()
 
@@ -113,7 +113,7 @@ describe('validateThemeContrast', () => {
           }
           return colors[varName] || ''
         },
-      }) as any
+      }) as unknown as CSSStyleDeclaration
 
     const result = validateThemeContrast()
 
@@ -143,7 +143,7 @@ describe('validateThemeContrast', () => {
           }
           return colors[varName] || ''
         },
-      }) as any
+      }) as unknown as CSSStyleDeclaration
 
     const result = validateThemeContrast()
 
@@ -167,7 +167,7 @@ describe('setupThemeContrastValidation', () => {
     class MockMutationObserver {
       observe = observeSpy
     }
-    globalThis.MutationObserver = MockMutationObserver as any
+    globalThis.MutationObserver = MockMutationObserver as unknown as typeof MutationObserver
 
     setupThemeContrastValidation()
 

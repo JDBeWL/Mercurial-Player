@@ -176,7 +176,7 @@ export const usePlayerStore = defineStore('player', {
 
     _getCacheManager(): PlayerCacheManager {
       if (!this._cacheManager) {
-        this._cacheManager = markRaw(new PlayerCacheManager()) as any
+        this._cacheManager = markRaw(new PlayerCacheManager())
       }
       return this._cacheManager as PlayerCacheManager
     },
@@ -582,7 +582,7 @@ export const usePlayerStore = defineStore('player', {
       let metadata = metadataCache.get(resolvedPath) ?? metadataCache.get(track.path)
       if (!metadata) {
         metadata = {
-          title: track.title || FileUtils.getFileName(resolvedPath),
+          title: track.title || FileUtils.getFileNameWithoutExtension(resolvedPath),
           artist: track.artist || '',
           album: track.album || '',
           duration: track.duration || 0,
@@ -1207,7 +1207,7 @@ export const usePlayerStore = defineStore('player', {
       // 创建新的 AbortController，使此次缓存任务可被后续调用取消
       const abortController = new AbortController()
 
-      this._cacheAbortController = abortController as any
+      this._cacheAbortController = abortController
 
       const cache = this._getMetadataCache()
       const CHUNK_SIZE = 200
@@ -1225,7 +1225,9 @@ export const usePlayerStore = defineStore('player', {
 
         cache.set(track.path, {
           title:
-            track.displayTitle || track.title || track.name || FileUtils.getFileName(track.path),
+            track.displayTitle ||
+            track.title ||
+            FileUtils.getFileNameWithoutExtension(track.path),
           artist: track.displayArtist || track.artist || '',
           album: track.album || '',
           duration: track.duration || 0,

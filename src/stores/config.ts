@@ -105,7 +105,7 @@ export const useConfigStore = defineStore('config', {
     titleExtraction: {
       preferMetadata: true,
       separator: '-',
-      customSeparators: ['-', '_', '.', ' '],
+      customSeparators: ['-', '_', '.'],
       hideFileExtension: true,
       parseArtistTitle: true,
     },
@@ -272,7 +272,11 @@ export const useConfigStore = defineStore('config', {
       if (configData) {
         // 迁移旧的歌词设置从 general 到 lyrics
         if (configData.general) {
-          const general = configData.general as any
+          const general = configData.general as GeneralConfig & {
+            lyricsAlignment?: string
+            lyricsFontFamily?: string
+            lyricsStyle?: string
+          }
           if (general.lyricsAlignment || general.lyricsFontFamily || general.lyricsStyle) {
             if (!configData.lyrics) {
               configData.lyrics = {
@@ -286,7 +290,7 @@ export const useConfigStore = defineStore('config', {
               }
             }
             if (general.lyricsAlignment) {
-              configData.lyrics.lyricsAlignment = general.lyricsAlignment
+              configData.lyrics.lyricsAlignment = general.lyricsAlignment as LyricsConfig['lyricsAlignment']
               delete general.lyricsAlignment
             }
             if (general.lyricsFontFamily) {
@@ -424,7 +428,7 @@ export const useConfigStore = defineStore('config', {
     },
 
     // 防抖保存（2秒延迟）
-    saveConfig: debounce(function (this: any) {
+    saveConfig: debounce(function (this: { saveConfigNow: () => Promise<void> }) {
       return this.saveConfigNow()
     }, 2000) as DebouncedFunction<() => void>,
 
@@ -537,27 +541,6 @@ export const useConfigStore = defineStore('config', {
       this._markDirty()
       if (this.general.autoSaveConfig && !this._isInitializing) {
         this.saveConfig()
-      }
-    },
-
-    addCustomSeparator(separator: string): void {
-      if (separator && !this.titleExtraction.customSeparators.includes(separator)) {
-        this.titleExtraction.customSeparators.push(separator)
-        this._markDirty()
-        if (this.general.autoSaveConfig && !this._isInitializing) {
-          this.saveConfig()
-        }
-      }
-    },
-
-    removeCustomSeparator(separator: string): void {
-      const index = this.titleExtraction.customSeparators.indexOf(separator)
-      if (index > -1) {
-        this.titleExtraction.customSeparators.splice(index, 1)
-        this._markDirty()
-        if (this.general.autoSaveConfig && !this._isInitializing) {
-          this.saveConfig()
-        }
       }
     },
 

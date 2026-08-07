@@ -160,7 +160,7 @@ describe('Logger', () => {
     })
 
     it('should handle non-serializable objects', () => {
-      const circular: any = { a: 1 }
+      const circular: Record<string, unknown> = { a: 1 }
       circular.self = circular
 
       logger.info('circular', circular)

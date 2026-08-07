@@ -159,7 +159,6 @@ export class TitleExtractor {
   ): TitleInfo {
     const {
       separator = '-',
-      customSeparators = ['-', '_', '.', ' '],
       hideFileExtension = true,
       parseArtistTitle = true,
     } = config
@@ -170,11 +169,13 @@ export class TitleExtractor {
     let artist = ''
 
     if (parseArtistTitle) {
-      // 定义一个带优先级的分隔符列表
-      const prioritizedSeparators = [
-        ' - ', // ' - ' 是最高优先级的
-        ...new Set([separator, ...customSeparators]),
-      ].filter((s) => s && s.length > 0)
+      // 只使用用户配置的 separator 进行分割
+      // 优先尝试带空格变体（如 ' - '），再尝试原始分隔符，对所有分隔符一视同仁
+      const trimmedSep = separator.trim()
+      const withSpaces = trimmedSep ? ` ${trimmedSep} ` : ''
+      const prioritizedSeparators = withSpaces && withSpaces !== separator
+        ? [withSpaces, separator]
+        : [separator]
 
       for (const sep of prioritizedSeparators) {
         // 使用 lastIndexOf 来处理 "艺术家 - 歌曲 - 专辑" 这类情况
@@ -247,20 +248,6 @@ export class TitleExtractor {
     const folderName = parts[parts.length - 1] || folderPath
 
     return format.replace('{folderName}', folderName)
-  }
-
-  /**
-   * 判断字符串是否为有效的分隔符
-   */
-  static isValidSeparator(separator: string): boolean {
-    return typeof separator === 'string' && separator.trim() !== ''
-  }
-
-  /**
-   * 获取所有有效的分隔符
-   */
-  static getValidSeparators(separators: string[]): string[] {
-    return separators.filter((sep) => this.isValidSeparator(sep))
   }
 
   /**

@@ -24,6 +24,11 @@ vi.mock('@/utils/fileUtils', () => ({
     findLyricsFile: vi.fn(async () => null),
     readFile: vi.fn(async () => ''),
     getFileName: vi.fn((p: string) => p.split(/[\\/]/).pop() || p),
+    getFileNameWithoutExtension: vi.fn((p: string) => {
+      const name = p.split(/[\\/]/).pop() || p
+      const i = name.lastIndexOf('.')
+      return i > 0 ? name.slice(0, i) : name
+    }),
     getFileExtension: vi.fn(() => 'mp3'),
   },
 }))
@@ -39,11 +44,12 @@ import { ErrorType } from '@/utils/errorHandler'
 import errorHandler from '@/utils/errorHandler'
 import { usePlayerStore } from '@/stores/player'
 import { invoke } from '@tauri-apps/api/core'
+import type { Track } from '@/types'
 
 const track = {
   path: '/music/test.mp3',
   name: 'Test',
-} as any
+} as unknown as Track
 
 const invokeMock = vi.mocked(invoke)
 

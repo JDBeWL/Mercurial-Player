@@ -64,10 +64,12 @@
 <script setup>
 import { computed } from 'vue'
 import { useConfigStore } from '../../stores/config'
+import { useTrackInfo } from '../../composables/useTrackInfo'
 import logger from '../../utils/logger'
 import MD3Select from '../MD3Select.vue'
 
 const configStore = useConfigStore()
+const { clearAllCache } = useTrackInfo()
 
 const separatorOptions = computed(() =>
   configStore.validSeparators.map((sep) => ({ value: sep, label: sep })),
@@ -83,6 +85,8 @@ const saveConfig = async () => {
 
 const toggleSetting = async (key) => {
   configStore.titleExtraction[key] = !configStore.titleExtraction[key]
+  // 标题提取设置变化后清除 useTrackInfo 缓存,让当前播放歌曲重新处理
+  clearAllCache()
   await saveConfig()
 }
 </script>

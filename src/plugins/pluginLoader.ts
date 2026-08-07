@@ -7,6 +7,8 @@ import { invoke } from '@tauri-apps/api/core'
 import logger from '../utils/logger'
 import pluginManager, {
   type PluginAPI,
+  type PluginInstance,
+  type PluginMainFunction,
   type PluginPermissionType,
   PluginPermission,
 } from './pluginManager'
@@ -29,6 +31,31 @@ interface InstallResult {
   success: boolean
   path?: string
   error?: string
+}
+
+const builtinPluginModules = import.meta.glob<{
+  default: (api: PluginAPI) => Promise<PluginInstance> | PluginInstance
+}>(['../../plugins/*/index.js', '../../plugins/*/index.ts'])
+
+const builtinManifests = import.meta.glob<PluginManifest>(
+  '../../plugins/*/manifest.json',
+  { eager: true, import: 'default' },
+)
+
+// 构建 id -> 模块加载器 的映射
+const builtinPluginMap = new Map<string, (typeof builtinPluginModules)[string]>()
+for (const [manifestPath, manifest] of Object.entries(builtinManifests)) {
+  const pluginId = manifest?.id
+  if (!pluginId) continue
+  // manifest 路径: ../../plugins/lyrics-share/manifest.json
+  // 对应的模块路径: ../../plugins/lyrics-share/index.js (或 .ts)
+  const baseDir = manifestPath.replace(/manifest\.json$/, '')
+  for (const modulePath of Object.keys(builtinPluginModules)) {
+    if (modulePath.startsWith(baseDir)) {
+      builtinPluginMap.set(pluginId, builtinPluginModules[modulePath])
+      break
+    }
+  }
 }
 
 /**
@@ -112,19 +139,34 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
       }
     }
 
-    const mainCode = await invoke<string>('read_plugin_main', {
-      path: pluginPath,
-      main: manifest.main || 'index.js',
-    })
+    let mainFn: PluginMainFunction
 
-    try {
-      validatePluginCode(mainCode)
-    } catch (error) {
-      logger.error(`插件代码安全检查失败: ${manifest.id}`, error)
-      throw new Error(`插件安全检查失败: ${(error as Error).message}`)
+    // 优先使用内置插件
+    const builtinLoader = builtinPluginMap.get(manifest.id)
+    if (builtinLoader) {
+      logger.info(`加载内置插件 (bundled): ${manifest.id}`)
+      const module = await builtinLoader()
+      const pluginFactory = module.default
+      mainFn = async (api: PluginAPI) => {
+        return await pluginFactory(api)
+      }
+    } else {
+      // 外置插件
+      // 注意：production 环境 CSP 不允许 new Function，运行时安装的插件需改为 ES 模块格式
+      const mainCode = await invoke<string>('read_plugin_main', {
+        path: pluginPath,
+        main: manifest.main || 'index.js',
+      })
+
+      try {
+        validatePluginCode(mainCode)
+      } catch (error) {
+        logger.error(`插件代码安全检查失败: ${manifest.id}`, error)
+        throw new Error(`插件安全检查失败: ${(error as Error).message}`)
+      }
+
+      mainFn = createPluginFunction(mainCode, manifest.id)
     }
-
-    const mainFn = createPluginFunction(mainCode, manifest.id)
 
     await pluginManager.register({
       id: manifest.id,

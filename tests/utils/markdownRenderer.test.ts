@@ -4,8 +4,8 @@ import { renderMarkdown } from '@/utils/markdownRenderer'
 describe('renderMarkdown', () => {
   it('should return empty string for empty input', () => {
     expect(renderMarkdown('')).toBe('')
-    expect(renderMarkdown(null as any)).toBe('')
-    expect(renderMarkdown(undefined as any)).toBe('')
+    expect(renderMarkdown(null as unknown as string)).toBe('')
+    expect(renderMarkdown(undefined as unknown as string)).toBe('')
   })
 
   it('should escape HTML characters', () => {

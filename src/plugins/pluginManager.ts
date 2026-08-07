@@ -610,7 +610,7 @@ class PluginManager {
     for (const key of Object.keys(this.extensions) as (keyof Extensions)[]) {
       const filtered = this.extensions[key].filter((ext) => ext.pluginId !== pluginId)
 
-      ;(this.extensions as any)[key] = filtered
+      ;(this.extensions as unknown as Record<string, unknown[]>)[key] = filtered
     }
 
     for (const [event, listeners] of this.eventListeners) {
@@ -628,7 +628,7 @@ class PluginManager {
     extension: Omit<Extensions[K][number], 'pluginId'>,
   ): void {
     if (!this.extensions[type]) {
-      ;(this.extensions as any)[type] = []
+      ;(this.extensions as unknown as Record<string, unknown[]>)[type] = []
     }
     ;(this.extensions[type] as { pluginId: string }[]).push({ ...extension, pluginId })
     logger.debug(`插件 ${pluginId} 注册了 ${type} 扩展`)

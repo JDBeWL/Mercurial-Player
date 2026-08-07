@@ -14,6 +14,13 @@ vi.mock('@/stores/player', () => ({
   usePlayerStore: () => mocks.playerStore,
 }))
 
+// mock config store
+vi.mock('@/stores/config', () => ({
+  useConfigStore: () => ({
+    titleExtraction: { hideFileExtension: true },
+  }),
+}))
+
 // mock pinia 的 storeToRefs，将 store 属性转为 ref
 // 组件使用 storeToRefs 获取 playlist 和 currentTrack，需要返回响应式 ref
 vi.mock('pinia', async () => {
@@ -36,6 +43,19 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@/utils/fileUtils', () => ({
   default: {
     getFileName: vi.fn((path: string) => path.split(/[\\/]/).pop() || path),
+    getFileNameWithoutExtension: vi.fn((path: string) => {
+      const name = path.split(/[\\/]/).pop() || path
+      const lastDot = name.lastIndexOf('.')
+      return lastDot > 0 ? name.substring(0, lastDot) : name
+    }),
+    getTrackDisplayName: vi.fn((track: { displayTitle?: string; title?: string; name?: string; path: string }, hideExt: boolean) => {
+      if (track.displayTitle) return track.displayTitle
+      if (track.title) return track.title
+      const name = track.name || (path => path.split(/[\\/]/).pop() || path)(track.path)
+      if (!hideExt) return name
+      const lastDot = name.lastIndexOf('.')
+      return lastDot > 0 ? name.substring(0, lastDot) : name
+    }),
     getFileExtension: vi.fn(() => 'mp3'),
   },
 }))
@@ -152,7 +172,8 @@ describe('PlaylistView.vue', () => {
       wrapper = mountComponent()
       await nextTick()
       const headline = wrapper.find('.list-item-headline')
-      expect(headline.text()).toBe('my-song.mp3')
+      // hideFileExtension 默认为 true,文件名不含扩展名
+      expect(headline.text()).toBe('my-song')
     })
 
     it('有封面时显示封面图片', async () => {

@@ -54,7 +54,7 @@ describe('ErrorHandler', () => {
     it('should serialize original error in JSON', () => {
       const original = new Error('original error')
       const error = new AppError('wrapper', ErrorType.UNKNOWN, ErrorSeverity.MEDIUM, original)
-      const json = error.toJSON() as any
+      const json = error.toJSON() as unknown as Record<string, unknown>
 
       expect(json.originalError).toHaveProperty('name', 'Error')
       expect(json.originalError).toHaveProperty('message', 'original error')
@@ -246,7 +246,7 @@ describe('withErrorHandling', () => {
     }
     const wrapped = withErrorHandling(fn, { throw: false, silent: true })
 
-    const result = (await wrapped()) as any
+    const result = await wrapped()
     expect(result.success).toBe(false)
     expect(result.error).toBeInstanceOf(AppError)
   })

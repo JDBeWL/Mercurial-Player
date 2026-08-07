@@ -82,7 +82,7 @@ describe('useConfigStore', () => {
       expect(store.titleExtraction.separator).toBe('-')
       expect(store.titleExtraction.hideFileExtension).toBe(true)
       expect(store.titleExtraction.parseArtistTitle).toBe(true)
-      expect(store.titleExtraction.customSeparators).toEqual(['-', '_', '.', ' '])
+      expect(store.titleExtraction.customSeparators).toEqual(['-', '_', '.'])
     })
 
     it('has default playlist config', () => {
@@ -159,12 +159,11 @@ describe('useConfigStore', () => {
   describe('getters', () => {
     it('availableSeparators merges separator and customSeparators uniquely', () => {
       const store = useConfigStore()
-      // defaults: separator='-', customSeparators=['-','_','.',' ']
+      // defaults: separator='-', customSeparators=['-','_','.']
       const seps = store.availableSeparators
       expect(seps).toContain('-')
       expect(seps).toContain('_')
       expect(seps).toContain('.')
-      expect(seps).toContain(' ')
       // unique
       expect(new Set(seps).size).toBe(seps.length)
     })
@@ -323,43 +322,6 @@ describe('useConfigStore', () => {
       expect(store.playlist.sortOrder).toBe('desc')
       store.toggleSortOrder()
       expect(store.playlist.sortOrder).toBe('asc')
-    })
-  })
-
-  // ---------- addCustomSeparator / removeCustomSeparator ----------
-
-  describe('addCustomSeparator / removeCustomSeparator', () => {
-    it('adds a new custom separator', () => {
-      const store = useConfigStore()
-      store.general.autoSaveConfig = false
-      const initial = store.titleExtraction.customSeparators.length
-      store.addCustomSeparator('|')
-      expect(store.titleExtraction.customSeparators).toContain('|')
-      expect(store.titleExtraction.customSeparators.length).toBe(initial + 1)
-    })
-
-    it('does not add a duplicate separator', () => {
-      const store = useConfigStore()
-      store.general.autoSaveConfig = false
-      const initial = store.titleExtraction.customSeparators.length
-      store.addCustomSeparator('-') // already in defaults
-      expect(store.titleExtraction.customSeparators.length).toBe(initial)
-    })
-
-    it('removes an existing separator', () => {
-      const store = useConfigStore()
-      store.general.autoSaveConfig = false
-      store.addCustomSeparator('|')
-      store.removeCustomSeparator('|')
-      expect(store.titleExtraction.customSeparators).not.toContain('|')
-    })
-
-    it('does nothing when removing a non-existent separator', () => {
-      const store = useConfigStore()
-      store.general.autoSaveConfig = false
-      const initial = store.titleExtraction.customSeparators.length
-      store.removeCustomSeparator('nonexistent')
-      expect(store.titleExtraction.customSeparators.length).toBe(initial)
     })
   })
 

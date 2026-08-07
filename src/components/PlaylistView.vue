@@ -96,6 +96,7 @@ import {
 } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
+import { useConfigStore } from '../stores/config'
 import FileUtils from '../utils/fileUtils'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { Track } from '../types'
@@ -112,6 +113,7 @@ const emit = defineEmits<{
 }>()
 
 const playerStore = usePlayerStore()
+const configStore = useConfigStore()
 const { playlist, currentTrack } = storeToRefs(playerStore)
 
 // 滚动容器引用
@@ -154,7 +156,7 @@ const pauseTrack = (): void => {
 // 标题/艺术家显示:简单的 || 链式调用,无需缓存
 // (之前的 Map 缓存与 useTrackInfo.processedTracks 功能重叠,且 1000 条 Map 占用额外内存)
 const getTrackTitle = (track: Track): string => {
-  return track.displayTitle || track.title || FileUtils.getFileName(track.path)
+  return FileUtils.getTrackDisplayName(track, configStore.titleExtraction.hideFileExtension)
 }
 
 const getTrackArtist = (track: Track): string => {

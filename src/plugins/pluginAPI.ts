@@ -233,14 +233,15 @@ export function createPluginAPI(
 
       setLyrics(lyrics: LyricLine[]): void {
         requirePermission(PluginPermission.LYRICS_PROVIDER, 'player.setLyrics')
-        // 转换为 store 的格式
+        // 转换为 store 的格式 (pluginAPI LyricLine.texts 是 {text,translation?}[],
+        // store 期望 @/types LyricLine.texts 为 string[]
         const store = getPlayerStore()
         const storeLyrics = lyrics.map((line) => ({
           time: line.time,
           texts: line.texts?.map((t) => t.text) || [],
         }))
 
-        store.lyrics = storeLyrics as any
+        store.lyrics = storeLyrics
       },
 
       async getCoverPath(): Promise<string | null> {

@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { usePlayerStore } from '@/stores/player'
 import { useConfigStore } from '@/stores/config'
 import logger from '@/utils/logger'
+import type { LyricLine, KaraokeWord } from '@/types'
 
 let lastCurrentLine = ''
 let lastSubLine = ''
@@ -26,7 +27,7 @@ const unlistenFns: Array<() => void> = []
 // 避免先卸载的组件停掉其他仍挂载组件共享的监听器。
 let refCount = 0
 
-function getSubLine(lyrics: any[], index: number): string {
+function getSubLine(lyrics: LyricLine[], index: number): string {
   if (index < 0 || index >= lyrics.length) return ''
   const line = lyrics[index]
   if (line.texts && line.texts.length > 1 && line.texts[1]) {
@@ -36,14 +37,14 @@ function getSubLine(lyrics: any[], index: number): string {
 }
 
 function getCurrentWords(
-  lyrics: any[],
+  lyrics: LyricLine[],
   index: number,
 ): Array<{ text: string; start: number; end: number }> {
   if (index < 0 || index >= lyrics.length) return []
   const line = lyrics[index]
   return Array.isArray(line?.words)
     ? line.words
-        .map((word: any) => ({
+        .map((word: KaraokeWord) => ({
           text: String(word?.text ?? ''),
           start: Number(word?.start),
           end: Number(word?.end),
@@ -58,7 +59,7 @@ function getCurrentWords(
     : []
 }
 
-function getCurrentLine(lyrics: any[], index: number): string {
+function getCurrentLine(lyrics: LyricLine[], index: number): string {
   if (index < 0 || index >= lyrics.length) return ''
   const line = lyrics[index]
   if (line.texts && line.texts.length > 0) return line.texts[0] || ''
@@ -71,7 +72,7 @@ function clampProgress(value: number): number {
 }
 
 function getCurrentLyricProgress(
-  lyrics: any[] | null,
+  lyrics: LyricLine[] | null,
   index: number,
   currentTime: number,
   lyricsOffset: number,
@@ -87,7 +88,7 @@ function getCurrentLyricProgress(
 
   const syncedTime = currentTime - (Number.isFinite(lyricsOffset) ? lyricsOffset : 0)
   const validWords = words
-    .map((word: any) => ({
+    .map((word: KaraokeWord) => ({
       text: String(word?.text ?? ''),
       start: Number(word?.start),
       end: Number(word?.end),

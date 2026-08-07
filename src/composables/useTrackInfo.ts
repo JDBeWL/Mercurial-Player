@@ -64,6 +64,26 @@ function ensureConfigStore(): ReturnType<typeof useConfigStore> {
   return _configStore
 }
 
+/** 根据配置获取用于回退显示的文件名 */
+function getFallbackDisplayName(trackPath: string): string {
+  const hideExt = ensureConfigStore().titleExtraction?.hideFileExtension ?? true
+  return hideExt
+    ? FileUtils.getFileNameWithoutExtension(trackPath)
+    : FileUtils.getFileName(trackPath)
+}
+
+/** 当 hideFileExtension=true 时,去除标题末尾与文件扩展名匹配的后缀 */
+function stripTitleExt(trackPath: string, title: string): string {
+  const hideExt = ensureConfigStore().titleExtraction?.hideFileExtension ?? true
+  if (!hideExt || !title) return title
+  const ext = FileUtils.getFileExtension(trackPath)
+  if (!ext) return title
+  const suffix = `.${ext}`
+  return title.toLowerCase().endsWith(suffix)
+    ? title.slice(0, -suffix.length)
+    : title
+}
+
 /** 从缓存读取并更新访问顺序 (LRU) */
 function getCached(trackPath: string): ProcessedTrackInfo | undefined {
   const value = sharedProcessedTracks.value.get(trackPath)
@@ -105,7 +125,7 @@ async function processTrackInfo(trackPath: string): Promise<void> {
       hideFileExtension: configStore.titleExtraction?.hideFileExtension ?? true,
       parseArtistTitle: configStore.titleExtraction?.parseArtistTitle ?? true,
       separator: configStore.titleExtraction?.separator ?? '-',
-      customSeparators: configStore.titleExtraction?.customSeparators ?? ['-', '_', '.', ' '],
+      customSeparators: configStore.titleExtraction?.customSeparators ?? ['-', '_', '.'],
     }
 
     // 使用 TitleExtractor 智能提取标题信息
@@ -121,7 +141,7 @@ async function processTrackInfo(trackPath: string): Promise<void> {
     // 出错时使用文件名作为标题
     setCached(trackPath, {
       processing: false,
-      title: FileUtils.getFileName(trackPath),
+      title: getFallbackDisplayName(trackPath),
       artist: '',
       fileName: FileUtils.getFileName(trackPath),
       isFromMetadata: false,
@@ -153,7 +173,7 @@ export function useTrackInfo() {
     // 如果已经处理过该音轨,直接返回结果
     const cached = getCached(trackPath)
     if (cached && !cached.processing) {
-      return cached.title || fallback
+      return (cached.title && stripTitleExt(trackPath, cached.title)) || fallback
     }
 
     // 异步处理音轨信息,但不阻塞当前渲染
@@ -161,8 +181,8 @@ export function useTrackInfo() {
       processTrackInfo(trackPath)
     }
 
-    // 处理中:优先读 store 已用元数据填充的 title 字段,避免显示原始文件名
-    return track.title || track.name || FileUtils.getFileName(trackPath)
+    // 优先读 store 已用元数据填充的 title 字段,避免显示原始文件名
+    return (track.title && stripTitleExt(trackPath, track.title)) || getFallbackDisplayName(trackPath)
   }
 
   /**
@@ -205,7 +225,7 @@ export function useTrackInfo() {
           // 让 getTrackTitle/getTrackArtist 在异步完成前也能返回有意义的值
           const existing = getCached(path)
           if (!existing || existing.processing) {
-            const preTitle = newTrack.title || newTrack.name || FileUtils.getFileName(path)
+            const preTitle = newTrack.title || getFallbackDisplayName(path)
             const preArtist = newTrack.artist || ''
             setCached(path, {
               processing: true,

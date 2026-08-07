@@ -258,7 +258,10 @@ export class PlaylistManager {
         // 回退方案：如果批量获取失败
         processedFiles.push({
           ...file,
-          displayTitle: file.name || '',
+          displayTitle: TitleExtractor.getFileName(
+            file.path,
+            config.titleExtraction?.hideFileExtension ?? true,
+          ),
           displayArtist: '',
           fileName: TitleExtractor.getFileName(
             file.path,

@@ -122,6 +122,36 @@ export class FileUtils {
   }
 
   /**
+   * 获取音轨显示名称
+   * 优先级: displayTitle > title > 文件名(根据 hideExtension 决定是否含扩展名)
+   *
+   * 当 hideExtension=true 时,会对 displayTitle/title 也去除与文件扩展名匹配的后缀,
+   * 防止元数据 title 恰好含扩展名时(常见于 wav 文件)绕过隐藏设置。
+   */
+  static getTrackDisplayName(
+    track: { displayTitle?: string; title?: string; name?: string; path: string },
+    hideExtension: boolean = true,
+  ): string {
+    // 当需要隐藏扩展名时,去除标题末尾与文件扩展名匹配的部分
+    // 例: track.path="01.wav", title="01.曲名.wav" -> "01.曲名"
+    const stripTrailingExt = (s: string): string => {
+      if (!hideExtension || !s) return s
+      const ext = this.getFileExtension(track.path)
+      if (!ext) return s
+      const suffix = `.${ext}`
+      return s.toLowerCase().endsWith(suffix)
+        ? s.slice(0, -suffix.length)
+        : s
+    }
+
+    if (track.displayTitle) return stripTrailingExt(track.displayTitle)
+    if (track.title) return stripTrailingExt(track.title)
+    return hideExtension
+      ? this.getFileNameWithoutExtension(track.path)
+      : track.name || this.getFileName(track.path)
+  }
+
+  /**
    * 获取文件名（含扩展名）
    */
   static getFileName(filePath: string): string {

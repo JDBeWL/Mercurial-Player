@@ -1,10 +1,12 @@
 /**
  * 歌词截图分享插件
  * 生成精美的歌词分享图片，支持保存和复制到剪贴板
+ *
  */
 
-// 默认配置
-const defaultConfig = {
+export default function (api) {
+  // 默认配置
+  const defaultConfig = {
   width: 960,
   height: 1920,
   padding: 80,
@@ -837,4 +839,7 @@ const plugin = {
     api.ui.showNotification(`已切换到${layoutName}布局`, 'info')
     api.log.info(`布局已切换为: ${newLayout}`)
   },
+}
+
+  return plugin
 }

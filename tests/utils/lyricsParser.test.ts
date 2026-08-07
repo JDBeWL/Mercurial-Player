@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { LyricsParser } from '@/utils/lyricsParser'
+import type { LyricLine, LyricsFormat } from '@/types'
 
 describe('LyricsParser', () => {
   describe('detectFormat', () => {
@@ -133,8 +134,8 @@ Second subtitle`
     })
 
     it('should return empty string for invalid input', () => {
-      expect(LyricsParser.stringify(null as any)).toBe('')
-      expect(LyricsParser.stringify(undefined as any)).toBe('')
+      expect(LyricsParser.stringify(null as unknown as LyricLine[])).toBe('')
+      expect(LyricsParser.stringify(undefined as unknown as LyricLine[])).toBe('')
     })
   })
 
@@ -149,11 +150,11 @@ Second subtitle`
 
     it('should return empty array for empty content', () => {
       expect(LyricsParser.parse('')).toEqual([])
-      expect(LyricsParser.parse(null as any)).toEqual([])
+      expect(LyricsParser.parse(null as unknown as string)).toEqual([])
     })
 
     it('should warn for unsupported format', () => {
-      const result = LyricsParser.parse('test', 'unknown' as any)
+      const result = LyricsParser.parse('test', 'unknown' as unknown as LyricsFormat)
       expect(result).toEqual([])
     })
   })
@@ -281,7 +282,7 @@ Test`
 
     it('should return empty for invalid input', async () => {
       expect(await LyricsParser.parseAsync('')).toEqual([])
-      expect(await LyricsParser.parseAsync(null as any)).toEqual([])
+      expect(await LyricsParser.parseAsync(null as unknown as string)).toEqual([])
     })
   })
 

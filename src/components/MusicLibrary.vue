@@ -45,7 +45,7 @@
               <img
                 v-if="file.coverPath"
                 :src="convertFileSrc(file.coverPath)"
-                :alt="file.displayTitle || file.name"
+                :alt="getDisplayName(file)"
                 class="list-item-cover"
                 :loading="index < 3 ? 'eager' : 'lazy'"
                 :fetchpriority="index === 0 ? 'high' : 'auto'"
@@ -56,8 +56,8 @@
               </div>
             </div>
             <div class="list-item-content">
-              <div class="list-item-headline" :title="file.displayTitle || file.name">
-                {{ file.displayTitle || file.name }}
+              <div class="list-item-headline" :title="getDisplayName(file)">
+                {{ getDisplayName(file) }}
               </div>
               <div
                 class="list-item-supporting"
@@ -211,6 +211,10 @@ const { t } = useI18n()
 const musicLibraryStore = useMusicLibraryStore()
 const playerStore = usePlayerStore()
 const configStore = useConfigStore()
+
+// 根据 hideFileExtension 设置获取音轨显示名称
+const getDisplayName = (file: { displayTitle?: string; title?: string; name?: string; path: string }): string =>
+  FileUtils.getTrackDisplayName(file, configStore.titleExtraction.hideFileExtension)
 
 // 关闭处理
 const handleClose = (): void => {
@@ -613,13 +617,13 @@ const playFile = (file: SearchResult): void => {
 
 const addFileNext = (file: SearchResult): void => {
   playerStore.addTrackNext(file)
-  logger.info('Added track to play next:', file.displayTitle || file.name)
+  logger.info('Added track to play next:', getDisplayName(file))
 
   // 显示成功通知
   errorHandler.handle(new Error('Track added to play next'), {
     type: (ErrorType as unknown as Record<string, ErrorType | undefined>)['PLAYBACK_ERROR'],
     severity: ErrorSeverity.LOW,
-    context: { trackName: file.displayTitle || file.name },
+    context: { trackName: getDisplayName(file) },
     showToUser: true,
     userMessage: t('library.addedToPlayNext'),
   })
