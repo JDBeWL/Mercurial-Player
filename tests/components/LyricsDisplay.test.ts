@@ -210,8 +210,8 @@ describe('LyricsDisplay.vue', () => {
   })
 
   // ---------- 当前歌词高亮 ----------
-  // 注意: 组件 setup 中 watch(isPlaying, { immediate: true }) 在 watch(visualTime) 注册前触发,
-  // 导致初始 visualTime 变化被遗漏。需要在挂载后改变 currentTime 来触发 visualTime watcher。
+  // 组件 onMounted 会根据当前 currentTime 立即计算 activeIndex（覆盖重新挂载场景），
+  // 播放中的高亮切换则由 visualTime watcher 驱动。
 
   describe('当前歌词高亮', () => {
     it('currentTime=2 时高亮第一行 (time=0)', async () => {
@@ -291,6 +291,105 @@ describe('LyricsDisplay.vue', () => {
 
       const store = mocks.playerStore as { currentTime: number }
       store.currentTime = 5
+      await nextTick()
+      await nextTick()
+
+      const lines = wrapper.findAll('.lyrics')
+      expect(lines[0].classes()).not.toContain('active')
+      expect(lines[1].classes()).not.toContain('active')
+    })
+  })
+
+  // ---------- 重新挂载恢复高亮 ----------
+
+  describe('重新挂载恢复高亮', () => {
+    it('暂停状态下挂载即高亮 currentTime 对应歌词行', async () => {
+      setupMocks({
+        currentTrack: makeTrack(),
+        lyrics: makeLyrics(),
+        loading: false,
+        currentTime: 12, // 对应 time=10 的第三行
+        isPlaying: false,
+      })
+      wrapper = mountComponent()
+      await nextTick()
+      await nextTick()
+
+      const lines = wrapper.findAll('.lyrics')
+      expect(lines[2].classes()).toContain('active')
+      expect(lines[1].classes()).not.toContain('active')
+      expect(lines[3].classes()).not.toContain('active')
+      // 同步到 store
+      const store = mocks.playerStore as { currentLyricIndex: number }
+      expect(store.currentLyricIndex).toBe(2)
+    })
+
+    it('暂停状态下挂载高亮应应用歌词偏移', async () => {
+      setupMocks({
+        currentTrack: makeTrack(),
+        lyrics: makeLyrics(),
+        loading: false,
+        currentTime: 12,
+        lyricsOffset: 3, // 12 - 3 = 9 → 对应 time=5 的第二行
+        isPlaying: false,
+      })
+      wrapper = mountComponent()
+      await nextTick()
+      await nextTick()
+
+      const lines = wrapper.findAll('.lyrics')
+      expect(lines[1].classes()).toContain('active')
+    })
+
+    it('卸载后重新挂载（模拟切换视图返回）仍恢复高亮', async () => {
+      setupMocks({
+        currentTrack: makeTrack(),
+        lyrics: makeLyrics(),
+        loading: false,
+        currentTime: 6, // 对应 time=5 的第二行
+        isPlaying: false,
+      })
+      wrapper = mountComponent()
+      await nextTick()
+      wrapper.unmount()
+      wrapper = mountComponent() // 模拟从波形模式切回，组件重新挂载
+      await nextTick()
+      await nextTick()
+
+      const lines = wrapper.findAll('.lyrics')
+      expect(lines[1].classes()).toContain('active')
+      const store = mocks.playerStore as { currentLyricIndex: number }
+      expect(store.currentLyricIndex).toBe(1)
+    })
+
+    it('重新挂载时走首帧瞬时定位（无平滑滚动、无延迟跳转）', async () => {
+      setupMocks({
+        currentTrack: makeTrack(),
+        lyrics: makeLyrics(),
+        loading: false,
+        currentTime: 12,
+        isPlaying: false,
+      })
+      wrapper = mountComponent()
+      await nextTick()
+      await nextTick()
+      const container = wrapper.find('.lyrics-display')
+      expect((container.element as HTMLElement).style.scrollBehavior).toBe('auto')
+    })
+
+    it('currentTime 在第一行之前时挂载无高亮行', async () => {
+      const lyrics: LyricLine[] = [
+        { time: 10, texts: ['第一行'] },
+        { time: 20, texts: ['第二行'] },
+      ]
+      setupMocks({
+        currentTrack: makeTrack(),
+        lyrics,
+        loading: false,
+        currentTime: 5,
+        isPlaying: false,
+      })
+      wrapper = mountComponent()
       await nextTick()
       await nextTick()
 

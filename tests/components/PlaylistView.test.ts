@@ -18,17 +18,32 @@ vi.mock('@/stores/player', () => ({
 vi.mock('@/stores/config', () => ({
   useConfigStore: () => ({
     titleExtraction: { hideFileExtension: true },
+    general: { showQueueInfo: true },
+  }),
+}))
+
+// mock vue-i18n（组件 setup 中调用 useI18n 获取 t 函数）
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, params?: Record<string, number | string>) => {
+      if (!params) return key
+      return Object.entries(params).reduce(
+        (text, [name, value]) => text.replace(`{${name}}`, String(value)),
+        key
+      )
+    },
   }),
 }))
 
 // mock pinia 的 storeToRefs，将 store 属性转为 ref
-// 组件使用 storeToRefs 获取 playlist 和 currentTrack，需要返回响应式 ref
+// 组件使用 storeToRefs 获取 playlist、currentTrack 和 currentTrackIndex，需要返回响应式 ref
 vi.mock('pinia', async () => {
   const { toRef } = await import('vue')
   return {
     storeToRefs: (store: Record<string, unknown>) => ({
       playlist: toRef(store, 'playlist'),
       currentTrack: toRef(store, 'currentTrack'),
+      currentTrackIndex: toRef(store, 'currentTrackIndex'),
     }),
   }
 })
@@ -87,6 +102,7 @@ function createMockStore(overrides: Record<string, unknown> = {}) {
   return reactive({
     playlist: [] as Track[],
     currentTrack: null as Track | null,
+    currentTrackIndex: -1,
     isPlaying: false,
     playTrack: vi.fn(),
     pause: vi.fn(),
@@ -350,6 +366,28 @@ describe('PlaylistView.vue', () => {
       await closeBtn.trigger('click')
       expect(wrapper.emitted('close')).toBeTruthy()
       expect(wrapper.emitted('close')).toHaveLength(1)
+    })
+  })
+
+  // ---------- 标题右侧队列信息 ----------
+
+  describe('队列信息', () => {
+    it('有曲目时标题右侧显示队列信息（含总时长）', async () => {
+      store.playlist = makeTracks(3) // 3 首 × 180s = 9:00
+      store.currentTrackIndex = 1
+      wrapper = mountComponent()
+      await nextTick()
+      const info = wrapper.find('.playlist-queue-info')
+      expect(info.exists()).toBe(true)
+      // t mock 返回 key 本身，后缀为格式化的总时长
+      expect(info.text()).toBe('player.queueInfo · 9:00')
+    })
+
+    it('空播放列表时不显示队列信息', async () => {
+      store.playlist = []
+      wrapper = mountComponent()
+      await nextTick()
+      expect(wrapper.find('.playlist-queue-info').exists()).toBe(false)
     })
   })
 

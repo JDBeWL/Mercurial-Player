@@ -273,22 +273,8 @@ export default {
       },
     )
 
-    // 基于高频 visualTime 计算 activeIndex，实现即时滚动
-    // 使用节流来减少计算频率，避免每帧都触发响应式更新
-    let lastCalcTime = 0
-    const CALC_INTERVAL = 50 // 每 50ms 计算一次，足够流畅且减少开销
-
-    watch(visualTime, (time) => {
-      if (!lyrics.value.length) {
-        if (activeIndex.value !== -1) activeIndex.value = -1
-        return
-      }
-
-      // 节流：避免每帧都计算
-      const now = performance.now()
-      if (now - lastCalcTime < CALC_INTERVAL) return
-      lastCalcTime = now
-
+    // 根据时间计算当前歌词索引（二分查找），并同步到 store
+    const updateActiveIndex = (time: number): void => {
       // 应用歌词偏移
       const offset = playerStore.lyricsOffset || 0
       const currentTime = time - offset
@@ -311,6 +297,25 @@ export default {
         activeIndex.value = idx
         playerStore.currentLyricIndex = idx // 同步到 store
       }
+    }
+
+    // 基于高频 visualTime 计算 activeIndex，实现即时滚动
+    // 使用节流来减少计算频率
+    let lastCalcTime = 0
+    const CALC_INTERVAL = 50 // 每 50ms 计算一次，足够流畅且减少开销
+
+    watch(visualTime, (time) => {
+      if (!lyrics.value.length) {
+        if (activeIndex.value !== -1) activeIndex.value = -1
+        return
+      }
+
+      // 节流：避免每帧都计算
+      const now = performance.now()
+      if (now - lastCalcTime < CALC_INTERVAL) return
+      lastCalcTime = now
+
+      updateActiveIndex(time)
     })
 
     // 歌词行样式：将对齐方式、字体和缩放锚点合并为 computed,
@@ -378,6 +383,32 @@ export default {
       }, 2500)
     }
 
+    // 计算目标滚动位置
+    const computeCenteredScroll = (container: HTMLElement, activeEl: HTMLElement): number => {
+      return Math.max(0, activeEl.offsetTop - container.clientHeight * 0.5 + activeEl.clientHeight / 2)
+    }
+
+    // 挂载首帧定位：在浏览器首次绘制前以瞬时滚动 (scroll-behavior: auto)
+    // 注：active 行 font-size 过渡 (24px→32px) 只影响其自身高度
+    // (中心定位偏差约 4px，可忽略)，不影响 offsetTop，无需等过渡完成。
+    const jumpToActiveLyric = (): void => {
+      const container = containerRef.value
+      if (!container) return
+      const idx = activeIndex.value
+      if (idx === -1 || !lyrics.value.length) return
+      const activeEl = container.querySelectorAll<HTMLElement>('.lyrics')[idx]
+      if (!activeEl) return
+
+      isAutoScrolling.value = true
+      container.style.scrollBehavior = 'auto'
+      container.scrollTop = computeCenteredScroll(container, activeEl)
+      // 下一帧恢复 smooth，供后续自动跟随使用；同时避免程序化滚动被误判为用户滚动
+      requestAnimationFrame(() => {
+        container.style.scrollBehavior = 'smooth'
+        setTimeout(() => (isAutoScrolling.value = false), 100)
+      })
+    }
+
     const scrollToActiveLyric = (
       immediate = false,
       isUserClick = false,
@@ -395,15 +426,7 @@ export default {
       if (!lyricElements || !lyricElements[idx]) return
 
       const activeEl = lyricElements[idx]
-
-      // 计算目标滚动位置 (把 active 行中心放到容器中心)
-      const computeTargetScroll = (): number => {
-        const containerH = container.clientHeight
-        const elTop = activeEl.offsetTop
-        const elH = activeEl.clientHeight
-        const offsetRatio = 0.5
-        return Math.max(0, elTop - containerH * offsetRatio + elH / 2)
-      }
+      const computeTargetScroll = (): number => computeCenteredScroll(container, activeEl)
 
       // 标记开始自动滚动，防止 handleScroll 误判
       isAutoScrolling.value = true
@@ -450,8 +473,12 @@ export default {
       }
     }
 
+    // 挂载初始化期间由 onMounted 显式定位，抑制 activeIndex 变化触发的自动跟随滚动
+    let suppressAutoScrollOnMount = false
+
     // 监听 activeIndex 变化以滚动
     watch(activeIndex, () => {
+      if (suppressAutoScrollOnMount) return
       // 只有在非用户滚动状态下才自动跟随
       if (!isUserScroll.value) {
         scrollToActiveLyric()
@@ -507,6 +534,17 @@ export default {
     }
 
     onMounted(() => {
+      // 组件重新挂载时需立即恢复高亮与定位，挂载时主动根据当前播放位置计算。
+      if (lyrics.value.length && !loading.value) {
+        visualTime.value = playerStore.currentTime
+        suppressAutoScrollOnMount = true
+        updateActiveIndex(visualTime.value)
+        // 避免 scrollToActiveLyric(true) 的 160ms 延迟导致淡入中途出现可见跳转
+        nextTick(() => {
+          suppressAutoScrollOnMount = false
+          jumpToActiveLyric()
+        })
+      }
       // 动画循环由 watch(isPlaying) 控制启停，无需在此启动
       window.addEventListener('resize', handleResize)
     })

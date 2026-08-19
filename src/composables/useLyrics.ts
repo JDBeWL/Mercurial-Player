@@ -110,7 +110,7 @@ async function saveLyricsToLocal(trackPath: string, lrcContent: string): Promise
   try {
     const baseName = FileUtils.getFileNameWithoutExtension(trackPath)
     const directory = FileUtils.getDirectoryPath(trackPath)
-    const lyricsPath = directory + '/' + baseName + '.lrc'
+    const lyricsPath = FileUtils.joinPath(directory, `${baseName}.lrc`)
     await invoke('write_lyrics_file', { path: lyricsPath, content: lrcContent })
     logger.info('Lyrics saved to: ' + lyricsPath)
     return true
@@ -210,11 +210,9 @@ function initializeSharedWatchers(): void {
   _playerStore = usePlayerStore()
   _configStore = useConfigStore()
 
-  const stopWatchTrackPath = watch(
-    () => _playerStore!.currentTrack?.path,
-    loadLyrics,
-    { immediate: true },
-  )
+  const stopWatchTrackPath = watch(() => _playerStore!.currentTrack?.path, loadLyrics, {
+    immediate: true,
+  })
   sharedWatchStopFns.push(stopWatchTrackPath)
 
   // activeIndex 更新逻辑 - 使用节流避免高频更新

@@ -15,6 +15,29 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;')
 }
 
+/**
+ * 校验 URL 协议：仅允许 http/https/mailto（或无协议的相对路径）
+ * 防止 javascript:、data: 等危险协议注入；不合法时返回 null
+ */
+function sanitizeUrl(url: string): string | null {
+  // 拒绝包含控制字符的 URL（如 "jav\tascript:" 可绕过简单前缀检查）
+  // eslint-disable-next-line no-control-regex -- 安全检查需要匹配控制字符
+  if (/[\u0000-\u001f\u007f]/.test(url)) return null
+
+  const trimmed = url.trim().toLowerCase()
+  const colonIndex = trimmed.indexOf(':')
+
+  // 无协议：相对路径或锚点，视为安全
+  if (colonIndex === -1) return url
+
+  // 协议部分必须是合法的 scheme，且在白名单内
+  const scheme = trimmed.slice(0, colonIndex)
+  if (!/^[a-z][a-z0-9+.-]*$/.test(scheme)) return null
+  if (scheme === 'http' || scheme === 'https' || scheme === 'mailto') return url
+
+  return null
+}
+
 /** 处理行内 Markdown 语法（bold、italic、code、link 等） */
 function renderInline(text: string): string {
   let result = escapeHtml(text)
@@ -22,17 +45,21 @@ function renderInline(text: string): string {
   // 行内代码 `code`（最先处理，内部不再解析其他语法）
   result = result.replace(/`([^`]+)`/g, '<code>$1</code>')
 
-  // 图片 ![alt](url) — 在链接之前匹配
-  result = result.replace(
-    /!\[([^\]]*)\]\(([^)]+)\)/g,
-    '<img src="$2" alt="$1" style="max-width:100%;border-radius:4px;" />',
-  )
+  // 图片 ![alt](url) — 在链接之前匹配；URL 协议不合法时仅保留 alt 文本
+  result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, alt: string, url: string) => {
+    const safeUrl = sanitizeUrl(url)
+    return safeUrl === null
+      ? alt
+      : `<img src="${safeUrl}" alt="${alt}" style="max-width:100%;border-radius:4px;" />`
+  })
 
-  // 链接 [text](url)
-  result = result.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
-  )
+  // 链接 [text](url)；URL 协议不合法时仅保留链接文本
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, text: string, url: string) => {
+    const safeUrl = sanitizeUrl(url)
+    return safeUrl === null
+      ? text
+      : `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`
+  })
 
   // 粗斜体 ***text*** 或 ___text___
   result = result.replace(/\*{3}(.+?)\*{3}/g, '<strong><em>$1</em></strong>')
@@ -152,11 +179,7 @@ export function renderMarkdown(markdown: string): string {
     }
 
     // —— 表格（GFM 风格：| header | ... | 后跟 |---|---| 分隔行）——
-    if (
-      trimmed.includes('|') &&
-      i + 1 < lines.length &&
-      isTableSeparator(lines[i + 1])
-    ) {
+    if (trimmed.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
       const headerCells = parseTableRow(trimmed)
       i += 2 // 跳过表头和分隔行
 
@@ -167,14 +190,9 @@ export function renderMarkdown(markdown: string): string {
         i++
       }
 
-      const headerHtml = headerCells
-        .map((cell) => `<th>${renderInline(cell)}</th>`)
-        .join('')
+      const headerHtml = headerCells.map((cell) => `<th>${renderInline(cell)}</th>`).join('')
       const bodyHtml = bodyRows
-        .map(
-          (row) =>
-            `<tr>${row.map((cell) => `<td>${renderInline(cell)}</td>`).join('')}</tr>`,
-        )
+        .map((row) => `<tr>${row.map((cell) => `<td>${renderInline(cell)}</td>`).join('')}</tr>`)
         .join('')
       htmlParts.push(
         `<table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`,
@@ -218,11 +236,7 @@ export function renderMarkdown(markdown: string): string {
       !isUnorderedListItem(lines[i].trim()) &&
       !isOrderedListItem(lines[i].trim()) &&
       // 表格起始行：当前行含 | 且下一行是分隔行
-      !(
-        lines[i].trim().includes('|') &&
-        i + 1 < lines.length &&
-        isTableSeparator(lines[i + 1])
-      )
+      !(lines[i].trim().includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1]))
     ) {
       paragraphLines.push(lines[i].trim())
       i++

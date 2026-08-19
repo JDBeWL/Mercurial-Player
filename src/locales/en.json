@@ -21,7 +21,10 @@
     "extractCover": "Extract Cover",
     "extractCoverSuccess": "Cover saved",
     "extractCoverFailed": "Failed to extract cover",
-    "noCover": "No cover"
+    "noCover": "No cover",
+    "viewCoverFullscreen": "Immersive cover",
+    "exitCoverFullscreen": "Click the left area or press Esc to exit",
+    "queueInfo": "{current} of {total}"
   },
   "controls": {
     "play": "Play",
@@ -115,6 +118,7 @@
     "startupLoadLastConfig": "Load last configuration on startup",
     "autoSaveConfig": "Auto save configuration",
     "showAudioInfo": "Show Audio Info",
+    "showQueueInfo": "Show Queue Info",
     "display": "Display",
     "lyricsAlignment": "Lyrics Alignment",
     "alignLeft": "Left",

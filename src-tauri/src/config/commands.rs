@@ -4,63 +4,31 @@
 
 use super::manager::AppConfig;
 use crate::AppState;
+use crate::security::is_sensitive_path;
 use std::path::Path;
 use tauri::{State, command};
 
 /// 验证路径是否安全（不在敏感目录中）
 fn is_path_safe(path: &str) -> Result<(), String> {
+    // 先对原始输入做词法检查
+    if is_sensitive_path(path) {
+        return Err("安全限制：不允许添加系统敏感目录".to_string());
+    }
+
     let path = Path::new(path);
 
     // 规范化路径
     let canonical = path
         .canonicalize()
         .map_err(|_| "无法解析路径，请确保目录存在".to_string())?;
-    let path_str = canonical.to_string_lossy().to_lowercase();
 
-    // Windows 敏感目录（用 starts_with 精确匹配，避免子串误判）
-    #[cfg(target_os = "windows")]
-    {
-        let forbidden = [
-            "c:\\windows",
-            "c:\\program files",
-            "c:\\program files (x86)",
-            "c:\\programdata",
-            "c:\\users\\all users",
-        ];
-        for prefix in &forbidden {
-            if path_str.starts_with(prefix) {
-                return Err("安全限制：不允许添加系统敏感目录".to_string());
-            }
-        }
-        // 用户级敏感目录（检查路径组件）
-        let components: Vec<&str> = canonical
-            .components()
-            .filter_map(|c| c.as_os_str().to_str())
-            .collect();
-        let lower_components: Vec<String> = components.iter().map(|c| c.to_lowercase()).collect();
-        for sensitive in &[".ssh", ".gnupg"] {
-            if lower_components.iter().any(|c| c == sensitive) {
-                return Err("安全限制：不允许添加系统敏感目录".to_string());
-            }
-        }
-        // AppData\Roaming\Microsoft 下含凭据等敏感数据
-        let path_lower = path_str.replace('/', "\\");
-        if path_lower.contains("\\appdata\\roaming\\microsoft\\") {
-            return Err("安全限制：不允许添加系统敏感目录".to_string());
-        }
+    // canonicalize 可能解析出输入中未显现的敏感位置（如 junction/symlink），需复查
+    let mut canonical_str = canonical.to_string_lossy().to_string();
+    if let Some(stripped) = canonical_str.strip_prefix(r"\\?\") {
+        canonical_str = stripped.to_string();
     }
-
-    // macOS/Linux 敏感目录
-    #[cfg(not(target_os = "windows"))]
-    {
-        let forbidden = [
-            "/etc", "/usr", "/bin", "/sbin", "/var", "/system", "/.ssh", "/.gnupg", "/.config",
-        ];
-        for prefix in &forbidden {
-            if path_str.starts_with(prefix) {
-                return Err("安全限制：不允许添加系统敏感目录".to_string());
-            }
-        }
+    if is_sensitive_path(&canonical_str) {
+        return Err("安全限制：不允许添加系统敏感目录".to_string());
     }
 
     // 确保是目录
@@ -68,6 +36,17 @@ fn is_path_safe(path: &str) -> Result<(), String> {
         return Err("指定的路径不是一个目录".to_string());
     }
 
+    Ok(())
+}
+
+/// 验证配置文件路径安全：必须为 .json 文件且不在敏感目录中
+fn is_config_file_path_safe(path: &str) -> Result<(), String> {
+    if is_sensitive_path(path) {
+        return Err("安全限制：不允许在敏感目录中操作配置文件".to_string());
+    }
+    if !path.to_lowercase().ends_with(".json") {
+        return Err("配置文件必须为 .json 文件".to_string());
+    }
     Ok(())
 }
 
@@ -96,12 +75,14 @@ pub fn export_config(
     config: AppConfig,
     file_path: String,
 ) -> Result<(), String> {
+    is_config_file_path_safe(&file_path)?;
     state.config_manager.export_config(&config, &file_path)
 }
 
 /// 从指定路径导入配置
 #[command]
 pub fn import_config(state: State<AppState>, file_path: String) -> Result<AppConfig, String> {
+    is_config_file_path_safe(&file_path)?;
     state.config_manager.import_config(&file_path)
 }
 

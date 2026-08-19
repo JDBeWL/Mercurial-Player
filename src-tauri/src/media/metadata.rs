@@ -2,6 +2,7 @@
 //!
 //! 提供音轨元数据结构和处理函数。
 
+use crate::security::{has_allowed_extension, is_sensitive_path};
 use lofty::picture::Picture;
 use lofty::prelude::{Accessor, AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
@@ -12,6 +13,9 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::UNIX_EPOCH;
+
+/// 允许的封面图片输出扩展名
+const COVER_OUTPUT_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
 
 // ============================================================================
 // 元数据缓存模块
@@ -251,9 +255,21 @@ pub fn flush_metadata_cache() -> Result<(), String> {
 }
 
 /// 设置自定义封面缓存路径
-pub fn set_cover_cache_path(path: Option<String>) {
+///
+/// 校验路径合法性，防止缓存清理逻辑被引导到敏感目录执行任意删除
+pub fn set_cover_cache_path(path: Option<String>) -> Result<(), String> {
+    if let Some(p) = &path {
+        if p.is_empty() {
+            return Err("缓存路径不能为空".to_string());
+        }
+        if is_sensitive_path(p) {
+            return Err("安全限制：不允许使用敏感目录作为缓存路径".to_string());
+        }
+    }
+
     let mut cache_path = lock_or_log!(CUSTOM_CACHE_PATH.write());
     *cache_path = path;
+    Ok(())
 }
 
 /// 获取自定义封面缓存路径
@@ -665,6 +681,16 @@ pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, Strin
 
 /// 提取音频文件的封面并保存到指定路径
 pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<String, String> {
+    // 校验输出路径：显式扩展名必须是图片格式，且不允许写入敏感目录
+    if Path::new(output_path).extension().is_some()
+        && !has_allowed_extension(output_path, &COVER_OUTPUT_EXTENSIONS)
+    {
+        return Err("封面输出路径必须是图片文件".to_string());
+    }
+    if is_sensitive_path(output_path) {
+        return Err("安全限制：不允许写入敏感目录".to_string());
+    }
+
     let file_path = Path::new(audio_path);
 
     let tagged_file = Probe::open(file_path)

@@ -107,8 +107,8 @@ pub fn clean_cover_cache_command(max_cache_size_mb: Option<u64>) -> Result<usize
 
 /// 设置封面缓存路径
 #[command]
-pub fn set_cover_cache_path_command(path: Option<String>) {
-    set_cover_cache_path(path);
+pub fn set_cover_cache_path_command(path: Option<String>) -> Result<(), String> {
+    set_cover_cache_path(path)
 }
 
 /// 清除元数据缓存

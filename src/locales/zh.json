@@ -21,7 +21,10 @@
     "extractCover": "提取封面",
     "extractCoverSuccess": "封面已保存",
     "extractCoverFailed": "提取封面失败",
-    "noCover": "没有封面"
+    "noCover": "没有封面",
+    "viewCoverFullscreen": "沉浸式封面",
+    "exitCoverFullscreen": "点击左侧区域或按 Esc 退出",
+    "queueInfo": "第 {current} 首 / 共 {total} 首"
   },
   "controls": {
     "play": "播放",
@@ -115,6 +118,7 @@
     "startupLoadLastConfig": "启动时加载上次配置",
     "autoSaveConfig": "自动保存配置",
     "showAudioInfo": "显示音频信息",
+    "showQueueInfo": "显示播放队列信息",
     "display": "显示设置",
     "enableAutoUpdate": "启用自动更新",
     "enableAutoUpdateDesc": "允许自动检查更新并在可用时提示（默认关闭以防止意外升级）",

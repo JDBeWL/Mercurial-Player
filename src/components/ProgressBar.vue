@@ -149,16 +149,26 @@ onUnmounted(() => {
   width: 100%;
   display: flex;
   flex-direction: column;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .progress-bar-wrapper {
   width: 100%;
-  height: 16px;
+  height: 0px; /* 零高度不占布局空间，避免撑大磨砂玻璃面板 */
   display: flex;
   align-items: center;
   cursor: pointer;
   position: relative;
+}
+
+/* 伪元素上下各延伸 10px 扩大可点击范围。 */
+.progress-bar-wrapper::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -10px;
+  bottom: -10px;
 }
 
 .progress-bar {

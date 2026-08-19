@@ -282,10 +282,11 @@ impl Iterator for SymphoniaSource {
         self.chunk_buffer.clear();
         self.chunk_pos = 0;
         {
-            let mut dec = self
-                .decoder
-                .try_lock()
-                .unwrap_or_else(|_| self.decoder.lock().unwrap());
+            // 锁中毒时通过 lock_or_log 恢复（取回内部数据），避免级联 panic
+            let mut dec = match self.decoder.try_lock() {
+                Ok(guard) => guard,
+                Err(_) => crate::lock_or_log!(self.decoder.lock()),
+            };
             for _ in 0..8192 {
                 if let Some(s) = dec.next() {
                     self.chunk_buffer.push(s);

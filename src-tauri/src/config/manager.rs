@@ -458,7 +458,22 @@ impl ConfigManager {
     }
 
     pub fn import_config(&self, import_path: &str) -> Result<AppConfig, String> {
-        Self::load_config_from_file(import_path)
+        let mut config = Self::load_config_from_file(import_path)?;
+
+        // 合并默认外链白名单，防止导入的配置移除安全域名限制
+        let defaults = default_external_url_allowed_hosts();
+        for d in defaults {
+            if !config
+                .general
+                .external_url_allowed_hosts
+                .iter()
+                .any(|h| h.eq_ignore_ascii_case(&d))
+            {
+                config.general.external_url_allowed_hosts.push(d);
+            }
+        }
+
+        Ok(config)
     }
 
     pub fn reset_config(&self) -> Result<AppConfig, String> {

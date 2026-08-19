@@ -1,6 +1,9 @@
 //! 插件管理器
 //! 处理插件的文件系统操作
 
+use crate::security::{
+    is_safe_relative_path, is_simple_filename, is_valid_plugin_id, is_within_dir,
+};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -69,6 +72,10 @@ pub fn list_plugin_dirs() -> Result<Vec<String>, String> {
 
 /// 读取插件清单
 pub fn read_manifest(plugin_name: &str) -> Result<PluginManifest, String> {
+    if !is_simple_filename(plugin_name) {
+        return Err("非法的插件目录名".to_string());
+    }
+
     let plugins_dir = get_plugins_dir()?;
     let manifest_path = plugins_dir.join(plugin_name).join("manifest.json");
 
@@ -83,8 +90,20 @@ pub fn read_manifest(plugin_name: &str) -> Result<PluginManifest, String> {
 
 /// 读取插件主文件
 pub fn read_main_file(plugin_name: &str, main_file: &str) -> Result<String, String> {
+    if !is_simple_filename(plugin_name) {
+        return Err("非法的插件目录名".to_string());
+    }
+    if !is_safe_relative_path(main_file) {
+        return Err("非法的插件文件路径".to_string());
+    }
+
     let plugins_dir = get_plugins_dir()?;
     let main_path = plugins_dir.join(plugin_name).join(main_file);
+
+    // 防止符号链接逃逸：解析真实路径后必须仍在插件目录内
+    if !is_within_dir(&main_path, &plugins_dir) {
+        return Err("插件文件路径超出插件目录范围".to_string());
+    }
 
     fs::read_to_string(&main_path).map_err(|e| format!("无法读取插件主文件: {e}"))
 }
@@ -109,6 +128,11 @@ pub fn install_plugin_from_path(source_path: &str) -> Result<String, String> {
     let manifest: PluginManifest =
         serde_json::from_str(&manifest_content).map_err(|e| format!("无法解析清单: {e}"))?;
 
+    // 校验插件 ID，防止 manifest.id 携带路径穿越导致任意目录删除/写入
+    if !is_valid_plugin_id(&manifest.id) {
+        return Err(format!("非法的插件 ID: {}", manifest.id));
+    }
+
     // 复制到插件目录
     let plugins_dir = get_plugins_dir()?;
     let target_dir = plugins_dir.join(&manifest.id);
@@ -124,6 +148,11 @@ pub fn install_plugin_from_path(source_path: &str) -> Result<String, String> {
 
 /// 卸载插件
 pub fn uninstall_plugin(plugin_id: &str) -> Result<(), String> {
+    // 校验插件 ID，防止路径穿越导致任意目录递归删除
+    if !is_simple_filename(plugin_id) {
+        return Err("非法的插件 ID".to_string());
+    }
+
     let plugins_dir = get_plugins_dir()?;
     let target_dir = plugins_dir.join(plugin_id);
 

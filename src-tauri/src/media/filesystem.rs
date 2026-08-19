@@ -5,6 +5,7 @@
 use super::metadata::{Playlist, flush_metadata_cache, get_track_metadata_internal};
 use super::tantivy_index;
 use crate::config::AppConfig;
+use crate::security::{has_allowed_extension, is_sensitive_path};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
@@ -13,6 +14,20 @@ use walkdir::{DirEntry, WalkDir};
 
 /// 支持的音频文件扩展名
 pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav", "ogg", "m4a", "aac"];
+
+/// 允许读写的歌词文件扩展名
+const LYRICS_EXTENSIONS: [&str; 3] = ["lrc", "ass", "srt"];
+
+/// 校验歌词文件路径：仅允许歌词扩展名，且不允许访问敏感目录
+fn validate_lyrics_path(path: &str) -> Result<(), String> {
+    if !has_allowed_extension(path, &LYRICS_EXTENSIONS) {
+        return Err("仅允许读写歌词文件（.lrc/.ass/.srt）".to_string());
+    }
+    if is_sensitive_path(path) {
+        return Err("安全限制：不允许访问敏感目录".to_string());
+    }
+    Ok(())
+}
 
 /// 读取指定目录中的子目录列表
 pub fn read_dir(path: &str) -> Result<Vec<String>, String> {
@@ -201,11 +216,14 @@ pub fn check_file_exists_internal(path: &str) -> bool {
 
 /// 读取歌词文件内容
 pub fn read_lyrics_file_internal(path: &str) -> Result<String, String> {
+    validate_lyrics_path(path)?;
     fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
 /// 写入歌词文件内容
 pub fn write_lyrics_file_internal(path: &str, content: &str) -> Result<(), String> {
+    validate_lyrics_path(path)?;
+
     // 确保父目录存在
     if let Some(parent) = Path::new(path).parent()
         && !parent.exists()

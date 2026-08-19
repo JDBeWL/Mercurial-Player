@@ -804,10 +804,13 @@ pub struct DesktopLyricsManager {
 }
 
 // SAFETY: DesktopLyricsManager 仅含一个 bool 字段，本身无内部可变性。
-// 所有窗口操作（show/hide/set_locked 等）通过 PostMessageW 将请求转发到
-// 桌面歌词消息循环线程执行，不直接触碰 Win32 句柄，因此可安全跨线程共享。
+// show/hide 等操作通过 PostMessageW 将请求转发到桌面歌词消息循环线程执行；
+// set_locked 虽直接调用 GetWindowLongPtrW/SetWindowLongPtrW/InvalidateRect，
+// 但这些 Win32 API 本身支持跨线程调用（仅读写窗口扩展样式，不涉及窗口过程指针），
+// 因此可安全跨线程共享。
 unsafe impl Send for DesktopLyricsManager {}
-// SAFETY: 同上，所有方法要么读 bool 要么通过消息循环间接操作窗口，无数据竞争
+// SAFETY: 同上，所有方法要么读 bool，要么通过消息循环间接操作窗口，
+// 要么调用线程安全的 Win32 窗口 API，无数据竞争
 unsafe impl Sync for DesktopLyricsManager {}
 
 impl Default for DesktopLyricsManager {
@@ -1757,8 +1760,8 @@ unsafe extern "system" fn window_proc(
             }
             LRESULT(0)
         },
-        WM_DPICHANGED => unsafe {
-            // SAFETY: lparam 指向系统提供的 RECT，在窗口过程调用期间有效
+        WM_DPICHANGED if lparam.0 != 0 => unsafe {
+            // SAFETY: lparam 非空且指向系统提供的 RECT，在窗口过程调用期间有效
             let rect = &*(lparam.0 as *const RECT);
             let _ = SetWindowPos(
                 hwnd,

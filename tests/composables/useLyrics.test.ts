@@ -21,6 +21,7 @@ const { mockFileUtils, mockLyricsParser, mockNeteaseApi } = vi.hoisted(() => ({
     getFileExtension: vi.fn(),
     getFileNameWithoutExtension: vi.fn(),
     getDirectoryPath: vi.fn(),
+    joinPath: vi.fn((...segments: string[]) => segments.filter(Boolean).join('/')),
   },
   // Mock lyricsParser - 提供命名导出和默认导出
   mockLyricsParser: {
@@ -49,7 +50,13 @@ vi.mock('@/utils/neteaseApi', () => ({
 
 // Mock player store - 使用 reactive 使 watcher 能响应变化
 const mockPlayerState = reactive({
-  currentTrack: null as { path: string; title?: string; name?: string; artist?: string; duration?: number } | null,
+  currentTrack: null as {
+    path: string
+    title?: string
+    name?: string
+    artist?: string
+    duration?: number
+  } | null,
   currentTime: 0,
   lyrics: null as unknown,
   currentLyricIndex: -1,
@@ -170,7 +177,10 @@ describe('useLyrics', () => {
 
       expect(mockFileUtils.findLyricsFile).toHaveBeenCalledWith('/music/song.mp3')
       expect(mockFileUtils.readFile).toHaveBeenCalledWith('/path/to/lyrics.lrc')
-      expect(mockLyricsParser.parseAsync).toHaveBeenCalledWith('[00:01.00]Hello\n[00:02.00]World', 'lrc')
+      expect(mockLyricsParser.parseAsync).toHaveBeenCalledWith(
+        '[00:01.00]Hello\n[00:02.00]World',
+        'lrc',
+      )
       expect(result.lyrics.value).toBe(parsedLyrics)
       expect(result.lyricsSource.value).toBe('local')
       expect(result.loading.value).toBe(false)
@@ -347,9 +357,7 @@ describe('useLyrics', () => {
       }
       await waitForLoadComplete()
 
-      const parsedLyrics: LyricLine[] = [
-        { time: 1, text: 'Fetched', texts: ['Fetched'] },
-      ]
+      const parsedLyrics: LyricLine[] = [{ time: 1, text: 'Fetched', texts: ['Fetched'] }]
       mockNeteaseApi.searchAndGetLyrics.mockResolvedValue({
         lrc: '[00:01.00]Fetched',
         tlyric: '',

@@ -112,6 +112,20 @@
 
       <div class="setting-item">
         <div class="setting-info">
+          <span class="setting-label">{{ $t('config.showQueueInfo') }}</span>
+        </div>
+        <div
+          class="switch"
+          :class="{ active: configStore.general.showQueueInfo }"
+          @click="toggleSetting('showQueueInfo')"
+        >
+          <div class="switch-track"></div>
+          <div class="switch-handle"></div>
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
           <span class="setting-label">{{ $t('config.enableAutoUpdate') }}</span>
           <div class="setting-desc">{{ $t('config.enableAutoUpdateDesc') }}</div>
         </div>

@@ -100,6 +100,7 @@ describe('useConfigStore', () => {
       expect(store.general.startupLoadLastConfig).toBe(true)
       expect(store.general.autoSaveConfig).toBe(true)
       expect(store.general.showAudioInfo).toBe(true)
+      expect(store.general.showQueueInfo).toBe(true)
       expect(store.general.enableAutoUpdate).toBe(false)
       expect(store.general.coverCacheSizeMb).toBe(1024)
     })

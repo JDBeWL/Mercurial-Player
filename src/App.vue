@@ -1,6 +1,30 @@
 <template>
   <MiniPlayer v-if="configStore.ui.miniMode" />
-  <div v-else class="app-container" :data-fullscreen="isFullscreen" :data-maximized="isMaximized">
+  <div
+    v-else
+    class="app-container"
+    :class="{
+      'immersive-cover': immersiveCover,
+      'immersive-controls-hidden': immersiveCover && !immersiveControlsVisible,
+    }"
+    :data-fullscreen="isFullscreen"
+    :data-maximized="isMaximized"
+  >
+    <!-- 沉浸式封面层：主色背景 + 左侧羽化封面 -->
+    <Transition name="fade">
+      <div
+        v-if="immersiveCover"
+        class="immersive-layer"
+        :style="{ '--immersive-bg': immersiveBackground }"
+      >
+        <!-- 1. 底层：封面主色背景 -->
+        <div class="background-layer"></div>
+        <!-- 2. 中层：靠左放大、裁剪的封面，暗化+羽化双通道融入背景 -->
+        <div class="cover-mask-layer">
+          <img v-if="coverDisplayUrl" :src="coverDisplayUrl" class="full-cover" alt="" />
+        </div>
+      </div>
+    </Transition>
     <header class="nav-bar" data-tauri-drag-region>
       <!-- 左侧控制区 -->
       <div class="nav-left">
@@ -27,17 +51,42 @@
         </button>
         <ThemeSelector data-tauri-drag-region="false" />
       </div>
+      <!-- 中间：当前曲目信息（双行显示） -->
+      <div class="nav-center" data-tauri-drag-region>
+        <Transition name="fade" mode="out-in">
+          <div :key="currentTrack ? currentTrack.path : 'no-track-nav'" class="nav-track-info">
+            <template v-if="currentTrack">
+              <div
+                class="nav-track-title"
+                :title="getTrackTitle(currentTrack) || $t('player.noTrack')"
+              >
+                <span class="nav-track-title-text">
+                  {{ getTrackTitle(currentTrack) || $t('player.noTrack') }}
+                </span>
+                <span
+                  v-if="!isTrackFileExists"
+                  class="material-symbols-rounded nav-file-warning"
+                  :title="$t('player.fileNotFound')"
+                >
+                  warning
+                </span>
+              </div>
+              <div
+                v-if="getTrackArtist(currentTrack)"
+                class="nav-track-artist"
+                :title="getTrackArtist(currentTrack)"
+              >
+                {{ getTrackArtist(currentTrack) }}
+              </div>
+            </template>
+            <template v-else>
+              <div class="nav-track-artist">{{ $t('player.noTrack') }}</div>
+            </template>
+          </div>
+        </Transition>
+      </div>
       <!-- 右侧控制区 -->
       <div class="nav-right">
-        <button
-          class="icon-button"
-          :class="{ active: configStore.lyrics?.desktopLyrics?.enabled }"
-          data-tauri-drag-region="false"
-          :title="$t('config.toggleDesktopLyrics')"
-          @click="toggleDesktopLyrics"
-        >
-          <span class="material-symbols-rounded">subtitles</span>
-        </button>
         <button
           class="icon-button"
           data-tauri-drag-region="false"
@@ -76,19 +125,19 @@
     </header>
 
     <main class="main-content">
-      <Transition name="slide-left">
-        <MusicLibrary v-if="showLibrary" @close="showLibrary = false" />
-      </Transition>
-
-      <!-- 配置面板 - 替换主内容区域 -->
+      <!-- 配置面板 -->
       <Transition name="fade" mode="out-in">
         <Settings v-if="configStore.ui.showConfigPanel" key="settings" />
         <div v-else key="player" class="player-container">
           <div class="player-main">
-            <!-- 上方区域：左侧专辑封面和歌曲信息，右侧歌词 -->
+            <!-- 上方区域：左侧专辑封面，右侧歌词 -->
             <div class="player-upper">
-              <!-- 左侧：专辑封面和歌曲信息 -->
-              <div class="player-left">
+              <!-- 左侧：专辑封面（沉浸式封面模式下点击退出） -->
+              <div
+                class="player-left"
+                :title="immersiveCover ? $t('player.exitCoverFullscreen') : undefined"
+                @click="handlePlayerLeftClick"
+              >
                 <div class="album-art-container">
                   <Transition
                     :name="
@@ -104,7 +153,12 @@
                       @mousemove="handleAlbumArtMouseMove"
                       @mouseleave="handleAlbumArtMouseLeave"
                     >
-                      <div class="album-art" :style="{ backgroundImage: currentTrackCover }">
+                      <div
+                        class="album-art"
+                        :style="{ backgroundImage: currentTrackCover }"
+                        :title="$t('player.viewCoverFullscreen')"
+                        @click.stop="openImmersiveCover"
+                      >
                         <div
                           v-if="!currentTrack || !currentTrack.coverPath"
                           class="album-art-placeholder"
@@ -125,45 +179,6 @@
                     </div>
                   </Transition>
                 </div>
-
-                <Transition name="fade" mode="out-in">
-                  <div :key="currentTrack ? currentTrack.path : 'no-track-info'">
-                    <div v-if="currentTrack" class="track-info">
-                      <h2
-                        class="track-title"
-                        :title="getTrackTitle(currentTrack) || $t('player.noTrack')"
-                      >
-                        {{ getTrackTitle(currentTrack) || $t('player.noTrack') }}
-                      </h2>
-                      <div
-                        v-if="getTrackArtist(currentTrack)"
-                        class="track-artist"
-                        :title="getTrackArtist(currentTrack)"
-                      >
-                        {{ getTrackArtist(currentTrack) }}
-                      </div>
-                      <!-- 文件不存在提示 -->
-                      <div v-if="currentTrack && !isTrackFileExists" class="file-missing-alert">
-                        <span class="material-symbols-rounded">warning</span>
-                        <span class="alert-text">{{ $t('player.fileNotFound') }}</span>
-                      </div>
-                    </div>
-                    <div v-else class="track-info-placeholder">
-                      <h2 class="track-title">{{ $t('player.noTrack') }}</h2>
-                      <div class="track-artist">&nbsp;</div>
-                    </div>
-
-                    <div
-                      v-if="currentTrack && formattedAudioInfo && configStore.general.showAudioInfo"
-                      class="audio-info"
-                    >
-                      <span class="text-caption">{{ formattedAudioInfo }}</span>
-                    </div>
-                    <div v-else class="audio-info-placeholder">
-                      <span class="text-caption">&nbsp;</span>
-                    </div>
-                  </div>
-                </Transition>
               </div>
 
               <!-- 右侧：歌词/可视化 -->
@@ -204,20 +219,53 @@
             <!-- 下方区域：进度条和控制按钮 -->
             <div class="player-lower">
               <ProgressBar class="global-progress-bar" />
-              <PlayerControls />
+              <div class="controls-area">
+                <!-- 左下角：音频信息（与封面水平居中对齐） -->
+                <div class="audio-info-corner">
+                  <div
+                    v-if="currentTrack && formattedAudioInfo && configStore.general.showAudioInfo"
+                    class="audio-info-text"
+                    :title="formattedAudioInfo"
+                  >
+                    {{ formattedAudioInfo }}
+                  </div>
+                </div>
+                <PlayerControls />
+                <!-- 右下角：播放列表开关、桌面歌词与音量控制 -->
+                <div class="side-controls">
+                  <button
+                    v-if="playerStore.playlist.length > 0"
+                    class="icon-button"
+                    :class="{ active: showPlaylist }"
+                    :title="$t('playlist.title')"
+                    @click="togglePlaylist"
+                  >
+                    <span class="material-symbols-rounded">queue_music</span>
+                  </button>
+                  <button
+                    class="icon-button"
+                    :class="{ active: configStore.lyrics?.desktopLyrics?.enabled }"
+                    :title="$t('config.toggleDesktopLyrics')"
+                    @click="toggleDesktopLyrics"
+                  >
+                    <span class="material-symbols-rounded">subtitles</span>
+                  </button>
+                  <VolumeControl />
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </Transition>
     </main>
 
+    <Transition name="slide-left">
+      <MusicLibrary v-if="showLibrary" @close="showLibrary = false" />
+    </Transition>
+
     <Transition name="slide-right">
       <PlaylistView v-if="showPlaylist" @close="showPlaylist = false" />
     </Transition>
-
-    <button v-if="playlist.length > 0" class="fab" @click="togglePlaylist">
-      <span class="material-symbols-rounded">playlist_play</span>
-    </button>
 
     <!-- 错误通知 -->
     <TransitionGroup name="error-notification" tag="div" class="error-notifications">
@@ -246,7 +294,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from './stores/player'
 import { useThemeStore } from './stores/theme'
@@ -259,9 +307,11 @@ import { useAutoUpdate } from './composables/useAutoUpdate'
 import { useDesktopLyrics } from './composables/useDesktopLyrics'
 import { useWindowControls } from './composables/useWindowControls'
 import { useAlbumArtInteraction } from './composables/useAlbumArtInteraction'
+import { useDominantColor } from './composables/useDominantColor'
 import { useGlobalKeyboard } from './composables/useGlobalKeyboard'
 import { useAppLifecycle } from './composables/useAppLifecycle'
 import PlayerControls from './components/PlayerControls.vue'
+import VolumeControl from './components/VolumeControl.vue'
 import ProgressBar from './components/ProgressBar.vue'
 import LyricsDisplay from './components/LyricsDisplay.vue'
 import VisualizerPanel from './components/VisualizerPanel.vue'
@@ -316,7 +366,117 @@ useGlobalKeyboard()
 // 本地 UI 状态
 const showLibrary = ref(false)
 const showPlaylist = ref(false)
+const immersiveCover = ref(false)
 const viewMode = ref('lyrics') // 'lyrics' or 'visualizer'
+
+// 进入沉浸式封面模式（仅有封面时可用）
+const openImmersiveCover = (): void => {
+  if (currentTrack.value?.coverPath) {
+    immersiveCover.value = true
+  }
+}
+
+// 沉浸式封面模式下点击左侧区域退出
+const handlePlayerLeftClick = (): void => {
+  if (immersiveCover.value) {
+    immersiveCover.value = false
+  }
+}
+
+// Esc 退出沉浸式封面模式；其他按键视为用户活动（显示控制栏）
+const handleCoverKeydown = (e: KeyboardEvent): void => {
+  if (e.key === 'Escape' && immersiveCover.value) {
+    immersiveCover.value = false
+    return
+  }
+  if (immersiveCover.value) {
+    markImmersiveActivity()
+  }
+}
+
+// ===== 沉浸式模式：控制栏自动隐藏 =====
+const IMMERSIVE_IDLE_DELAY = 3000 // 无操作隐藏延时（ms）
+const IMMERSIVE_TOP_AREA = 96 // 顶部控制栏热区高度（覆盖顶栏及其下方缓冲区）
+const IMMERSIVE_BOTTOM_AREA = 140 // 底部控制栏热区高度（覆盖磨砂玻璃底栏及其上方缓冲区）
+
+const immersiveControlsVisible = ref(true)
+let immersiveHideTimer: ReturnType<typeof setTimeout> | null = null
+let immersivePointerY = -1
+
+// 鼠标是否位于顶/底控制栏热区（悬停时不隐藏，保证可点击）
+const immersivePointerInControls = (): boolean => {
+  if (immersivePointerY < 0) return false
+  return (
+    immersivePointerY <= IMMERSIVE_TOP_AREA ||
+    immersivePointerY >= window.innerHeight - IMMERSIVE_BOTTOM_AREA
+  )
+}
+
+// 用户活动：显示控制栏并重置隐藏计时
+const markImmersiveActivity = (): void => {
+  immersiveControlsVisible.value = true
+  if (immersiveHideTimer) clearTimeout(immersiveHideTimer)
+  immersiveHideTimer = setTimeout(() => {
+    immersiveHideTimer = null
+    // 鼠标仍悬停在控制栏区域时继续等待，否则隐藏
+    if (immersivePointerInControls()) {
+      markImmersiveActivity()
+      return
+    }
+    immersiveControlsVisible.value = false
+  }, IMMERSIVE_IDLE_DELAY)
+}
+
+const handleImmersivePointerMove = (e: MouseEvent): void => {
+  immersivePointerY = e.clientY
+  markImmersiveActivity()
+}
+
+// 进入/退出沉浸模式时挂载/卸载自动隐藏逻辑
+watch(immersiveCover, (active) => {
+  if (active) {
+    immersiveControlsVisible.value = true
+    immersivePointerY = -1
+    window.addEventListener('mousemove', handleImmersivePointerMove, { passive: true })
+    markImmersiveActivity()
+  } else {
+    window.removeEventListener('mousemove', handleImmersivePointerMove)
+    if (immersiveHideTimer) {
+      clearTimeout(immersiveHideTimer)
+      immersiveHideTimer = null
+    }
+    immersiveControlsVisible.value = true
+    immersivePointerY = -1
+  }
+})
+
+// 打开设置时退出沉浸模式（设置面板为不透明界面，顶栏需恢复底色），关闭时恢复
+const wasImmersiveBeforeSettings = ref(false)
+watch(
+  () => configStore.ui.showConfigPanel,
+  (open) => {
+    if (open) {
+      wasImmersiveBeforeSettings.value = immersiveCover.value
+      if (immersiveCover.value) immersiveCover.value = false
+    } else if (wasImmersiveBeforeSettings.value) {
+      wasImmersiveBeforeSettings.value = false
+      immersiveCover.value = true
+    }
+  }
+)
+
+onMounted(() => {
+  window.addEventListener('keydown', handleCoverKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleCoverKeydown)
+  window.removeEventListener('mousemove', handleImmersivePointerMove)
+  if (immersiveHideTimer) {
+    clearTimeout(immersiveHideTimer)
+    immersiveHideTimer = null
+  }
+})
 
 const toggleViewMode = () => {
   viewMode.value = viewMode.value === 'lyrics' ? 'visualizer' : 'lyrics'
@@ -348,6 +508,18 @@ const currentTrackCover = computed(() => {
   return 'none' // 如果没有封面，返回none
 })
 
+// 沉浸式封面：提取封面主色作为背景（提取失败时回退主题色）
+const { dominantColor } = useDominantColor(computed(() => currentTrack.value?.coverPath))
+const immersiveBackground = computed(
+  () => dominantColor.value || 'var(--md-sys-color-surface-container)'
+)
+
+// 封面展示 URL（供沉浸式封面的 <img> 使用）
+const coverDisplayUrl = computed(() =>
+  currentTrack.value?.coverPath ? convertFileSrc(currentTrack.value.coverPath) : ''
+)
+
+// 音频信息文案（格式 | 比特率 | 采样率 | 位深度 | 声道）
 const formattedAudioInfo = computed(() => {
   const { bitrate, sampleRate, channels, bitDepth, format } = audioInfo.value
 
@@ -517,8 +689,6 @@ useAppLifecycle({
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: 12px;
-  transition: border-radius 0.3s ease;
   background-color: var(--md-sys-color-surface-container-low);
 }
 
@@ -526,7 +696,6 @@ useAppLifecycle({
   flex: 1;
   display: flex;
   overflow: hidden;
-  padding: 0 0 0.5%;
   background-color: var(--md-sys-color-surface-container-low);
 }
 
@@ -563,16 +732,133 @@ useAppLifecycle({
   gap: 0px;
 }
 
+/* 三列布局：左侧音频信息 / 中间控制组 / 右侧桌面歌词+音量 */
+.controls-area {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  /* 两侧区域隐藏或内容为空时仍保持控制组居中 */
+  justify-content: center;
+}
+
+.controls-area :deep(.player-controls) {
+  width: auto;
+}
+
+/* 左下角：音频信息容器 */
+.audio-info-corner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+/* 与 .player-left 相同的几何结构,空间不足时收窄避免与控制按钮重叠 */
+.audio-info-text {
+  flex: 0 0 auto;
+  width: min(600px, 34vw);
+  max-width: calc(100% - 6vw);
+  margin-left: 6vw;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--md-sys-color-on-surface-variant);
+  /* 细微投影增加与背景的分离度，深浅主题下均适用 */
+  text-shadow: 0 0px 1px rgba(0, 0, 0, 0.1);
+}
+
+/* 右下角：桌面歌词与音量，右边距与左侧一致 */
+.side-controls {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding-right: 8px;
+}
+
+/* 顶部中间：当前曲目信息 */
+/* 左右各留 120px 间距；允许收缩，避免长曲名把两侧按钮挤出屏幕 */
+.nav-center {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 120px;
+}
+
+/* 双行显示：第一行曲名 16px，第二行艺术家 14px */
+.nav-track-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.nav-track-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
+}
+
+.nav-track-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-track-artist {
+  max-width: 100%;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 文件不存在警告图标（曲名右侧） */
+.nav-file-warning {
+  flex-shrink: 0;
+  font-size: 16px;
+  color: var(--md-sys-color-error);
+}
+
+/* 窄窗口时隐藏两侧区域，避免与控制按钮组重叠 */
+@media (max-width: 640px) {
+  .audio-info-corner,
+  .side-controls {
+    display: none;
+  }
+
+  /* 窄窗口时顶部只显示曲名，隐藏艺术家 */
+  .nav-track-artist {
+    display: none;
+  }
+}
+
 .global-progress-bar {
   width: calc(100% + 32px);
   margin-left: -16px;
   margin-right: -16px;
 }
 
-/* 左侧：专辑封面和歌曲信息 */
+/* 左侧：专辑封面 */
 .player-left {
-  flex: 0 0 min(600px, 30vw);
-  margin-left: 6vw;
+  flex: 0 0 min(600px, 34vw);
+  margin-left: 5vw;
   max-width: 600px;
   display: flex;
   flex-direction: column;
@@ -585,7 +871,7 @@ useAppLifecycle({
   flex: 1;
   min-width: 0;
   position: relative;
-  margin-right: 6vw;
+  margin-right: 5vw;
 }
 
 .view-controls-container {
@@ -633,28 +919,18 @@ useAppLifecycle({
     width: 100%;
   }
 
-  /* 在小屏幕上调整标题字体大小 */
-  .track-title {
-    font-size: 24px;
-    /* 允许最多3行 */
-    -webkit-line-clamp: 3;
-    line-clamp: 3;
-    max-height: 3.9em;
-  }
-
-  .track-artist {
-    font-size: 16px;
-    /* 允许最多2行 */
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    max-height: 2.8em;
+  /* 窄屏下封面改为全宽居中，音频信息无法与其对齐，退化为左对齐 */
+  .audio-info-text {
+    width: auto;
+    max-width: 100%;
+    margin-left: 8px;
+    text-align: left;
   }
 }
 
 .album-art-container {
-  width: min(600px, 45vh);
-  height: min(600px, 45vh);
-  margin-bottom: 24px;
+  width: min(600px, 54vh);
+  height: min(600px, 54vh);
   flex-shrink: 0;
   position: relative;
 }
@@ -680,6 +956,7 @@ useAppLifecycle({
   align-items: center;
   justify-content: center;
   transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  cursor: pointer;
 }
 
 .album-art:hover {
@@ -736,107 +1013,9 @@ useAppLifecycle({
   margin-bottom: 8px;
 }
 
-.track-info {
-  width: 100%;
-  text-align: center;
-  margin-bottom: 16px;
-  max-width: min(400px, 40vw);
-  /* 添加容器以限制溢出 */
-  overflow: hidden;
-  position: relative;
-  /* 确保可以正确计算高度 */
-  min-height: 76px; /* 32px + 18px + 8px + 18px for artist and title */
-}
-
-.track-title {
-  font-size: 32px;
-  font-weight: 500;
-  color: var(--md-sys-color-on-surface);
-  margin: 0 0 8px 0;
-  word-break: break-word;
-  /* Allow long words to break */
-  /* 添加多行文本限制 */
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2; /* 最多显示两行 */
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  /* 确保短标题不会有多余空间 */
-  max-height: 2.6em; /* 约2行的高度 */
-  line-height: 1.3;
-  transition: all 0.3s ease;
-}
-
-.track-artist {
-  font-size: 18px;
-  color: var(--md-sys-color-on-surface-variant);
-  margin-bottom: 8px;
-  font-weight: 400;
-  /* 添加多行文本限制 */
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 1; /* 最多显示一行 */
-  line-clamp: 1;
-  -webkit-box-orient: vertical;
-  white-space: normal;
-  /* 确保短艺术家名不会有多余空间 */
-  max-height: 1.4em; /* 约1行的高度 */
-  line-height: 1.4;
-  transition: all 0.3s ease;
-}
-
-.audio-info {
-  display: flex;
-  justify-content: center;
-  margin-top: 8px;
-  color: var(--md-sys-color-on-surface-variant);
-  max-width: min(400px, 40vw);
-  text-align: center;
-}
-
 .lyrics-container {
   height: 100%;
   width: 100%;
-}
-
-/* 文件不存在提示样式 */
-.file-missing-alert {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px 12px;
-  margin-top: 8px;
-  border-radius: var(--md-sys-shape-corner-small);
-  background-color: var(--md-sys-color-error-container);
-  color: var(--md-sys-color-on-error-container);
-  font-size: 14px;
-  animation: fadeIn 0.3s ease-in-out;
-}
-
-.file-missing-alert .material-symbols-rounded {
-  font-size: 18px;
-}
-
-.alert-text {
-  font-weight: 500;
-}
-
-.track-info-placeholder {
-  width: 100%;
-  text-align: center;
-  margin-bottom: 16px;
-  max-width: min(400px, 40vw);
-  visibility: hidden;
-}
-
-.audio-info-placeholder {
-  display: flex;
-  justify-content: center;
-  margin-top: 8px;
-  max-width: min(400px, 40vw);
-  text-align: center;
-  visibility: hidden;
 }
 
 .fade-enter-active,
@@ -849,22 +1028,172 @@ useAppLifecycle({
   opacity: 0;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 /* 全屏和最大化状态下移除圆角 */
 .app-container[data-fullscreen='true'],
 .app-container[data-maximized='true'] {
   border-radius: 0;
+}
+
+/* ===== 沉浸式封面模式（类似网易云） ===== */
+
+/* 沉浸层：铺满整个窗口，位于内容之下（nav-bar z-index 100 在其上） */
+.immersive-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* 底层：封面主色背景（颜色由脚本提取后经 CSS 变量注入，失败时回退主题色） */
+.background-layer {
+  position: absolute;
+  inset: 0;
+  background-color: var(--immersive-bg);
+}
+
+/* 中层：靠左放大、裁剪的封面。
+   融合采用双通道：::after 先把封面向背景色"染色"（降亮度，纹理仍在），
+   mask 再缓慢淡出 alpha——观感是封面渐渐沉入背景，
+   而非像素被直接擦除 */
+.cover-mask-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 50%; /* 封面图像占左半部分 */
+  height: 100%;
+  overflow: hidden;
+
+  /* alpha 通道：70% 后才启动、分段缓出，只负责终态的消失 */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    black 0%,
+    black 70%,
+    rgba(0, 0, 0, 0.74) 82%,
+    rgba(0, 0, 0, 0.34) 92%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    black 0%,
+    black 70%,
+    rgba(0, 0, 0, 0.74) 82%,
+    rgba(0, 0, 0, 0.34) 92%,
+    transparent 100%
+  );
+}
+
+/* 染色层：封面右侧先向背景色降亮度沉入，纹理渐隐而非被擦除 */
+.cover-mask-layer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    transparent 58%,
+    color-mix(in srgb, var(--immersive-bg) 26%, transparent) 72%,
+    color-mix(in srgb, var(--immersive-bg) 68%, transparent) 87%,
+    var(--immersive-bg) 100%
+  );
+}
+
+.full-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* 保证封面拉伸铺满不变形 */
+  object-position: left center; /* 保持人物/主体居左显示 */
+}
+
+/* 沉浸模式底部控制区：通栏磨砂玻璃条，铺满窗口宽度和底边 */
+.app-container.immersive-cover .player-lower {
+  /* 负边距抵消 .player-container 的 12px 16px 内边距，玻璃条贴住窗口左右和底部 */
+  margin-left: -16px;
+  margin-right: -16px;
+  margin-bottom: -16px;
+  padding: 12px 16px 16px;
+  background: rgba(255, 255, 255, 0);
+  /* -webkit- 前缀必须在前。构建时 CSS 压缩器会把前缀版与标准版
+     视为同一属性去重、仅保留最后一条；若标准版在前，产物会只剩 -webkit- 版，
+     而 WebView2(Chromium) 只认不带前缀的 backdrop-filter */
+  -webkit-backdrop-filter: blur(10px) saturate(0.5);
+  backdrop-filter: blur(10px) saturate(0.5);
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.1);
+}
+
+/* 全屏/最大化时窗口无圆角，玻璃条圆角同步归零 */
+.app-container[data-fullscreen='true'].immersive-cover .player-lower,
+.app-container[data-maximized='true'].immersive-cover .player-lower {
+  border-radius: 0;
+}
+
+/* 沉浸模式下音频信息叠在磨砂玻璃与封面之上，封面明暗不可控，
+   使用白色文字 + 双层阴影，保证任意封面下都有足够对比度 */
+.app-container.immersive-cover .audio-info-text {
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 0 8px rgba(0, 0, 0, 0.25);
+}
+
+/* 进度条沿用默认的 -16px 通栏负边距，正好从窗口左边缘贯穿到右边缘 */
+/* 顶/底控制栏及右上角歌词切换按钮的滑出/滑入过渡（仅沉浸模式启用） */
+.app-container.immersive-cover .nav-bar,
+.app-container.immersive-cover .player-lower,
+.app-container.immersive-cover .view-controls-container {
+  transition:
+    transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    opacity 0.3s ease;
+}
+
+.app-container.immersive-cover .player-lower{
+  padding-top: 0;
+}
+
+/* 隐藏状态：顶栏向上滑出、底栏向下滑出，且不再拦截点击 */
+.app-container.immersive-cover.immersive-controls-hidden .nav-bar {
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-container.immersive-cover.immersive-controls-hidden .player-lower {
+  transform: translateY(100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 右上角歌词/波形切换按钮跟随顶栏一起隐藏 */
+.app-container.immersive-cover.immersive-controls-hidden .view-controls-container {
+  transform: translateY(-40px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 沉浸模式下内容浮于沉浸层之上，背景让位给封面 */
+.app-container.immersive-cover .main-content {
+  position: relative;
+  z-index: 1;
+  background-color: transparent;
+}
+
+.app-container.immersive-cover .player-container {
+  background-color: transparent;
+}
+
+/* 顶栏背景完全透明，图标直接浮于封面之上 */
+.app-container.immersive-cover .nav-bar {
+  background-color: transparent;
+}
+
+/* 小封面由左半沉浸封面替代 */
+.app-container.immersive-cover .album-art-container {
+  display: none;
+}
+
+/* 沉浸模式下点击左半区域退出 */
+.app-container.immersive-cover .player-left {
+  cursor: pointer;
 }
 
 /* 错误通知样式 */

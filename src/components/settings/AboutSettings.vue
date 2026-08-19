@@ -191,13 +191,7 @@ const githubUrl = 'https://github.com/JDBeWL/Mercurial-Player'
 const showLicenseDetails = ref<boolean>(false)
 
 // 自动更新
-const {
-  isChecking,
-  checkForUpdates,
-  error,
-  lastCheckTime,
-  updateLog,
-} = useAutoUpdate()
+const { isChecking, checkForUpdates, error, lastCheckTime, updateLog } = useAutoUpdate()
 
 // 技术栈分类数据
 const techCategories = computed<TechCategory[]>(() => [
@@ -346,6 +340,11 @@ const loadAppVersion = async (): Promise<void> => {
 
 const openExternalUrl = async (url: string): Promise<void> => {
   try {
+    // 前端前置校验协议，与后端 HTTPS 白名单校验形成双重防御
+    if (!url.startsWith('https://')) {
+      logger.error('Blocked non-HTTPS URL:', url)
+      return
+    }
     await invoke('open_external_url', { url })
   } catch (error) {
     logger.error('Failed to open external URL:', error)

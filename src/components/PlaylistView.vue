@@ -1,7 +1,16 @@
 <template>
   <div class="playlist-view">
     <div class="playlist-header">
-      <h2 class="playlist-title">{{ $t('playlist.title') }}</h2>
+      <div class="playlist-header-left">
+        <h2 class="playlist-title">{{ $t('playlist.title') }}</h2>
+        <span
+          v-if="showQueueInfo && playlist.length > 0"
+          class="playlist-queue-info"
+          :title="queueInfoText"
+        >
+          {{ queueInfoText }}
+        </span>
+      </div>
       <button class="icon-button" @click="handleClose">
         <span class="material-symbols-rounded">close</span>
       </button>
@@ -99,6 +108,7 @@ import { usePlayerStore } from '../stores/player'
 import { useConfigStore } from '../stores/config'
 import FileUtils from '../utils/fileUtils'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { useI18n } from 'vue-i18n'
 import type { Track } from '../types'
 
 // 处理后的 track 类型 (扩展自 Track, 添加缓存字段)
@@ -114,7 +124,33 @@ const emit = defineEmits<{
 
 const playerStore = usePlayerStore()
 const configStore = useConfigStore()
-const { playlist, currentTrack } = storeToRefs(playerStore)
+const { t } = useI18n()
+const { playlist, currentTrack, currentTrackIndex } = storeToRefs(playerStore)
+
+// 是否显示播放队列信息
+const showQueueInfo = computed(() => configStore.general.showQueueInfo !== false)
+
+// 第 X 首 / 共 Y 首 · 总时长
+const queueInfoText = computed(() => {
+  const base = t('player.queueInfo', {
+    current: currentTrackIndex.value + 1,
+    total: playlist.value.length,
+  })
+
+  // 播放列表总时长（有时长数据才附加）
+  const total = playlist.value.reduce((sum, track) => sum + (track.duration || 0), 0)
+  if (!total) return base
+
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = Math.floor(total % 60)
+  const duration =
+    hours > 0
+      ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+      : `${minutes}:${String(seconds).padStart(2, '0')}`
+
+  return `${base} · ${duration}`
+})
 
 // 滚动容器引用
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -357,11 +393,28 @@ const removeTrackByPath = (path: string): void => {
   border-bottom: 1px solid var(--md-sys-color-outline-variant);
 }
 
+.playlist-header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
 .playlist-title {
   font-size: 24px;
   font-weight: 500;
   margin: 0;
   color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
+}
+
+/* 标题右侧的播放队列信息 */
+.playlist-queue-info {
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .playlist-content {

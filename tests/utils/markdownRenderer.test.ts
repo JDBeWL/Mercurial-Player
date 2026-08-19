@@ -80,6 +80,44 @@ describe('renderMarkdown', () => {
         '<p><img src="image.png" alt="alt" style="max-width:100%;border-radius:4px;" /></p>',
       )
     })
+
+    it('should render http links', () => {
+      expect(renderMarkdown('[link](http://example.com)')).toContain('href="http://example.com"')
+    })
+
+    it('should render mailto links', () => {
+      expect(renderMarkdown('[mail](mailto:a@b.com)')).toContain('href="mailto:a@b.com"')
+    })
+
+    it('should strip javascript: protocol links', () => {
+      const result = renderMarkdown('[click](javascript:location=//evil.com)')
+      expect(result).not.toContain('javascript:')
+      expect(result).not.toContain('<a ')
+      expect(result).toContain('click')
+    })
+
+    it('should strip data: protocol links', () => {
+      const result = renderMarkdown('[x](data:text/html,<script>)')
+      expect(result).not.toContain('data:')
+      expect(result).not.toContain('<a ')
+    })
+
+    it('should strip javascript: protocol from control-character obfuscated links', () => {
+      const result = renderMarkdown('[click](jav\tascript:alert(1))')
+      expect(result).not.toContain('alert(1)')
+      expect(result).not.toContain('<a ')
+    })
+
+    it('should strip javascript: protocol images', () => {
+      const result = renderMarkdown('![img](javascript:alert(1))')
+      expect(result).not.toContain('javascript:')
+      expect(result).not.toContain('<img')
+    })
+
+    it('should render relative links without protocol', () => {
+      expect(renderMarkdown('[rel](docs/page.html)')).toContain('href="docs/page.html"')
+      expect(renderMarkdown('[anchor](#section)')).toContain('href="#section"')
+    })
   })
 
   describe('lists', () => {

@@ -17,15 +17,12 @@ function createMockStore(overrides: Record<string, unknown> = {}) {
     isPlaying: false,
     isShuffle: false,
     repeatMode: 'none',
-    volume: 0.5,
-    isMuted: false,
     hasNextTrack: true,
     hasPreviousTrack: true,
+    playlist: [] as unknown[],
     togglePlay: vi.fn(),
     toggleShuffle: vi.fn(),
     toggleRepeat: vi.fn(),
-    toggleMute: vi.fn(),
-    setVolume: vi.fn(),
     nextTrack: vi.fn(),
     previousTrack: vi.fn(),
     ...overrides,
@@ -260,91 +257,55 @@ describe('PlayerControls.vue', () => {
     })
   })
 
-  // ---------- 音量控制 ----------
+  // ---------- 播放列表开关 ----------
 
-  describe('音量控制', () => {
-    it('点击音量按钮调用 toggleMute', async () => {
+  describe('播放列表开关', () => {
+    it('播放列表为空时不显示播放列表按钮', async () => {
+      store.playlist = []
       wrapper = mountComponent(store)
       await nextTick()
-      const volumeBtn = wrapper.find('.volume-button')
-      await volumeBtn.trigger('click')
-      expect(store.toggleMute).toHaveBeenCalledTimes(1)
+      expect(wrapper.find('.playlist-toggle-btn').exists()).toBe(false)
     })
 
-    it('volume=0 时显示 volume_off 图标', async () => {
-      store.volume = 0
-      store.isMuted = false
+    it('播放列表有曲目时显示播放列表按钮', async () => {
+      store.playlist = [{ path: '/a.mp3' }, { path: '/b.mp3' }]
       wrapper = mountComponent(store)
       await nextTick()
-      const volumeBtn = wrapper.find('.volume-button')
-      expect(volumeBtn.text()).toContain('volume_off')
+      expect(wrapper.find('.playlist-toggle-btn').exists()).toBe(true)
     })
 
-    it('volume<0.5 时显示 volume_down 图标', async () => {
-      store.volume = 0.3
-      store.isMuted = false
-      wrapper = mountComponent(store)
+    it('showPlaylist=true 时按钮有 active 类', async () => {
+      store.playlist = [{ path: '/a.mp3' }]
+      storeRef.current = store
+      wrapper = mount(PlayerControls, {
+        props: { showPlaylist: true },
+        global: { mocks: { $t: (key: string) => key } },
+      })
       await nextTick()
-      const volumeBtn = wrapper.find('.volume-button')
-      expect(volumeBtn.text()).toContain('volume_down')
+      expect(wrapper.find('.playlist-toggle-btn').classes()).toContain('active')
     })
 
-    it('volume>=0.5 时显示 volume_up 图标', async () => {
-      store.volume = 0.7
-      store.isMuted = false
-      wrapper = mountComponent(store)
+    it('showPlaylist=false 时按钮无 active 类', async () => {
+      store.playlist = [{ path: '/a.mp3' }]
+      storeRef.current = store
+      wrapper = mount(PlayerControls, {
+        props: { showPlaylist: false },
+        global: { mocks: { $t: (key: string) => key } },
+      })
       await nextTick()
-      const volumeBtn = wrapper.find('.volume-button')
-      expect(volumeBtn.text()).toContain('volume_up')
+      expect(wrapper.find('.playlist-toggle-btn').classes()).not.toContain('active')
     })
 
-    it('isMuted=true 时显示 volume_off 图标（无论音量值）', async () => {
-      store.volume = 0.8
-      store.isMuted = true
-      wrapper = mountComponent(store)
+    it('点击播放列表按钮触发 togglePlaylist 事件', async () => {
+      store.playlist = [{ path: '/a.mp3' }]
+      storeRef.current = store
+      wrapper = mount(PlayerControls, {
+        props: { showPlaylist: false },
+        global: { mocks: { $t: (key: string) => key } },
+      })
       await nextTick()
-      const volumeBtn = wrapper.find('.volume-button')
-      expect(volumeBtn.text()).toContain('volume_off')
-    })
-
-    it('音量值显示为百分比', async () => {
-      store.volume = 0.65
-      wrapper = mountComponent(store)
-      await nextTick()
-      // 音量弹出框默认隐藏 (v-show)，但 DOM 仍存在
-      const volumeValue = wrapper.find('.volume-value')
-      expect(volumeValue.text()).toContain('65%')
-    })
-
-    it('音量弹出框默认隐藏', async () => {
-      wrapper = mountComponent(store)
-      await nextTick()
-      const popup = wrapper.find('.volume-slider-popup')
-      // v-show 控制可见性，元素存在但 display:none
-      expect(popup.exists()).toBe(true)
-      expect((popup.element as HTMLElement).style.display).toBe('none')
-    })
-
-    it('鼠标悬停时显示音量弹出框', async () => {
-      wrapper = mountComponent(store)
-      await nextTick()
-      const container = wrapper.find('.volume-control-container')
-      await container.trigger('mouseenter')
-      await nextTick()
-      const popup = wrapper.find('.volume-slider-popup')
-      expect((popup.element as HTMLElement).style.display).not.toBe('none')
-    })
-
-    it('音量滑块填充高度随 volume 变化', async () => {
-      store.volume = 0.4
-      wrapper = mountComponent(store)
-      await nextTick()
-      const fill = wrapper.find('.slider-fill')
-      expect(fill.attributes('style')).toContain('height: 40%')
-
-      store.volume = 0.8
-      await nextTick()
-      expect(fill.attributes('style')).toContain('height: 80%')
+      await wrapper.find('.playlist-toggle-btn').trigger('click')
+      expect(wrapper.emitted('togglePlaylist')).toHaveLength(1)
     })
   })
 

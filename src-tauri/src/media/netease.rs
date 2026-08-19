@@ -5,6 +5,7 @@
 use crate::media::http_client::get_client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tauri_plugin_http::reqwest::Response;
 use tauri_plugin_http::reqwest::header::{
     ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, HeaderMap, HeaderValue, REFERER, USER_AGENT,
 };
@@ -16,7 +17,7 @@ const MAX_RETRIES: u32 = 3;
 /// 对网络错误（连接超时、DNS 失败等）重试，对 HTTP 错误状态码不重试
 async fn send_with_retry(
     request_builder: tauri_plugin_http::reqwest::RequestBuilder,
-) -> Result<tauri_plugin_http::reqwest::Response, String> {
+) -> Result<Response, String> {
     let mut last_err = String::new();
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
@@ -137,15 +138,42 @@ fn build_headers() -> HeaderMap {
     headers
 }
 
+/// 响应体最大大小（5MB），防止异常大响应导致内存耗尽
+const MAX_RESPONSE_SIZE: usize = 5 * 1024 * 1024;
+
+/// 读取响应体文本，带大小限制
+async fn read_response_text(mut response: Response) -> Result<String, String> {
+    // 优先根据 Content-Length 拒绝过大响应
+    if let Some(len) = response.content_length()
+        && len as usize > MAX_RESPONSE_SIZE
+    {
+        return Err(format!("响应过大: {len} 字节（上限 {MAX_RESPONSE_SIZE}）"));
+    }
+
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("Read response failed: {e}"))?
+    {
+        body.extend_from_slice(&chunk);
+        if body.len() > MAX_RESPONSE_SIZE {
+            return Err(format!("响应超过大小限制（{MAX_RESPONSE_SIZE} 字节）"));
+        }
+    }
+
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
 /// 搜索歌曲 - 使用 Web API
 pub async fn search_songs(
     keyword: &str,
     limit: u32,
     offset: u32,
 ) -> Result<Vec<SearchSongResult>, String> {
-    let client = get_client();
+    let client = get_client()?;
 
-    // 使用 cloudsearch API（更稳定）
+    // 使用 cloudsearch API
     let url = "https://music.163.com/api/cloudsearch/pc";
 
     let params = [
@@ -158,10 +186,7 @@ pub async fn search_songs(
     let response = send_with_retry(client.post(url).headers(build_headers()).form(&params)).await?;
 
     let status = response.status();
-    let response_text = response
-        .text()
-        .await
-        .map_err(|e| format!("Read response failed: {e}"))?;
+    let response_text = read_response_text(response).await?;
 
     if !status.is_success() {
         return Err(format!("HTTP error: {status} - {response_text}"));
@@ -202,17 +227,19 @@ pub async fn search_songs(
 
 /// 获取歌词 - 使用 Web API
 pub async fn get_lyrics(song_id: &str) -> Result<LyricsData, String> {
-    let client = get_client();
+    // 歌曲 ID 必须为纯数字，防止 URL 参数注入
+    if song_id.is_empty() || !song_id.chars().all(|c| c.is_ascii_digit()) {
+        return Err("非法的歌曲 ID".to_string());
+    }
+
+    let client = get_client()?;
 
     let url = format!("https://music.163.com/api/song/lyric?id={song_id}&lv=-1&tv=-1&rv=-1&kv=-1");
 
     let response = send_with_retry(client.get(&url).headers(build_headers())).await?;
 
     let status = response.status();
-    let response_text = response
-        .text()
-        .await
-        .map_err(|e| format!("Read response failed: {e}"))?;
+    let response_text = read_response_text(response).await?;
 
     if !status.is_success() {
         return Err(format!("HTTP error: {status} - {response_text}"));

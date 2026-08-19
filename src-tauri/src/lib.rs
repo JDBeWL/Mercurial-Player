@@ -25,6 +25,7 @@ pub mod equalizer;
 pub mod error;
 pub mod media;
 pub mod plugins;
+pub mod security;
 pub mod system;
 
 #[cfg(windows)]

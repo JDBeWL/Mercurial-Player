@@ -90,6 +90,8 @@ export interface GeneralConfig {
   startupLoadLastConfig: boolean
   autoSaveConfig: boolean
   showAudioInfo: boolean
+  // Whether to show the queue info at the bottom-left of the player (default: true)
+  showQueueInfo?: boolean
   // Whether automatic update checks are enabled (default: false)
   enableAutoUpdate?: boolean
   // Cover cache size in MB (default: 1024 = 1GB)
