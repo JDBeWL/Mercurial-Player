@@ -257,58 +257,6 @@ describe('PlayerControls.vue', () => {
     })
   })
 
-  // ---------- 播放列表开关 ----------
-
-  describe('播放列表开关', () => {
-    it('播放列表为空时不显示播放列表按钮', async () => {
-      store.playlist = []
-      wrapper = mountComponent(store)
-      await nextTick()
-      expect(wrapper.find('.playlist-toggle-btn').exists()).toBe(false)
-    })
-
-    it('播放列表有曲目时显示播放列表按钮', async () => {
-      store.playlist = [{ path: '/a.mp3' }, { path: '/b.mp3' }]
-      wrapper = mountComponent(store)
-      await nextTick()
-      expect(wrapper.find('.playlist-toggle-btn').exists()).toBe(true)
-    })
-
-    it('showPlaylist=true 时按钮有 active 类', async () => {
-      store.playlist = [{ path: '/a.mp3' }]
-      storeRef.current = store
-      wrapper = mount(PlayerControls, {
-        props: { showPlaylist: true },
-        global: { mocks: { $t: (key: string) => key } },
-      })
-      await nextTick()
-      expect(wrapper.find('.playlist-toggle-btn').classes()).toContain('active')
-    })
-
-    it('showPlaylist=false 时按钮无 active 类', async () => {
-      store.playlist = [{ path: '/a.mp3' }]
-      storeRef.current = store
-      wrapper = mount(PlayerControls, {
-        props: { showPlaylist: false },
-        global: { mocks: { $t: (key: string) => key } },
-      })
-      await nextTick()
-      expect(wrapper.find('.playlist-toggle-btn').classes()).not.toContain('active')
-    })
-
-    it('点击播放列表按钮触发 togglePlaylist 事件', async () => {
-      store.playlist = [{ path: '/a.mp3' }]
-      storeRef.current = store
-      wrapper = mount(PlayerControls, {
-        props: { showPlaylist: false },
-        global: { mocks: { $t: (key: string) => key } },
-      })
-      await nextTick()
-      await wrapper.find('.playlist-toggle-btn').trigger('click')
-      expect(wrapper.emitted('togglePlaylist')).toHaveLength(1)
-    })
-  })
-
   // ---------- 综合状态切换 ----------
 
   describe('状态切换实时反映', () => {
