@@ -3,7 +3,7 @@
 //! 提供路径与文件名的统一校验，防止路径穿越、任意文件读写等攻击。
 //! 所有检查均为词法检查，可直接用于前端传入的参数。
 
-use std::path::{Component, Path};
+use std::path::Path;
 
 /// 判断路径是否恰好等于目录前缀，或位于其下（按分隔符边界匹配）
 fn starts_with_dir(path: &str, dir: &str, sep: char) -> bool {
@@ -62,24 +62,31 @@ pub fn is_sensitive_path(path: &str) -> bool {
         .any(|p| starts_with_dir(&unix_style, p, '/'))
 }
 
-/// 判断是否为简单文件名：单个路径组件，不含分隔符、`..`、`.`、盘符或根
+/// 判断是否为简单文件名：单个路径组件，不含分隔符、`..`、`.`、盘符或根。
+///
+/// 显式检查 `/`、`\`、`:` 而不依赖 `Path::components()`——后者按宿主平台
+/// 解析分隔符，`\` 在 Unix 上是普通字符，会导致跨平台校验结果不一致。
 #[must_use]
 pub fn is_simple_filename(name: &str) -> bool {
     if name.is_empty() || name.len() > 255 {
         return false;
     }
-    let mut components = Path::new(name).components();
-    matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
+    if name == "." || name == ".." {
+        return false;
+    }
+    !name.contains(['/', '\\', ':'])
 }
 
-/// 判断是否为安全的相对路径：非绝对路径、不含 `..`、不含盘符或根组件
+/// 判断是否为安全的相对路径：非绝对路径、不含 `..`、`.`、空组件、盘符或根。
+///
+/// 与 `is_simple_filename` 同理，按两种分隔符切分做跨平台一致的校验。
 #[must_use]
 pub fn is_safe_relative_path(path: &str) -> bool {
     if path.is_empty() || path.len() > 1024 {
         return false;
     }
-    let p = Path::new(path);
-    !p.is_absolute() && p.components().all(|c| matches!(c, Component::Normal(_)))
+    path.split(['/', '\\'])
+        .all(|c| !c.is_empty() && c != "." && c != ".." && !c.contains(':'))
 }
 
 /// 判断是否为合法的插件 ID：仅字母、数字、下划线、连字符，长度 1-64
