@@ -126,6 +126,7 @@ export const useConfigStore = defineStore('config', {
       autoSaveConfig: true,
       showAudioInfo: true,
       showQueueInfo: true,
+      immersiveColorScheme: 'album' as const,
       enableAutoUpdate: false,
       coverCacheSizeMb: 1024, // 1GB default
       coverCachePath: undefined, // 默认使用系统临时目录

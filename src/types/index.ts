@@ -60,6 +60,9 @@ export interface Playlist {
 export type RepeatMode = 'none' | 'track' | 'list'
 export type SortOrder = 'asc' | 'desc'
 
+/** 沉浸式封面背景取色风格 */
+export type ImmersiveColorScheme = 'album' | 'fusion'
+
 // ============ 配置类型 ============
 
 export interface DirectoryScanConfig {
@@ -92,6 +95,10 @@ export interface GeneralConfig {
   showAudioInfo: boolean
   // Whether to show the queue info at the bottom-left of the player (default: true)
   showQueueInfo?: boolean
+  // Immersive cover background color scheme:
+  // 'album' = representative theme color of the whole cover (default)
+  // 'fusion' = sample the right edge strip so the background blends into the feathered cover
+  immersiveColorScheme?: ImmersiveColorScheme
   // Whether automatic update checks are enabled (default: false)
   enableAutoUpdate?: boolean
   // Cover cache size in MB (default: 1024 = 1GB)

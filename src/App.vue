@@ -308,8 +308,10 @@ import { useDesktopLyrics } from './composables/useDesktopLyrics'
 import { useWindowControls } from './composables/useWindowControls'
 import { useAlbumArtInteraction } from './composables/useAlbumArtInteraction'
 import { useDominantColor } from './composables/useDominantColor'
+import { useImmersiveCover } from './composables/useImmersiveCover'
 import { useGlobalKeyboard } from './composables/useGlobalKeyboard'
 import { useAppLifecycle } from './composables/useAppLifecycle'
+import type { ImmersiveColorScheme } from './types'
 import PlayerControls from './components/PlayerControls.vue'
 import VolumeControl from './components/VolumeControl.vue'
 import ProgressBar from './components/ProgressBar.vue'
@@ -432,15 +434,42 @@ const handleImmersivePointerMove = (e: MouseEvent): void => {
   markImmersiveActivity()
 }
 
+// 鼠标移出窗口：清空热区判定。
+const handleImmersivePointerLeave = (): void => {
+  immersivePointerY = -1
+  markImmersiveActivity()
+}
+
+// 窗口失焦：用户已转向其他窗口（如点击桌面），立即隐藏控制栏
+const handleImmersiveBlur = (): void => {
+  immersivePointerY = -1
+  if (immersiveHideTimer) {
+    clearTimeout(immersiveHideTimer)
+    immersiveHideTimer = null
+  }
+  immersiveControlsVisible.value = false
+}
+
+// 窗口重新聚焦：恢复控制栏并重新进入空闲计时
+const handleImmersiveFocus = (): void => {
+  markImmersiveActivity()
+}
+
 // 进入/退出沉浸模式时挂载/卸载自动隐藏逻辑
 watch(immersiveCover, (active) => {
   if (active) {
     immersiveControlsVisible.value = true
     immersivePointerY = -1
     window.addEventListener('mousemove', handleImmersivePointerMove, { passive: true })
+    document.addEventListener('mouseleave', handleImmersivePointerLeave)
+    window.addEventListener('blur', handleImmersiveBlur)
+    window.addEventListener('focus', handleImmersiveFocus)
     markImmersiveActivity()
   } else {
     window.removeEventListener('mousemove', handleImmersivePointerMove)
+    document.removeEventListener('mouseleave', handleImmersivePointerLeave)
+    window.removeEventListener('blur', handleImmersiveBlur)
+    window.removeEventListener('focus', handleImmersiveFocus)
     if (immersiveHideTimer) {
       clearTimeout(immersiveHideTimer)
       immersiveHideTimer = null
@@ -472,6 +501,9 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleCoverKeydown)
   window.removeEventListener('mousemove', handleImmersivePointerMove)
+  document.removeEventListener('mouseleave', handleImmersivePointerLeave)
+  window.removeEventListener('blur', handleImmersiveBlur)
+  window.removeEventListener('focus', handleImmersiveFocus)
   if (immersiveHideTimer) {
     clearTimeout(immersiveHideTimer)
     immersiveHideTimer = null
@@ -508,15 +540,24 @@ const currentTrackCover = computed(() => {
   return 'none' // 如果没有封面，返回none
 })
 
-// 沉浸式封面：提取封面主色作为背景（提取失败时回退主题色）
-const { dominantColor } = useDominantColor(computed(() => currentTrack.value?.coverPath))
+// 沉浸式封面：提取封面主色作为背景（提取失败时回退主题色）。
+// 取色风格由设置控制：album = 专辑主题色（全图代表色），fusion = 封面融合（取右缘条带）
+const immersiveColorScheme = computed<ImmersiveColorScheme>(
+  () => configStore.general.immersiveColorScheme ?? 'album'
+)
+const { dominantColor } = useDominantColor(
+  computed(() => currentTrack.value?.coverPath),
+  immersiveColorScheme
+)
 const immersiveBackground = computed(
   () => dominantColor.value || 'var(--md-sys-color-surface-container)'
 )
 
-// 封面展示 URL（供沉浸式封面的 <img> 使用）
-const coverDisplayUrl = computed(() =>
-  currentTrack.value?.coverPath ? convertFileSrc(currentTrack.value.coverPath) : ''
+// 封面展示 URL（供沉浸式封面的 <img> 使用）：
+// 源图不够大时用 pica(Lanczos3) 预放大到精确显示尺寸，避免浏览器双线性放大发糊
+const { coverDisplayUrl } = useImmersiveCover(
+  computed(() => currentTrack.value?.coverPath),
+  immersiveCover
 )
 
 // 音频信息文案（格式 | 比特率 | 采样率 | 位深度 | 声道）
@@ -857,7 +898,7 @@ useAppLifecycle({
 
 /* 左侧：专辑封面 */
 .player-left {
-  flex: 0 0 min(600px, 34vw);
+  flex: 0 0 min(600px, 36vw);
   margin-left: 5vw;
   max-width: 600px;
   display: flex;
@@ -871,7 +912,7 @@ useAppLifecycle({
   flex: 1;
   min-width: 0;
   position: relative;
-  margin-right: 5vw;
+  margin-right: 4vw;
 }
 
 .view-controls-container {
@@ -1034,7 +1075,7 @@ useAppLifecycle({
   border-radius: 0;
 }
 
-/* ===== 沉浸式封面模式（类似网易云） ===== */
+/* ===== 沉浸式封面模式 ===== */
 
 /* 沉浸层：铺满整个窗口，位于内容之下（nav-bar z-index 100 在其上） */
 .immersive-layer {
@@ -1053,16 +1094,16 @@ useAppLifecycle({
 }
 
 /* 中层：靠左放大、裁剪的封面。
-   融合采用双通道：::after 先把封面向背景色"染色"（降亮度，纹理仍在），
+   融合采用双通道：::after 先把封面向背景色"染色"，
    mask 再缓慢淡出 alpha——观感是封面渐渐沉入背景，
    而非像素被直接擦除 */
 .cover-mask-layer {
   position: absolute;
   left: 0;
   top: 0;
-  width: 50%; /* 封面图像占左半部分 */
   height: 100%;
-  overflow: hidden;
+  aspect-ratio: 1 / 1; /* 宽度跟随窗口高度，封面区域始终为正方形，不被裁切成矩形 */
+
 
   /* alpha 通道：70% 后才启动、分段缓出，只负责终态的消失 */
   -webkit-mask-image: linear-gradient(
@@ -1194,6 +1235,21 @@ useAppLifecycle({
 /* 沉浸模式下点击左半区域退出 */
 .app-container.immersive-cover .player-left {
   cursor: pointer;
+}
+
+.app-container.immersive-cover .player-upper {
+  flex-direction: row;
+}
+
+.app-container.immersive-cover .player-left {
+  flex: 0 0 min(600px, 36vw);
+  max-width: 600px;
+  width: auto;
+}
+
+.app-container.immersive-cover .player-right {
+  flex: 1;
+  width: auto;
 }
 
 /* 错误通知样式 */

@@ -124,6 +124,18 @@
         </div>
       </div>
 
+      <div class="setting-item select">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.immersiveColorScheme') }}</span>
+          <div class="setting-desc">{{ $t('config.immersiveColorSchemeDesc') }}</div>
+        </div>
+        <MD3Select
+          v-model="immersiveColorScheme"
+          :options="immersiveSchemeOptions"
+          @change="handleImmersiveSchemeChange"
+        />
+      </div>
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.enableAutoUpdate') }}</span>
@@ -238,13 +250,38 @@ import { setLocale } from '../../i18n'
 import logger from '../../utils/logger'
 import MD3Select from '../MD3Select.vue'
 import { invoke } from '@tauri-apps/api/core'
+import { useI18n } from 'vue-i18n'
+import type { ImmersiveColorScheme } from '../../types'
 
 const configStore = useConfigStore()
+const { t } = useI18n()
 
 const languageOptions = computed(() => [
   { value: 'zh', label: '中文' },
   { value: 'en', label: 'English' },
 ])
+
+const immersiveSchemeOptions = computed(() => [
+  { value: 'album', label: t('config.immersiveSchemeAlbum') },
+  { value: 'fusion', label: t('config.immersiveSchemeFusion') },
+])
+
+const immersiveColorScheme = computed({
+  get: () => (configStore.general.immersiveColorScheme ?? 'album') as ImmersiveColorScheme,
+  set: (value: string | number) => {
+    if (value === 'album' || value === 'fusion') {
+      configStore.general.immersiveColorScheme = value
+    }
+  },
+})
+
+const handleImmersiveSchemeChange = async () => {
+  try {
+    await configStore.saveConfigNow()
+  } catch (error) {
+    logger.error('Failed to save immersive color scheme:', error)
+  }
+}
 
 const coverCacheSizeMb = computed({
   get: () => configStore.general.coverCacheSizeMb || 1024,

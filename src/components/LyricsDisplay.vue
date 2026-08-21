@@ -600,7 +600,7 @@ export default {
 
 .lyrics-display {
   height: 100%;
-  padding: 0 32px;
+  padding: 0 32px 0 8px;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;

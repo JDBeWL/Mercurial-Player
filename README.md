@@ -1,16 +1,15 @@
 <h1 align="center" style="font-size: 24px; font-weight: bold;">
-   いつも 不器用な私の番だから<br/>
-   现在 该总是很笨拙的我出场了<br/>
-   笑って 初めて言えたことだから<br/>
-   笑一个 因为是一开始就说好的<br/>
-   いつか ゴミのような過去も愛したい<br/>
-   总有一天 想去爱垃圾一样的过去<br/>
-   だって 私はわたしさ トラッシュライフ<br/>
-   因为我就是我 垃圾人生
+   相反している因果と応報<br/>
+   截然颠倒的因果与报应<br/>
+   誠実さんはくたびれ儲け<br/>
+   诚实只能换来一场空<br/>
+   愛を歌えばなんとかなると思っていた<br/>
+   好似只要高歌爱 一切都能顺利解决<br/>
+   こんな時代じゃ本質も見えないが...<br/>
+   这个时代连本质都模糊不清了…
 </h1>
 
-![light-virtview-pic](/Calling-pink-dark-virtview-ass.png)
-![light-modlyrics-pic](/TRASH_LIFE-blue-light-modlryris.png)
+![你会做梦吗](/君は夢を見ますか.png)
 
 <h3 align="center">
    是基于Tauri开发的音乐播放器。
