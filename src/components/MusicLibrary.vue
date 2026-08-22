@@ -3,7 +3,11 @@
     <div class="library-header">
       <h2 class="library-title">{{ $t('library.title') }}</h2>
       <div class="header-actions">
-        <button class="icon-button" title="刷新音乐库" @click="refreshDirectoryTrees">
+        <button
+          class="icon-button"
+          :title="$t('library.refreshLibrary')"
+          @click="refreshDirectoryTrees"
+        >
           <span class="material-symbols-rounded">refresh</span>
         </button>
         <button class="icon-button" @click="handleClose">
@@ -75,7 +79,7 @@
             <div class="list-item-trailing">
               <button
                 class="icon-button"
-                :title="$t('library.playNext') || '播放下一首'"
+                :title="$t('library.playNext')"
                 @click.stop="addFileNext(file)"
               >
                 <span class="material-symbols-rounded">playlist_add</span>
@@ -95,11 +99,11 @@
               <button
                 v-if="playlists.length > 0"
                 class="text-button"
-                title="播放全部歌曲"
+                :title="$t('library.playAllSongs')"
                 @click="playAll"
               >
                 <span class="material-symbols-rounded">play_arrow</span>
-                播放全部歌曲
+                {{ $t('library.playAllSongs') }}
               </button>
             </h3>
             <button
@@ -208,13 +212,21 @@ const emit = defineEmits<{
 }>()
 const { t } = useI18n()
 
+// 判断是否为"全部歌曲"播放列表：新生成的列表带标记；旧缓存仅有名称（历史中文名或当前语言名）
+const isAllSongs = (p: Playlist): boolean =>
+  p.isAllSongsPlaylist === true || p.name === '全部歌曲' || p.name === t('playlist.allSongs')
+
 const musicLibraryStore = useMusicLibraryStore()
 const playerStore = usePlayerStore()
 const configStore = useConfigStore()
 
 // 根据 hideFileExtension 设置获取音轨显示名称
-const getDisplayName = (file: { displayTitle?: string; title?: string; name?: string; path: string }): string =>
-  FileUtils.getTrackDisplayName(file, configStore.titleExtraction.hideFileExtension)
+const getDisplayName = (file: {
+  displayTitle?: string
+  title?: string
+  name?: string
+  path: string
+}): string => FileUtils.getTrackDisplayName(file, configStore.titleExtraction.hideFileExtension)
 
 // 关闭处理
 const handleClose = (): void => {
@@ -252,11 +264,11 @@ const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
   const uniqueFiles = new Set<string>()
 
   // 检查是否有全部歌曲播放列表
-  const hasAllSongsPlaylist = playlists.value.some((p) => p.name === '全部歌曲')
+  const hasAllSongsPlaylist = playlists.value.some((p) => isAllSongs(p))
 
   // 处理全部歌曲播放列表
   for (const playlist of playlists.value) {
-    if (playlist.files && playlist.name !== '全部歌曲') {
+    if (playlist.files && !isAllSongs(playlist)) {
       for (const file of playlist.files) {
         if (!uniqueFiles.has(file.path)) {
           uniqueFiles.add(file.path)
@@ -269,7 +281,7 @@ const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
   // 如果有全部歌曲，则添加到播放列表中
   if (allSongsFiles.length > 0 && !hasAllSongsPlaylist) {
     allPlaylists.push({
-      name: `全部歌曲 (${allSongsFiles.length} 首)`,
+      name: `${t('playlist.allSongs')} (${allSongsFiles.length} ${t('library.tracksUnit')})`,
       path: 'all-songs',
       files: allSongsFiles,
       subdirectoryCount: 0,
@@ -282,16 +294,16 @@ const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
   for (const playlist of playlists.value) {
     if (playlist.files && playlist.files.length > 0) {
       // 处理播放列表名称，如果为"全部歌曲"，则加上文件数量
-      const playlistName = playlist.name === '全部歌曲'
-        ? `全部歌曲 (${playlist.files.length} 首)`
-        : `${playlist.name} (${playlist.files.length} 首)`
+      const playlistName = isAllSongs(playlist)
+        ? `${t('playlist.allSongs')} (${playlist.files.length} ${t('library.tracksUnit')})`
+        : `${playlist.name} (${playlist.files.length} ${t('library.tracksUnit')})`
 
       allPlaylists.push({
         ...playlist,
         totalFiles: playlist.files.length,
         subdirectoryCount: 0,
         name: playlistName,
-        isAllSongsPlaylist: playlist.name === '全部歌曲',
+        isAllSongsPlaylist: isAllSongs(playlist),
       })
     }
   }
@@ -418,7 +430,7 @@ const calculateDirectoryStats = async (): Promise<void> => {
     if (playlist.files) {
       playlist.files.forEach((file) => allAudioFiles.add(file.path))
     }
-    if (playlist.name !== '全部歌曲' && playlist.files && playlist.files.length > 0) {
+    if (!isAllSongs(playlist) && playlist.files && playlist.files.length > 0) {
       // 如果不是"全部歌曲"，则添加到目录中
       allDirectories.add(playlist.name)
     }
@@ -539,7 +551,7 @@ const clearSearch = (): void => {
 const openFolderDialog = async (): Promise<void> => {
   try {
     const selected = await FileUtils.selectFolder({
-      title: '选择音乐文件夹',
+      title: t('library.selectMusicFolder'),
     })
 
     if (selected) {
@@ -609,7 +621,7 @@ const toggleSortOrder = (): void => {
 
 const playFile = (file: SearchResult): void => {
   const playlist: Playlist = {
-    name: '搜索结果',
+    name: t('library.searchResults'),
     files: [file],
   }
   playPlaylist(playlist)

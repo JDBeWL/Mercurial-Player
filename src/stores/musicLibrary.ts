@@ -27,6 +27,7 @@ function normalizePath(p: string): string {
 interface CachedPlaylist {
   name: string
   files: Omit<Track, 'coverPath'>[]
+  isAllSongsPlaylist?: boolean
 }
 
 interface MusicLibraryState {
@@ -265,6 +266,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         const lightPlaylists: CachedPlaylist[] = this.playlists.map((p) => ({
           name: p.name,
           files: p.files.map(({ coverPath: _coverPath, ...rest }) => rest),
+          isAllSongsPlaylist: p.isAllSongsPlaylist,
         }))
         await store.set('libraryCache', {
           playlists: lightPlaylists,

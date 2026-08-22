@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
+import i18n from '@/i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { type UnlistenFn } from '@tauri-apps/api/event'
 import FileUtils from '../utils/fileUtils'
@@ -504,8 +505,8 @@ export const usePlayerStore = defineStore('player', {
           showToUser: true,
           userMessage:
             errorAction === 'switch-fallback'
-              ? `音频设备已断开，切换到备用设备失败: ${deviceName}`
-              : `切换到新设备失败: ${deviceName}`,
+              ? i18n.global.t('errors.switchDeviceFallbackFailed', { device: deviceName })
+              : i18n.global.t('errors.switchDeviceFailed', { device: deviceName }),
         })
       } finally {
         this._isSwitchingDevice = false
@@ -661,7 +662,7 @@ export const usePlayerStore = defineStore('player', {
         let timeoutId: ReturnType<typeof setTimeout> | null = null
         const playPromise = invoke('play_track', { path: resolvedPath })
         const timeoutPromise = new Promise((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error('播放超时')), 5000)
+          timeoutId = setTimeout(() => reject(new Error(i18n.global.t('errors.playTimeout'))), 5000)
         })
 
         try {

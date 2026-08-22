@@ -62,15 +62,17 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useConfigStore } from '../../stores/config'
 import logger from '../../utils/logger'
 import MD3Select from '../MD3Select.vue'
 
+const { t } = useI18n()
 const configStore = useConfigStore()
 
 const sortOrderOptions = computed(() => [
-  { value: 'asc', label: 'A-Z (升序)' },
-  { value: 'desc', label: 'Z-A (降序)' },
+  { value: 'asc', label: t('config.sortAsc') },
+  { value: 'desc', label: t('config.sortDesc') },
 ])
 
 const saveConfig = async (): Promise<void> => {

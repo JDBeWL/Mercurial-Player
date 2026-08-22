@@ -11,6 +11,13 @@ vi.mock('@/stores/player', () => ({
   usePlayerStore: () => storeRef.current,
 }))
 
+// mock vue-i18n（组件 setup 中调用 useI18n 获取 t 函数）
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => key,
+  }),
+}))
+
 /** 创建一个响应式 mock store，模拟 playerStore 的状态和方法 */
 function createMockStore(overrides: Record<string, unknown> = {}) {
   return reactive({

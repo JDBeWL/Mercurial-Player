@@ -1,21 +1,21 @@
 <template>
   <div class="tab-content">
     <div class="content-header">
-      <h3>{{ $t('config.playStats') || '播放统计' }}</h3>
+      <h3>{{ $t('config.playStats') }}</h3>
       <button
         v-if="playStats && playStats.totalPlays > 0"
         class="text-button danger"
         @click="clearStats"
       >
         <span class="material-symbols-rounded">delete</span>
-        清除数据
+        {{ $t('config.clearPlayStatsData') }}
       </button>
     </div>
 
     <div v-if="!playStats || playStats.totalPlays === 0" class="empty-state">
       <span class="material-symbols-rounded">bar_chart</span>
-      <p>暂无播放记录</p>
-      <p class="hint">播放音乐后这里会显示统计数据</p>
+      <p>{{ $t('config.noPlayStats') }}</p>
+      <p class="hint">{{ $t('config.noPlayStatsHint') }}</p>
     </div>
 
     <template v-else>
@@ -25,21 +25,21 @@
           <span class="material-symbols-rounded">play_circle</span>
           <div class="stat-content">
             <span class="stat-value">{{ playStats.totalPlays }}</span>
-            <span class="stat-label">总播放次数</span>
+            <span class="stat-label">{{ $t('config.totalPlays') }}</span>
           </div>
         </div>
         <div class="stat-card">
           <span class="material-symbols-rounded">library_music</span>
           <div class="stat-content">
             <span class="stat-value">{{ playStats.totalTracks }}</span>
-            <span class="stat-label">播放过的歌曲</span>
+            <span class="stat-label">{{ $t('config.tracksPlayed') }}</span>
           </div>
         </div>
         <div class="stat-card">
           <span class="material-symbols-rounded">schedule</span>
           <div class="stat-content">
             <span class="stat-value">{{ playStats.totalPlayTimeFormatted }}</span>
-            <span class="stat-label">总播放时长</span>
+            <span class="stat-label">{{ $t('config.totalPlayTime') }}</span>
           </div>
         </div>
       </div>
@@ -48,16 +48,16 @@
       <div v-if="mostPlayed.length > 0" class="section">
         <h4>
           <span class="material-symbols-rounded">trending_up</span>
-          最常播放
+          {{ $t('config.mostPlayed') }}
         </h4>
         <div class="track-list">
           <div v-for="(item, index) in mostPlayed" :key="item.path" class="track-item">
             <span class="rank" :class="{ 'top-3': index < 3 }">{{ index + 1 }}</span>
             <div class="track-info">
-              <span class="track-title">{{ item.title || '未知曲目' }}</span>
+              <span class="track-title">{{ item.title || $t('config.unknownTrack') }}</span>
               <span v-if="item.artist" class="track-artist">{{ item.artist }}</span>
             </div>
-            <span class="play-count">{{ item.count }} 次</span>
+            <span class="play-count">{{ $t('config.playCountTimes', { count: item.count }) }}</span>
           </div>
         </div>
       </div>
@@ -66,13 +66,13 @@
       <div v-if="recentPlayed.length > 0" class="section">
         <h4>
           <span class="material-symbols-rounded">history</span>
-          最近播放
+          {{ $t('config.recentPlayed') }}
         </h4>
         <div class="track-list">
           <div v-for="item in recentPlayed" :key="item.timestamp" class="track-item">
             <span class="material-symbols-rounded track-icon">music_note</span>
             <div class="track-info">
-              <span class="track-title">{{ item.title || '未知曲目' }}</span>
+              <span class="track-title">{{ item.title || $t('config.unknownTrack') }}</span>
               <span v-if="item.artist" class="track-artist">{{ item.artist }}</span>
             </div>
             <span class="play-time">{{ formatTime(item.timestamp) }}</span>
@@ -85,11 +85,14 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { pluginManager } from '../../plugins'
 import { useErrorNotification } from '../../composables/useErrorNotification'
 import { usePlayerStore } from '../../stores/player'
+import { getCurrentLocale } from '../../i18n'
 import type { Track } from '@/types'
 
+const { t } = useI18n()
 const { showError } = useErrorNotification()
 const playerStore = usePlayerStore()
 
@@ -183,7 +186,7 @@ const enrichTrackInfo = (tracks: Array<{ path: string; count: number }>): MostPl
 
 // 从路径提取文件名
 const extractFileName = (path: string): string => {
-  if (!path) return '未知'
+  if (!path) return t('config.unknown')
   const parts = path.replace(/\\/g, '/').split('/')
   const filename = parts[parts.length - 1]
   return filename.replace(/\.[^/.]+$/, '')
@@ -194,17 +197,22 @@ const formatTime = (timestamp: number): string => {
   const date = new Date(timestamp)
   const now = new Date()
   const diff = now.getTime() - date.getTime()
+  const locale = getCurrentLocale() === 'zh' ? 'zh-CN' : 'en-US'
 
   // 今天
   if (diff < 24 * 60 * 60 * 1000 && date.getDate() === now.getDate()) {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    return date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
   }
   // 昨天
   if (diff < 48 * 60 * 60 * 1000) {
-    return '昨天 ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    return (
+      t('config.yesterday') +
+      ' ' +
+      date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+    )
   }
   // 更早
-  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  return date.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
 }
 
 // 清除统计数据
@@ -215,7 +223,7 @@ const clearStats = (): void => {
   if (playCountInstance?.instance) {
     playCountInstance.instance.clearAllData()
     void refreshStats()
-    showError('播放统计已清除', 'info')
+    showError(t('config.playStatsCleared'), 'info')
   }
 }
 

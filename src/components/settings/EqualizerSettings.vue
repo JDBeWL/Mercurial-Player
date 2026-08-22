@@ -1,9 +1,9 @@
 <template>
   <div class="equalizer-settings">
     <div class="content-header">
-      <h3>{{ $t('config.equalizer') || 'EQ 均衡器' }}</h3>
+      <h3>{{ $t('config.equalizer') }}</h3>
       <div class="header-actions">
-        <button class="icon-button" :title="$t('config.reset') || '重置'" @click="resetEq">
+        <button class="icon-button" :title="$t('config.reset')" @click="resetEq">
           <span class="material-symbols-rounded">restart_alt</span>
         </button>
       </div>
@@ -13,7 +13,7 @@
     <div class="eq-toggle" @click="toggleEnabled">
       <div class="toggle-info">
         <span class="material-symbols-rounded">equalizer</span>
-        <span class="toggle-label">{{ $t('config.enableEq') || '启用均衡器' }}</span>
+        <span class="toggle-label">{{ $t('config.enableEq') }}</span>
       </div>
       <div class="switch" :class="{ active: enabled }">
         <div class="switch-track"></div>
@@ -23,7 +23,7 @@
 
     <!-- 预设选择 -->
     <div class="preset-section">
-      <label class="section-label">{{ $t('config.eqPreset') || '预设' }}</label>
+      <label class="section-label">{{ $t('config.eqPreset') }}</label>
       <div class="preset-chips">
         <button
           v-for="preset in presets"
@@ -40,7 +40,7 @@
     <!-- 前置增益 -->
     <div class="preamp-section">
       <div class="preamp-header">
-        <label class="section-label">{{ $t('config.preamp') || '前置增益' }}</label>
+        <label class="section-label">{{ $t('config.preamp') }}</label>
         <span class="preamp-value">{{ preamp > 0 ? '+' : '' }}{{ preamp.toFixed(1) }} dB</span>
       </div>
       <div
@@ -58,7 +58,7 @@
 
     <!-- 频段滑块 -->
     <div class="bands-section">
-      <label class="section-label">{{ $t('config.eqBands') || '频段调节' }}</label>
+      <label class="section-label">{{ $t('config.eqBands') }}</label>
       <div class="bands-container">
         <div v-for="(band, index) in bands" :key="index" class="band-control">
           <div class="band-value">

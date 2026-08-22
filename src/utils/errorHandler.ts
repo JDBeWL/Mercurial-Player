@@ -5,6 +5,7 @@
  */
 
 import logger from './logger'
+import i18n from '@/i18n'
 import type { ErrorContext, ErrorHandlerOptions, HandleResult, ErrorStats } from '@/types'
 
 /**
@@ -164,9 +165,21 @@ class ErrorHandler {
       // 合并上下文
       appError.context = { ...appError.context, ...context }
     } else if (error instanceof Error) {
-      appError = new AppError(error.message || '未知错误', type, severity, error, context)
+      appError = new AppError(
+        error.message || i18n.global.t('errors.unknownError'),
+        type,
+        severity,
+        error,
+        context,
+      )
     } else {
-      appError = new AppError(String(error) || '未知错误', type, severity, error, context)
+      appError = new AppError(
+        String(error) || i18n.global.t('errors.unknownError'),
+        type,
+        severity,
+        error,
+        context,
+      )
     }
 
     // 更新统计
@@ -269,25 +282,25 @@ class ErrorHandler {
   getUserFriendlyMessage(error: AppError): string {
     // 根据错误类型返回友好的消息
     const messages: Record<ErrorType, string> = {
-      [ErrorType.NETWORK]: '网络连接失败，请检查网络设置',
-      [ErrorType.NETWORK_TIMEOUT]: '网络请求超时，请稍后重试',
-      [ErrorType.NETWORK_OFFLINE]: '网络未连接，请检查网络设置',
-      [ErrorType.FILE_NOT_FOUND]: '文件未找到，可能已被移动或删除',
-      [ErrorType.FILE_READ_ERROR]: '文件读取失败，请检查文件权限',
-      [ErrorType.FILE_WRITE_ERROR]: '文件写入失败，请检查磁盘空间和权限',
-      [ErrorType.FILE_PERMISSION_DENIED]: '没有文件访问权限',
-      [ErrorType.AUDIO_DECODE_ERROR]: '音频解码失败，文件可能已损坏',
-      [ErrorType.AUDIO_PLAYBACK_ERROR]: '音频播放失败，请检查音频设备',
-      [ErrorType.AUDIO_DEVICE_ERROR]: '音频设备错误，请检查音频设备连接',
-      [ErrorType.CONFIG_LOAD_ERROR]: '配置加载失败，将使用默认配置',
-      [ErrorType.CONFIG_SAVE_ERROR]: '配置保存失败，请检查磁盘空间',
-      [ErrorType.CONFIG_INVALID]: '配置格式无效，已重置为默认配置',
-      [ErrorType.DATA_PARSE_ERROR]: '数据解析失败，数据格式可能不正确',
-      [ErrorType.DATA_VALIDATION_ERROR]: '数据验证失败，请检查输入数据',
-      [ErrorType.UNKNOWN]: '发生未知错误，请稍后重试',
+      [ErrorType.NETWORK]: i18n.global.t('errors.network'),
+      [ErrorType.NETWORK_TIMEOUT]: i18n.global.t('errors.networkTimeout'),
+      [ErrorType.NETWORK_OFFLINE]: i18n.global.t('errors.networkOffline'),
+      [ErrorType.FILE_NOT_FOUND]: i18n.global.t('errors.fileNotFound'),
+      [ErrorType.FILE_READ_ERROR]: i18n.global.t('errors.fileReadError'),
+      [ErrorType.FILE_WRITE_ERROR]: i18n.global.t('errors.fileWriteError'),
+      [ErrorType.FILE_PERMISSION_DENIED]: i18n.global.t('errors.filePermissionDenied'),
+      [ErrorType.AUDIO_DECODE_ERROR]: i18n.global.t('errors.audioDecodeError'),
+      [ErrorType.AUDIO_PLAYBACK_ERROR]: i18n.global.t('errors.audioPlaybackError'),
+      [ErrorType.AUDIO_DEVICE_ERROR]: i18n.global.t('errors.audioDeviceError'),
+      [ErrorType.CONFIG_LOAD_ERROR]: i18n.global.t('errors.configLoadError'),
+      [ErrorType.CONFIG_SAVE_ERROR]: i18n.global.t('errors.configSaveError'),
+      [ErrorType.CONFIG_INVALID]: i18n.global.t('errors.configInvalid'),
+      [ErrorType.DATA_PARSE_ERROR]: i18n.global.t('errors.dataParseError'),
+      [ErrorType.DATA_VALIDATION_ERROR]: i18n.global.t('errors.dataValidationError'),
+      [ErrorType.UNKNOWN]: i18n.global.t('errors.genericError'),
     }
 
-    return messages[error.type] || error.message || '发生错误，请稍后重试'
+    return messages[error.type] || error.message || i18n.global.t('errors.genericError')
   }
 
   /**

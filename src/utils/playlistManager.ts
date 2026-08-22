@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import i18n from '@/i18n'
 import { TitleExtractor } from './titleExtractor'
 import logger from './logger'
 import type {
@@ -207,7 +208,7 @@ export class PlaylistManager {
       const allFiles = this.collectAllAudioFiles(directoryTree)
       if (allFiles.length > 0) {
         playlists.unshift({
-          name: '全部歌曲',
+          name: i18n.global.t('playlist.allSongs'),
           path: directoryTree.path,
           files: await this.processAudioFiles(allFiles, config),
           subdirectoryCount: this.countSubdirectories(directoryTree),

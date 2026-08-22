@@ -3,6 +3,7 @@
  * 记录每首歌曲的播放次数和播放历史
  */
 
+import i18n from '@/i18n'
 import { PluginPermission, type PluginAPI, type BuiltinPluginDefinition } from '../pluginManager'
 import type { Track } from '@/types'
 
@@ -31,17 +32,17 @@ function formatDuration(seconds: number): string {
   const minutes = Math.floor((seconds % 3600) / 60)
 
   if (hours > 0) {
-    return `${hours}小时${minutes}分钟`
+    return i18n.global.t('player.durationHm', { hours, minutes })
   }
-  return `${minutes}分钟`
+  return i18n.global.t('player.durationM', { minutes })
 }
 
 export const playCountPlugin: BuiltinPluginDefinition = {
   id: 'builtin-play-count',
-  name: '播放统计',
+  name: i18n.global.t('plugin.playCountName'),
   version: '1.1.0',
   author: 'Mercurial Player',
-  description: '记录每首歌曲的播放次数和播放历史',
+  description: i18n.global.t('plugin.playCountDescription'),
   permissions: [PluginPermission.PLAYER_READ, PluginPermission.STORAGE],
 
   main: (api: PluginAPI) => {

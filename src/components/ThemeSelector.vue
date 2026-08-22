@@ -1,6 +1,6 @@
 <template>
   <div class="theme-selector">
-    <button class="icon-button" @click="toggleColorPicker">
+    <button class="icon-button" :title="$t('nav.theme.switch')" @click="toggleColorPicker">
       <span class="material-symbols-rounded">palette</span>
     </button>
 
@@ -34,7 +34,7 @@
             class="color-preset"
             :class="{ selected: themeStore.primaryColor === color.hex }"
             :style="{ backgroundColor: color.hex }"
-            :title="color.name"
+            :title="colorName(color)"
             @click="selectColor(color.hex)"
           >
             <span
@@ -70,7 +70,7 @@
         <div class="color-preview">
           <div class="preview-swatch" :style="{ backgroundColor: themeStore.primaryColor }"></div>
           <div class="preview-info">
-            <span class="preview-label">当前主题色</span>
+            <span class="preview-label">{{ $t('themeSelector.currentColor') }}</span>
             <span class="preview-hex">{{ themeStore.primaryColor }}</span>
           </div>
         </div>
@@ -81,6 +81,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useThemeStore } from '../stores/theme'
 import { useConfigStore } from '../stores/config'
 import logger from '../utils/logger'
@@ -98,23 +99,30 @@ interface ColorPreset {
   category: string
 }
 
+const { t, te } = useI18n()
+
+// 颜色名走 i18n（key 为不含 # 的十六进制值），缺失时回退到预设名
+const colorName = (color: ColorPreset): string => {
+  const key = `themeSelector.colors.${color.hex.slice(1)}`
+  return te(key) ? t(key) : color.name
+}
 const themeStore = useThemeStore()
 const configStore = useConfigStore()
 const showColorPicker = ref<boolean>(false)
 const activeCategory = ref<string>('all')
 
 // 颜色分类
-const colorCategories: ColorCategory[] = [
-  { id: 'all', name: '全部' },
-  { id: 'blue', name: '蓝色系' },
-  { id: 'purple', name: '紫色系' },
-  { id: 'pink', name: '粉色系' },
-  { id: 'red', name: '红色系' },
-  { id: 'orange', name: '橙色系' },
-  { id: 'green', name: '绿色系' },
-  { id: 'monet', name: '莫奈' },
-  { id: 'neutral', name: '中性色' },
-]
+const colorCategories = computed<ColorCategory[]>(() => [
+  { id: 'all', name: t('themeSelector.category.all') },
+  { id: 'blue', name: t('themeSelector.category.blue') },
+  { id: 'purple', name: t('themeSelector.category.purple') },
+  { id: 'pink', name: t('themeSelector.category.pink') },
+  { id: 'red', name: t('themeSelector.category.red') },
+  { id: 'orange', name: t('themeSelector.category.orange') },
+  { id: 'green', name: t('themeSelector.category.green') },
+  { id: 'monet', name: t('themeSelector.category.monet') },
+  { id: 'neutral', name: t('themeSelector.category.neutral') },
+])
 
 // 精选颜色预设（带名称和分类）- 使用用户直观可见的颜色
 const colorPresets: ColorPreset[] = [

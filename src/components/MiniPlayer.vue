@@ -25,7 +25,7 @@
         <div
           class="cover-overlay"
           data-tauri-drag-region="false"
-          :title="$t('common.close') || '恢复主界面'"
+          :title="$t('player.restoreMainWindow')"
           @click="exitMiniMode"
         >
           <span class="material-symbols-rounded">open_in_full</span>

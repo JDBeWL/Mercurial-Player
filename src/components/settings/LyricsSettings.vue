@@ -5,7 +5,7 @@
     </div>
 
     <div class="settings-section">
-      <h4 class="section-title">{{ $t('config.onlineLyrics') || '在线歌词' }}</h4>
+      <h4 class="section-title">{{ $t('config.onlineLyrics') }}</h4>
 
       <div class="setting-item">
         <div class="setting-info">
@@ -54,7 +54,7 @@
     </div>
 
     <div class="settings-section">
-      <h4 class="section-title">{{ $t('config.display') || '显示' }}</h4>
+      <h4 class="section-title">{{ $t('config.display') }}</h4>
 
       <div class="setting-item select">
         <div class="setting-info">
@@ -171,38 +171,38 @@
             <button
               class="preset-btn"
               :class="{ active: desktopLyricsConfig.colorPreset === 'blue' }"
-              :title="$t('config.colorPresetBlue') || '深蓝'"
+              :title="$t('config.colorPresetBlue')"
               @click="setColorPreset('blue')"
             >
               <span class="preset-preview blue-preview"></span>
-              <span class="preset-label">{{ $t('config.colorPresetBlue') || '深蓝' }}</span>
+              <span class="preset-label">{{ $t('config.colorPresetBlue') }}</span>
             </button>
             <button
               class="preset-btn"
               :class="{ active: desktopLyricsConfig.colorPreset === 'pink' }"
-              :title="$t('config.colorPresetPink') || '粉色'"
+              :title="$t('config.colorPresetPink')"
               @click="setColorPreset('pink')"
             >
               <span class="preset-preview pink-preview"></span>
-              <span class="preset-label">{{ $t('config.colorPresetPink') || '粉色' }}</span>
+              <span class="preset-label">{{ $t('config.colorPresetPink') }}</span>
             </button>
             <button
               class="preset-btn"
               :class="{ active: desktopLyricsConfig.colorPreset === 'orange' }"
-              :title="$t('config.colorPresetOrange') || '橙色'"
+              :title="$t('config.colorPresetOrange')"
               @click="setColorPreset('orange')"
             >
               <span class="preset-preview orange-preview"></span>
-              <span class="preset-label">{{ $t('config.colorPresetOrange') || '橙色' }}</span>
+              <span class="preset-label">{{ $t('config.colorPresetOrange') }}</span>
             </button>
             <button
               class="preset-btn"
               :class="{ active: desktopLyricsConfig.colorPreset === 'green' }"
-              :title="$t('config.colorPresetGreen') || '绿色'"
+              :title="$t('config.colorPresetGreen')"
               @click="setColorPreset('green')"
             >
               <span class="preset-preview green-preview"></span>
-              <span class="preset-label">{{ $t('config.colorPresetGreen') || '绿色' }}</span>
+              <span class="preset-label">{{ $t('config.colorPresetGreen') }}</span>
             </button>
           </div>
         </div>

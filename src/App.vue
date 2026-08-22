@@ -34,7 +34,7 @@
         <button
           class="icon-button"
           data-tauri-drag-region="false"
-          title="设置"
+          :title="$t('nav.settings')"
           @click="toggleSettings"
         >
           <span class="material-symbols-rounded">settings</span>
@@ -42,7 +42,7 @@
         <button
           class="icon-button"
           data-tauri-drag-region="false"
-          title="切换主题"
+          :title="themeStore.isDarkMode ? $t('nav.theme.light') : $t('nav.theme.dark')"
           @click="themeStore.toggleDarkMode"
         >
           <span class="material-symbols-rounded">{{
@@ -90,7 +90,7 @@
         <button
           class="icon-button"
           data-tauri-drag-region="false"
-          title="Mini模式"
+          :title="$t('window.miniMode')"
           @click="configStore.toggleMiniMode"
         >
           <span class="material-symbols-rounded">picture_in_picture_alt</span>
@@ -98,7 +98,7 @@
         <button
           class="icon-button"
           data-tauri-drag-region="false"
-          title="最小化"
+          :title="$t('window.minimize')"
           @click="minimizeWindow"
         >
           <span class="material-symbols-rounded">minimize</span>
@@ -106,7 +106,7 @@
         <button
           class="icon-button"
           data-tauri-drag-region="false"
-          :title="isFullscreen ? '退出全屏' : '全屏'"
+          :title="isFullscreen ? $t('window.exitFullscreen') : $t('window.fullscreen')"
           @click="toggleFullscreen"
         >
           <span class="material-symbols-rounded">{{
@@ -116,7 +116,7 @@
         <button
           class="icon-button"
           data-tauri-drag-region="false"
-          title="关闭"
+          :title="$t('window.close')"
           @click="closeWindow"
         >
           <span class="material-symbols-rounded">close</span>
@@ -197,7 +197,11 @@
                   <button
                     v-if="!configStore.audio.exclusiveMode"
                     class="icon-button view-toggle-btn"
-                    :title="viewMode === 'lyrics' ? '切换到波形模式' : '切换到歌词模式'"
+                    :title="
+                      viewMode === 'lyrics'
+                        ? $t('window.switchToVisualizer')
+                        : $t('window.switchToLyrics')
+                    "
                     @click="toggleViewMode"
                   >
                     <span class="material-symbols-rounded">{{
@@ -491,7 +495,7 @@ watch(
       wasImmersiveBeforeSettings.value = false
       immersiveCover.value = true
     }
-  }
+  },
 )
 
 onMounted(() => {
@@ -543,21 +547,21 @@ const currentTrackCover = computed(() => {
 // 沉浸式封面：提取封面主色作为背景（提取失败时回退主题色）。
 // 取色风格由设置控制：album = 专辑主题色（全图代表色），fusion = 封面融合（取右缘条带）
 const immersiveColorScheme = computed<ImmersiveColorScheme>(
-  () => configStore.general.immersiveColorScheme ?? 'album'
+  () => configStore.general.immersiveColorScheme ?? 'album',
 )
 const { dominantColor } = useDominantColor(
   computed(() => currentTrack.value?.coverPath),
-  immersiveColorScheme
+  immersiveColorScheme,
 )
 const immersiveBackground = computed(
-  () => dominantColor.value || 'var(--md-sys-color-surface-container)'
+  () => dominantColor.value || 'var(--md-sys-color-surface-container)',
 )
 
 // 封面展示 URL（供沉浸式封面的 <img> 使用）：
 // 源图不够大时用 pica(Lanczos3) 预放大到精确显示尺寸，避免浏览器双线性放大发糊
 const { coverDisplayUrl } = useImmersiveCover(
   computed(() => currentTrack.value?.coverPath),
-  immersiveCover
+  immersiveCover,
 )
 
 // 音频信息文案（格式 | 比特率 | 采样率 | 位深度 | 声道）
@@ -1104,7 +1108,6 @@ useAppLifecycle({
   height: 100%;
   aspect-ratio: 1 / 1; /* 宽度跟随窗口高度，封面区域始终为正方形，不被裁切成矩形 */
 
-
   /* alpha 通道：70% 后才启动、分段缓出，只负责终态的消失 */
   -webkit-mask-image: linear-gradient(
     to right,
@@ -1187,7 +1190,7 @@ useAppLifecycle({
     opacity 0.3s ease;
 }
 
-.app-container.immersive-cover .player-lower{
+.app-container.immersive-cover .player-lower {
   padding-top: 0;
 }
 

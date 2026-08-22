@@ -51,8 +51,10 @@
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { usePlayerStore } from '../stores/player'
 
+const { t } = useI18n()
 const playerStore = usePlayerStore()
 
 // 循环模式相关函数
@@ -67,11 +69,11 @@ const getRepeatIcon = () => {
 
 const getRepeatTitle = () => {
   if (playerStore.repeatMode === 'track') {
-    return '单曲循环'
+    return t('controls.repeatOne')
   } else if (playerStore.repeatMode === 'list') {
-    return '列表循环'
+    return t('controls.repeatList')
   }
-  return '循环播放'
+  return t('controls.repeat')
 }
 </script>
 

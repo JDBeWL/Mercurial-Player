@@ -1,23 +1,23 @@
 <template>
   <div class="tab-content">
     <div class="content-header">
-      <h3>{{ $t('config.plugins') || '插件' }}</h3>
+      <h3>{{ $t('config.plugins') }}</h3>
       <div class="header-actions">
         <button class="filled-tonal-button" @click="openPluginsFolder">
           <span class="material-symbols-rounded">folder_open</span>
-          {{ $t('config.openPluginsFolder') || '打开插件目录' }}
+          {{ $t('config.openPluginsFolder') }}
         </button>
         <button class="filled-tonal-button" @click="refreshPlugins">
           <span class="material-symbols-rounded">refresh</span>
-          {{ $t('config.refresh') || '刷新' }}
+          {{ $t('config.refresh') }}
         </button>
       </div>
     </div>
 
     <div v-if="plugins.length === 0" class="empty-state">
       <span class="material-symbols-rounded">extension</span>
-      <p>{{ $t('config.noPlugins') || '暂无已安装的插件' }}</p>
-      <p class="hint">{{ $t('config.pluginHint') || '将插件文件夹放入插件目录即可安装' }}</p>
+      <p>{{ $t('config.noPlugins') }}</p>
+      <p class="hint">{{ $t('config.pluginHint') }}</p>
     </div>
 
     <div v-else class="plugin-list">
@@ -33,12 +33,14 @@
         <div class="plugin-info">
           <div class="plugin-header">
             <span class="plugin-name">{{ plugin.name }}</span>
-            <span v-if="plugin.id.startsWith('builtin-')" class="plugin-builtin">内置</span>
+            <span v-if="plugin.id.startsWith('builtin-')" class="plugin-builtin">{{
+              $t('plugin.builtin')
+            }}</span>
             <span class="plugin-state" :class="`state-${plugin.state}`">
               {{ getStateText(plugin.state) }}
             </span>
           </div>
-          <p class="plugin-description">{{ plugin.description || '暂无描述' }}</p>
+          <p class="plugin-description">{{ plugin.description || $t('plugin.noDescription') }}</p>
           <div class="plugin-meta">
             <span class="plugin-author">
               <span class="material-symbols-rounded">person</span>
@@ -47,7 +49,7 @@
             <span class="plugin-version">v{{ plugin.version }}</span>
             <span v-if="plugin.permissions?.length" class="plugin-permissions">
               <span class="material-symbols-rounded">security</span>
-              {{ plugin.permissions.length }} 项权限
+              {{ $t('plugin.permissionsCount', { count: plugin.permissions.length }) }}
             </span>
           </div>
           <p v-if="plugin.error" class="plugin-error">{{ plugin.error }}</p>
@@ -56,7 +58,7 @@
           <button
             v-if="plugin.state === 'inactive'"
             class="icon-button"
-            :title="$t('config.activate') || '激活'"
+            :title="$t('config.activate')"
             @click="activatePlugin(plugin.id)"
           >
             <span class="material-symbols-rounded">play_arrow</span>
@@ -64,7 +66,7 @@
           <button
             v-if="plugin.state === 'active'"
             class="icon-button"
-            :title="$t('config.deactivate') || '停用'"
+            :title="$t('config.deactivate')"
             @click="deactivatePlugin(plugin.id)"
           >
             <span class="material-symbols-rounded">pause</span>
@@ -72,7 +74,7 @@
           <button
             v-if="!plugin.id.startsWith('builtin-')"
             class="icon-button danger"
-            :title="$t('config.uninstall') || '卸载'"
+            :title="$t('config.uninstall')"
             @click="uninstallPlugin(plugin.id)"
           >
             <span class="material-symbols-rounded">delete</span>
@@ -85,22 +87,24 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { pluginManager, PluginState, loadAllPlugins } from '../../plugins'
 import type { Plugin, PluginStateType } from '../../plugins/pluginManager'
 import logger from '../../utils/logger'
 import { useErrorNotification } from '../../composables/useErrorNotification'
 
+const { t } = useI18n()
 const { showError } = useErrorNotification()
 
 const plugins = computed<Plugin[]>(() => pluginManager.getAllPlugins())
 
 const getStateText = (state: PluginStateType): string => {
   const texts: Partial<Record<PluginStateType, string>> = {
-    [PluginState.ACTIVE]: '运行中',
-    [PluginState.INACTIVE]: '未激活',
-    [PluginState.ERROR]: '错误',
-    [PluginState.DISABLED]: '已禁用',
+    [PluginState.ACTIVE]: t('plugin.state.active'),
+    [PluginState.INACTIVE]: t('plugin.state.inactive'),
+    [PluginState.ERROR]: t('plugin.state.error'),
+    [PluginState.DISABLED]: t('plugin.state.disabled'),
   }
   return texts[state] || state
 }
@@ -108,22 +112,22 @@ const getStateText = (state: PluginStateType): string => {
 const activatePlugin = async (pluginId: string): Promise<void> => {
   try {
     await pluginManager.activate(pluginId)
-    showError('插件已激活', 'info')
+    showError(t('plugin.activated'), 'info')
   } catch (error) {
     logger.error('激活插件失败:', error)
     const msg = error instanceof Error ? error.message : String(error)
-    showError(`激活失败: ${msg}`, 'error')
+    showError(t('plugin.activateFailed', { message: msg }), 'error')
   }
 }
 
 const deactivatePlugin = async (pluginId: string): Promise<void> => {
   try {
     await pluginManager.deactivate(pluginId)
-    showError('插件已停用', 'info')
+    showError(t('plugin.deactivated'), 'info')
   } catch (error) {
     logger.error('停用插件失败:', error)
     const msg = error instanceof Error ? error.message : String(error)
-    showError(`停用失败: ${msg}`, 'error')
+    showError(t('plugin.deactivateFailed', { message: msg }), 'error')
   }
 }
 
@@ -131,11 +135,11 @@ const uninstallPlugin = async (pluginId: string): Promise<void> => {
   try {
     await pluginManager.uninstall(pluginId)
     await invoke('uninstall_plugin', { pluginId })
-    showError('插件已卸载', 'info')
+    showError(t('plugin.uninstalled'), 'info')
   } catch (error) {
     logger.error('卸载插件失败:', error)
     const msg = error instanceof Error ? error.message : String(error)
-    showError(`卸载失败: ${msg}`, 'error')
+    showError(t('plugin.uninstallFailed', { message: msg }), 'error')
   }
 }
 
@@ -144,7 +148,7 @@ const openPluginsFolder = async (): Promise<void> => {
     await invoke('open_plugins_directory')
   } catch (error) {
     logger.error('打开插件目录失败:', error)
-    showError('无法打开插件目录', 'error')
+    showError(t('plugin.openFolderFailed'), 'error')
   }
 }
 
@@ -165,11 +169,11 @@ const refreshPlugins = async (): Promise<void> => {
 
     // 重新加载所有插件
     await loadAllPlugins()
-    showError('插件列表已刷新', 'info')
+    showError(t('plugin.refreshed'), 'info')
   } catch (error) {
     logger.error('刷新插件失败:', error)
     const msg = error instanceof Error ? error.message : String(error)
-    showError(`刷新失败: ${msg}`, 'error')
+    showError(t('plugin.refreshFailed', { message: msg }), 'error')
   }
 }
 

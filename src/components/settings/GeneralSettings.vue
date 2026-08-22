@@ -94,7 +94,7 @@
     </div>
 
     <div class="settings-section">
-      <h4 class="section-title">{{ $t('config.display') || '显示' }}</h4>
+      <h4 class="section-title">{{ $t('config.display') }}</h4>
 
       <div class="setting-item">
         <div class="setting-info">
@@ -165,13 +165,13 @@
 
     <!-- 缓存设置 -->
     <div class="settings-section">
-      <h4 class="section-title">{{ $t('config.cacheSettings') || '缓存设置' }}</h4>
+      <h4 class="section-title">{{ $t('config.cacheSettings') }}</h4>
 
       <div class="setting-item">
         <div class="setting-info">
-          <span class="setting-label">{{ $t('config.coverCacheSize') || '封面缓存大小' }}</span>
+          <span class="setting-label">{{ $t('config.coverCacheSize') }}</span>
           <div class="setting-desc">
-            {{ $t('config.coverCacheSizeDesc') || '封面图片缓存的最大磁盘空间' }}
+            {{ $t('config.coverCacheSizeDesc') }}
           </div>
         </div>
         <div class="cache-size-control">
@@ -191,9 +191,9 @@
 
       <div class="setting-item">
         <div class="setting-info">
-          <span class="setting-label">{{ $t('config.coverCachePath') || '封面缓存路径' }}</span>
+          <span class="setting-label">{{ $t('config.coverCachePath') }}</span>
           <div class="setting-desc">
-            {{ $t('config.coverCachePathDesc') || '封面缓存存储位置，默认使用系统临时目录' }}
+            {{ $t('config.coverCachePathDesc') }}
           </div>
         </div>
         <div class="cache-path-control">
@@ -204,7 +204,7 @@
           <button
             v-if="coverCachePath"
             class="cache-path-btn"
-            title="恢复默认"
+            :title="$t('config.restoreDefault')"
             @click="resetCachePath"
           >
             <span class="material-symbols-rounded">refresh</span>
@@ -214,20 +214,20 @@
 
       <div class="setting-item">
         <div class="setting-info">
-          <span class="setting-label">{{ $t('config.clearCoverCache') || '清理封面缓存' }}</span>
+          <span class="setting-label">{{ $t('config.clearCoverCache') }}</span>
           <div class="setting-desc">
-            {{ $t('config.clearCoverCacheDesc') || '立即清理所有过期的封面缓存文件' }}
+            {{ $t('config.clearCoverCacheDesc') }}
           </div>
         </div>
         <button class="clear-cache-btn" :disabled="isClearingCache" @click="clearCoverCache">
-          <span v-if="!isClearingCache">{{ $t('config.clearCache') || '清理' }}</span>
-          <span v-else>{{ $t('config.clearing') || '清理中...' }}</span>
+          <span v-if="!isClearingCache">{{ $t('config.clearCache') }}</span>
+          <span v-else>{{ $t('config.clearing') }}</span>
         </button>
       </div>
 
       <div class="setting-item">
         <div class="setting-info">
-          <span class="setting-label">{{ $t('config.metadataCache') || '元数据缓存' }}</span>
+          <span class="setting-label">{{ $t('config.metadataCache') }}</span>
           <div class="setting-desc">{{ metadataCacheDesc }}</div>
         </div>
         <button
@@ -235,8 +235,8 @@
           :disabled="isClearingMetadataCache"
           @click="clearMetadataCache"
         >
-          <span v-if="!isClearingMetadataCache">{{ $t('config.clearCache') || '清理' }}</span>
-          <span v-else>{{ $t('config.clearing') || '清理中...' }}</span>
+          <span v-if="!isClearingMetadataCache">{{ $t('config.clearCache') }}</span>
+          <span v-else>{{ $t('config.clearing') }}</span>
         </button>
       </div>
     </div>
@@ -325,7 +325,7 @@ const loadTempDirPath = async () => {
   try {
     tempDirPath.value = await invoke<string>('get_temp_dir_command')
   } catch (error) {
-    tempDirPath.value = '系统临时目录'
+    tempDirPath.value = t('config.systemTempDir')
     logger.error('Failed to get temp dir:', error)
   }
 }
@@ -337,11 +337,11 @@ const metadataCacheStats = ref({ count: 0, size: 0 })
 const metadataCacheDesc = computed(() => {
   const { count, size } = metadataCacheStats.value
   if (count === 0) {
-    return '暂无元数据缓存'
+    return t('config.metadataCacheEmpty')
   }
   const sizeStr =
     size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(2)} MB` : `${(size / 1024).toFixed(2)} KB`
-  return `已缓存 ${count} 首歌曲的元数据，占用 ${sizeStr}`
+  return t('config.metadataCacheStats', { count, size: sizeStr })
 })
 
 const loadMetadataCacheStats = async () => {
@@ -431,7 +431,7 @@ const selectCachePath = async () => {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: '选择封面缓存目录',
+      title: t('config.selectCoverCacheDir'),
     })
     if (selected && typeof selected === 'string') {
       coverCachePath.value = selected

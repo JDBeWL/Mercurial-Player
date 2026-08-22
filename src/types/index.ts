@@ -55,6 +55,8 @@ export interface Playlist {
   name: string
   files: Track[]
   totalFiles?: number
+  /** 全部歌曲播放列表标记（生成时写入；旧缓存中可能缺失，需结合名称判断） */
+  isAllSongsPlaylist?: boolean
 }
 
 export type RepeatMode = 'none' | 'track' | 'list'
