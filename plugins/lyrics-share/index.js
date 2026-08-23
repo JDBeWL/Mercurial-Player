@@ -229,11 +229,81 @@ const calculateLineCount = (ctx, text, maxWidth) => {
 }
 
 /**
+ * 歌词排版基准字号（两种布局共用，自适应缩放的基准）
+ */
+const LYRIC_BASE_FONTS = { main: 56, trans: 52, mainLineH: 72, transLineH: 64, gap: 24 }
+
+/**
+ * 按缩放比例测量歌词块尺寸（含换行重排），不绘制
+ * @returns {{mainFont:number,transFont:number,mainLineH:number,transLineH:number,gap:number,height:number,mainLines:number,transLines:number}}
+ */
+const measureLyricBlock = (ctx, mainText, transText, maxWidth, scale, fontFamily) => {
+  const mainFont = Math.round(LYRIC_BASE_FONTS.main * scale)
+  const transFont = Math.round(LYRIC_BASE_FONTS.trans * scale)
+  const mainLineH = Math.round(LYRIC_BASE_FONTS.mainLineH * scale)
+  const transLineH = Math.round(LYRIC_BASE_FONTS.transLineH * scale)
+  const gap = Math.round(LYRIC_BASE_FONTS.gap * scale)
+
+  ctx.font = `bold ${mainFont}px ${fontFamily}`
+  const mainLines = mainText ? calculateLineCount(ctx, mainText, maxWidth) : 0
+
+  let transLines = 0
+  if (transText) {
+    ctx.font = `${transFont}px ${fontFamily}`
+    transLines = calculateLineCount(ctx, transText, maxWidth)
+  }
+
+  const height =
+    mainLines * mainLineH + (transText && transLines > 0 ? gap + transLines * transLineH : 0)
+
+  return { mainFont, transFont, mainLineH, transLineH, gap, height, mainLines, transLines }
+}
+
+/**
+ * 在 [minScale, maxScale] 区间内二分搜索能放入 areaHeight 的最大歌词缩放比例。
+ * 空间富余时放大字号填充（不超过 maxScale），空间不足时缩小（不低于 minScale）。
+ * @returns 测量结果；返回 null 表示 minScale 也放不下（调用方需要加高画布）
+ */
+const fitLyricScale = (
+  ctx,
+  mainText,
+  transText,
+  maxWidth,
+  areaHeight,
+  fontFamily,
+  minScale = 0.65,
+  maxScale = 1.5,
+) => {
+  // 目标高度留 8% 呼吸空间，避免文字贴边
+  const target = areaHeight * 0.92
+
+  let best = measureLyricBlock(ctx, mainText, transText, maxWidth, minScale, fontFamily)
+  if (best.height > target) return null
+
+  let lo = minScale
+  let hi = maxScale
+  for (let i = 0; i < 9; i++) {
+    const mid = (lo + hi) / 2
+    const m = measureLyricBlock(ctx, mainText, transText, maxWidth, mid, fontFamily)
+    if (m.height <= target) {
+      best = m
+      lo = mid
+    } else {
+      hi = mid
+    }
+  }
+  return best
+}
+
+/**
  * 生成经典布局分享图片
+ * 自适应排版：先在临时画布上完成全部测量，空间富余时放大封面/标题/歌词填满画布，
+ * 空间不足时缩小歌词字号防止溢出（极端情况加高画布兜底）
  */
 const generateClassicImage = async (options = {}) => {
   const config = { ...getConfig(), ...options }
   const { width, padding } = config
+  const contentWidth = width - padding * 2
 
   // 先让出主线程，避免阻塞 UI
   await yieldToMain()
@@ -254,34 +324,75 @@ const generateClassicImage = async (options = {}) => {
 
   // 获取当前歌词（使用公共抽取函数）
   const { mainText, transText } = getCurrentLyricText(lyrics, lyricIndex)
+  const hasLyrics = mainText.length > 0
 
   // 让出主线程，避免长时间阻塞
   await yieldToMain()
 
-  // 计算歌词需要的行数来决定高度（使用公共计算函数）
+  // ==== 自适应排版：先测量，定稿尺寸后再绘制 ====
   const tempCanvas = api.utils.createCanvas(width, 100)
   const tempCtx = tempCanvas.ctx
-  const maxLyricWidth = width - padding * 2
 
-  tempCtx.font = `bold 56px ${config.fontFamily}`
-  const mainLines = calculateLineCount(tempCtx, mainText, maxLyricWidth)
+  const title = state.currentTrack.title || state.currentTrack.name || '未知歌曲'
+  const artist = state.currentTrack.artist || '未知艺术家'
 
-  tempCtx.font = `52px ${config.fontFamily}`
-  const transLines = calculateLineCount(tempCtx, transText, maxLyricWidth)
+  // 基准字号下的歌词块高度
+  const baseMeasure = measureLyricBlock(tempCtx, mainText, transText, contentWidth, 1, config.fontFamily)
 
-  // 动态计算高度
-  const coverSize = Math.min(width - padding * 2, 400)
-  const hasLyrics = mainText.length > 0
+  // 垂直方向固定开销：顶部留白60 + 封面下间距60 + 歌词上留白40 + 进度区140
+  const FIXED_V = 300
+  // 基准信息区高度（标题58 + 间距50 + 艺人42，单行估算）
+  const BASE_INFO_H = 150
+  const baseCoverSize = Math.min(contentWidth, 400)
 
-  // 基础高度：padding + 封面区域 + 歌曲信息 + 进度条 + padding
-  const baseHeight = padding + 60 + coverSize + 60 + 80 + 150 + padding
+  // 基准状态下的自然内容高度
+  const naturalHeight = padding * 2 + FIXED_V + baseCoverSize + BASE_INFO_H + baseMeasure.height
 
-  // 歌词区域高度（没有歌词时为 0）
-  const lyricAreaHeight = hasLyrics
-    ? 100 + mainLines * 72 + (transText ? transLines * 64 + 30 : 0)
-    : 0
+  // 画布高度：沿用原有上下限（有歌词 1280 ~ 1920，无歌词 900 ~ 1920）
+  let height = Math.max(hasLyrics ? 1280 : 900, Math.min(1920, naturalHeight))
 
-  const height = Math.max(hasLyrics ? 1280 : 900, Math.min(1920, baseHeight + lyricAreaHeight))
+  // ---- 分配富余空间：放大封面，标题/艺人字号小幅跟随 ----
+  const extra = height - naturalHeight
+  let coverSize = baseCoverSize
+  let titleScale = 1
+  if (extra > 0) {
+    coverSize = baseCoverSize + Math.min(extra * 0.55, contentWidth - baseCoverSize)
+    titleScale = Math.min(1.18, 1 + extra * 0.0008)
+  }
+
+  const titleFont = Math.round(48 * titleScale)
+  const artistFont = Math.round(32 * titleScale)
+  const titleLineH = Math.round(58 * titleScale)
+  const artistLineH = Math.round(42 * titleScale)
+  const titleGap = Math.round(50 * titleScale)
+
+  // 放大后重新测量标题/艺人实际行数
+  tempCtx.font = `bold ${titleFont}px ${config.fontFamily}`
+  const titleLines = calculateLineCount(tempCtx, title, contentWidth)
+  tempCtx.font = `${artistFont}px ${config.fontFamily}`
+  const artistLines = calculateLineCount(tempCtx, artist, contentWidth)
+  const infoBlockH = titleLines * titleLineH + titleGap + artistLines * artistLineH
+
+  // ---- 歌词区域：按实际剩余空间自适应缩放 ----
+  const lyricAreaTop = padding + 60 + coverSize + 60 + infoBlockH + 40
+  const lyricAreaBottom = height - padding - 140
+
+  let lyricMeasure = null
+  if (hasLyrics) {
+    lyricMeasure = fitLyricScale(
+      tempCtx,
+      mainText,
+      transText,
+      contentWidth,
+      lyricAreaBottom - lyricAreaTop,
+      config.fontFamily,
+    )
+    if (!lyricMeasure) {
+      // 最小字号也放不下：加高画布承接全部歌词，避免文字溢出
+      lyricMeasure = measureLyricBlock(tempCtx, mainText, transText, contentWidth, 0.65, config.fontFamily)
+      height = lyricAreaTop + lyricMeasure.height + 40 + 140 + padding
+    }
+  }
 
   // 获取主题颜色
   const themeInfo = await api.theme.getCurrent()
@@ -310,7 +421,7 @@ const generateClassicImage = async (options = {}) => {
   // 让出主线程
   await yieldToMain()
 
-  // 绘制封面图片（居中显示）
+  // ==== 绘制封面（居中，按富余空间放大） ====
   const coverX = (width - coverSize) / 2
   const coverY = padding + 60
 
@@ -339,61 +450,43 @@ const generateClassicImage = async (options = {}) => {
     ctx.fillText('♪', coverX + coverSize / 2, coverY + coverSize / 2)
   }
 
-  // 歌曲信息区域
-  const infoY = coverY + coverSize + 60
+  // ==== 绘制歌曲信息（标题 + 艺人，流式排布，字号随富余空间放大） ====
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
 
-  // 歌曲标题
+  const titleCenterY = coverY + coverSize + 60 + (titleLines * titleLineH) / 2
   ctx.fillStyle = onBgColor
-  ctx.font = `bold 48px ${config.fontFamily}`
-  const title = state.currentTrack.title || state.currentTrack.name || '未知歌曲'
-  const titleInfo = wrapText(ctx, title, width / 2, infoY, width - padding * 2, 58)
+  ctx.font = `bold ${titleFont}px ${config.fontFamily}`
+  wrapText(ctx, title, width / 2, titleCenterY, contentWidth, titleLineH)
 
-  // 艺术家（支持换行）
+  const artistCenterY =
+    titleCenterY + (titleLines * titleLineH) / 2 + titleGap + (artistLines * artistLineH) / 2
   ctx.fillStyle = onSurfaceVariant
-  ctx.font = `32px ${config.fontFamily}`
-  const artist = state.currentTrack.artist || '未知艺术家'
-  const artistY = infoY + titleInfo.totalHeight / 2 + 50
-  const artistInfo = wrapText(ctx, artist, width / 2, artistY, width - padding * 2, 42)
+  ctx.font = `${artistFont}px ${config.fontFamily}`
+  wrapText(ctx, artist, width / 2, artistCenterY, contentWidth, artistLineH)
 
-  // 歌词区域 - 在封面信息和进度条之间居中
-  // 歌词区域的范围：从歌曲信息下方到进度条上方
-  const lyricsAreaTop = artistY + artistInfo.totalHeight / 2 + 40 // 艺术家下方
-  const lyricsAreaBottom = height - padding - 140 // 进度条上方
-  const lyricsAreaCenterY = (lyricsAreaTop + lyricsAreaBottom) / 2
-  const gap = 24 // 主歌词和翻译之间的间隙
+  // ==== 绘制歌词（在信息区与进度条之间垂直居中，字号自适应） ====
+  if (hasLyrics && lyricMeasure) {
+    const lyricsAreaTop = artistCenterY + (artistLines * artistLineH) / 2 + 40
+    const lyricsAreaBottom = height - padding - 140
+    const lyricsAreaCenterY = (lyricsAreaTop + lyricsAreaBottom) / 2
 
-  if (mainText) {
-    // 先计算总高度
-    ctx.font = `bold 56px ${config.fontFamily}`
-    const mainInfo = wrapText(ctx, mainText, 0, 0, maxLyricWidth, 72, true)
+    const m = lyricMeasure
+    const mainBlockH = m.mainLines * m.mainLineH
 
-    let transInfo = null
-    if (transText) {
-      ctx.font = `52px ${config.fontFamily}`
-      transInfo = wrapText(ctx, transText, 0, 0, maxLyricWidth, 64, true)
-    }
-
-    // 计算整体高度
-    const totalLyricHeight = mainInfo.totalHeight + (transInfo ? gap + transInfo.totalHeight : 0)
-
-    // 计算起始 Y 位置，使整体居中
-    const lyricStartY = lyricsAreaCenterY - totalLyricHeight / 2 + mainInfo.totalHeight / 2
-
-    // 绘制主歌词
+    const mainCenterY = lyricsAreaCenterY - m.height / 2 + mainBlockH / 2
     ctx.fillStyle = primaryColor
-    ctx.font = `bold 56px ${config.fontFamily}`
-    wrapText(ctx, mainText, width / 2, lyricStartY, maxLyricWidth, 72)
+    ctx.font = `bold ${m.mainFont}px ${config.fontFamily}`
+    wrapText(ctx, mainText, width / 2, mainCenterY, contentWidth, m.mainLineH)
 
-    // 绘制翻译歌词
-    if (transText && transInfo) {
-      const transY = lyricStartY + mainInfo.totalHeight / 2 + gap + transInfo.totalHeight / 2
+    if (transText && m.transLines > 0) {
+      const transCenterY =
+        mainCenterY + mainBlockH / 2 + m.gap + (m.transLines * m.transLineH) / 2
       ctx.save()
       ctx.fillStyle = primaryColor
       ctx.globalAlpha = 0.85
-      ctx.font = `52px ${config.fontFamily}`
-      wrapText(ctx, transText, width / 2, transY, maxLyricWidth, 64)
+      ctx.font = `${m.transFont}px ${config.fontFamily}`
+      wrapText(ctx, transText, width / 2, transCenterY, contentWidth, m.transLineH)
       ctx.restore()
     }
   }
@@ -442,10 +535,13 @@ const generateClassicImage = async (options = {}) => {
 /**
  * 生成紧凑布局分享图片
  * 布局：歌词在上方，封面在右下角，歌曲信息和进度条在左下角
+ * 自适应排版：空间富余时放大封面/标题/歌词填满画布，
+ * 空间不足时缩小歌词字号防止溢出（极端情况加高画布）
  */
 const generateCompactImage = async (options = {}) => {
   const config = { ...getConfig(), ...options }
   const { width, padding } = config
+  const maxLyricWidth = width - padding * 2
 
   // 先让出主线程，避免阻塞 UI
   await yieldToMain()
@@ -464,31 +560,72 @@ const generateCompactImage = async (options = {}) => {
 
   // 获取当前歌词（使用公共抽取函数）
   const { mainText, transText } = getCurrentLyricText(lyrics, lyricIndex)
+  const hasLyrics = mainText.length > 0
 
   await yieldToMain()
 
-  // 紧凑布局尺寸
-  const coverSize = 200 // 右下角封面尺寸较小
-  const bottomAreaHeight = 280 // 底部区域高度（封面+信息+进度条）
-  const hasLyrics = mainText.length > 0
-
-  // 计算歌词行数（使用公共计算函数）
-  const maxLyricWidth = width - padding * 2
+  // ==== 自适应排版：先测量，定稿尺寸后再绘制 ====
   const tempCanvas = api.utils.createCanvas(width, 100)
   const tempCtx = tempCanvas.ctx
 
-  tempCtx.font = `bold 56px ${config.fontFamily}`
-  const mainLines = calculateLineCount(tempCtx, mainText, maxLyricWidth)
+  const title = state.currentTrack.title || state.currentTrack.name || '未知歌曲'
+  const artist = state.currentTrack.artist || '未知艺术家'
 
-  tempCtx.font = `52px ${config.fontFamily}`
-  const transLines = calculateLineCount(tempCtx, transText, maxLyricWidth)
+  // 基准尺寸
+  const baseCoverSize = 200
+  const topGap = 40 // 顶部水印与歌词区的间距
 
-  // 动态计算高度
-  const lyricAreaHeight = hasLyrics
-    ? padding + mainLines * 72 + (transText ? transLines * 64 + 30 : 0) + 60
+  // 基准歌词块高度（无歌词时按 200px 预留）
+  const baseLyricH = hasLyrics
+    ? measureLyricBlock(tempCtx, mainText, transText, maxLyricWidth, 1, config.fontFamily).height
     : 200
 
-  const height = Math.max(800, Math.min(1600, lyricAreaHeight + bottomAreaHeight + padding))
+  // 底部区域高度 = 底部留白 + 封面（左侧信息与封面对齐）
+  const baseBottomH = padding + baseCoverSize
+
+  // 自然内容高度：顶部留白 + 歌词 + 间距 + 底部区域
+  const naturalHeight = padding + topGap + baseLyricH + 20 + baseBottomH
+
+  // 画布高度：紧凑布局 800 ~ 1600
+  let height = Math.max(800, Math.min(1600, naturalHeight))
+
+  // ---- 分配富余空间：放大封面（底部区域随之变高），剩余空间留给歌词 ----
+  const extra = height - naturalHeight
+  let coverSize = baseCoverSize
+  if (extra > 0) {
+    // 无歌词时封面多分一些，避免中部大面积留白
+    const ratio = hasLyrics ? 0.35 : 0.6
+    coverSize = baseCoverSize + Math.min(extra * ratio, 160)
+  }
+  const bottomH = padding + coverSize
+
+  // ---- 歌词区域：按实际剩余空间自适应缩放 ----
+  const lyricAreaTop = padding + topGap
+  const lyricAreaBottom = height - 20 - bottomH
+
+  let lyricMeasure = null
+  if (hasLyrics) {
+    lyricMeasure = fitLyricScale(
+      tempCtx,
+      mainText,
+      transText,
+      maxLyricWidth,
+      lyricAreaBottom - lyricAreaTop,
+      config.fontFamily,
+    )
+    if (!lyricMeasure) {
+      // 最小字号也放不下：加高画布承接全部歌词，避免文字溢出
+      lyricMeasure = measureLyricBlock(
+        tempCtx,
+        mainText,
+        transText,
+        maxLyricWidth,
+        0.65,
+        config.fontFamily,
+      )
+      height = lyricAreaTop + lyricMeasure.height + 20 + bottomH
+    }
+  }
 
   // 获取主题颜色
   const themeInfo = await api.theme.getCurrent()
@@ -519,48 +656,38 @@ const generateCompactImage = async (options = {}) => {
 
   await yieldToMain()
 
-  // ========== 绘制歌词区域（上方） ==========
-  const lyricsAreaTop = padding + 40
-  const lyricsAreaBottom = height - bottomAreaHeight - 20
-  const lyricsAreaCenterY = (lyricsAreaTop + lyricsAreaBottom) / 2
-  const gap = 24
+  // ========== 绘制歌词区域（上方，垂直居中，字号自适应） ==========
+  const lyricsAreaBottom = height - 20 - bottomH
+  const lyricsAreaCenterY = (lyricAreaTop + lyricsAreaBottom) / 2
 
-  if (mainText) {
-    ctx.font = `bold 56px ${config.fontFamily}`
-    const mainInfo = wrapText(ctx, mainText, 0, 0, maxLyricWidth, 72, true)
+  if (hasLyrics && lyricMeasure) {
+    const m = lyricMeasure
+    const mainBlockH = m.mainLines * m.mainLineH
 
-    let transInfo = null
-    if (transText) {
-      ctx.font = `52px ${config.fontFamily}`
-      transInfo = wrapText(ctx, transText, 0, 0, maxLyricWidth, 64, true)
-    }
-
-    const totalLyricHeight = mainInfo.totalHeight + (transInfo ? gap + transInfo.totalHeight : 0)
-    const lyricStartY = lyricsAreaCenterY - totalLyricHeight / 2 + mainInfo.totalHeight / 2
-
-    // 绘制主歌词
+    const mainCenterY = lyricsAreaCenterY - m.height / 2 + mainBlockH / 2
     ctx.fillStyle = primaryColor
-    ctx.font = `bold 56px ${config.fontFamily}`
+    ctx.font = `bold ${m.mainFont}px ${config.fontFamily}`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    wrapText(ctx, mainText, width / 2, lyricStartY, maxLyricWidth, 72)
+    wrapText(ctx, mainText, width / 2, mainCenterY, maxLyricWidth, m.mainLineH)
 
     // 绘制翻译歌词
-    if (transText && transInfo) {
-      const transY = lyricStartY + mainInfo.totalHeight / 2 + gap + transInfo.totalHeight / 2
+    if (transText && m.transLines > 0) {
+      const transCenterY =
+        mainCenterY + mainBlockH / 2 + m.gap + (m.transLines * m.transLineH) / 2
       ctx.save()
       ctx.fillStyle = primaryColor
       ctx.globalAlpha = 0.85
-      ctx.font = `52px ${config.fontFamily}`
-      wrapText(ctx, transText, width / 2, transY, maxLyricWidth, 64)
+      ctx.font = `${m.transFont}px ${config.fontFamily}`
+      wrapText(ctx, transText, width / 2, transCenterY, maxLyricWidth, m.transLineH)
       ctx.restore()
     }
   }
 
   // ========== 底部区域 ==========
   // 布局：
-  // - 封面：右下角，200x200
-  // - 左侧从上到下：进度条 -> 时间 -> 标题 -> 艺术家
+  // - 封面：右下角，尺寸随富余空间放大
+  // - 左侧从上到下：进度条 -> 时间 -> 标题 -> 艺术家（字号随封面小幅放大）
 
   // ========== 绘制封面（右下角） ==========
   const coverX = width - padding - coverSize
@@ -596,6 +723,9 @@ const generateCompactImage = async (options = {}) => {
   const leftAreaTop = coverY // 与封面顶部对齐
   const leftAreaBottom = coverY + coverSize // 与封面底部对齐
 
+  // 标题/艺人字号随封面放大（一半力度，避免挤压左侧宽度）
+  const fontScale = Math.min(1.3, 1 + (coverSize - baseCoverSize) / baseCoverSize / 2)
+
   // 进度条在顶部
   if (config.showProgress && state.duration > 0) {
     const progressY = leftAreaTop + 10
@@ -619,7 +749,7 @@ const generateCompactImage = async (options = {}) => {
 
     // 时间文字
     ctx.fillStyle = onSurfaceVariant
-    ctx.font = `18px ${config.fontFamily}`
+    ctx.font = `${Math.round(18 * fontScale)}px ${config.fontFamily}`
     ctx.textAlign = 'left'
     ctx.textBaseline = 'top'
     ctx.fillText(api.utils.formatTime(state.currentTime), progressX, progressY + 14)
@@ -628,22 +758,20 @@ const generateCompactImage = async (options = {}) => {
   }
 
   // 歌曲标题（在底部区域的中下部）
-  const titleY = leftAreaBottom - 60 // 距离底部60px
+  const titleY = leftAreaBottom - Math.round(60 * fontScale)
   ctx.fillStyle = onBgColor
-  ctx.font = `bold 40px ${config.fontFamily}`
+  ctx.font = `bold ${Math.round(40 * fontScale)}px ${config.fontFamily}`
   ctx.textAlign = 'left'
   ctx.textBaseline = 'bottom'
-  const title = state.currentTrack.title || state.currentTrack.name || '未知歌曲'
   const titleTruncated = truncateText(ctx, title, infoMaxWidth)
   ctx.fillText(titleTruncated, infoX, titleY)
 
   // 艺术家（在标题下方）
   ctx.fillStyle = onSurfaceVariant
-  ctx.font = `28px ${config.fontFamily}`
+  ctx.font = `${Math.round(28 * fontScale)}px ${config.fontFamily}`
   ctx.textBaseline = 'top'
-  const artist = state.currentTrack.artist || '未知艺术家'
   const artistTruncated = truncateText(ctx, artist, infoMaxWidth)
-  ctx.fillText(artistTruncated, infoX, titleY + 16)
+  ctx.fillText(artistTruncated, infoX, titleY + Math.round(16 * fontScale))
 
   // 水印
   ctx.fillStyle = onSurfaceVariant
