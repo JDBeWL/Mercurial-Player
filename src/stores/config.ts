@@ -139,13 +139,16 @@ export const useConfigStore = defineStore('config', {
       preferTranslation: true,
       onlineSource: 'netease',
       lyricsAlignment: 'center',
-      lyricsFontFamily: 'Roboto',
+      lyricsFontFamily: 'Noto Sans SC',
+      translationFontFamily: '',
       lyricsStyle: 'modern',
+      showNoLyricsHint: true,
+      showFetchLyricsButton: true,
       desktopLyrics: {
         enabled: false,
         locked: true,
         fontSize: 28,
-        colorPreset: 'dark' as const,
+        colorPreset: 'auto' as const,
       },
     },
 
@@ -287,8 +290,11 @@ export const useConfigStore = defineStore('config', {
                 preferTranslation: true,
                 onlineSource: 'netease',
                 lyricsAlignment: 'center',
-                lyricsFontFamily: 'Roboto',
+                lyricsFontFamily: 'Noto Sans SC',
+                translationFontFamily: '',
                 lyricsStyle: 'modern',
+                showNoLyricsHint: true,
+                showFetchLyricsButton: true,
               }
             }
             if (general.lyricsAlignment) {
@@ -304,7 +310,7 @@ export const useConfigStore = defineStore('config', {
               delete general.lyricsStyle
             }
             if (!configData.lyrics.lyricsAlignment) configData.lyrics.lyricsAlignment = 'center'
-            if (!configData.lyrics.lyricsFontFamily) configData.lyrics.lyricsFontFamily = 'Roboto'
+            if (!configData.lyrics.lyricsFontFamily) configData.lyrics.lyricsFontFamily = 'Noto Sans SC'
             if (!configData.lyrics.lyricsStyle) configData.lyrics.lyricsStyle = 'modern'
 
             logger.info('Migrated lyrics settings from general to lyrics config')
@@ -376,8 +382,11 @@ export const useConfigStore = defineStore('config', {
           preferTranslation: true,
           onlineSource: 'netease',
           lyricsAlignment: 'center',
-          lyricsFontFamily: 'Roboto',
+          lyricsFontFamily: 'Noto Sans SC',
+          translationFontFamily: '',
           lyricsStyle: 'modern',
+          showNoLyricsHint: true,
+          showFetchLyricsButton: true,
           desktopLyrics: {
             enabled: false,
             locked: true,
@@ -386,16 +395,22 @@ export const useConfigStore = defineStore('config', {
         }
       } else {
         if (!configToSave.lyrics.lyricsAlignment) configToSave.lyrics.lyricsAlignment = 'center'
-        if (!configToSave.lyrics.lyricsFontFamily) configToSave.lyrics.lyricsFontFamily = 'Roboto'
+        if (!configToSave.lyrics.lyricsFontFamily) configToSave.lyrics.lyricsFontFamily = 'Noto Sans SC'
+        if (configToSave.lyrics.translationFontFamily === undefined)
+          configToSave.lyrics.translationFontFamily = ''
         if (!configToSave.lyrics.lyricsStyle) configToSave.lyrics.lyricsStyle = 'modern'
         if (configToSave.lyrics.onlineSource === undefined)
           configToSave.lyrics.onlineSource = 'netease'
+        if (configToSave.lyrics.showNoLyricsHint === undefined)
+          configToSave.lyrics.showNoLyricsHint = true
+        if (configToSave.lyrics.showFetchLyricsButton === undefined)
+          configToSave.lyrics.showFetchLyricsButton = true
         if (!configToSave.lyrics.desktopLyrics) {
           configToSave.lyrics.desktopLyrics = {
             enabled: false,
             locked: true,
             fontSize: 28,
-            colorPreset: 'dark' as const,
+            colorPreset: 'auto' as const,
           }
         }
       }
@@ -536,7 +551,7 @@ export const useConfigStore = defineStore('config', {
           enabled: false,
           locked: true,
           fontSize: 28,
-          colorPreset: 'dark' as const,
+          colorPreset: 'auto' as const,
         }
       }
       this.lyrics.desktopLyrics = { ...this.lyrics.desktopLyrics, ...config }

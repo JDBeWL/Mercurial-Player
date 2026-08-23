@@ -92,6 +92,36 @@ pub fn get_system_fonts() -> Result<Vec<String>, String> {
     }
 }
 
+/// 获取软件同级 fonts/ 目录下的外部字体文件列表
+#[command]
+pub fn get_external_fonts() -> Result<Vec<super::fonts::ExternalFont>, String> {
+    super::fonts::list_external_fonts()
+}
+
+/// 获取字体相关缓存的统计信息（TTC/OTC 提取缓存占用）
+#[command]
+pub fn get_font_cache_stats() -> super::fonts::FontCacheStats {
+    super::fonts::FontCacheStats {
+        extract_cache_bytes: super::fonts::font_extract_cache_size(),
+    }
+}
+
+/// 清理字体缓存：磁盘上的 TTC/OTC 提取缓存 + 桌面歌词的外部字体
+/// 内存缓存（名字索引/已加载字体集/文本格式），返回清理后的统计。
+/// 提取缓存会在下次扫描 fonts/ 目录时按需重建
+#[command]
+pub fn clear_font_caches() -> Result<super::fonts::FontCacheStats, String> {
+    super::fonts::clear_font_extract_cache()?;
+    #[cfg(windows)]
+    {
+        // 桌面歌词未初始化时无内存缓存可清，忽略错误
+        let _ = crate::taskbar::desktop_lyrics::invalidate_font_caches();
+    }
+    Ok(super::fonts::FontCacheStats {
+        extract_cache_bytes: super::fonts::font_extract_cache_size(),
+    })
+}
+
 /// 设置迷你模式
 #[command]
 pub async fn set_mini_mode(app_handle: AppHandle, enable: bool) -> Result<(), String> {

@@ -17,11 +17,14 @@
         <span>{{ $t('lyrics.noTrackPlaying') }}</span>
       </div>
 
-      <!-- 有音乐但没有歌词 -->
-      <div v-else-if="!lyrics.length" class="no-lyrics">
-        <span>{{ $t('lyrics.notFound') }}</span>
+      <!-- 有音乐但没有歌词（提示文字与获取按钮均可在设置中隐藏，两者都隐藏时整个区域留空） -->
+      <div
+        v-else-if="!lyrics.length && (showNoLyricsHint || showFetchLyricsButton)"
+        class="no-lyrics"
+      >
+        <span v-if="showNoLyricsHint">{{ $t('lyrics.notFound') }}</span>
         <button
-          v-if="configStore.lyrics?.enableOnlineFetch || true"
+          v-if="showFetchLyricsButton"
           class="fetch-lyrics-btn"
           :disabled="fetchingLyrics"
           @click="handleFetchLyrics"
@@ -45,7 +48,10 @@
           @click="handleLyricClick(line.time, index)"
         >
           <template v-if="line.karaoke && isActive(index)">
-            <div class="first-line karaoke-line">
+            <div
+              class="first-line karaoke-line"
+              :lang="lineLanguages[index]?.[0] || undefined"
+            >
               <span
                 v-for="(word, idx) in line.words"
                 :key="idx"
@@ -55,12 +61,28 @@
                 >{{ word.text }}</span
               >
             </div>
-            <div v-if="line.texts[1]" class="last-line translation">{{ line.texts[1] }}</div>
+            <div
+              v-if="line.texts[1]"
+              class="last-line translation"
+              :lang="lineLanguages[index]?.[1] || undefined"
+              :style="translationStyle"
+            >
+              {{ line.texts[1] }}
+            </div>
           </template>
 
           <template v-else>
-            <div class="first-line">{{ line.texts[0] }}</div>
-            <div v-if="line.texts[1]" class="last-line translation">{{ line.texts[1] }}</div>
+            <div class="first-line" :lang="lineLanguages[index]?.[0] || undefined">
+              {{ line.texts[0] }}
+            </div>
+            <div
+              v-if="line.texts[1]"
+              class="last-line translation"
+              :lang="lineLanguages[index]?.[1] || undefined"
+              :style="translationStyle"
+            >
+              {{ line.texts[1] }}
+            </div>
           </template>
         </div>
 
@@ -108,6 +130,7 @@ import { pluginManager } from '@/plugins'
 import type { ActionButton } from '@/plugins/pluginManager'
 import logger from '@/utils/logger'
 import type { KaraokeWord } from '@/types'
+import { detectLyricLanguage, type LyricLanguage } from '@/utils/languageDetect'
 
 export default {
   name: 'LyricsDisplay',
@@ -155,6 +178,12 @@ export default {
 
     // 是否有当前播放的曲目
     const hasCurrentTrack = computed(() => !!playerStore.currentTrack)
+
+    // 无歌词时的提示文字与获取按钮显隐（默认显示，旧配置缺字段时同样视为显示）
+    const showNoLyricsHint = computed(() => configStore.lyrics?.showNoLyricsHint !== false)
+    const showFetchLyricsButton = computed(
+      () => configStore.lyrics?.showFetchLyricsButton !== false,
+    )
 
     // 获取插件注册的操作按钮
     const actionButtons = computed(() => {
@@ -331,9 +360,29 @@ export default {
               ? 'center center'
               : 'left center',
         textAlign: alignment,
-        fontFamily: configStore.lyrics?.lyricsFontFamily || 'Roboto',
+        // 字体名必须加引号：不带引号的 font-family 标识符不允许以数字开头
+        // （如按文件名解析出的 "975"），赋给 CSSOM 会被整体丢弃
+        fontFamily: `"${configStore.lyrics?.lyricsFontFamily || 'Noto Sans SC'}"`,
       }
     })
+
+    // 译文字体：为空时跟随原文（不设置该样式，继承行容器的字体）
+    const translationStyle = computed<CSSProperties | undefined>(() => {
+      const family = configStore.lyrics?.translationFontFamily
+      if (!family) {
+        return undefined
+      }
+      return { fontFamily: `"${family}"` }
+    })
+
+    // 每行歌词的语言标注（原文/译文分别检测），供 lang 属性使用；
+    // 仅依赖歌词数据本身，歌词不变时不会因滚动/激活状态变化而重算
+    const lineLanguages = computed<[LyricLanguage, LyricLanguage][]>(() =>
+      lyrics.value.map((line) => [
+        detectLyricLanguage(line.texts[0]),
+        detectLyricLanguage(line.texts[1]),
+      ]),
+    )
 
     // --- 样式计算逻辑 ---
     const isActive = (index: number): boolean => index === activeIndex.value
@@ -570,6 +619,8 @@ export default {
       configStore,
       lyricsSource,
       hasCurrentTrack,
+      showNoLyricsHint,
+      showFetchLyricsButton,
       playerStore,
       isActive,
       isWordActive,
@@ -585,6 +636,8 @@ export default {
       actionButtons,
       handleActionButton,
       lyricLineStyle,
+      translationStyle,
+      lineLanguages,
     }
   },
 }

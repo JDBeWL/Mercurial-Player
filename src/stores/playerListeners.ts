@@ -1,6 +1,7 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { register, unregisterAll, isRegistered } from '@tauri-apps/plugin-global-shortcut'
 import logger from '@/utils/logger'
+import i18n from '@/i18n'
 import errorHandler, { ErrorType, ErrorSeverity } from '@/utils/errorHandler'
 import type { usePlayerStore } from './player'
 
@@ -161,7 +162,7 @@ export async function setupDeviceListeners(store: PlayerStore): Promise<DeviceLi
         await store._switchAudioDevice(
           deviceName,
           'switch-fallback-success',
-          `音频设备已断开，已自动切换到: ${deviceName}`,
+          i18n.global.t('errors.audioDeviceDisconnectedSwitched', { device: deviceName }),
           'switch-fallback',
           ErrorSeverity.HIGH,
         )
@@ -181,7 +182,7 @@ export async function setupDeviceListeners(store: PlayerStore): Promise<DeviceLi
         severity: ErrorSeverity.CRITICAL,
         context: { action: 'no-device' },
         showToUser: true,
-        userMessage: '没有可用的音频设备，请连接音频设备后重试',
+        userMessage: i18n.global.t('errors.noAudioDeviceAvailable'),
       })
     })
 
@@ -197,7 +198,7 @@ export async function setupDeviceListeners(store: PlayerStore): Promise<DeviceLi
         await store._switchAudioDevice(
           deviceName,
           'switch-default-success',
-          `已自动切换到新设备: ${deviceName}`,
+          i18n.global.t('errors.audioDeviceSwitched', { device: deviceName }),
           'switch-default',
           ErrorSeverity.MEDIUM,
         )

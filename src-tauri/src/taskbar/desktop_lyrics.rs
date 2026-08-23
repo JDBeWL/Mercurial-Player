@@ -5,6 +5,9 @@
 //! 支持点击穿透（锁定模式）和顶部拖拽（解锁模式）。
 //! 悬浮时显示锁定按钮和关闭按钮。
 //! 支持双行歌词。
+//! 字体族跟随前端歌词字体设置（原文/译文可分别指定）：
+//! 优先使用系统已安装字体，未安装时尝试把 fonts/ 目录的外部字体
+//! 加载为 DirectWrite 内存字体集后使用。
 
 #![allow(unsafe_code)]
 
@@ -19,7 +22,7 @@ use tauri::command;
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
+    D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT, D2D_RECT_F,
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DRAW_TEXT_OPTIONS_NONE,
@@ -33,17 +36,19 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_HIT_TEST_METRICS, DWRITE_MEASURING_MODE_NATURAL,
     DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING,
     DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory,
-    IDWriteFactory, IDWriteFontCollection, IDWriteTextFormat, IDWriteTextLayout,
+    IDWriteFactory, IDWriteFactory5, IDWriteFontCollection, IDWriteInMemoryFontFileLoader,
+    IDWriteTextFormat, IDWriteTextLayout,
 };
-use windows::core::{PCWSTR, w};
+use windows::core::{Interface, PCWSTR, w};
 
 use unicode_segmentation::UnicodeSegmentation;
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{
     BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, BeginPaint, CreateCompatibleDC, CreateDIBSection,
     CreateFontW, DIB_RGB_COLORS, DeleteDC, DeleteObject, EndPaint, FONT_CHARSET,
-    FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_NORMAL, HBRUSH, HFONT, HGDIOBJ,
-    InvalidateRect, PAINTSTRUCT, RGBQUAD, ScreenToClient, SelectObject, SetBkMode, TRANSPARENT,
+    FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_NORMAL, GetDC, HBRUSH, HFONT,
+    HGDIOBJ, InvalidateRect, PAINTSTRUCT, ReleaseDC, RGBQUAD, SRCCOPY, ScreenToClient,
+    SelectObject, SetBkMode, StretchBlt, TRANSPARENT,
 };
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -98,47 +103,56 @@ const CLOSE_BTN_MARGIN: i32 = 6;
 const RESIZE_EDGE_WIDTH: i32 = 18;
 const MARQUEE_SPEED_PX_PER_SEC: i32 = 42;
 
+/// 配色方案。outline 为文字描边色：取与文字色同色系的深色
+/// （深/浅预设用灰阶），比纯黑描边更柔和，同时保证任意背景可读
 #[derive(Clone, Copy, Debug)]
 struct ColorPreset {
     text_color: u32,
     highlight_color: u32,
-    hover_bg_alpha: u8,
+    outline_color: u32,
+    outline_alpha: f32,
 }
 
 const PRESET_DARK: ColorPreset = ColorPreset {
-    text_color: 0x00_00_00_00,
-    highlight_color: 0x00_00_A8_E8,
-    hover_bg_alpha: 180,
+    text_color: 0x00_21_21_21,
+    highlight_color: 0x00_02_88_D1,
+    outline_color: 0x00_EC_EF_F1,
+    outline_alpha: 0.9,
 };
 
 const PRESET_LIGHT: ColorPreset = ColorPreset {
     text_color: 0x00_FF_FF_FF,
-    highlight_color: 0x00_FB_C0_2D,
-    hover_bg_alpha: 180,
+    highlight_color: 0x00_FF_C5_3D,
+    outline_color: 0x00_37_47_4F,
+    outline_alpha: 0.8,
 };
 
 const PRESET_BLUE: ColorPreset = ColorPreset {
     text_color: 0x00_03_A9_F4,
-    highlight_color: 0x00_4F_C3_F7,
-    hover_bg_alpha: 180,
+    highlight_color: 0x00_81_D4_FA,
+    outline_color: 0x00_01_57_9B,
+    outline_alpha: 0.7,
 };
 
 const PRESET_PINK: ColorPreset = ColorPreset {
     text_color: 0x00_E9_1E_63,
     highlight_color: 0x00_FF_80_AB,
-    hover_bg_alpha: 180,
+    outline_color: 0x00_88_0E_4F,
+    outline_alpha: 0.7,
 };
 
 const PRESET_ORANGE: ColorPreset = ColorPreset {
     text_color: 0x00_FF_98_00,
-    highlight_color: 0x00_FF_B7_4D,
-    hover_bg_alpha: 180,
+    highlight_color: 0x00_FF_CC_80,
+    outline_color: 0x00_BF_36_0C,
+    outline_alpha: 0.7,
 };
 
 const PRESET_GREEN: ColorPreset = ColorPreset {
     text_color: 0x00_4C_AF_50,
-    highlight_color: 0x00_69_F0_AE,
-    hover_bg_alpha: 180,
+    highlight_color: 0x00_A5_D6_A7,
+    outline_color: 0x00_1B_5E_20,
+    outline_alpha: 0.7,
 };
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -156,10 +170,22 @@ struct SharedLyricState {
     prev_sub_line: String,
     current_words: Vec<DesktopLyricWord>,
     font_size: i32,
+    /// 原文歌词字体族（来自前端歌词字体设置，渲染前由前端同步）
+    font_family: String,
+    /// 译文字体族（空字符串 = 跟随原文）
+    translation_font_family: String,
+    /// 字体设置代数：变化时渲染线程重建外部字体内存字体集
+    font_generation: u32,
     is_locked: bool,
     is_hovered: bool,
     is_playing: bool,
     color_preset: ColorPreset,
+    /// 配色为 auto：按窗口背后背景亮度在深/浅文字间自动切换
+    preset_auto: bool,
+    /// auto 模式下当前使用浅色文字（背景偏暗时为 true）
+    auto_light_text: bool,
+    /// 上次背景采样时间（毫秒），限流采样频率
+    last_bg_sample_ms: i64,
     fade_alpha: f32,
     fade_pending: bool,
     marquee_active: bool,
@@ -184,7 +210,204 @@ thread_local! {
 struct Direct2DState {
     dwrite_factory: IDWriteFactory,
     dc_render_target: ID2D1DCRenderTarget,
-    text_format_cache: HashMap<i32, IDWriteTextFormat>,
+    /// 键为 (字体族, 字号)：字体设置运行时可变，族名必须参与缓存键
+    text_format_cache: HashMap<(String, i32), IDWriteTextFormat>,
+    /// fonts/ 目录外部字体的名字索引（懒构建，随 SharedLyricState::font_generation 重建）
+    external_index: Option<ExternalFontIndex>,
+    /// 内存字体加载器（懒创建，创建时自动注册到 factory；字体文件引用
+    /// 与其绑定，需在渲染线程存活期间一直持有）
+    memory_loader: Option<IDWriteInMemoryFontFileLoader>,
+    /// 已按需加载的外部字体：前端族名（小写）→ 自定义字体集合
+    external_collections: HashMap<String, ExternalFontCollection>,
+}
+
+/// fonts/ 目录外部字体的名字索引：前端族名（小写）→ 候选文件路径。
+/// 只记录路径不驻留字体数据，被歌词实际选中的字体才按需加载，
+/// 避免像 Super OTC 这类动辄数百 MB 的字体集合整包进入内存
+struct ExternalFontIndex {
+    /// 前端族名（小写）→ 候选文件（常规字重/VF 优先，按优先级升序）
+    candidates: HashMap<String, Vec<String>>,
+    /// 构建时的字体设置代数，用于判断是否需要重建
+    generation: u32,
+}
+
+/// 单个外部字体文件加载出的 DirectWrite 自定义字体集合
+struct ExternalFontCollection {
+    collection: IDWriteFontCollection,
+    /// CreateTextFormat 应使用的内部族名（字体 name 表的族名，
+    /// 可能与前端按文件名解析出的族名不同）
+    internal_family: String,
+}
+
+/// 桌面歌词按常规字重请求文本格式：VF 可变字体优先，其次常规字重
+/// （无后缀 / -400 / -regular 等），最后其余字重
+fn font_weight_priority(stem: &str) -> u8 {
+    let lower = stem.to_lowercase();
+    if lower.ends_with("-vf") {
+        return 0;
+    }
+    let Some((_, last)) = lower.rsplit_once('-') else {
+        return 1; // 无字重后缀 = Regular
+    };
+    match last {
+        "400" | "regular" | "normal" | "book" => 1,
+        // 其余字重后缀（-700、-bold 等）偏离常规字重
+        _ => 2,
+    }
+}
+
+/// 构建外部字体名字索引：只扫描文件名，不读取字体内容。
+/// woff/woff2 为 Web 压缩容器，DirectWrite 无法读取，跳过
+fn build_external_font_index(generation: u32) -> Option<ExternalFontIndex> {
+    let entries = crate::system::fonts::list_external_fonts().ok()?;
+    let mut candidates: HashMap<String, Vec<(u8, String)>> = HashMap::new();
+    for font in entries {
+        let ext = font.path.rsplit('.').next().unwrap_or_default().to_lowercase();
+        if matches!(ext.as_str(), "woff" | "woff2") {
+            continue;
+        }
+        let family = crate::system::fonts::frontend_family_from_file_name(&font.name);
+        if family.is_empty() {
+            continue;
+        }
+        let stem = font.name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&font.name);
+        candidates
+            .entry(family.to_lowercase())
+            .or_default()
+            .push((font_weight_priority(stem), font.path));
+    }
+    if candidates.is_empty() {
+        return None;
+    }
+    let candidates: HashMap<String, Vec<String>> = candidates
+        .into_iter()
+        .map(|(family, mut files)| {
+            files.sort_by_key(|(priority, _)| *priority);
+            (family, files.into_iter().map(|(_, path)| path).collect())
+        })
+        .collect();
+    Some(ExternalFontIndex {
+        candidates,
+        generation,
+    })
+}
+
+/// 创建并注册 DirectWrite 内存字体加载器。
+/// 头文件要求客户端自行调用 RegisterFontFileLoader 注册，未注册的
+/// 加载器创建字体文件引用会返回 E_INVALIDARG。
+/// 不注销：字体文件引用仅在 loader 保持注册期间有效，注册关系
+/// 随工厂存活到进程结束，渲染线程重建时新 loader 单独注册即可
+///
+/// # Safety
+/// 必须在已初始化 COM（`CoInitializeEx`）的渲染线程上调用
+unsafe fn build_memory_loader(dwrite: &IDWriteFactory) -> Option<IDWriteInMemoryFontFileLoader> {
+    // SAFETY: 调用者保证当前线程已初始化 COM
+    let loader = unsafe {
+        dwrite.cast::<IDWriteFactory5>()
+            .ok()?
+            .CreateInMemoryFontFileLoader()
+            .ok()?
+    };
+    // SAFETY: loader 刚创建且有效
+    match unsafe { dwrite.RegisterFontFileLoader(&loader) } {
+        Ok(()) => Some(loader),
+        Err(e) => {
+            log::warn!("桌面歌词: 注册内存字体加载器失败: {e}");
+            None
+        }
+    }
+}
+
+/// 把一个外部字体文件加载为 DirectWrite 自定义字体集合。
+/// ownerObject 传 NULL 时 DirectWrite 会复制字体数据，
+/// 调用方的临时缓冲在调用后即可释放
+///
+/// # Safety
+/// 必须在已初始化 COM（`CoInitializeEx`）的渲染线程上调用
+unsafe fn try_load_external_font(
+    dwrite: &IDWriteFactory,
+    loader: &IDWriteInMemoryFontFileLoader,
+    path: &str,
+    family: &str,
+) -> Option<ExternalFontCollection> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            log::warn!("桌面歌词: 读取外部字体 {path} 失败: {e}");
+            return None;
+        }
+    };
+    let internal_families = crate::system::fonts::internal_font_families(&bytes);
+    if internal_families.is_empty() {
+        log::warn!("桌面歌词: 外部字体 {path} 无法解析内部族名");
+        return None;
+    }
+    let factory5: IDWriteFactory5 = dwrite.cast().ok()?;
+    // SAFETY: 调用者保证当前线程已初始化 COM；字体数据被复制管理
+    let file_ref = match unsafe {
+        loader.CreateInMemoryFontFileReference(
+            dwrite,
+            bytes.as_ptr().cast(),
+            bytes.len() as u32,
+            None,
+        )
+    } {
+        Ok(file_ref) => file_ref,
+        Err(e) => {
+            log::warn!("桌面歌词: 外部字体 {path} 创建字体文件引用失败: {e}");
+            return None;
+        }
+    };
+    // SAFETY: 同上
+    let builder = unsafe { factory5.CreateFontSetBuilder().ok()? };
+    // SAFETY: file_ref 刚创建且有效
+    if let Err(e) = unsafe { builder.AddFontFile(&file_ref) } {
+        log::warn!("桌面歌词: 外部字体 {path} 加入字体集失败: {e}");
+        return None;
+    }
+    // SAFETY: builder 已成功加入字体文件
+    let font_set = unsafe { builder.CreateFontSet().ok()? };
+    let collection = unsafe { factory5.CreateFontCollectionFromFontSet(&font_set).ok()? };
+    // 优先使用与前端族名一致的内部族名，否则取第一个
+    let internal_family = internal_families
+        .iter()
+        .find(|f| f.eq_ignore_ascii_case(family))
+        .cloned()
+        .or_else(|| internal_families.first().cloned())?;
+    Some(ExternalFontCollection {
+        collection: collection.into(),
+        internal_family,
+    })
+}
+
+/// 系统字体集合是否包含该族名（DirectWrite 匹配大小写不敏感）
+fn family_has_system_face(dwrite: &IDWriteFactory, family: &str) -> bool {
+    if family.is_empty() {
+        return false;
+    }
+    let wide: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut system: Option<IDWriteFontCollection> = None;
+    // SAFETY: system 为栈上局部变量，仅在调用期间被写入；wide 以 NUL 结尾
+    unsafe {
+        if dwrite
+            .GetSystemFontCollection(&raw mut system, false)
+            .is_err()
+        {
+            return false;
+        }
+    }
+    let Some(system) = system else {
+        return false;
+    };
+    let mut index = 0u32;
+    let mut exists = windows::core::BOOL::default();
+    // SAFETY: index/exists 为栈上局部变量；wide 以 NUL 结尾
+    unsafe {
+        system
+            .FindFamilyName(PCWSTR::from_raw(wide.as_ptr()), &raw mut index, &raw mut exists)
+            .is_ok()
+            && exists.as_bool()
+    }
 }
 
 impl Direct2DState {
@@ -218,7 +441,84 @@ impl Direct2DState {
             dwrite_factory,
             dc_render_target,
             text_format_cache: HashMap::new(),
+            external_index: None,
+            memory_loader: None,
+            external_collections: HashMap::new(),
         })
+    }
+
+    /// 懒构建/按代数重建外部字体名字索引。
+    /// 指向的文件可能已变化，重建时同时丢弃按需加载的集合与文本格式缓存
+    fn ensure_external_index(&mut self) {
+        // 阻塞锁：try_lock 失败时读不到代数，会把回退格式的结果缓存下来
+        // 且永远不会再重建，这里必须保证读到真实代数
+        let Some(generation) = SHARED_STATE
+            .get()
+            .map(|state| lock_or_log!(state.lock()).font_generation)
+        else {
+            return;
+        };
+        let stale = match &self.external_index {
+            Some(index) => index.generation != generation,
+            None => true,
+        };
+        if stale {
+            self.external_index = build_external_font_index(generation);
+            self.external_collections.clear();
+            self.text_format_cache.clear();
+        }
+    }
+
+    /// 懒创建内存字体加载器（需要 IDWriteFactory5，Windows 10 1709+；
+    /// 不可用时外部字体功能整体禁用，回落系统字体）。
+    /// 加载器必须注册到 factory 后才能创建字体文件引用
+    fn ensure_memory_loader(&mut self) -> Option<&IDWriteInMemoryFontFileLoader> {
+        if self.memory_loader.is_none() {
+            // SAFETY: Direct2DState 方法仅在已初始化 COM 的渲染线程（D2D_STATE）调用
+            self.memory_loader = unsafe { build_memory_loader(&self.dwrite_factory) };
+        }
+        self.memory_loader.as_ref()
+    }
+
+    /// 解析 family 实际使用的字体集合与族名：系统已安装的字体优先
+    /// （与前端 @font-face 中 local() 优先的语义一致），否则按需加载
+    /// fonts/ 目录下同名族的外部字体，都不存在时交给系统回退
+    fn resolve_font_source(&mut self, family: &str) -> (Option<IDWriteFontCollection>, String) {
+        if family_has_system_face(&self.dwrite_factory, family) {
+            return (None, family.to_string());
+        }
+        self.ensure_external_index();
+        let key = family.to_lowercase();
+        if let Some(entry) = self.external_collections.get(&key) {
+            return (Some(entry.collection.clone()), entry.internal_family.clone());
+        }
+        let Some(paths) = self
+            .external_index
+            .as_ref()
+            .and_then(|index| index.candidates.get(&key))
+            .cloned()
+        else {
+            return (None, family.to_string());
+        };
+        let Some(loader) = self.ensure_memory_loader().cloned() else {
+            return (None, family.to_string());
+        };
+        for path in &paths {
+            // SAFETY: 当前处于 D2D_STATE 渲染线程上下文（COM 已初始化）
+            if let Some(loaded) =
+                unsafe { try_load_external_font(&self.dwrite_factory, &loader, path, family) }
+            {
+                self.external_collections.insert(
+                    key,
+                    ExternalFontCollection {
+                        collection: loaded.collection.clone(),
+                        internal_family: loaded.internal_family.clone(),
+                    },
+                );
+                return (Some(loaded.collection), loaded.internal_family);
+            }
+        }
+        (None, family.to_string())
     }
 
     /// # Safety
@@ -227,15 +527,23 @@ impl Direct2DState {
     unsafe fn text_format(
         &mut self,
         font_size_scaled: i32,
+        family: &str,
     ) -> windows::core::Result<IDWriteTextFormat> {
-        if let Some(format) = self.text_format_cache.get(&font_size_scaled) {
+        let cache_key = (family.to_string(), font_size_scaled);
+        if let Some(format) = self.text_format_cache.get(&cache_key) {
             return Ok(format.clone());
         }
-        // SAFETY: 字符串字面量 w!() 以 NUL 结尾，font_size 经 max(1) 保证为正
+        let (collection, resolved_family) = self.resolve_font_source(family);
+        // SAFETY: family_wide 以 NUL 结尾且在本调用期间存活；
+        // font_size 经 max(1) 保证为正
+        let family_wide: Vec<u16> = resolved_family
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         let format = unsafe {
             self.dwrite_factory.CreateTextFormat(
-                w!("Microsoft YaHei"),
-                None::<&IDWriteFontCollection>,
+                PCWSTR::from_raw(family_wide.as_ptr()),
+                collection.as_ref(),
                 DWRITE_FONT_WEIGHT_NORMAL,
                 DWRITE_FONT_STYLE_NORMAL,
                 DWRITE_FONT_STRETCH_NORMAL,
@@ -249,8 +557,7 @@ impl Direct2DState {
             let _ = format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             let _ = format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         }
-        self.text_format_cache
-            .insert(font_size_scaled, format.clone());
+        self.text_format_cache.insert(cache_key, format.clone());
         Ok(format)
     }
 
@@ -263,10 +570,11 @@ impl Direct2DState {
         font_size_scaled: i32,
         width: f32,
         height: f32,
+        family: &str,
     ) -> windows::core::Result<IDWriteTextLayout> {
         let text = trim_utf16_nul(text);
         // SAFETY: 转发到 text_format，契约一致
-        let format = unsafe { self.text_format(font_size_scaled)? };
+        let format = unsafe { self.text_format(font_size_scaled, family)? };
         // SAFETY: text 是 &[u16]，PCWSTR 要求的 NUL 由 CreateTextLayout 内部处理
         unsafe {
             self.dwrite_factory
@@ -440,19 +748,26 @@ fn draw_d2d_lyric_line(
     text: &[u16],
     rect: RECT,
     font_size_scaled: i32,
+    family: &str,
     scale: i32,
     marquee_start_ms: i64,
     text_color: D2D1_COLOR_F,
     highlight_color: D2D1_COLOR_F,
+    outline_color: D2D1_COLOR_F,
     base_brush: &ID2D1SolidColorBrush,
     highlight_brush: &ID2D1SolidColorBrush,
     clip_progress: f32,
     color_progress: f32,
     line_duration_ms: Option<i64>,
 ) -> Option<bool> {
-    let text_w =
-        measure_text_width_dwrite_with_state(state, text, rect.bottom - rect.top, font_size_scaled)
-            .unwrap_or_else(|| (rect.right - rect.left).max(1));
+    let text_w = measure_text_width_dwrite_with_state(
+        state,
+        text,
+        rect.bottom - rect.top,
+        font_size_scaled,
+        family,
+    )
+    .unwrap_or_else(|| (rect.right - rect.left).max(1));
     let avail_w = (rect.right - rect.left).max(1);
     let base_speed = (MARQUEE_SPEED_PX_PER_SEC * scale / 96).max(12) as i64;
     let max_scroll = (text_w - avail_w).max(0);
@@ -511,21 +826,38 @@ fn draw_d2d_lyric_line(
     if grapheme_count <= 1 {
         let t = clip_progress.clamp(0.0, 1.0);
         let blended = lerp_d2d_color(text_color, highlight_color, t);
-        // SAFETY: blended 是栈上局部变量，&raw const 仅在该 COM 调用期间被读取
+        // SAFETY: blended/outline_color 是栈上局部变量，&raw const 仅在该 COM 调用期间被读取
         let brush = unsafe {
             state
                 .dc_render_target
                 .CreateSolidColorBrush(&raw const blended, None)
                 .ok()?
         };
+        let outline_brush = unsafe {
+            state
+                .dc_render_target
+                .CreateSolidColorBrush(&raw const outline_color, None)
+                .ok()?
+        };
         // SAFETY: create_layout 要求 COM 已初始化，调用方在 D2D_STATE 线程上下文
         let layout = unsafe {
             state
-                .create_layout(text, font_size_scaled, width, height)
+                .create_layout(text, font_size_scaled, width, height, family)
                 .ok()?
         };
-        // SAFETY: layout/brush 均为刚创建的有效 COM 对象
+        // SAFETY: layout/outline_brush 均为有效 COM 对象
         unsafe {
+            for o in outline_offsets(scale) {
+                state.dc_render_target.DrawTextLayout(
+                    Vector2 {
+                        X: origin.X + o.0,
+                        Y: origin.Y + o.1,
+                    },
+                    &layout,
+                    &outline_brush,
+                    D2D1_DRAW_TEXT_OPTIONS_NONE,
+                );
+            }
             state.dc_render_target.DrawTextLayout(
                 origin,
                 &layout,
@@ -539,17 +871,35 @@ fn draw_d2d_lyric_line(
     // SAFETY: 同上，create_layout 要求 COM 已初始化
     let base_layout = unsafe {
         state
-            .create_layout(text, font_size_scaled, width, height)
+            .create_layout(text, font_size_scaled, width, height, family)
             .ok()?
     };
     // SAFETY: 同上
     let overlay_layout = unsafe {
         state
-            .create_layout(text, font_size_scaled, width, height)
+            .create_layout(text, font_size_scaled, width, height, family)
             .ok()?
     };
-    // SAFETY: base_layout/base_brush 均为有效 COM 对象
+    // 以描边色向 8 个方向偏移绘制底层文本，保证任意背景下的可读性
+    let outline_brush = unsafe {
+        state
+            .dc_render_target
+            .CreateSolidColorBrush(&raw const outline_color, None)
+            .ok()?
+    };
+    // SAFETY: base_layout/outline_brush 均为有效 COM 对象
     unsafe {
+        for o in outline_offsets(scale) {
+            state.dc_render_target.DrawTextLayout(
+                Vector2 {
+                    X: origin.X + o.0,
+                    Y: origin.Y + o.1,
+                },
+                &base_layout,
+                &outline_brush,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
+            );
+        }
         state.dc_render_target.DrawTextLayout(
             origin,
             &base_layout,
@@ -622,6 +972,8 @@ fn render_lyrics_d2d_frame(
     current_line: &str,
     sub_line: &str,
     font_size: i32,
+    font_family: &str,
+    translation_font_family: &str,
     preset: ColorPreset,
     fade_alpha: f32,
     marquee_start_ms: i64,
@@ -647,25 +999,14 @@ fn render_lyrics_d2d_frame(
             state.dc_render_target.Clear(None);
 
             let font_size_scaled = font_size * scale / 96;
-            let has_sub = !sub_line.is_empty();
-            let layout = build_lyrics_layout(client_rect, scale, has_sub);
+            let layout = build_lyrics_layout(client_rect, scale);
             let corner_radius = (16 * scale / 96) as f32;
             let strip_radius = (10 * scale / 96) as f32;
 
             if is_hovered {
-                let hover_color = d2d_color(0xE0_E0_E0, preset.hover_bg_alpha as f32 / 255.0);
-                let hover_brush = state
-                    .dc_render_target
-                    .CreateSolidColorBrush(&raw const hover_color, None)
-                    .ok()?;
-                let bg_rect = D2D1_ROUNDED_RECT {
-                    rect: rect_to_d2d(client_rect),
-                    radiusX: corner_radius,
-                    radiusY: corner_radius,
-                };
-                state
-                    .dc_render_target
-                    .FillRoundedRectangle(&raw const bg_rect, &hover_brush);
+                // 简单黑色遮罩卡片
+                // 外层 unsafe 块保证 COM 已初始化
+                draw_hover_card(state, client_rect, corner_radius);
 
                 let btn_text_format = state
                     .dwrite_factory
@@ -686,7 +1027,7 @@ fn render_lyrics_d2d_frame(
                 let close_rect = layout.close_rect;
                 let lock_rect = layout.lock_rect;
                 if !is_locked {
-                    let close_bg = d2d_color(0xE5_39_35, 0.16);
+                    let close_bg = d2d_color(0xD3_2F_2F, 0.30);
                     let close_brush = state
                         .dc_render_target
                         .CreateSolidColorBrush(&raw const close_bg, None)
@@ -697,9 +1038,9 @@ fn render_lyrics_d2d_frame(
                         .FillRoundedRectangle(&raw const close_round, &close_brush);
                 }
                 let lock_bg = if is_locked {
-                    d2d_color(0xDD_EF_FF, 0.16)
+                    d2d_color(0x19_76_D2, 0.30)
                 } else {
-                    d2d_color(0xDD_EF_FF, 0.10)
+                    d2d_color(0xFF_FFFF, 0.12)
                 };
                 let lock_brush = state
                     .dc_render_target
@@ -710,10 +1051,11 @@ fn render_lyrics_d2d_frame(
                     .dc_render_target
                     .FillRoundedRectangle(&raw const lock_round, &lock_brush);
 
+                // 深色卡片上用亮色图标：锁定=亮蓝，未锁定/关闭=亮红
                 let icon_color = if is_locked {
-                    d2d_color(0x1E_88_E5, 1.0)
+                    d2d_color(0x90_CA_F9, 1.0)
                 } else {
-                    d2d_color(0xE5_39_35, 1.0)
+                    d2d_color(0xFF_8A_80, 1.0)
                 };
                 let icon_brush = state
                     .dc_render_target
@@ -742,6 +1084,8 @@ fn render_lyrics_d2d_frame(
             if !current_line.is_empty() {
                 let text_color = d2d_color(preset.text_color, fade_alpha);
                 let highlight_color = d2d_color(preset.highlight_color, fade_alpha);
+                let outline_color =
+                    d2d_color(preset.outline_color, preset.outline_alpha * fade_alpha);
                 let base_brush = state
                     .dc_render_target
                     .CreateSolidColorBrush(&raw const text_color, None)
@@ -760,10 +1104,12 @@ fn render_lyrics_d2d_frame(
                         current,
                         layout.text_rect,
                         font_size_scaled,
+                        font_family,
                         scale,
                         marquee_start_ms,
                         text_color,
                         highlight_color,
+                        outline_color,
                         &base_brush,
                         &highlight_brush,
                         smooth_lyric_progress,
@@ -771,16 +1117,56 @@ fn render_lyrics_d2d_frame(
                         line_duration_ms,
                     )?;
                 } else {
-                    for (text, rect) in [(current, layout.upper_rect), (sub, layout.lower_rect)] {
+                    // 译文行独立跟随译文字体设置（空 = 跟随原文）
+                    let sub_family = if translation_font_family.is_empty() {
+                        font_family
+                    } else {
+                        translation_font_family
+                    };
+                    // 按两行各自的字体度量高度紧凑排版并整体垂直居中
+                    let fallback_h = (font_size_scaled * 5 / 4).max(1);
+                    let upper_h = measure_text_height_dwrite_with_state(
+                        state,
+                        current,
+                        font_size_scaled,
+                        font_family,
+                    )
+                    .unwrap_or(fallback_h)
+                    .max(1);
+                    let lower_h =
+                        measure_text_height_dwrite_with_state(state, sub, font_size_scaled, sub_family)
+                            .unwrap_or(fallback_h)
+                            .max(1);
+                    let gap = (6 * scale / 96).max(2);
+                    let avail = layout.text_rect.bottom - layout.text_rect.top;
+                    let group_top =
+                        layout.text_rect.top + (avail - (upper_h + lower_h + gap)).max(0) / 2;
+                    let lower_top = group_top + upper_h + gap;
+                    let upper_rect = RECT {
+                        top: group_top,
+                        bottom: group_top + upper_h,
+                        ..layout.text_rect
+                    };
+                    let lower_rect = RECT {
+                        top: lower_top,
+                        bottom: lower_top + lower_h,
+                        ..layout.text_rect
+                    };
+                    for (text, rect, family) in [
+                        (current, upper_rect, font_family),
+                        (sub, lower_rect, sub_family),
+                    ] {
                         should_animate |= draw_d2d_lyric_line(
                             state,
                             text,
                             rect,
                             font_size_scaled,
+                            family,
                             scale,
                             marquee_start_ms,
                             text_color,
                             highlight_color,
+                            outline_color,
                             &base_brush,
                             &highlight_brush,
                             smooth_lyric_progress,
@@ -795,6 +1181,48 @@ fn render_lyrics_d2d_frame(
         }
         Some(should_animate)
     })
+}
+
+/// 悬浮卡片底板：简单的半透明黑色遮罩圆角卡片 + 细高光描边
+///
+/// # Safety
+/// 必须在已初始化 COM 的渲染线程（D2D_STATE 上下文）调用，且此时
+/// 渲染目标已 BindDC
+unsafe fn draw_hover_card(
+    state: &mut Direct2DState,
+    client_rect: &RECT,
+    corner_radius: f32,
+) {
+    let w = client_rect.right - client_rect.left;
+    let h = client_rect.bottom - client_rect.top;
+    if w <= 0 || h <= 0 {
+        return;
+    }
+    let card = D2D1_ROUNDED_RECT {
+        rect: rect_to_d2d(client_rect),
+        radiusX: corner_radius,
+        radiusY: corner_radius,
+    };
+    // SAFETY: card/tint/border 为栈上局部变量；画刷在本次绘制内使用
+    unsafe {
+        let tint = d2d_color(0x00_00_00, 0.5);
+        if let Ok(tint_brush) =
+            state.dc_render_target.CreateSolidColorBrush(&raw const tint, None)
+        {
+            state
+                .dc_render_target
+                .FillRoundedRectangle(&raw const card, &tint_brush);
+        }
+        let border = d2d_color(0xFF_FFFF, 0.08);
+        if let Ok(border_brush) = state
+            .dc_render_target
+            .CreateSolidColorBrush(&raw const border, None)
+        {
+            state
+                .dc_render_target
+                .DrawRoundedRectangle(&raw const card, &border_brush, 1.0, None);
+        }
+    }
 }
 
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
@@ -839,10 +1267,16 @@ impl DesktopLyricsManager {
                 prev_sub_line: String::new(),
                 current_words: Vec::new(),
                 font_size: 28,
+                font_family: "Microsoft YaHei".to_string(),
+                translation_font_family: String::new(),
+                font_generation: 0,
                 is_locked: true,
                 is_hovered: false,
                 is_playing: false,
                 color_preset: PRESET_DARK,
+                preset_auto: false,
+                auto_light_text: true,
+                last_bg_sample_ms: 0,
                 fade_alpha: 1.0,
                 fade_pending: false,
                 marquee_active: false,
@@ -1008,16 +1442,39 @@ impl DesktopLyricsManager {
         Ok(())
     }
 
+    /// 设置原文/译文歌词字体族。译文族传空字符串表示跟随原文。
+    /// 同时提升字体代数，渲染线程会据此重建外部字体内存字体集
+    /// （fonts/ 目录的文件可能在会话期间新增）
+    pub fn set_font_family(
+        &self,
+        font_family: &str,
+        translation_font_family: &str,
+    ) -> Result<(), String> {
+        let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
+        {
+            let mut guard = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+            guard.font_family = font_family.to_string();
+            guard.translation_font_family = translation_font_family.to_string();
+            guard.font_generation = guard.font_generation.wrapping_add(1);
+            guard.render_pending = true;
+        }
+        post_update();
+        Ok(())
+    }
+
     pub fn set_color_preset(&self, preset_name: &str) -> Result<(), String> {
         let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
         {
             let mut guard = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+            // auto 模式保留当前 color_preset 作为首帧占位，渲染线程采样后动态决定
+            guard.preset_auto = preset_name == "auto";
             guard.color_preset = match preset_name {
                 "light" => PRESET_LIGHT,
                 "blue" => PRESET_BLUE,
                 "pink" => PRESET_PINK,
                 "orange" => PRESET_ORANGE,
                 "green" => PRESET_GREEN,
+                "auto" => guard.color_preset,
                 _ => PRESET_DARK,
             };
             guard.render_pending = true;
@@ -1093,8 +1550,6 @@ struct LyricsLayout {
     close_rect: RECT,
     lock_rect: RECT,
     text_rect: RECT,
-    upper_rect: RECT,
-    lower_rect: RECT,
 }
 
 fn desired_window_height(scale: i32, font_size: i32) -> i32 {
@@ -1106,8 +1561,10 @@ fn desired_window_height(scale: i32, font_size: i32) -> i32 {
     let line_spacing = 8 * scale / 96;
     let font_size_scaled = (font_size * scale / 96).max(18 * scale / 96);
 
-    // 始终预留双行歌词高度，避免歌词翻译切换时窗口抖动，也避免大字体被裁剪
-    let content_h = font_size_scaled * 2 + line_spacing;
+    // 始终预留双行歌词高度，避免歌词翻译切换时窗口抖动，也避免大字体被裁剪。
+    // 每行按 1.5em 预留：字体实际行高（ascent+descent）随字体族在
+    // 1.2~1.6em 间浮动，只按字号预留会裁剪高行高字体
+    let content_h = font_size_scaled * 3 + line_spacing;
     (top_offset + content_h + bottom_padding).max(150 * scale / 96)
 }
 
@@ -1141,7 +1598,7 @@ fn resize_window_for_font(hwnd: HWND, font_size: i32) {
     }
 }
 
-fn build_lyrics_layout(client_rect: &RECT, scale: i32, dual_line: bool) -> LyricsLayout {
+fn build_lyrics_layout(client_rect: &RECT, scale: i32) -> LyricsLayout {
     let close_rect = get_close_btn_rect(client_rect, scale);
     let lock_rect = get_lock_btn_rect(client_rect, scale);
     let padding = 8 * scale / 96;
@@ -1152,21 +1609,12 @@ fn build_lyrics_layout(client_rect: &RECT, scale: i32, dual_line: bool) -> Lyric
     text_rect.top = btn_bottom + padding;
     text_rect.bottom -= padding;
 
-    let mut upper_rect = text_rect;
-    let mut lower_rect = text_rect;
-    if dual_line {
-        let h = text_rect.bottom - text_rect.top;
-        let line_h = h / 2;
-        upper_rect.bottom = text_rect.top + line_h;
-        lower_rect.top = upper_rect.bottom;
-    }
-
+    // 双行的具体行高在渲染时按两行字体度量动态计算（见
+    // measure_text_height_dwrite_with_state），这里只给出文本总区域
     LyricsLayout {
         close_rect,
         lock_rect,
         text_rect,
-        upper_rect,
-        lower_rect,
     }
 }
 
@@ -1216,6 +1664,22 @@ fn point_in_rect(x: i32, y: i32, rect: &RECT) -> bool {
     x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
 }
 
+/// 描边绘制的 8 方向偏移（像素，随 DPI 缩放）。
+/// 返回相对文本原点的 (dx, dy) 偏移，用于把描边层铺在文字下方
+fn outline_offsets(scale: i32) -> [(f32, f32); 8] {
+    let r = ((scale as f32 / 96.0).round() as i32).max(1) as f32;
+    [
+        (-r, 0.0),
+        (r, 0.0),
+        (0.0, -r),
+        (0.0, r),
+        (-r, -r),
+        (-r, r),
+        (r, -r),
+        (r, r),
+    ]
+}
+
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1223,11 +1687,155 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// 捕获屏幕区域（不含分层窗口自身）到 out_w×out_h 的 BGRA 缓冲，
+/// alpha 恒为 255。StretchBlt 不带 CAPTUREBLT 标志时不会捕获分层窗口，
+/// 拿到的降采样图就是本窗口身后被遮挡的内容。
+/// 返回 (像素数据, 宽, 高)；区域非法或 GDI 失败返回 None
+///
+/// # Safety
+/// `window_rect` 为屏幕坐标。GDI 对象（DIB/兼容 DC）在函数内成对创建与释放，
+/// 屏幕 DC 配对 ReleaseDC
+unsafe fn capture_region_bgra(
+    window_rect: &RECT,
+    out_w: i32,
+    out_h: i32,
+) -> Option<(Vec<u8>, i32, i32)> {
+    let region_w = window_rect.right - window_rect.left;
+    let region_h = window_rect.bottom - window_rect.top;
+    if region_w <= 0 || region_h <= 0 || out_w <= 0 || out_h <= 0 {
+        return None;
+    }
+    let bmi = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: out_w,
+            biHeight: -out_h, // 自上而下，行序与屏幕方向一致
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: 0,
+            biSizeImage: 0,
+            biXPelsPerMeter: 0,
+            biYPelsPerMeter: 0,
+            biClrUsed: 0,
+            biClrImportant: 0,
+        },
+        bmiColors: [RGBQUAD {
+            rgbBlue: 0,
+            rgbGreen: 0,
+            rgbRed: 0,
+            rgbReserved: 0,
+        }],
+    };
+
+    // SAFETY: GetDC(None) 返回整屏 DC，函数结束前配对 ReleaseDC
+    let hdc_screen = unsafe { GetDC(None) };
+    if hdc_screen.is_invalid() {
+        return None;
+    }
+    // SAFETY: 由有效屏幕 DC 派生兼容 DC
+    let hdc_mem = unsafe { CreateCompatibleDC(Some(hdc_screen)) };
+    let mut p_bits: *mut core::ffi::c_void = std::ptr::null_mut();
+    // SAFETY: bmi 为栈上局部变量；p_bits 指向 DIB 数据，DeleteObject 前有效
+    let Ok(h_bitmap) = (unsafe {
+        CreateDIBSection(None, &raw const bmi, DIB_RGB_COLORS, &raw mut p_bits, None, 0)
+    }) else {
+        // SAFETY: 配对释放本函数创建的 GDI 资源
+        unsafe {
+            let _ = DeleteDC(hdc_mem);
+            let _ = ReleaseDC(None, hdc_screen);
+        }
+        return None;
+    };
+    if p_bits.is_null() {
+        // SAFETY: 同上
+        unsafe {
+            let _ = DeleteObject(HGDIOBJ(h_bitmap.0));
+            let _ = DeleteDC(hdc_mem);
+            let _ = ReleaseDC(None, hdc_screen);
+        }
+        return None;
+    }
+    // SAFETY: 选入 DIB 后原对象保存在 old，退出前选回
+    let old_bitmap = unsafe { SelectObject(hdc_mem, HGDIOBJ(h_bitmap.0)) };
+    // SAFETY: 目标 DC 已选入 DIB；源为屏幕 DC；SRCCOPY 不含 CAPTUREBLT
+    let blitted = unsafe {
+        StretchBlt(
+            hdc_mem,
+            0,
+            0,
+            out_w,
+            out_h,
+            Some(hdc_screen),
+            window_rect.left,
+            window_rect.top,
+            region_w,
+            region_h,
+            SRCCOPY,
+        )
+    };
+
+    let captured = if blitted.as_bool() {
+        // SAFETY: p_bits 指向 out_h * (out_w * 4) 字节的 DIB 数据（32bpp 行天然 4 对齐）
+        let len = out_w as usize * out_h as usize * 4;
+        let mut data = vec![0u8; len];
+        unsafe {
+            std::ptr::copy_nonoverlapping(p_bits.cast::<u8>(), data.as_mut_ptr(), len);
+        }
+        // GDI 位图的 alpha 通道不可靠（常为 0），强制不透明
+        for px in data.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        Some((data, out_w, out_h))
+    } else {
+        None
+    };
+
+    // SAFETY: 恢复 DC 原选入对象并释放本函数创建的全部 GDI 资源
+    unsafe {
+        let _ = SelectObject(hdc_mem, old_bitmap);
+        let _ = DeleteObject(HGDIOBJ(h_bitmap.0));
+        let _ = DeleteDC(hdc_mem);
+        let _ = ReleaseDC(None, hdc_screen);
+    }
+    captured
+}
+
+/// 采样窗口背后的屏幕区域平均亮度（0=全黑 1=全白），供 auto 配色
+/// 决定使用深色还是浅色文字
+///
+/// # Safety
+/// `window_rect` 为屏幕坐标
+unsafe fn sample_background_luma(window_rect: &RECT) -> Option<f32> {
+    const SAMPLE_W: i32 = 48;
+    let region_w = window_rect.right - window_rect.left;
+    let region_h = window_rect.bottom - window_rect.top;
+    if region_w <= 0 || region_h <= 0 {
+        return None;
+    }
+    let sample_h = ((region_h as f32 / region_w as f32) * SAMPLE_W as f32)
+        .max(1.0)
+        .round() as i32;
+    // SAFETY: GDI 资源在函数内配对管理
+    let (data, ..) = unsafe { capture_region_bgra(window_rect, SAMPLE_W, sample_h)? };
+
+    let mut sum = 0f64;
+    let mut count = 0usize;
+    for px in data.chunks_exact(4) {
+        sum += 0.299 * px[2] as f64 + 0.587 * px[1] as f64 + 0.114 * px[0] as f64;
+        count += 1;
+    }
+    if count == 0 {
+        return None;
+    }
+    Some((sum / count as f64 / 255.0) as f32)
+}
+
 fn measure_text_width_dwrite_with_state(
     state: &mut Direct2DState,
     text: &[u16],
     height: i32,
     font_size_scaled: i32,
+    family: &str,
 ) -> Option<i32> {
     let text = trim_utf16_nul(text);
     if text.is_empty() {
@@ -1236,7 +1844,7 @@ fn measure_text_width_dwrite_with_state(
     // SAFETY: create_layout 要求 COM 已初始化，调用方在 D2D_STATE 线程上下文
     let layout = unsafe {
         state
-            .create_layout(text, font_size_scaled, 100_000.0, height.max(1) as f32)
+            .create_layout(text, font_size_scaled, 100_000.0, height.max(1) as f32, family)
             .ok()?
     };
     let mut metrics = DWRITE_TEXT_METRICS::default();
@@ -1244,6 +1852,37 @@ fn measure_text_width_dwrite_with_state(
     // GetMetrics 调用期间被写入，随后读取，无别名冲突
     unsafe { layout.GetMetrics(&raw mut metrics).ok()? };
     Some(metrics.widthIncludingTrailingWhitespace.ceil().max(0.0) as i32)
+}
+
+/// 测量单行文本的字体度量高度（随字体族的实际 ascent/descent 变化），
+/// 供双行歌词按各自实际高度紧凑排版
+fn measure_text_height_dwrite_with_state(
+    state: &mut Direct2DState,
+    text: &[u16],
+    font_size_scaled: i32,
+    family: &str,
+) -> Option<i32> {
+    let text = trim_utf16_nul(text);
+    if text.is_empty() {
+        return Some(0);
+    }
+    // SAFETY: create_layout 要求 COM 已初始化，调用方在 D2D_STATE 线程上下文；
+    // NO_WRAP 下单行高度与给定矩形高度无关
+    let layout = unsafe {
+        state
+            .create_layout(
+                text,
+                font_size_scaled,
+                100_000.0,
+                font_size_scaled.max(1) as f32,
+                family,
+            )
+            .ok()?
+    };
+    let mut metrics = DWRITE_TEXT_METRICS::default();
+    // SAFETY: 同上，metrics 为栈上局部变量
+    unsafe { layout.GetMetrics(&raw mut metrics).ok()? };
+    Some(metrics.height.ceil().max(0.0) as i32)
 }
 
 fn get_cached_font(font_size_scaled: i32) -> HFONT {
@@ -1329,7 +1968,10 @@ unsafe fn render_lyrics(hwnd: HWND) {
             current_words,
             is_playing,
             font_size,
+            font_family,
+            translation_font_family,
             preset,
+            preset_auto,
             mut fade_alpha,
             fade_pending,
             render_pending,
@@ -1350,7 +1992,10 @@ unsafe fn render_lyrics(hwnd: HWND) {
                         guard.current_words.clone(),
                         guard.is_playing,
                         guard.font_size,
+                        guard.font_family.clone(),
+                        guard.translation_font_family.clone(),
                         guard.color_preset,
+                        guard.preset_auto,
                         guard.fade_alpha,
                         guard.fade_pending,
                         guard.render_pending,
@@ -1370,6 +2015,37 @@ unsafe fn render_lyrics(hwnd: HWND) {
         };
 
         let now = now_ms();
+
+        // auto 配色：限时采样窗口背后背景亮度，深/浅文字滞回切换
+        let preset = if preset_auto {
+            let mut light_text = true;
+            if let Some(state) = SHARED_STATE.get() {
+                if let Ok(mut guard) = state.try_lock() {
+                    light_text = guard.auto_light_text;
+                    if now - guard.last_bg_sample_ms > 600 {
+                        // 采样不涉及自身分层窗口（无 CAPTUREBLT）
+                        if let Some(luma) = sample_background_luma(&window_rect) {
+                            // 滞回区间避免临界亮度下来回跳变
+                            if luma > 0.62 {
+                                light_text = false;
+                            } else if luma < 0.38 {
+                                light_text = true;
+                            }
+                            guard.auto_light_text = light_text;
+                        }
+                        guard.last_bg_sample_ms = now;
+                    }
+                }
+            }
+            if light_text {
+                PRESET_LIGHT
+            } else {
+                PRESET_DARK
+            }
+        } else {
+            preset
+        };
+
         let delta = ((now - visual_time_last_ms).max(0) as f32 / 1000.0).min(0.1);
         if is_playing {
             let diff = visual_time - target_time;
@@ -1515,6 +2191,8 @@ unsafe fn render_lyrics(hwnd: HWND) {
             &current_line,
             &sub_line,
             font_size,
+            &font_family,
+            &translation_font_family,
             preset,
             fade_alpha,
             marquee_start_ms,
@@ -1912,6 +2590,20 @@ unsafe extern "system" fn window_proc(
 
 static DESKTOP_LYRICS_MANAGER: OnceLock<Arc<Mutex<DesktopLyricsManager>>> = OnceLock::new();
 
+/// 使桌面歌词的字体内存缓存全部失效：渲染线程在下一帧重建外部字体
+/// 名字索引、丢弃已按需加载的字体集合与文本格式缓存。
+/// fonts/ 目录文件变化或用户主动清理字体缓存后调用
+pub fn invalidate_font_caches() -> Result<(), String> {
+    let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
+    {
+        let mut guard = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+        guard.font_generation = guard.font_generation.wrapping_add(1);
+        guard.render_pending = true;
+    }
+    post_update();
+    Ok(())
+}
+
 pub fn get_desktop_lyrics_manager() -> Arc<Mutex<DesktopLyricsManager>> {
     Arc::clone(
         DESKTOP_LYRICS_MANAGER.get_or_init(|| Arc::new(Mutex::new(DesktopLyricsManager::new()))),
@@ -1969,6 +2661,16 @@ pub fn set_desktop_lyrics_font_size(size: i32) -> Result<(), String> {
 }
 
 #[command]
+pub fn set_desktop_lyrics_font_family(
+    font_family: String,
+    translation_font_family: String,
+) -> Result<(), String> {
+    let manager = get_desktop_lyrics_manager();
+    let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
+    guard.set_font_family(&font_family, &translation_font_family)
+}
+
+#[command]
 pub fn set_desktop_lyrics_color_preset(preset: String) -> Result<(), String> {
     let manager = get_desktop_lyrics_manager();
     let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
@@ -1980,4 +2682,111 @@ pub fn is_desktop_lyrics_visible() -> Result<bool, String> {
     let manager = get_desktop_lyrics_manager();
     let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
     Ok(guard.is_visible())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 用 dev 运行目录（target/debug/fonts）中的真实字体文件验证
+    /// DirectWrite 内存字体集加载链路：
+    /// Factory5 → InMemoryFontFileLoader → FontSetBuilder → 集合 → FindFamilyName。
+    /// 目录不存在或没有可用字体时跳过
+    #[test]
+    fn dwrite_external_font_load_pipeline() {
+        let fonts_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("debug")
+            .join("fonts");
+        let entries: Vec<std::path::PathBuf> = match std::fs::read_dir(&fonts_dir) {
+            Ok(it) => it
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.extension()
+                        .map(|x| {
+                            let ext = x.to_string_lossy().to_lowercase();
+                            matches!(ext.as_str(), "ttf" | "otf")
+                        })
+                        .unwrap_or(false)
+                })
+                .collect(),
+            Err(_) => return,
+        };
+        if entries.is_empty() {
+            return;
+        }
+
+        // SAFETY: 测试线程入口即初始化 COM，退出前配对 CoUninitialize
+        let mut failures: Vec<(String, String)> = Vec::new();
+        unsafe {
+            let com_initialized = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
+            let dwrite: IDWriteFactory =
+                DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).expect("DWriteCreateFactory 失败");
+            // 走生产构建函数（含 RegisterFontFileLoader）
+            let loader = build_memory_loader(&dwrite).expect("build_memory_loader 失败");
+
+            for path in &entries {
+                let file_name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let family =
+                    crate::system::fonts::frontend_family_from_file_name(&file_name);
+                // 走生产加载函数；外层 unsafe 块保证 COM 已初始化、loader 已注册
+                let report = match try_load_external_font(
+                    &dwrite,
+                    &loader,
+                    &path.to_string_lossy(),
+                    &family,
+                ) {
+                    None => "try_load_external_font 失败".to_string(),
+                    Some(font) => {
+                        let wide: Vec<u16> = font
+                            .internal_family
+                            .encode_utf16()
+                            .chain(std::iter::once(0))
+                            .collect();
+                        let mut index = 0u32;
+                        let mut exists = windows::core::BOOL::default();
+                        font.collection
+                            .FindFamilyName(
+                                PCWSTR::from_raw(wide.as_ptr()),
+                                &raw mut index,
+                                &raw mut exists,
+                            )
+                            .expect("FindFamilyName 失败");
+                        if exists.as_bool() {
+                            let format = dwrite.CreateTextFormat(
+                                PCWSTR::from_raw(wide.as_ptr()),
+                                Some(&font.collection),
+                                DWRITE_FONT_WEIGHT_NORMAL,
+                                DWRITE_FONT_STYLE_NORMAL,
+                                DWRITE_FONT_STRETCH_NORMAL,
+                                28.0,
+                                w!("zh-cn"),
+                            );
+                            match format {
+                                Ok(_) => "OK".to_string(),
+                                Err(e) => format!("CreateTextFormat: {e}"),
+                            }
+                        } else {
+                            format!("FindFamilyName 未命中内部族名 {}", font.internal_family)
+                        }
+                    }
+                };
+                println!("  {file_name}: {report}");
+                failures.push((file_name, report));
+            }
+            let failures: Vec<(String, String)> = failures
+                .into_iter()
+                .filter(|(_, report)| report != "OK")
+                .collect();
+            assert!(failures.is_empty(), "失败: {failures:?}");
+
+            if com_initialized {
+                CoUninitialize();
+            }
+        }
+    }
 }

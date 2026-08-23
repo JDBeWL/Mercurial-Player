@@ -112,7 +112,7 @@ describe('useConfigStore', () => {
       expect(store.lyrics.preferTranslation).toBe(true)
       expect(store.lyrics.onlineSource).toBe('netease')
       expect(store.lyrics.lyricsAlignment).toBe('center')
-      expect(store.lyrics.lyricsFontFamily).toBe('Roboto')
+      expect(store.lyrics.lyricsFontFamily).toBe('Noto Sans SC')
       expect(store.lyrics.lyricsStyle).toBe('modern')
     })
 
@@ -122,7 +122,7 @@ describe('useConfigStore', () => {
       expect(store.lyrics.desktopLyrics?.enabled).toBe(false)
       expect(store.lyrics.desktopLyrics?.locked).toBe(true)
       expect(store.lyrics.desktopLyrics?.fontSize).toBe(28)
-      expect(store.lyrics.desktopLyrics?.colorPreset).toBe('dark')
+      expect(store.lyrics.desktopLyrics?.colorPreset).toBe('auto')
     })
 
     it('has default audio config', () => {
@@ -216,7 +216,7 @@ describe('useConfigStore', () => {
       expect(store.lyrics.lyricsAlignment).toBe('left')
       expect(store.lyrics.onlineSource).toBe('qq')
       expect(store.lyrics.enableOnlineFetch).toBe(false)
-      expect(store.lyrics.lyricsFontFamily).toBe('Roboto')
+      expect(store.lyrics.lyricsFontFamily).toBe('Noto Sans SC')
     })
   })
 
@@ -242,7 +242,7 @@ describe('useConfigStore', () => {
       store.setDesktopLyricsConfig({ enabled: true })
       expect(store.lyrics.desktopLyrics).toBeDefined()
       expect(store.lyrics.desktopLyrics?.enabled).toBe(true)
-      expect(store.lyrics.desktopLyrics?.colorPreset).toBe('dark')
+      expect(store.lyrics.desktopLyrics?.colorPreset).toBe('auto')
     })
   })
 

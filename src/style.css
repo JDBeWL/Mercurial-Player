@@ -8,22 +8,11 @@
   src: url('./assets/fonts/material-symbols-rounded.woff2') format('woff2');
 }
 
-/* Roboto 回退字体：用本地系统字体 + 字体指标覆盖，匹配 Roboto 的度量，
-   使 font-display: swap 切换到 Roboto 时不发生布局偏移 (CLS)。
-   指标值基于 web.dev 推荐的 Roboto/Arial 匹配。 */
-@font-face {
-  font-family: 'Roboto Fallback';
-  src: local('Arial'), local('Helvetica'), local('Segoe UI'), local('sans-serif');
-  font-style: normal;
-  font-weight: 300 700;
-  font-display: swap;
-  ascent-override: 92.7734%;
-  descent-override: 24.4141%;
-  line-gap-override: 0%;
-  size-adjust: 100.0664%;
-}
-
 :root {
+  /* 全局应用字体：Noto Sans SC 注册为 local() 优先（系统已安装则零加载），
+     未安装时使用打包的 VF woff2；谚文等未覆盖字符回落系统字体 */
+  --app-font-family: 'Noto Sans SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+
   /* Shape */
   --md-sys-shape-corner-none: 0px;
   --md-sys-shape-corner-extra-small: 4px;
@@ -96,7 +85,7 @@
    ========================================= */
 body {
   margin: 0;
-  font-family: 'Roboto', 'Roboto Fallback', sans-serif;
+  font-family: var(--app-font-family);
   background-color: var(--md-sys-color-background);
   color: var(--md-sys-color-on-background);
   transition:
@@ -449,7 +438,7 @@ ThemeSelector {
   border-radius: 0;
   padding: 8px 0;
   width: 100%;
-  font-family: 'Roboto', 'Roboto Fallback', sans-serif;
+  font-family: var(--app-font-family);
   font-size: 16px;
   color: var(--md-sys-color-on-surface);
   outline: none;
@@ -462,7 +451,7 @@ ThemeSelector {
   position: absolute;
   top: 8px;
   left: 0;
-  font-family: 'Roboto', 'Roboto Fallback', sans-serif;
+  font-family: var(--app-font-family);
   font-size: 16px;
   color: var(--md-sys-color-on-surface-variant);
   pointer-events: none;
@@ -895,7 +884,7 @@ select.md3-select option {
   padding: 12px 16px;
   font-size: 14px;
   font-weight: 400;
-  font-family: 'Roboto', 'Roboto Fallback', sans-serif;
+  font-family: var(--app-font-family);
   color: var(--md-sys-color-on-surface);
   background-color: var(--md-sys-color-surface-container);
   border: none;

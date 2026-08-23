@@ -154,6 +154,20 @@ fn main() {
                 window.open_devtools();
             }
 
+            // 放开外部字体目录的 asset 协议访问（软件同级 fonts/，供前端动态注册 @font-face）
+            if let Ok(fonts_dir) = system::fonts::get_external_fonts_dir() {
+                if let Err(e) = app.asset_protocol_scope().allow_directory(fonts_dir, true) {
+                    log::warn!("Failed to allow fonts dir in asset scope: {e}");
+                }
+            }
+
+            // 字体集合（TTC/OTC）成员提取缓存目录同样经 asset 协议提供给前端
+            if let Ok(extract_dir) = system::fonts::get_font_extract_cache_dir() {
+                if let Err(e) = app.asset_protocol_scope().allow_directory(extract_dir, true) {
+                    log::warn!("Failed to allow font extract cache dir in asset scope: {e}");
+                }
+            }
+
             // 启动设备监听器
             {
                 let state: tauri::State<AppState> = app.state();
@@ -298,6 +312,9 @@ fn main() {
             // 系统命令
             system::commands::get_system_info,
             system::commands::get_system_fonts,
+            system::commands::get_external_fonts,
+            system::commands::get_font_cache_stats,
+            system::commands::clear_font_caches,
             system::commands::get_platform,
             system::commands::get_screen_refresh_rate,
             system::commands::open_external_url,
@@ -353,6 +370,8 @@ fn main() {
             taskbar::desktop_lyrics::set_desktop_lyrics_locked,
             #[cfg(windows)]
             taskbar::desktop_lyrics::set_desktop_lyrics_font_size,
+            #[cfg(windows)]
+            taskbar::desktop_lyrics::set_desktop_lyrics_font_family,
             #[cfg(windows)]
             taskbar::desktop_lyrics::set_desktop_lyrics_color_preset,
             #[cfg(windows)]

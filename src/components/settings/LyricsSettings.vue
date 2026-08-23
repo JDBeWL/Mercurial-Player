@@ -56,6 +56,36 @@
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.display') }}</h4>
 
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.showNoLyricsHint') }}</span>
+          <span class="setting-description">{{ $t('config.showNoLyricsHintDesc') }}</span>
+        </div>
+        <div
+          class="switch"
+          :class="{ active: configStore.lyrics?.showNoLyricsHint !== false }"
+          @click="toggleSetting('showNoLyricsHint')"
+        >
+          <div class="switch-track"></div>
+          <div class="switch-handle"></div>
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.showFetchLyricsButton') }}</span>
+          <span class="setting-description">{{ $t('config.showFetchLyricsButtonDesc') }}</span>
+        </div>
+        <div
+          class="switch"
+          :class="{ active: configStore.lyrics?.showFetchLyricsButton !== false }"
+          @click="toggleSetting('showFetchLyricsButton')"
+        >
+          <div class="switch-track"></div>
+          <div class="switch-handle"></div>
+        </div>
+      </div>
+
       <div class="setting-item select">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.lyricsAlignment') }}</span>
@@ -70,10 +100,23 @@
       <div class="setting-item select">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.lyricsFontFamily') }}</span>
+          <span class="setting-description">{{ $t('config.lyricsFontFamilyDesc') }}</span>
         </div>
         <MD3Select
           v-model="lyricsConfig.lyricsFontFamily"
           :options="fontOptions"
+          @change="saveConfig"
+        />
+      </div>
+
+      <div class="setting-item select">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.translationFontFamily') }}</span>
+          <span class="setting-description">{{ $t('config.translationFontFamilyDesc') }}</span>
+        </div>
+        <MD3Select
+          v-model="translationFontModel"
+          :options="translationFontOptions"
           @change="saveConfig"
         />
       </div>
@@ -150,6 +193,15 @@
             <span class="setting-description">{{ $t('config.desktopLyricsColorPresetDesc') }}</span>
           </div>
           <div class="preset-buttons">
+            <button
+              class="preset-btn"
+              :class="{ active: desktopLyricsConfig.colorPreset === 'auto' }"
+              :title="$t('config.colorPresetAuto')"
+              @click="setColorPreset('auto')"
+            >
+              <span class="preset-preview auto-preview"></span>
+              <span class="preset-label">{{ $t('config.colorPresetAuto') }}</span>
+            </button>
             <button
               class="preset-btn"
               :class="{ active: desktopLyricsConfig.colorPreset === 'dark' }"
@@ -265,6 +317,11 @@ import { useConfigStore } from '../../stores/config'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 import logger from '../../utils/logger'
+import {
+  bundledFontOptions,
+  externalFontOptions,
+  loadExternalFonts,
+} from '../../utils/bundledFonts'
 import MD3Select from '../MD3Select.vue'
 import type { LyricsConfig, DesktopLyricsConfig, VisualizerConfig } from '@/types'
 
@@ -288,11 +345,41 @@ const alignmentOptions = computed(() => [
 ])
 
 const fontOptions = computed(() => {
-  // 始终包含 Roboto 作为默认选项
-  const fonts = ['Roboto', 'sans-serif', 'serif', 'monospace', ...systemFonts.value]
-  // 去重
-  const uniqueFonts = [...new Set(fonts)]
-  return uniqueFonts.map((font) => ({ value: font, label: font }))
+  // 通用字体 / 内置打包字体 / 外部字体（软件同级 fonts/）/ 系统字体（与内置重名的只保留靠前分组）
+  const bundledValues = new Set(bundledFontOptions.map((f) => f.value))
+  const externalOptions = externalFontOptions.value.filter((f) => !bundledValues.has(f.value))
+  const externalValues = new Set([...bundledValues, ...externalOptions.map((f) => f.value)])
+  const systemOptions = [...new Set(systemFonts.value)]
+    .filter((font) => !externalValues.has(font))
+    .map((font) => ({ value: font, label: font }))
+  return [
+    {
+      label: t('config.fontGroupCommon'),
+      options: ['Roboto', 'sans-serif', 'serif', 'monospace'].map((font) => ({
+        value: font,
+        label: font,
+      })),
+    },
+    { label: t('config.fontGroupBundled'), options: bundledFontOptions },
+    ...(externalOptions.length > 0
+      ? [{ label: t('config.fontGroupExternal'), options: externalOptions }]
+      : []),
+    { label: t('config.fontGroupSystem'), options: systemOptions },
+  ]
+})
+
+// 译文字体选项：在原文选项基础上多一个“跟随原文”（空值 = 继承原文歌词字体）
+const translationFontOptions = computed(() => [
+  { value: '', label: t('config.translationFontFollow') },
+  ...fontOptions.value,
+])
+
+// 译文字体的 v-model 适配：可选字段归一为空串（跟随原文），MD3Select 只接受 string | number
+const translationFontModel = computed<string>({
+  get: () => lyricsConfig.value.translationFontFamily ?? '',
+  set: (value: string) => {
+    lyricsConfig.value.translationFontFamily = value
+  },
 })
 
 const styleOptions = computed(() => [
@@ -443,8 +530,11 @@ if (!configStore.lyrics) {
     preferTranslation: true,
     onlineSource: 'netease',
     lyricsAlignment: 'center',
-    lyricsFontFamily: 'Roboto',
+    lyricsFontFamily: 'Noto Sans SC',
+    translationFontFamily: '',
     lyricsStyle: 'modern',
+    showNoLyricsHint: true,
+    showFetchLyricsButton: true,
   }
 } else {
   // 确保所有字段都存在
@@ -452,10 +542,19 @@ if (!configStore.lyrics) {
     configStore.lyrics.lyricsAlignment = 'center'
   }
   if (!configStore.lyrics.lyricsFontFamily) {
-    configStore.lyrics.lyricsFontFamily = 'Roboto'
+    configStore.lyrics.lyricsFontFamily = 'Noto Sans SC'
+  }
+  if (configStore.lyrics.translationFontFamily === undefined) {
+    configStore.lyrics.translationFontFamily = ''
   }
   if (!configStore.lyrics.lyricsStyle) {
     configStore.lyrics.lyricsStyle = 'modern'
+  }
+  if (configStore.lyrics.showNoLyricsHint === undefined) {
+    configStore.lyrics.showNoLyricsHint = true
+  }
+  if (configStore.lyrics.showFetchLyricsButton === undefined) {
+    configStore.lyrics.showFetchLyricsButton = true
   }
 }
 
@@ -489,7 +588,12 @@ const saveConfig = async (): Promise<void> => {
 }
 
 const toggleSetting = async (
-  key: 'enableOnlineFetch' | 'autoSaveOnlineLyrics' | 'preferTranslation',
+  key:
+    | 'enableOnlineFetch'
+    | 'autoSaveOnlineLyrics'
+    | 'preferTranslation'
+    | 'showNoLyricsHint'
+    | 'showFetchLyricsButton',
 ): Promise<void> => {
   // 确保 lyrics 配置存在
   if (!configStore.lyrics) {
@@ -499,8 +603,11 @@ const toggleSetting = async (
       preferTranslation: true,
       onlineSource: 'netease',
       lyricsAlignment: 'center',
-      lyricsFontFamily: 'Roboto',
+      lyricsFontFamily: 'Noto Sans SC',
+      translationFontFamily: '',
       lyricsStyle: 'modern',
+      showNoLyricsHint: true,
+      showFetchLyricsButton: true,
     }
   }
   configStore.lyrics[key] = !configStore.lyrics[key]
@@ -510,7 +617,7 @@ const toggleSetting = async (
 const desktopLyricsConfig = computed<DesktopLyricsConfig>({
   get: () => {
     if (!configStore.lyrics?.desktopLyrics) {
-      return { enabled: false, locked: true, fontSize: 28, colorPreset: 'dark' as const }
+      return { enabled: false, locked: true, fontSize: 28, colorPreset: 'auto' as const }
     }
     return configStore.lyrics.desktopLyrics
   },
@@ -552,6 +659,8 @@ const setColorPreset = async (preset: DesktopLyricsConfig['colorPreset']): Promi
 
 onMounted(() => {
   loadSystemFonts()
+  // 每次打开设置页重新扫描外部字体目录，运行中放入的字体无需重启即可选择
+  void loadExternalFonts()
 
   // 如果没有检测过刷新率，自动检测一次
   if (
@@ -858,6 +967,11 @@ onMounted(() => {
 
 .dark-preview {
   background: #1a1a1a;
+}
+
+.auto-preview {
+  /* 半深半浅 */
+  background: linear-gradient(135deg, #1a1a1a 50%, #f5f5f5 50%);
 }
 
 .light-preview {

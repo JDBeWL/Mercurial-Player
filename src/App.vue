@@ -853,7 +853,7 @@ useAppLifecycle({
   max-width: 100%;
   font-size: 16px;
   font-weight: 500;
-  line-height: 1.3;
+  line-height: 1.4;
   color: var(--md-sys-color-on-surface);
   white-space: nowrap;
 }

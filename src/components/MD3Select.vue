@@ -22,18 +22,34 @@
     <Transition name="dropdown">
       <div v-if="isOpen" class="md3-select-dropdown" @click.stop>
         <div class="md3-select-dropdown-scroll">
-          <div
-            v-for="option in options"
-            :key="option.value"
-            class="md3-select-option"
-            :class="{ 'is-selected': modelValue === option.value }"
-            @click="selectOption(option.value)"
-          >
-            <span class="md3-select-option-text">{{ option.label }}</span>
-            <span v-if="modelValue === option.value" class="md3-select-option-check">
-              <span class="material-symbols-rounded">check</span>
-            </span>
-          </div>
+          <template v-for="entry in options" :key="isGroup(entry) ? entry.label : entry.value">
+            <template v-if="isGroup(entry)">
+              <div class="md3-select-group-label">{{ entry.label }}</div>
+              <div
+                v-for="option in entry.options"
+                :key="option.value"
+                class="md3-select-option"
+                :class="{ 'is-selected': modelValue === option.value }"
+                @click="selectOption(option.value)"
+              >
+                <span class="md3-select-option-text">{{ option.label }}</span>
+                <span v-if="modelValue === option.value" class="md3-select-option-check">
+                  <span class="material-symbols-rounded">check</span>
+                </span>
+              </div>
+            </template>
+            <div
+              v-else
+              class="md3-select-option"
+              :class="{ 'is-selected': modelValue === entry.value }"
+              @click="selectOption(entry.value)"
+            >
+              <span class="md3-select-option-text">{{ entry.label }}</span>
+              <span v-if="modelValue === entry.value" class="md3-select-option-check">
+                <span class="material-symbols-rounded">check</span>
+              </span>
+            </div>
+          </template>
         </div>
       </div>
     </Transition>
@@ -49,10 +65,20 @@ interface SelectOption {
   label: string
 }
 
+/* 选项分组（在下拉列表中渲染为不可选中的小标题） */
+interface SelectOptionGroup {
+  label: string
+  options: SelectOption[]
+}
+
+type SelectEntry = SelectOption | SelectOptionGroup
+
+const isGroup = (entry: SelectEntry): entry is SelectOptionGroup => 'options' in entry
+
 const props = withDefaults(
   defineProps<{
     modelValue: string | number
-    options: SelectOption[]
+    options: SelectEntry[]
     placeholder?: string
   }>(),
   {
@@ -76,7 +102,8 @@ const instanceId = ref<string>(
 )
 
 const displayValue = computed<string>(() => {
-  const selectedOption = props.options.find((opt) => opt.value === props.modelValue)
+  const flatOptions = props.options.flatMap((entry) => (isGroup(entry) ? entry.options : [entry]))
+  const selectedOption = flatOptions.find((opt) => opt.value === props.modelValue)
   return selectedOption ? selectedOption.label : props.placeholder
 })
 
@@ -237,6 +264,15 @@ const handleOtherSelectOpen = (event: Event): void => {
   max-height: 240px;
   overflow-y: auto;
   background-color: var(--md-sys-color-surface-container-low);
+}
+
+.md3-select-group-label {
+  padding: 12px 16px 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--md-sys-color-primary);
+  font-family: 'Roboto', 'Roboto Fallback', sans-serif;
+  user-select: none;
 }
 
 .md3-select-option {

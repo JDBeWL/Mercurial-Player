@@ -63,7 +63,7 @@ function makeTrack(): Track {
 }
 
 /** 初始化所有 mock store/composable */
-function setupMocks(overrides: { lyrics?: LyricLine[]; loading?: boolean; currentTrack?: Track | null; currentTime?: number; isPlaying?: boolean; lyricsOffset?: number } = {}) {
+function setupMocks(overrides: { lyrics?: LyricLine[]; loading?: boolean; currentTrack?: Track | null; currentTime?: number; isPlaying?: boolean; lyricsOffset?: number; lyricsConfig?: Record<string, unknown> } = {}) {
   mocks.playerStore = reactive({
     currentTrack: overrides.currentTrack ?? null,
     currentTime: overrides.currentTime ?? 0,
@@ -81,6 +81,7 @@ function setupMocks(overrides: { lyrics?: LyricLine[]; loading?: boolean; curren
       lyricsAlignment: 'center',
       lyricsFontFamily: 'Roboto',
       enableOnlineFetch: false,
+      ...overrides.lyricsConfig,
     },
   })
 
@@ -157,6 +158,59 @@ describe('LyricsDisplay.vue', () => {
       await nextTick()
       const fetchBtn = wrapper.find('.fetch-lyrics-btn')
       expect(fetchBtn.exists()).toBe(true)
+    })
+
+    it('showNoLyricsHint=false 时隐藏"未找到歌词"提示但保留按钮', async () => {
+      setupMocks({
+        currentTrack: makeTrack(),
+        lyrics: [],
+        loading: false,
+        lyricsConfig: { showNoLyricsHint: false },
+      })
+      wrapper = mountComponent()
+      await nextTick()
+      const noLyrics = wrapper.find('.no-lyrics')
+      expect(noLyrics.exists()).toBe(true)
+      expect(noLyrics.text()).not.toContain('lyrics.notFound')
+      expect(wrapper.find('.fetch-lyrics-btn').exists()).toBe(true)
+    })
+
+    it('showFetchLyricsButton=false 时隐藏获取歌词按钮但保留提示', async () => {
+      setupMocks({
+        currentTrack: makeTrack(),
+        lyrics: [],
+        loading: false,
+        lyricsConfig: { showFetchLyricsButton: false },
+      })
+      wrapper = mountComponent()
+      await nextTick()
+      const noLyrics = wrapper.find('.no-lyrics')
+      expect(noLyrics.exists()).toBe(true)
+      expect(noLyrics.text()).toContain('lyrics.notFound')
+      expect(wrapper.find('.fetch-lyrics-btn').exists()).toBe(false)
+    })
+
+    it('两个开关都关闭时整个无歌词区域不渲染', async () => {
+      setupMocks({
+        currentTrack: makeTrack(),
+        lyrics: [],
+        loading: false,
+        lyricsConfig: { showNoLyricsHint: false, showFetchLyricsButton: false },
+      })
+      wrapper = mountComponent()
+      await nextTick()
+      expect(wrapper.find('.no-lyrics').exists()).toBe(false)
+      expect(wrapper.find('.fetch-lyrics-btn').exists()).toBe(false)
+    })
+
+    it('配置缺省（字段为 undefined）时提示与按钮默认显示', async () => {
+      setupMocks({ currentTrack: makeTrack(), lyrics: [], loading: false })
+      wrapper = mountComponent()
+      await nextTick()
+      const noLyrics = wrapper.find('.no-lyrics')
+      expect(noLyrics.exists()).toBe(true)
+      expect(noLyrics.text()).toContain('lyrics.notFound')
+      expect(wrapper.find('.fetch-lyrics-btn').exists()).toBe(true)
     })
 
     it('点击获取歌词按钮调用 fetchAndSaveLyrics', async () => {

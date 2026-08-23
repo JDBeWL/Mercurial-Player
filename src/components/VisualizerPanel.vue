@@ -14,6 +14,8 @@
             { 'has-translation': !!currentLyric.texts[1] },
             isLyricTypeASS ? 'lyric-original-ass' : 'lyric-original-lrc',
           ]"
+          :style="lyricFontStyle"
+          :lang="originalLang || undefined"
         >
           <template v-if="currentLyric.karaoke">
             <!-- 复用卡拉OK逻辑 -->
@@ -30,7 +32,12 @@
             {{ currentLyric.texts[0] }}
           </template>
         </div>
-        <div v-if="currentLyric.texts[1]" class="lyric-translation">
+        <div
+          v-if="currentLyric.texts[1]"
+          class="lyric-translation"
+          :style="translationStyle"
+          :lang="translationLang || undefined"
+        >
           {{ currentLyric.texts[1] }}
         </div>
       </div>
@@ -42,14 +49,17 @@
 <script>
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { usePlayerStore } from '@/stores/player'
+import { useConfigStore } from '@/stores/config'
 import { useLyrics } from '@/composables/useLyrics'
 import { listen } from '@tauri-apps/api/event'
 import logger from '@/utils/logger'
+import { detectLyricLanguage } from '@/utils/languageDetect'
 
 export default {
   name: 'VisualizerPanel',
   setup() {
     const playerStore = usePlayerStore()
+    const configStore = useConfigStore()
     const { lyrics, activeIndex } = useLyrics()
 
     const canvasRef = ref(null)
@@ -108,6 +118,22 @@ export default {
     const isLyricTypeASS = computed(() => {
       return currentLyric.value && currentLyric.value.words && currentLyric.value.words.length > 0
     })
+
+    // --- 歌词字体（与主歌词页共用同一配置） ---
+    // 字体名加引号：不带引号的 font-family 标识符不允许以数字开头（如 "975"）
+    const lyricFontStyle = computed(() => ({
+      fontFamily: `"${configStore.lyrics?.lyricsFontFamily || 'Noto Sans SC'}"`,
+    }))
+
+    // 译文字体：为空时跟随原文（不设置该样式，继承原文字体）
+    const translationStyle = computed(() => {
+      const family = configStore.lyrics?.translationFontFamily
+      return family ? { fontFamily: `"${family}"` } : undefined
+    })
+
+    // 当前行的语言标注（原文/译文分别检测），供 lang 属性与字体 locl 区域字形使用
+    const originalLang = computed(() => detectLyricLanguage(currentLyric.value?.texts[0]))
+    const translationLang = computed(() => detectLyricLanguage(currentLyric.value?.texts[1]))
 
     // --- 视觉时间 (用于卡拉OK) ---
     const visualTime = ref(0)
@@ -382,6 +408,10 @@ export default {
       currentLyric,
       isLyricTypeASS,
       getKaraokeStyle,
+      lyricFontStyle,
+      translationStyle,
+      originalLang,
+      translationLang,
     }
   },
 }
@@ -431,7 +461,7 @@ canvas {
 
 .lyric-original {
   font-size: 32px;
-  font-weight: bold;
+  font-weight: 500;
   color: var(--md-sys-color-primary);
   line-height: 1.3;
   transition: all 0.3s ease;
@@ -455,7 +485,7 @@ canvas {
 .lyric-translation {
   font-size: 32px;
   color: var(--md-sys-color-primary);
-  font-weight: bold;
+  font-weight: 500;
   /* 限制最多显示2行 */
   display: -webkit-box;
   -webkit-line-clamp: 2;

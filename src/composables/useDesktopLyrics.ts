@@ -219,7 +219,7 @@ function startDesktopLyricsPolling() {
   if (updateIntervalId !== null) return
   updateIntervalId = window.setInterval(() => {
     scheduleDesktopLyricsUpdate()
-  }, 33)
+  }, 16) // 60 FPS
 }
 
 function stopDesktopLyricsPolling() {
@@ -264,9 +264,20 @@ async function syncFontSize() {
   }
 }
 
+async function syncFontFamily() {
+  const configStore = useConfigStore()
+  const fontFamily = configStore.lyrics?.lyricsFontFamily || 'Noto Sans SC'
+  const translationFontFamily = configStore.lyrics?.translationFontFamily ?? ''
+  try {
+    await invoke('set_desktop_lyrics_font_family', { fontFamily, translationFontFamily })
+  } catch {
+    // non-Windows platform or not initialized
+  }
+}
+
 async function syncColorPreset() {
   const configStore = useConfigStore()
-  const preset = configStore.lyrics?.desktopLyrics?.colorPreset ?? 'dark'
+  const preset = configStore.lyrics?.desktopLyrics?.colorPreset ?? 'auto'
   try {
     await invoke('set_desktop_lyrics_color_preset', { preset })
   } catch {
@@ -324,6 +335,7 @@ export function useDesktopLyrics() {
           showDesktopLyrics()
           syncLockState()
           syncFontSize()
+          syncFontFamily()
           syncColorPreset()
           startDesktopLyricsPolling()
           scheduleDesktopLyricsUpdate()
@@ -346,6 +358,13 @@ export function useDesktopLyrics() {
       () => syncFontSize(),
     )
     stopFns.push(stopWatchFontSize)
+
+    // 歌词字体设置（原文/译文）变化时同步到桌面歌词
+    const stopWatchLyricsFontFamily = watch(
+      () => [configStore.lyrics?.lyricsFontFamily, configStore.lyrics?.translationFontFamily],
+      () => syncFontFamily(),
+    )
+    stopFns.push(stopWatchLyricsFontFamily)
 
     const stopWatchColorPreset = watch(
       () => configStore.lyrics?.desktopLyrics?.colorPreset,
@@ -370,6 +389,7 @@ export function useDesktopLyrics() {
       showDesktopLyrics()
       syncLockState()
       syncFontSize()
+      syncFontFamily()
       syncColorPreset()
       startDesktopLyricsPolling()
       scheduleDesktopLyricsUpdate()

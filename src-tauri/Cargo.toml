@@ -46,6 +46,7 @@ display-info = "0.5"
 unicode-segmentation = "1"
 # async sleep 用于将阻塞的播放命令改为 async,避免阻塞 Tauri 命令线程
 tokio = { version = "1", features = ["time"] }
+ttf-parser = "0.25.1"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

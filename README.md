@@ -44,6 +44,7 @@
 - [x] 点击歌词跳转
 - [x] 卡拉OK逐字高亮（ASS格式）
 - [x] 双语歌词显示
+- [x] 歌词字体可选：内置霞鹜文楷屏幕版（LXGW WenKai Screen）与程序默认的Noto Sans，支持软件同级 `fonts/` 目录动态加载与构建期打包（`src/assets/fonts/lyrics/`）自定义字体，也可选系统字体
 - [x] 桌面歌词
 
 ## 播放控制
@@ -124,6 +125,7 @@
 | @material/material-color-utilities | ^0.4.0   |
 | pica                               | ^10.0.3  |
 | @fontsource/roboto                 | ^5.3.0   |
+| lxgw-wenkai-screen-webfont         | ^1.7.0   |
 
 ## 后端 (Rust)
 
@@ -200,6 +202,17 @@ pnpm run tauri build
 - 如果您修改了本软件，您必须将修改后的源代码也以GPL-3.0许可证发布
 - 本软件不提供任何担保
 - 完整的许可证文本请查看 [LICENSE](LICENSE) 文件或访问 [GNU 官网](https://www.gnu.org/licenses/gpl-3.0.html)
+
+### 随软件分发的第三方资源
+
+本项目为GPL-3.0许可证，以下资源以各自的许可证随软件分发（与GPL-3.0兼容，且适用于各自的条款）：
+
+| 资源 | 用途 | 许可证 | 许可证文本 |
+| --- | --- | --- | --- |
+| [Noto Sans SC](https://github.com/google/fonts/tree/main/ofl/notosanssc)（含 VF，仓库内为 WOFF2 格式转换） | 全局默认字体 / 歌词字体 | SIL OFL 1.1 | [src/assets/fonts/lyrics/OFL-NotoSansSC.txt](src/assets/fonts/lyrics/OFL-NotoSansSC.txt) |
+| [霞鹜文楷屏幕版 LXGW WenKai Screen](https://github.com/lxgw/LxgwWenKai-Screen) | 内置歌词字体 | SIL OFL 1.1 | 见上游仓库 |
+| [Material Symbols Rounded](https://github.com/google/material-design-icons) | 图标字体 | Apache-2.0 | 见上游仓库 |
+| [Roboto](https://github.com/googlefonts/roboto)（@fontsource 自托管） | 可选歌词字体 | Apache-2.0 | 见上游仓库 |
 
 # 致谢
 

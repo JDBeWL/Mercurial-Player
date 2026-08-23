@@ -239,6 +239,17 @@
           <span v-else>{{ $t('config.clearing') }}</span>
         </button>
       </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.fontCache') }}</span>
+          <div class="setting-desc">{{ fontCacheDesc }}</div>
+        </div>
+        <button class="clear-cache-btn" :disabled="isClearingFontCache" @click="clearFontCaches">
+          <span v-if="!isClearingFontCache">{{ $t('config.clearCache') }}</span>
+          <span v-else>{{ $t('config.clearing') }}</span>
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -350,6 +361,41 @@ const loadMetadataCacheStats = async () => {
     metadataCacheStats.value = { count, size }
   } catch (error) {
     logger.error('Failed to load metadata cache stats:', error)
+  }
+}
+
+const isClearingFontCache = ref(false)
+const fontCacheStats = ref({ extractCacheBytes: 0 })
+
+const fontCacheDesc = computed(() => {
+  const size = fontCacheStats.value.extractCacheBytes
+  if (size === 0) {
+    return t('config.fontCacheEmpty')
+  }
+  const sizeStr =
+    size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(2)} MB` : `${(size / 1024).toFixed(2)} KB`
+  return t('config.fontCacheStats', { size: sizeStr })
+})
+
+const loadFontCacheStats = async () => {
+  try {
+    fontCacheStats.value = await invoke<{ extractCacheBytes: number }>('get_font_cache_stats')
+  } catch (error) {
+    logger.error('Failed to load font cache stats:', error)
+  }
+}
+
+const clearFontCaches = async () => {
+  if (isClearingFontCache.value) return
+
+  isClearingFontCache.value = true
+  try {
+    fontCacheStats.value = await invoke<{ extractCacheBytes: number }>('clear_font_caches')
+    logger.info('Font caches cleared')
+  } catch (error) {
+    logger.error('Failed to clear font caches:', error)
+  } finally {
+    isClearingFontCache.value = false
   }
 }
 
@@ -468,6 +514,7 @@ const clearMetadataCache = async () => {
 
 onMounted(() => {
   loadMetadataCacheStats()
+  loadFontCacheStats()
   loadTempDirPath()
 })
 </script>

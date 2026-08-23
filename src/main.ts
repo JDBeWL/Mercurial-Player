@@ -20,11 +20,16 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
-// Roboto 字体自托管 (替代 Google Fonts CDN),仅导入使用到的权重
+// Roboto 字体自托管 ,仅导入使用到的权重
 import '@fontsource/roboto/300.css'
 import '@fontsource/roboto/400.css'
 import '@fontsource/roboto/500.css'
 import '@fontsource/roboto/700.css'
+// 歌词可选字体：霞鹜文楷屏幕版（unicode-range 分片按需加载）
+import 'lxgw-wenkai-screen-webfont/lxgwwenkaiscreen.css'
+// 注册 assets/fonts/lyrics/ 下手动引入的打包字体
+import './utils/bundledFonts'
+import { loadExternalFonts } from './utils/bundledFonts'
 import './style.css'
 import i18n from './i18n'
 import logger from './utils/logger'
@@ -40,6 +45,9 @@ const pinia = createPinia()
 app.use(pinia)
 app.use(i18n)
 app.mount('#app')
+
+// 扫描软件同级 fonts/ 目录，注册外部字体（应用运行中放入的字体在打开设置页时还会重新扫描）
+void loadExternalFonts()
 
 logger.info('应用程序已启动')
 

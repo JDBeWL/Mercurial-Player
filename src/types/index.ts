@@ -55,14 +55,14 @@ export interface Playlist {
   name: string
   files: Track[]
   totalFiles?: number
-  /** 全部歌曲播放列表标记（生成时写入；旧缓存中可能缺失，需结合名称判断） */
+  /* 全部歌曲播放列表标记（生成时写入；旧缓存中可能缺失，需结合名称判断） */
   isAllSongsPlaylist?: boolean
 }
 
 export type RepeatMode = 'none' | 'track' | 'list'
 export type SortOrder = 'asc' | 'desc'
 
-/** 沉浸式封面背景取色风格 */
+/* 沉浸式封面背景取色风格 */
 export type ImmersiveColorScheme = 'album' | 'fusion'
 
 // ============ 配置类型 ============
@@ -116,7 +116,13 @@ export interface LyricsConfig {
   onlineSource: string
   lyricsAlignment: 'left' | 'center' | 'right'
   lyricsFontFamily: string
+  /* 译文字体（空字符串 = 跟随原文歌词字体） */
+  translationFontFamily?: string
   lyricsStyle: string
+  /* 无歌词时是否显示"未找到歌词"提示（默认显示） */
+  showNoLyricsHint?: boolean
+  /* 无歌词时是否显示"获取歌词"按钮（默认显示） */
+  showFetchLyricsButton?: boolean
   desktopLyrics?: DesktopLyricsConfig
 }
 
@@ -124,7 +130,8 @@ export interface DesktopLyricsConfig {
   enabled: boolean
   locked: boolean
   fontSize: number
-  colorPreset: 'dark' | 'light' | 'blue' | 'pink' | 'orange' | 'green'
+  /* auto为按背景亮度自动切换深/浅文字 */
+  colorPreset: 'auto' | 'dark' | 'light' | 'blue' | 'pink' | 'orange' | 'green'
 }
 
 export interface UIConfig {
@@ -136,7 +143,7 @@ export interface UIConfig {
 export interface AudioConfig {
   exclusiveMode: boolean
   volume: number
-  /** 是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音) */
+  /* 是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音) */
   fadeEnabled: boolean
 }
 
@@ -197,7 +204,7 @@ export interface ResumeResult {
   positionSecs?: number | null
   playlistName?: string | null
   trackIndexInPlaylist?: number | null
-  /** 播放队列快照 (用于恢复 player.playlist) */
+  /* 播放队列快照 (用于恢复 player.playlist) */
   playlistTracks: TrackSnapshot[]
   status: string
 }
@@ -212,7 +219,7 @@ export interface AppConfig {
   ui: UIConfig
   audio: AudioConfig
   visualizer: VisualizerConfig
-  /** 上次播放会话 (启动恢复用) */
+  /* 上次播放会话 (启动恢复用) */
   lastSession?: LastSession | null
 }
 
