@@ -22,7 +22,7 @@ use tauri::command;
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT, D2D_RECT_F,
+    D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DRAW_TEXT_OPTIONS_NONE,
@@ -47,7 +47,7 @@ use windows::Win32::Graphics::Gdi::{
     BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, BeginPaint, CreateCompatibleDC, CreateDIBSection,
     CreateFontW, DIB_RGB_COLORS, DeleteDC, DeleteObject, EndPaint, FONT_CHARSET,
     FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_NORMAL, GetDC, HBRUSH, HFONT,
-    HGDIOBJ, InvalidateRect, PAINTSTRUCT, ReleaseDC, RGBQUAD, SRCCOPY, ScreenToClient,
+    HGDIOBJ, InvalidateRect, PAINTSTRUCT, RGBQUAD, ReleaseDC, SRCCOPY, ScreenToClient,
     SelectObject, SetBkMode, StretchBlt, TRANSPARENT,
 };
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
@@ -262,7 +262,12 @@ fn build_external_font_index(generation: u32) -> Option<ExternalFontIndex> {
     let entries = crate::system::fonts::list_external_fonts().ok()?;
     let mut candidates: HashMap<String, Vec<(u8, String)>> = HashMap::new();
     for font in entries {
-        let ext = font.path.rsplit('.').next().unwrap_or_default().to_lowercase();
+        let ext = font
+            .path
+            .rsplit('.')
+            .next()
+            .unwrap_or_default()
+            .to_lowercase();
         if matches!(ext.as_str(), "woff" | "woff2") {
             continue;
         }
@@ -270,7 +275,11 @@ fn build_external_font_index(generation: u32) -> Option<ExternalFontIndex> {
         if family.is_empty() {
             continue;
         }
-        let stem = font.name.rsplit_once('.').map(|(s, _)| s).unwrap_or(&font.name);
+        let stem = font
+            .name
+            .rsplit_once('.')
+            .map(|(s, _)| s)
+            .unwrap_or(&font.name);
         candidates
             .entry(family.to_lowercase())
             .or_default()
@@ -303,7 +312,8 @@ fn build_external_font_index(generation: u32) -> Option<ExternalFontIndex> {
 unsafe fn build_memory_loader(dwrite: &IDWriteFactory) -> Option<IDWriteInMemoryFontFileLoader> {
     // SAFETY: 调用者保证当前线程已初始化 COM
     let loader = unsafe {
-        dwrite.cast::<IDWriteFactory5>()
+        dwrite
+            .cast::<IDWriteFactory5>()
             .ok()?
             .CreateInMemoryFontFileLoader()
             .ok()?
@@ -404,7 +414,11 @@ fn family_has_system_face(dwrite: &IDWriteFactory, family: &str) -> bool {
     // SAFETY: index/exists 为栈上局部变量；wide 以 NUL 结尾
     unsafe {
         system
-            .FindFamilyName(PCWSTR::from_raw(wide.as_ptr()), &raw mut index, &raw mut exists)
+            .FindFamilyName(
+                PCWSTR::from_raw(wide.as_ptr()),
+                &raw mut index,
+                &raw mut exists,
+            )
             .is_ok()
             && exists.as_bool()
     }
@@ -490,7 +504,10 @@ impl Direct2DState {
         self.ensure_external_index();
         let key = family.to_lowercase();
         if let Some(entry) = self.external_collections.get(&key) {
-            return (Some(entry.collection.clone()), entry.internal_family.clone());
+            return (
+                Some(entry.collection.clone()),
+                entry.internal_family.clone(),
+            );
         }
         let Some(paths) = self
             .external_index
@@ -1133,10 +1150,14 @@ fn render_lyrics_d2d_frame(
                     )
                     .unwrap_or(fallback_h)
                     .max(1);
-                    let lower_h =
-                        measure_text_height_dwrite_with_state(state, sub, font_size_scaled, sub_family)
-                            .unwrap_or(fallback_h)
-                            .max(1);
+                    let lower_h = measure_text_height_dwrite_with_state(
+                        state,
+                        sub,
+                        font_size_scaled,
+                        sub_family,
+                    )
+                    .unwrap_or(fallback_h)
+                    .max(1);
                     let gap = (6 * scale / 96).max(2);
                     let avail = layout.text_rect.bottom - layout.text_rect.top;
                     let group_top =
@@ -1188,11 +1209,7 @@ fn render_lyrics_d2d_frame(
 /// # Safety
 /// 必须在已初始化 COM 的渲染线程（D2D_STATE 上下文）调用，且此时
 /// 渲染目标已 BindDC
-unsafe fn draw_hover_card(
-    state: &mut Direct2DState,
-    client_rect: &RECT,
-    corner_radius: f32,
-) {
+unsafe fn draw_hover_card(state: &mut Direct2DState, client_rect: &RECT, corner_radius: f32) {
     let w = client_rect.right - client_rect.left;
     let h = client_rect.bottom - client_rect.top;
     if w <= 0 || h <= 0 {
@@ -1206,8 +1223,9 @@ unsafe fn draw_hover_card(
     // SAFETY: card/tint/border 为栈上局部变量；画刷在本次绘制内使用
     unsafe {
         let tint = d2d_color(0x00_00_00, 0.5);
-        if let Ok(tint_brush) =
-            state.dc_render_target.CreateSolidColorBrush(&raw const tint, None)
+        if let Ok(tint_brush) = state
+            .dc_render_target
+            .CreateSolidColorBrush(&raw const tint, None)
         {
             state
                 .dc_render_target
@@ -1737,7 +1755,14 @@ unsafe fn capture_region_bgra(
     let mut p_bits: *mut core::ffi::c_void = std::ptr::null_mut();
     // SAFETY: bmi 为栈上局部变量；p_bits 指向 DIB 数据，DeleteObject 前有效
     let Ok(h_bitmap) = (unsafe {
-        CreateDIBSection(None, &raw const bmi, DIB_RGB_COLORS, &raw mut p_bits, None, 0)
+        CreateDIBSection(
+            None,
+            &raw const bmi,
+            DIB_RGB_COLORS,
+            &raw mut p_bits,
+            None,
+            0,
+        )
     }) else {
         // SAFETY: 配对释放本函数创建的 GDI 资源
         unsafe {
@@ -1844,7 +1869,13 @@ fn measure_text_width_dwrite_with_state(
     // SAFETY: create_layout 要求 COM 已初始化，调用方在 D2D_STATE 线程上下文
     let layout = unsafe {
         state
-            .create_layout(text, font_size_scaled, 100_000.0, height.max(1) as f32, family)
+            .create_layout(
+                text,
+                font_size_scaled,
+                100_000.0,
+                height.max(1) as f32,
+                family,
+            )
             .ok()?
     };
     let mut metrics = DWRITE_TEXT_METRICS::default();
@@ -2731,8 +2762,7 @@ mod tests {
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
-                let family =
-                    crate::system::fonts::frontend_family_from_file_name(&file_name);
+                let family = crate::system::fonts::frontend_family_from_file_name(&file_name);
                 // 走生产加载函数；外层 unsafe 块保证 COM 已初始化、loader 已注册
                 let report = match try_load_external_font(
                     &dwrite,

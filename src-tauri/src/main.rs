@@ -163,7 +163,10 @@ fn main() {
 
             // 字体集合（TTC/OTC）成员提取缓存目录同样经 asset 协议提供给前端
             if let Ok(extract_dir) = system::fonts::get_font_extract_cache_dir() {
-                if let Err(e) = app.asset_protocol_scope().allow_directory(extract_dir, true) {
+                if let Err(e) = app
+                    .asset_protocol_scope()
+                    .allow_directory(extract_dir, true)
+                {
                     log::warn!("Failed to allow font extract cache dir in asset scope: {e}");
                 }
             }

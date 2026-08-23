@@ -219,10 +219,7 @@ fn face_family_name(face: &ttf_parser::Face) -> Option<String> {
         ttf_parser::name_id::TYPOGRAPHIC_FAMILY,
         ttf_parser::name_id::FAMILY,
     ];
-    let decode = |name: ttf_parser::name::Name| {
-        name.to_string()
-            .filter(|s| !s.trim().is_empty())
-    };
+    let decode = |name: ttf_parser::name::Name| name.to_string().filter(|s| !s.trim().is_empty());
     for &id in &ids {
         for name in face.names() {
             if name.name_id == id
@@ -250,7 +247,12 @@ fn face_family_name(face: &ttf_parser::Face) -> Option<String> {
 /// 剔除文件名非法字符与引号（前端按文件名解析族名时会剔除引号，保持一致）
 fn sanitize_file_name(s: &str) -> String {
     s.chars()
-        .filter(|&c| !matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\''))
+        .filter(|&c| {
+            !matches!(
+                c,
+                '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\''
+            )
+        })
         .collect::<String>()
         .trim()
         .to_string()
@@ -442,10 +444,7 @@ fn extract_collection_to_cache(path: &Path) -> Result<Vec<ExternalFont>, String>
                 let p = entry.path();
                 if p.is_dir()
                     && p != key_dir
-                    && entry
-                        .file_name()
-                        .to_string_lossy()
-                        .starts_with(&prefix)
+                    && entry.file_name().to_string_lossy().starts_with(&prefix)
                 {
                     let _ = fs::remove_dir_all(&p);
                 }
@@ -456,10 +455,7 @@ fn extract_collection_to_cache(path: &Path) -> Result<Vec<ExternalFont>, String>
         let mut used = HashSet::new();
         for (i, meta) in metas.iter().enumerate() {
             let Some(member_bytes) = extract_collection_member(&bytes, i) else {
-                log::warn!(
-                    "跳过字体集合 {} 的第 {i} 个成员：提取失败",
-                    path.display()
-                );
+                log::warn!("跳过字体集合 {} 的第 {i} 个成员：提取失败", path.display());
                 continue;
             };
             let name = member_file_name(meta, &mut used);
@@ -472,8 +468,7 @@ fn extract_collection_to_cache(path: &Path) -> Result<Vec<ExternalFont>, String>
 
     // 缓存目录中的文件即全部成员，文件名已按前端约定生成
     let mut fonts = Vec::new();
-    let entries =
-        fs::read_dir(&key_dir).map_err(|e| format!("无法读取提取缓存目录: {e}"))?;
+    let entries = fs::read_dir(&key_dir).map_err(|e| format!("无法读取提取缓存目录: {e}"))?;
     for entry in entries.flatten() {
         let p = entry.path();
         if !p.is_file() {
@@ -727,7 +722,10 @@ mod tests {
         let member1: &[([u8; 4], &[u8])] = &[(*b"CMAP", b"gamma!"), (*b"HEA1", b"beta-longer")];
         let data = build_collection(&[member0, member1]);
 
-        for (index, expected) in [(0usize, vec![b"HEA1", b"NAM1"]), (1, vec![b"CMAP", b"HEA1"])] {
+        for (index, expected) in [
+            (0usize, vec![b"HEA1", b"NAM1"]),
+            (1, vec![b"CMAP", b"HEA1"]),
+        ] {
             let out = extract_collection_member(&data, index).unwrap();
             // 输出是独立 sfnt 而非集合
             assert_eq!(&out[0..4], &[0, 1, 0, 0]);
@@ -753,12 +751,24 @@ mod tests {
     #[test]
     fn frontend_family_from_file_name_conventions() {
         // 与前端 bundledFonts.test.ts 的解析用例保持一致
-        assert_eq!(frontend_family_from_file_name("Noto Sans SC-VF.woff2"), "Noto Sans SC");
-        assert_eq!(frontend_family_from_file_name("975Maru SC.ttf"), "975Maru SC");
+        assert_eq!(
+            frontend_family_from_file_name("Noto Sans SC-VF.woff2"),
+            "Noto Sans SC"
+        );
+        assert_eq!(
+            frontend_family_from_file_name("975Maru SC.ttf"),
+            "975Maru SC"
+        );
         // Google Fonts 命名（英文字重名）与 Adobe 数字字重命名
-        assert_eq!(frontend_family_from_file_name("SourceHanSansSC-Bold.otf"), "SourceHanSansSC");
+        assert_eq!(
+            frontend_family_from_file_name("SourceHanSansSC-Bold.otf"),
+            "SourceHanSansSC"
+        );
         assert_eq!(frontend_family_from_file_name("Family-700.ttf"), "Family");
-        assert_eq!(frontend_family_from_file_name("Roboto-Regular.ttf"), "Roboto");
+        assert_eq!(
+            frontend_family_from_file_name("Roboto-Regular.ttf"),
+            "Roboto"
+        );
         // 数字字重优先于英文字重名；引号剔除
         assert_eq!(frontend_family_from_file_name("X-300.ttf"), "X");
         assert_eq!(frontend_family_from_file_name("My'Font.ttf"), "MyFont");
@@ -797,7 +807,10 @@ mod tests {
             variable: false,
             cff: false,
         };
-        assert_eq!(member_file_name(&regular, &mut used), "Source Han Sans SC-700.ttf");
+        assert_eq!(
+            member_file_name(&regular, &mut used),
+            "Source Han Sans SC-700.ttf"
+        );
 
         let vf = CollectionMemberMeta {
             family: "My Font".to_string(),
@@ -818,7 +831,10 @@ mod tests {
 
         // 同族同字重去重
         let mut used2 = HashSet::new();
-        assert_eq!(member_file_name(&regular, &mut used2), "Source Han Sans SC-700.ttf");
+        assert_eq!(
+            member_file_name(&regular, &mut used2),
+            "Source Han Sans SC-700.ttf"
+        );
         assert_eq!(
             member_file_name(&regular, &mut used2),
             "Source Han Sans SC-700-2.ttf"
@@ -838,7 +854,10 @@ mod tests {
         let face = ttf_parser::Face::parse(&out, 0).expect("提取结果无法被 ttf-parser 解析");
         assert!(face.number_of_glyphs() > 1000, "字形数量异常");
         let family = face_family_name(&face).expect("读取族名失败");
-        assert!(family.contains("YaHei") || family.contains("雅黑"), "族名异常: {family}");
+        assert!(
+            family.contains("YaHei") || family.contains("雅黑"),
+            "族名异常: {family}"
+        );
 
         let families = internal_font_families(&data);
         assert!(!families.is_empty(), "真实 TTC 应解析出内部族名");
