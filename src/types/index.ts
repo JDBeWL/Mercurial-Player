@@ -101,6 +101,8 @@ export interface GeneralConfig {
   // 'album' = representative theme color of the whole cover (default)
   // 'fusion' = sample the right edge strip so the background blends into the feathered cover
   immersiveColorScheme?: ImmersiveColorScheme
+  // Auto switch light/dark theme by cover luminance in immersive mode (default: true)
+  immersiveAutoTheme?: boolean
   // Whether automatic update checks are enabled (default: false)
   enableAutoUpdate?: boolean
   // Cover cache size in MB (default: 1024 = 1GB)

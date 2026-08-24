@@ -136,6 +136,8 @@
     "immersiveColorSchemeDesc": "Album Theme: representative color of the whole cover; Cover Blend: samples the right edge for a smoother transition",
     "immersiveSchemeAlbum": "Album Theme",
     "immersiveSchemeFusion": "Cover Blend",
+    "immersiveAutoTheme": "Auto Light/Dark in Immersive Mode",
+    "immersiveAutoThemeDesc": "Switch light/dark theme automatically by cover luminance for readability; restores your theme on exit",
     "lyricsAlignment": "Lyrics Alignment",
     "alignLeft": "Left",
     "alignCenter": "Center",

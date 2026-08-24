@@ -136,6 +136,8 @@
     "immersiveColorSchemeDesc": "专辑主题色：整张封面的代表色；封面融合：取封面右缘颜色，背景与封面过渡更自然",
     "immersiveSchemeAlbum": "专辑主题色",
     "immersiveSchemeFusion": "封面融合",
+    "immersiveAutoTheme": "沉浸式模式自动深浅色",
+    "immersiveAutoThemeDesc": "根据封面背景亮度自动切换深色/浅色主题，保证文字可读，退出后恢复原主题",
     "enableAutoUpdate": "启用自动更新",
     "enableAutoUpdateDesc": "允许自动检查更新并在可用时提示（默认关闭以防止意外升级）",
     "cacheSettings": "缓存设置",

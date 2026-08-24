@@ -24,6 +24,9 @@ export function useDominantColor(
   mode: Ref<ImmersiveColorScheme> = ref('album')
 ) {
   const dominantColor = ref('')
+  // 主色的 OKLab 亮度（0~1），取色失败时为 null。
+  // 沉浸式模式据此自动切换应用的深/浅主题，保证前景文字可读。
+  const dominantLuminance = ref<number | null>(null)
   let generation = 0
 
   // ===================== 色彩空间转换（Björn Ottosson） =====================
@@ -145,10 +148,11 @@ export function useDominantColor(
 
   // ===================== 核心取色算法 =====================
 
-  /** 亮度上限压缩 + 彩度等比缩放 + 色域映射，输出最终 rgb() 字符串（两种模式共用） */
-  const finalizeColor = (L: number, a: number, b: number): string => {
-    // 亮度压缩（不超过 0.65，保证白色文字在背景上可读）
-    const targetL = Math.min(L, 0.65)
+  /** 亮度上限压缩 + 彩度等比缩放 + 色域映射，输出最终 rgb() 字符串与亮度（两种模式共用） */
+  const finalizeColor = (L: number, a: number, b: number): { color: string; luminance: number } => {
+    // 亮度压缩（为了能看清歌词视觉上最好不超过 0.65，保证可读，现在暂时调高一点我感觉观感更好）
+    // const targetL = Math.min(L, 0.65)
+    const targetL = Math.min(L, 0.95)
 
     // 按亮度压缩比例缩放彩度，防止压缩后彩度不变导致偏色
     const dimRatio = targetL / Math.max(L, 0.001)
@@ -177,10 +181,13 @@ export function useDominantColor(
     }
 
     const { r, g, b: blue } = oklabToRgb(targetL, finalA, finalB)
-    return `rgb(${r}, ${g}, ${blue})`
+    return { color: `rgb(${r}, ${g}, ${blue})`, luminance: targetL }
   }
 
-  const pickDominant = (pixels: Uint8ClampedArray, mode: ImmersiveColorScheme): string => {
+  const pickDominant = (
+    pixels: Uint8ClampedArray,
+    mode: ImmersiveColorScheme
+  ): { color: string; luminance: number } => {
     // 1. 将不透明像素转入 OKLab 空间。
     //    - album：整张封面均匀取样，选出最具代表性的主题色
     //    - fusion：只保留最右侧 5%（x >= 0.95）的羽化条带，其余像素不参与
@@ -196,8 +203,8 @@ export function useDominantColor(
     }
 
     if (pts.length === 0) {
-      // 无有效像素 => 返回深灰色后备
-      return 'rgb(40, 40, 40)'
+      // 无有效像素 => 返回深灰色后备（OKLab L≈0.19）
+      return { color: 'rgb(40, 40, 40)', luminance: 0.19 }
     }
 
     // fusion：直接对条带取平均——融合模式下背景色应贴近右缘真实观感，
@@ -341,23 +348,32 @@ export function useDominantColor(
       const gen = ++generation
       if (!path) {
         dominantColor.value = ''
+        dominantLuminance.value = null
         return
       }
 
       decodePixels(path)
         .then((pixels) => {
           if (gen === generation) {
-            dominantColor.value = pixels ? pickDominant(pixels, currentMode) : ''
+            if (pixels) {
+              const result = pickDominant(pixels, currentMode)
+              dominantColor.value = result.color
+              dominantLuminance.value = result.luminance
+            } else {
+              dominantColor.value = ''
+              dominantLuminance.value = null
+            }
           }
         })
         .catch(() => {
           if (gen === generation) {
             dominantColor.value = ''
+            dominantLuminance.value = null
           }
         })
     },
     { immediate: true }
   )
 
-  return { dominantColor }
+  return { dominantColor, dominantLuminance }
 }

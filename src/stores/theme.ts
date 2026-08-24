@@ -208,6 +208,8 @@ interface ThemeState {
   primaryColor: string
   enableGlassEffect: boolean
   enableGradients: boolean
+  /** 沉浸式模式深浅覆盖是否生效（不持久化，退出时按用户偏好恢复） */
+  immersiveThemeOverride: boolean
 }
 
 export const useThemeStore = defineStore('theme', {
@@ -217,6 +219,7 @@ export const useThemeStore = defineStore('theme', {
     primaryColor: '#2C2C2C',
     enableGlassEffect: true,
     enableGradients: true,
+    immersiveThemeOverride: false,
   }),
 
   getters: {
@@ -255,6 +258,32 @@ export const useThemeStore = defineStore('theme', {
         this.primaryColor = preference
       }
       this.applyTheme()
+    },
+
+    /**
+     * 沉浸式模式的深浅主题覆盖。
+     * - dark = true/false：按封面主色亮度临时切换深/浅模式（不写入配置）。
+     * - dark = null：退出沉浸式，恢复用户主题偏好（auto 跟随系统）对应的深浅模式。
+     */
+    setImmersiveDarkMode(dark: boolean | null): void {
+      if (dark === null) {
+        if (!this.immersiveThemeOverride) return
+        this.immersiveThemeOverride = false
+        if (this.themePreference === 'dark') {
+          this.isDarkMode = true
+        } else if (this.themePreference === 'light') {
+          this.isDarkMode = false
+        } else {
+          this.isDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches
+        }
+        this.applyTheme()
+        return
+      }
+      this.immersiveThemeOverride = true
+      if (this.isDarkMode !== dark) {
+        this.isDarkMode = dark
+        this.applyTheme()
+      }
     },
 
     setGlassEffect(enabled: boolean): void {

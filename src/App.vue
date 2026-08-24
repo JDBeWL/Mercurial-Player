@@ -498,6 +498,16 @@ watch(
   },
 )
 
+// 切换到迷你模式时退出沉浸模式（迷你窗口无沉浸层，避免主题深浅覆盖残留）
+watch(
+  () => configStore.ui.miniMode,
+  (mini) => {
+    if (mini && immersiveCover.value) {
+      immersiveCover.value = false
+    }
+  },
+)
+
 onMounted(() => {
   window.addEventListener('keydown', handleCoverKeydown)
 })
@@ -549,12 +559,27 @@ const currentTrackCover = computed(() => {
 const immersiveColorScheme = computed<ImmersiveColorScheme>(
   () => configStore.general.immersiveColorScheme ?? 'album',
 )
-const { dominantColor } = useDominantColor(
+const { dominantColor, dominantLuminance } = useDominantColor(
   computed(() => currentTrack.value?.coverPath),
   immersiveColorScheme,
 )
 const immersiveBackground = computed(
   () => dominantColor.value || 'var(--md-sys-color-surface-container)',
+)
+
+// 沉浸式模式：根据封面主色亮度自动切换深/浅主题（亮背景配浅色主题、暗背景配深色主题），
+// 保证前景文字可读；退出时恢复用户主题偏好。取色失败（亮度为 null）时保持当前主题。
+watch(
+  [immersiveCover, dominantLuminance],
+  ([active, luminance]) => {
+    if (!active) {
+      themeStore.setImmersiveDarkMode(null)
+      return
+    }
+    if ((configStore.general.immersiveAutoTheme ?? true) && luminance !== null) {
+      themeStore.setImmersiveDarkMode(luminance < 0.5)
+    }
+  },
 )
 
 // 封面展示 URL（供沉浸式封面的 <img> 使用）：

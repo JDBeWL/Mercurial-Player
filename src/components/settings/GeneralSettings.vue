@@ -138,6 +138,21 @@
 
       <div class="setting-item">
         <div class="setting-info">
+          <span class="setting-label">{{ $t('config.immersiveAutoTheme') }}</span>
+          <div class="setting-desc">{{ $t('config.immersiveAutoThemeDesc') }}</div>
+        </div>
+        <div
+          class="switch"
+          :class="{ active: configStore.general.immersiveAutoTheme ?? true }"
+          @click="toggleSetting('immersiveAutoTheme')"
+        >
+          <div class="switch-track"></div>
+          <div class="switch-handle"></div>
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
           <span class="setting-label">{{ $t('config.enableAutoUpdate') }}</span>
           <div class="setting-desc">{{ $t('config.enableAutoUpdateDesc') }}</div>
         </div>
