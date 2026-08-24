@@ -27,6 +27,14 @@
           <div class="progress-bar">
             <div class="progress-bar-fill" :style="{ width: downloadProgress + '%' }"></div>
           </div>
+          <div class="progress-detail">
+            <span>
+              {{ formatBytes(downloadedBytes) }}<template v-if="totalBytes > 0">
+                / {{ formatBytes(totalBytes) }}</template
+              >
+            </span>
+            <span v-if="downloadSpeed > 0">{{ formatBytes(downloadSpeed) }}/s</span>
+          </div>
         </div>
 
         <div v-else class="release-notes">
@@ -79,11 +87,27 @@ const {
   error,
   releaseNotes,
   downloadFinished,
+  downloadedBytes,
+  totalBytes,
+  downloadSpeed,
   hasError,
   downloadAndInstall,
   runInstaller,
   resetUpdateState,
 } = useAutoUpdate()
+
+/** 字节数格式化为带单位的可读文本（如 12.5 MB） */
+const formatBytes = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes < 0) return '--'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${value >= 100 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`
+}
 
 /** 将release notes渲染为HTML */
 const renderedNotes = computed(() => {
@@ -230,6 +254,14 @@ const onDismiss = () => {
 .progress-percent {
   font-weight: 500;
   color: var(--md-sys-color-primary);
+}
+
+.progress-detail {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--md-sys-color-on-surface-variant);
 }
 
 /* 更新日志区域 */

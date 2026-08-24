@@ -11,7 +11,6 @@ export {
   mockShortcutIsRegistered,
   mockWriteFile,
   mockTauriFetch,
-  mockCheckUpdate,
   mockRelaunch,
 } from '../setup'
 import {
@@ -26,7 +25,6 @@ import {
   mockShortcutIsRegistered,
   mockWriteFile,
   mockTauriFetch,
-  mockCheckUpdate,
   mockRelaunch,
 } from '../setup'
 
@@ -43,7 +41,6 @@ export function resetTauriMocks() {
   mockShortcutIsRegistered.mockReset()
   mockWriteFile.mockReset()
   mockTauriFetch.mockReset()
-  mockCheckUpdate.mockReset()
   mockRelaunch.mockReset()
 }
 

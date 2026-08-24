@@ -30,7 +30,6 @@
     "dialog:default",
     "opener:default",
     "process:default",
-    "updater:default",
     "store:default",
     "global-shortcut:default",
     "global-shortcut:allow-is-registered",

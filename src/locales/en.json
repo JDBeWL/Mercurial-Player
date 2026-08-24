@@ -305,7 +305,6 @@
     "appVersion": "App Version",
     "checkUpdates": "Check for Updates",
     "checkingUpdates": "Checking...",
-    "lastChecked": "Last Checked",
     "updateAvailable": "New version available:",
     "usingLatest": "You are using the latest version",
     "updateCheckFailed": "Failed to check for updates. Please try again later",
@@ -318,10 +317,7 @@
       "releaseNotes": "Release Notes",
       "noReleaseNotes": "No release notes available",
       "downloading": "Downloading...",
-      "installing": "Installing...",
-      "downloadFinished": "Download finished",
-      "installerPath": "Installer path: {path}",
-      "noInstallerPath": "Installer path not available"
+      "installing": "Installing..."
     },
     "unknown": "Unknown"
   },

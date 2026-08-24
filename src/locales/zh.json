@@ -305,7 +305,6 @@
     "appVersion": "应用版本",
     "checkUpdates": "检查更新",
     "checkingUpdates": "检查中...",
-    "lastChecked": "上次检查",
     "updateAvailable": "发现新版本：",
     "usingLatest": "已是最新版本",
     "updateCheckFailed": "检查更新失败，请稍后重试",
@@ -318,10 +317,7 @@
       "releaseNotes": "更新说明",
       "noReleaseNotes": "暂无更新说明",
       "downloading": "下载中...",
-      "installing": "安装中...",
-      "downloadFinished": "下载完成",
-      "installerPath": "安装程序路径：{path}",
-      "noInstallerPath": "未提供安装程序路径"
+      "installing": "安装中..."
     },
     "unknown": "未知"
   },

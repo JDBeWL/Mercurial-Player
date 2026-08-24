@@ -27,6 +27,7 @@ pub mod media;
 pub mod plugins;
 pub mod security;
 pub mod system;
+pub mod updater;
 
 #[cfg(windows)]
 pub mod taskbar;

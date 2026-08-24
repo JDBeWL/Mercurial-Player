@@ -1196,13 +1196,11 @@ useAppLifecycle({
   border-radius: 0;
 }
 
-/* 沉浸模式下音频信息叠在磨砂玻璃与封面之上，封面明暗不可控，
-   使用白色文字 + 双层阴影，保证任意封面下都有足够对比度 */
+/* 沉浸模式开启自动深浅色后，文字颜色跟随主题切换，不再固定白色 */
 .app-container.immersive-cover .audio-info-text {
-  color: rgba(255, 255, 255, 0.92);
-  text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.35),
-    0 0 8px rgba(0, 0, 0, 0.25);
+  color: var(--md-sys-color-on-surface);
+  /* 磨砂玻璃上增加细微投影，深浅主题下均保持与背景分离 */
+  text-shadow: 0 0px 2px rgba(0, 0, 0, 0.15);
 }
 
 /* 进度条沿用默认的 -16px 通栏负边距，正好从窗口左边缘贯穿到右边缘 */

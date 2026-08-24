@@ -2994,17 +2994,20 @@ dependencies = [
 
 [[package]]
 name = "mercurial-player"
-version = "1.3.6"
+version = "1.3.7"
 dependencies = [
  "audioadapter",
  "audioadapter-buffers",
+ "base64 0.22.1",
  "cpal",
  "criterion",
  "crossbeam-channel",
  "dirs",
  "display-info",
+ "futures-util",
  "lofty",
  "log",
+ "minisign-verify",
  "rayon",
  "rodio",
  "rubato",

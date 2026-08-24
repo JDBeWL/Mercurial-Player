@@ -24,13 +24,6 @@
               {{ isChecking ? t('config.checkingUpdates') : t('config.checkUpdates') }}
             </button>
           </div>
-          <div
-            v-if="lastCheckTime"
-            class="text-caption"
-            style="color: var(--md-sys-color-on-surface-variant)"
-          >
-            {{ t('config.lastChecked') }}: {{ lastCheckTime }}
-          </div>
 
           <div
             v-if="error"
@@ -38,17 +31,6 @@
             style="color: var(--md-sys-color-error); margin-top: 6px"
           >
             {{ error }}
-          </div>
-          <div
-            v-if="updateLog && !isDownloadFinishedLog(updateLog)"
-            class="text-caption"
-            style="
-              margin-top: 6px;
-              color: var(--md-sys-color-on-surface-variant);
-              word-break: break-all;
-            "
-          >
-            {{ updateLog }}
           </div>
         </div>
       </div>
@@ -191,7 +173,7 @@ const githubUrl = 'https://github.com/JDBeWL/Mercurial-Player'
 const showLicenseDetails = ref<boolean>(false)
 
 // 自动更新
-const { isChecking, checkForUpdates, error, lastCheckTime, updateLog } = useAutoUpdate()
+const { isChecking, checkForUpdates, error } = useAutoUpdate()
 
 // 技术栈分类数据
 const techCategories = computed<TechCategory[]>(() => [
@@ -362,10 +344,6 @@ const openLink = async (url: string): Promise<void> => {
 const openLicense = async (): Promise<void> => {
   // 打开 LICENSE 文件或 GitHub 上的许可证页面
   await openExternalUrl('https://www.gnu.org/licenses/gpl-3.0.html')
-}
-
-const isDownloadFinishedLog = (s: unknown): boolean => {
-  return typeof s === 'string' && s.startsWith('Download finished:')
 }
 
 onMounted(() => {

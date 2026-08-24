@@ -55,13 +55,6 @@ vi.mock('@tauri-apps/plugin-http', () => ({
   fetch: mockTauriFetch,
 }))
 
-// Mock Tauri updater plugin
-export const mockCheckUpdate = vi.fn()
-
-vi.mock('@tauri-apps/plugin-updater', () => ({
-  check: mockCheckUpdate,
-}))
-
 // Mock Tauri process plugin
 export const mockRelaunch = vi.fn()
 

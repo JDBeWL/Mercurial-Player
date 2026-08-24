@@ -26,7 +26,7 @@ use mercurial_player::{
     config::ConfigManager,
     equalizer,
     equalizer::{Equalizer, GlobalEqualizer},
-    media, plugins, system,
+    media, plugins, system, updater,
 };
 
 #[cfg(windows)]
@@ -145,6 +145,7 @@ fn main() {
 
     tauri::Builder::default()
         .manage(app_state)
+        .manage(updater::PendingUpdate::new())
         .setup(|app| {
             use tauri::Manager;
 
@@ -381,6 +382,10 @@ fn main() {
             taskbar::desktop_lyrics::is_desktop_lyrics_visible,
             // 系统版本命令（保留 get_app_version 用于前端显示）
             system::commands::get_app_version,
+            // 应用更新命令（多线程分片下载）
+            updater::updater_check,
+            updater::updater_download,
+            updater::updater_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
