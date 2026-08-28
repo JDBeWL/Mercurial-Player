@@ -98,6 +98,7 @@ import {
   computed,
   watch,
   shallowRef,
+  triggerRef,
   onMounted,
   onUnmounted,
   nextTick,
@@ -252,53 +253,41 @@ const processPlaylist = (): void => {
 }
 
 // ===== 核心优化：合并 watch，消除冗余 =====
-// watch 监听 playlist 变化，深度监听设为 true，否则 splice 无法被检测到
-const stopWatchPlaylist = watch(playlist, processPlaylist, { immediate: true, deep: true })
+// 结构 watch：getter 只读取每项的 path，列表增删/移动/替换才触发 O(N) 处理；
+// 封面等字段级 mutation 不再触发 deep watch 的 O(N) 级联（封面走下方版本号通道）
+const stopWatchPlaylist = watch(
+  () => {
+    const raw = playlist.value
+    const paths = new Array<string>(raw.length)
+    for (let i = 0; i < raw.length; i++) paths[i] = raw[i].path
+    return paths.join('\n')
+  },
+  processPlaylist,
+  { immediate: true },
+)
 
-// ===== 优化：封面更新使用版本号通知，而非遍历式 watch =====
-// 使用一个轻量的 coverVersion 计数器，由 store 的 _loadPlaylistCovers 完成后递增
-// 但由于 store 的 cover 加载是通过直接修改 track.coverPath 实现的（mutation），
-// 我们需要一个轻量的轮询方式来检测 coverPath 变化
-let coverCheckTimer: ReturnType<typeof setInterval> | null = null
-let lastCoverSnapshot = ''
-
-const checkCoverUpdates = (): void => {
-  // 只在有播放列表时检查
-  if (playlist.value.length === 0) return
-
-  // 轻量检查：只比较没有 cover 的 track 数量是否减少了
-  // 这比 map+join 整个列表的字符串便宜得多
-  let uncoveredCount = 0
-  let sampleCover = ''
-  for (let i = 0; i < playlist.value.length; i++) {
-    const cp = playlist.value[i].coverPath
-    if (!cp) {
-      uncoveredCount++
-    } else if (!sampleCover) {
-      sampleCover = cp
+// ===== 封面增量更新 =====
+// store 的 _loadPlaylistCovers 每处理完一批递增 playlistCoverVersion，
+// 这里取走更新并就地修改 processedTrack（配合 triggerRef 与 v-memo，
+// 只重渲染封面真正变化的项目），复杂度 O(变更数) 而非 O(N²)
+watch(
+  () => playerStore.playlistCoverVersion,
+  () => {
+    const updates = playerStore.takeCoverUpdates()
+    if (updates.size === 0) return
+    let applied = 0
+    for (const [path, coverPath] of updates) {
+      const pt = processedMap.get(path)
+      if (pt && pt.coverPath !== coverPath) {
+        pt.coverPath = coverPath
+        pt.coverUrl = convertFileSrc(coverPath)
+        applied++
+      }
     }
-  }
-
-  const snapshot = `${uncoveredCount}:${sampleCover}`
-  if (snapshot !== lastCoverSnapshot) {
-    lastCoverSnapshot = snapshot
-    processPlaylist()
-  }
-}
-
-// 使用低频率的定时器来检测 cover 变化（2秒一次，而非每帧）
-// 只在组件存活期间运行
-const startCoverCheck = (): void => {
-  // 初始延迟后开始检查，给 store 的 _loadPlaylistCovers 时间开始工作
-  coverCheckTimer = setInterval(checkCoverUpdates, 2000)
-}
-
-const stopCoverCheck = (): void => {
-  if (coverCheckTimer) {
-    clearInterval(coverCheckTimer)
-    coverCheckTimer = null
-  }
-}
+    if (applied > 0) triggerRef(processedPlaylist)
+  },
+  { immediate: true },
+)
 
 // 滚动到当前播放的歌曲
 const scrollToCurrentTrack = (): void => {
@@ -319,13 +308,11 @@ const scrollToCurrentTrack = (): void => {
   })
 }
 
-// 组件挂载时滚动到当前歌曲 & 启动 cover 检测
+// 组件挂载时滚动到当前歌曲
 let hasScrolledOnMount = false
 let stopWatchScrollOnMount: WatchStopHandle | null = null
 
 onMounted(() => {
-  startCoverCheck()
-
   stopWatchScrollOnMount = watch(
     processedPlaylist,
     (newList) => {
@@ -348,7 +335,6 @@ onUnmounted(() => {
     scrollTimeout = null
   }
 
-  stopCoverCheck()
   stopWatchPlaylist()
   stopWatchScrollOnMount?.()
 

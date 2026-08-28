@@ -1068,7 +1068,9 @@ fn decode_and_push_to_wasapi(
                                         for ch in &mut output_frames_resampled {
                                             ch.truncate(out_written);
                                         }
-                                        Cow::Owned(output_frames_resampled.clone())
+                                        // 成功路径借用即可：output_frames_resampled
+                                        // 在本迭代内只读，下一轮循环才会被 clear/resize
+                                        Cow::Borrowed(&output_frames_resampled)
                                     }
                                     Err(_) => Cow::Borrowed(&input_frames),
                                 }
@@ -1106,7 +1108,9 @@ fn decode_and_push_to_wasapi(
                                         for ch in &mut output_frames_resampled {
                                             ch.truncate(out_written);
                                         }
-                                        Cow::Owned(output_frames_resampled.clone())
+                                        // 成功路径借用即可：output_frames_resampled
+                                        // 在本迭代内只读，下一轮循环才会被 clear/resize
+                                        Cow::Borrowed(&output_frames_resampled)
                                     }
                                     Err(_) => Cow::Borrowed(&input_frames),
                                 }

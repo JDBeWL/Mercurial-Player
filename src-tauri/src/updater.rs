@@ -4,6 +4,7 @@
 //! 下载阶段替换为多线程分片下载（HTTP Range 并发请求），
 //! 下载完成后按插件相同逻辑做 minisign 签名校验，再走插件原生安装。
 
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -16,6 +17,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_http::reqwest;
 use tauri_plugin_updater::{Update, UpdaterExt};
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 /// 并发分片数量
 const PARALLEL_PARTS: usize = 8;
@@ -30,8 +32,9 @@ const PROGRESS_EVENT: &str = "updater://download-progress";
 pub struct PendingUpdate {
     /// updater_check 检查到的更新对象
     update: Mutex<Option<Update>>,
-    /// updater_download 下载并校验通过的安装包数据
-    data: Mutex<Option<Vec<u8>>>,
+    /// updater_download 下载并校验通过的安装包临时文件路径。
+    /// 只存路径不存数据：安装包可达上百 MB，全程驻留内存会带来数百 MB 常驻开销
+    path: Mutex<Option<PathBuf>>,
 }
 
 impl PendingUpdate {
@@ -39,7 +42,7 @@ impl PendingUpdate {
     pub fn new() -> Self {
         Self {
             update: Mutex::new(None),
-            data: Mutex::new(None),
+            path: Mutex::new(None),
         }
     }
 }
@@ -47,6 +50,34 @@ impl PendingUpdate {
 impl Default for PendingUpdate {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// 生成更新包临时文件路径（带 pid 与时间戳避免并发冲突）
+fn unique_temp_path() -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!(
+        "mercurial-player-update-{}-{nanos}.part",
+        std::process::id()
+    ))
+}
+
+/// 删除临时文件（不存在则忽略，其余错误仅记录日志）
+fn remove_temp_file(path: &Path) {
+    if let Err(e) = std::fs::remove_file(path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("删除更新临时文件 {} 失败: {e}", path.display());
+        }
+    }
+}
+
+/// 丢弃 pending 中保存的临时文件路径并删除对应文件
+fn clear_pending_path(guard: &mut Option<PathBuf>) {
+    if let Some(old) = guard.take() {
+        remove_temp_file(&old);
     }
 }
 
@@ -91,7 +122,7 @@ pub async fn updater_check(
         .map_err(|e| format!("检查更新失败: {e}"))?;
 
     let mut update_guard = lock_or_log!(pending.update.lock());
-    let mut data_guard = lock_or_log!(pending.data.lock());
+    let mut path_guard = lock_or_log!(pending.path.lock());
     if let Some(update) = update {
         let info = UpdateInfo {
             version: update.version.clone(),
@@ -100,20 +131,20 @@ pub async fn updater_check(
             current_version: update.current_version.clone(),
         };
         *update_guard = Some(update);
-        // 版本信息已变化，丢弃旧的下载数据
-        *data_guard = None;
+        // 版本信息已变化，丢弃旧的下载文件
+        clear_pending_path(&mut path_guard);
         Ok(Some(info))
     } else {
         *update_guard = None;
-        *data_guard = None;
+        clear_pending_path(&mut path_guard);
         Ok(None)
     }
 }
 
 /// 下载更新
 ///
-/// 多线程分片下载（服务器不支持 Range 时自动回退单线程），
-/// 完成后校验 minisign 签名，通过后暂存数据供 [`updater_install`] 使用。
+/// 多线程分片下载（服务器不支持 Range 时自动回退单线程），流式写入临时文件，
+/// 完成后校验 minisign 签名，通过后暂存文件路径供 [`updater_install`] 使用。
 /// 进度通过 `updater://download-progress` 事件推送。
 #[tauri::command]
 pub async fn updater_download(
@@ -149,20 +180,50 @@ pub async fn updater_download(
     let range_supported = probe.status() == reqwest::StatusCode::PARTIAL_CONTENT && total > 0;
     drop(probe);
 
-    let buffer = if range_supported && total >= MIN_PARALLEL_SIZE {
+    // 下载全程流式写入临时文件，峰值内存只有单个 chunk，
+    // 避免安装包（可达上百 MB）在下载期间整体驻留内存两份
+    let temp_path = unique_temp_path();
+    let download_result = if range_supported && total >= MIN_PARALLEL_SIZE {
         log::info!("更新包支持分片下载，总大小 {total} 字节，{PARALLEL_PARTS} 线程并发");
-        download_parallel(&client, &update.download_url, total, &app).await?
+        download_parallel(&client, &update.download_url, total, &temp_path, &app).await
     } else {
         log::info!("更新包不支持分片下载（大小 {total} 字节），回退单线程");
-        download_single(&client, &update.download_url, &app).await?
+        download_single(&client, &update.download_url, &temp_path, &app).await
     };
 
-    // 与 tauri-plugin-updater 相同的 minisign 签名校验
-    let pubkey = updater_pubkey(&app).ok_or("无法读取更新公钥配置")?;
-    verify_signature(&buffer, &update.signature, &pubkey)?;
+    let written = match download_result {
+        Ok(len) => len,
+        Err(e) => {
+            remove_temp_file(&temp_path);
+            return Err(e);
+        }
+    };
 
-    log::info!("更新包下载完成并签名校验通过，共 {} 字节", buffer.len());
-    *lock_or_log!(pending.data.lock()) = Some(buffer);
+    // 与 tauri-plugin-updater 相同的 minisign 签名校验：
+    // 读临时文件到内存校验后立即释放，随后只保留文件路径
+    let Some(pubkey) = updater_pubkey(&app) else {
+        remove_temp_file(&temp_path);
+        return Err("无法读取更新公钥配置".to_string());
+    };
+    let signature = update.signature.clone();
+    let verify_path = temp_path.clone();
+    let verify_result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let buffer = std::fs::read(&verify_path).map_err(|e| format!("读取下载文件失败: {e}"))?;
+        verify_signature(&buffer, &signature, &pubkey)
+    })
+    .await
+    .map_err(|e| format!("校验任务执行失败: {e}"))
+    .and_then(|inner| inner);
+
+    if let Err(e) = verify_result {
+        remove_temp_file(&temp_path);
+        return Err(e);
+    }
+
+    log::info!("更新包下载完成并签名校验通过，共 {written} 字节");
+    let mut path_guard = lock_or_log!(pending.path.lock());
+    clear_pending_path(&mut path_guard);
+    *path_guard = Some(temp_path);
     Ok(())
 }
 
@@ -175,25 +236,30 @@ pub async fn updater_install(pending: State<'_, PendingUpdate>) -> Result<(), St
     let update = lock_or_log!(pending.update.lock())
         .clone()
         .ok_or("没有待安装的更新，请先检查更新")?;
-    let data = lock_or_log!(pending.data.lock())
+    let temp_path = lock_or_log!(pending.path.lock())
         .take()
         .ok_or("更新尚未下载完成")?;
 
-    // 安装涉及写临时文件和拉起安装器，放到阻塞线程池执行，避免阻塞异步运行时
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        match update.install(&data) {
-            Ok(()) => Ok(()),
-            // 安装失败时带回下载数据以便重试，避免重新下载
-            Err(e) => Err((format!("安装更新失败: {e}"), data)),
-        }
+    // 读文件和安装都涉及大文件 IO 与拉起安装器，放到阻塞线程池执行
+    let install_path = temp_path.clone();
+    let install_result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        // tauri-plugin-updater 的 install 接口以字节为输入，此处读取是瞬时峰值
+        let data =
+            std::fs::read(&install_path).map_err(|e| format!("读取更新包文件失败: {e}"))?;
+        update.install(&data).map_err(|e| format!("安装更新失败: {e}"))
     })
     .await
-    .map_err(|e| format!("安装任务执行失败: {e}"))?;
+    .map_err(|e| format!("安装任务执行失败: {e}"))
+    .and_then(|inner| inner);
 
-    match result {
-        Ok(()) => Ok(()),
-        Err((message, data)) => {
-            *lock_or_log!(pending.data.lock()) = Some(data);
+    match install_result {
+        Ok(()) => {
+            remove_temp_file(&temp_path);
+            Ok(())
+        }
+        // 安装失败时保留临时文件以便重试，避免重新下载
+        Err(message) => {
+            *lock_or_log!(pending.path.lock()) = Some(temp_path);
             Err(message)
         }
     }
@@ -231,19 +297,26 @@ fn spawn_progress_reporter(
     })
 }
 
-/// 多线程分片下载：将文件按 [`PARALLEL_PARTS`] 分片并发请求，完成后按序拼接
+/// 多线程分片下载：将文件按 [`PARALLEL_PARTS`] 分片并发请求，
+/// 各分片流式写入同一临时文件的对应偏移（峰值内存仅为单个 chunk），
+/// 完成后校验落盘大小
 async fn download_parallel(
     client: &reqwest::Client,
     url: &reqwest::Url,
     total: u64,
+    path: &Path,
     app: &AppHandle,
-) -> Result<Vec<u8>, String> {
+) -> Result<u64, String> {
+    // 先创建并截断目标文件；各分片任务各自持有写句柄，seek 到自己的偏移写入
+    std::fs::File::create(path).map_err(|e| format!("创建临时文件失败: {e}"))?;
+
     let fetched = Arc::new(AtomicU64::new(0));
     let done = Arc::new(AtomicBool::new(false));
     let reporter =
         spawn_progress_reporter(app.clone(), Arc::clone(&fetched), Arc::clone(&done), total);
 
     let part_size = total.div_ceil(PARALLEL_PARTS as u64);
+    let path_buf = path.to_path_buf();
 
     let mut handles = Vec::new();
     for i in 0..PARALLEL_PARTS {
@@ -259,31 +332,31 @@ async fn download_parallel(
         let client = client.clone();
         let url = url.clone();
         let fetched = Arc::clone(&fetched);
+        let path_buf = path_buf.clone();
         handles.push(tauri::async_runtime::spawn(async move {
-            download_range(&client, &url, start, end, &fetched)
+            download_range(&client, &url, start, end, path_buf, &fetched)
                 .await
-                .map(|buf| (i, buf))
+                .map(|written| (i, written))
         }));
     }
 
-    let download_result: Result<Vec<u8>, String> = async {
-        let mut parts = Vec::with_capacity(handles.len());
+    let download_result: Result<u64, String> = async {
+        let mut written = 0u64;
         for handle in handles {
-            let (index, buf) = handle
+            let (_, part_written) = handle
                 .await
                 .map_err(|e| format!("下载任务执行失败: {e}"))??;
-            parts.push((index, buf));
+            written += part_written;
         }
 
-        parts.sort_by_key(|(index, _)| *index);
-        let mut buffer = Vec::with_capacity(total as usize);
-        for (_, buf) in parts {
-            buffer.extend_from_slice(&buf);
+        // 校验落盘大小（分片写入各自 seek 到不同偏移，总大小即完整性依据）
+        let actual = std::fs::metadata(path)
+            .map_err(|e| format!("校验下载文件失败: {e}"))?
+            .len();
+        if actual != total {
+            return Err(format!("下载数据不完整: {actual}/{total} 字节"));
         }
-        if buffer.len() as u64 != total {
-            return Err(format!("下载数据不完整: {}/{} 字节", buffer.len(), total));
-        }
-        Ok(buffer)
+        Ok(written)
     }
     .await;
 
@@ -293,14 +366,15 @@ async fn download_parallel(
     download_result
 }
 
-/// 下载单个分片（含 Range 请求头），并累加全局进度计数
+/// 下载单个分片（含 Range 请求头），流式写入临时文件的对应偏移，并累加全局进度计数
 async fn download_range(
     client: &reqwest::Client,
     url: &reqwest::Url,
     start: u64,
     end: u64,
+    path: PathBuf,
     fetched: &AtomicU64,
-) -> Result<Vec<u8>, String> {
+) -> Result<u64, String> {
     let expected = end.saturating_sub(start).saturating_add(1) as usize;
     let response = client
         .get(url.clone())
@@ -313,29 +387,44 @@ async fn download_range(
         return Err(format!("分片下载失败，状态码: {}", response.status()));
     }
 
-    let mut buffer = Vec::with_capacity(expected);
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .await
+        .map_err(|e| format!("打开分片写入文件失败: {e}"))?;
+    file.seek(std::io::SeekFrom::Start(start))
+        .await
+        .map_err(|e| format!("分片定位失败: {e}"))?;
+
+    let mut written = 0usize;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("分片下载中断: {e}"))?;
         fetched.fetch_add(chunk.len() as u64, Ordering::Relaxed);
-        buffer.extend_from_slice(&chunk);
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("写入分片数据失败: {e}"))?;
+        written += chunk.len();
     }
+    file.flush()
+        .await
+        .map_err(|e| format!("刷新分片数据失败: {e}"))?;
 
-    if buffer.len() != expected {
+    if written != expected {
         return Err(format!(
-            "分片数据不完整: 期望 {expected} 字节，实际 {} 字节",
-            buffer.len()
+            "分片数据不完整: 期望 {expected} 字节，实际 {written} 字节"
         ));
     }
-    Ok(buffer)
+    Ok(written as u64)
 }
 
-/// 单线程流式下载（服务器不支持 Range 或文件过小时的回退路径）
+/// 单线程流式下载（服务器不支持 Range 或文件过小时的回退路径），写入临时文件
 async fn download_single(
     client: &reqwest::Client,
     url: &reqwest::Url,
+    path: &Path,
     app: &AppHandle,
-) -> Result<Vec<u8>, String> {
+) -> Result<u64, String> {
     let response = client
         .get(url.clone())
         .send()
@@ -358,18 +447,29 @@ async fn download_single(
     let reporter =
         spawn_progress_reporter(app.clone(), Arc::clone(&fetched), Arc::clone(&done), total);
 
-    let download_result: Result<Vec<u8>, String> = async {
-        let mut buffer = Vec::new();
+    let download_result: Result<u64, String> = async {
+        let mut file = tokio::fs::File::create(path)
+            .await
+            .map_err(|e| format!("创建临时文件失败: {e}"))?;
+
+        let mut written = 0u64;
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| format!("下载中断: {e}"))?;
             fetched.fetch_add(chunk.len() as u64, Ordering::Relaxed);
-            buffer.extend_from_slice(&chunk);
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| format!("写入下载数据失败: {e}"))?;
+            written += chunk.len() as u64;
         }
-        if total > 0 && buffer.len() as u64 != total {
-            return Err(format!("下载数据不完整: {}/{} 字节", buffer.len(), total));
+        file.flush()
+            .await
+            .map_err(|e| format!("刷新下载数据失败: {e}"))?;
+
+        if total > 0 && written != total {
+            return Err(format!("下载数据不完整: {written}/{total} 字节"));
         }
-        Ok(buffer)
+        Ok(written)
     }
     .await;
 

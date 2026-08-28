@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::{Arc, RwLock};
 
 /// 应用程序配置数据结构
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -299,6 +300,9 @@ impl Default for LyricsConfig {
 /// 配置管理器
 pub struct ConfigManager {
     config_dir: String,
+    /// 进程内配置缓存（Arc 共享，读命中时免磁盘 IO + JSON 解析 + 目录扫描）。
+    /// save_config 写穿更新，reset_config 清空；ConfigManager 在 AppState 中单例存在
+    cache: RwLock<Option<Arc<AppConfig>>>,
 }
 
 impl Default for ConfigManager {
@@ -314,7 +318,23 @@ impl ConfigManager {
         if let Err(e) = std::fs::create_dir_all(&config_dir) {
             log::error!("Failed to create config directory: {e}");
         }
-        Self { config_dir }
+        Self {
+            config_dir,
+            cache: RwLock::new(None),
+        }
+    }
+
+    /// 更新进程内缓存
+    fn store_cache(&self, config: &AppConfig) {
+        if let Ok(mut guard) = self.cache.write() {
+            *guard = Some(Arc::new(config.clone()));
+        }
+    }
+
+    /// 读取缓存命中时的克隆
+    fn cached_config(&self) -> Option<AppConfig> {
+        let guard = self.cache.read().ok()?;
+        guard.as_deref().cloned()
     }
 
     fn get_app_config_dir() -> Result<String, Box<dyn std::error::Error>> {
@@ -383,6 +403,11 @@ impl ConfigManager {
     }
 
     pub fn load_config(&self) -> Result<AppConfig, String> {
+        // 缓存命中直接返回，避免每个 command 都重复 读盘 + 解析 + read_dir 扫描
+        if let Some(cached) = self.cached_config() {
+            return Ok(cached);
+        }
+
         self.initialize_config_files()?;
 
         let user_config_path = self.get_user_config_path();
@@ -401,17 +426,21 @@ impl ConfigManager {
                     }
                 }
                 log::info!("Loaded user configuration from: {user_config_path}");
+                self.store_cache(&config);
                 return Ok(config);
             }
         }
 
         let default_config_path = self.get_default_config_path();
-        Self::load_config_from_file(&default_config_path).or_else(|_| {
-            log::info!("Creating default configuration");
-            let default_config = AppConfig::default();
-            let _ = self.save_default_config(&default_config);
-            Ok(default_config)
-        })
+        if let Ok(config) = Self::load_config_from_file(&default_config_path) {
+            self.store_cache(&config);
+            return Ok(config);
+        }
+        log::info!("Creating default configuration");
+        let default_config = AppConfig::default();
+        let _ = self.save_default_config(&default_config);
+        self.store_cache(&default_config);
+        Ok(default_config)
     }
 
     fn load_config_from_file(file_path: &str) -> Result<AppConfig, String> {
@@ -421,7 +450,10 @@ impl ConfigManager {
     }
 
     pub fn save_config(&self, config: &AppConfig) -> Result<(), String> {
-        Self::save_config_to_file(config, &self.get_user_config_path())
+        Self::save_config_to_file(config, &self.get_user_config_path())?;
+        // 写穿：保存成功后同步更新进程内缓存
+        self.store_cache(config);
+        Ok(())
     }
 
     pub fn save_default_config(&self, config: &AppConfig) -> Result<(), String> {
@@ -483,6 +515,10 @@ impl ConfigManager {
             if let Err(e) = std::fs::remove_file(&user_config_path) {
                 log::error!("Failed to remove user config file: {e}");
             }
+        }
+        // user.json 已删除，缓存作废，下次 load_config 重新初始化
+        if let Ok(mut guard) = self.cache.write() {
+            *guard = None;
         }
         Ok(default_config)
     }

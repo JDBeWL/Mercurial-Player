@@ -75,7 +75,14 @@ interface PlayerState {
   _shufflePosition: number
   /** 历史栈:记录已播放过的索引,用于 previousTrack 真正回到上一首 */
   _shuffleHistory: number[]
+  /** 封面加载完成版本号:_loadPlaylistCovers 每处理完一批递增一次,
+   *  供 PlaylistView 以 O(变更数) 而非 O(N²) 感知封面更新 */
+  playlistCoverVersion: number
 }
+
+// 待通知的封面更新 (path -> coverPath):非响应式,由 takeCoverUpdates 一次性取走。
+// 放在 store 实例外,避免 Pinia 深度代理整个 Map。
+const pendingCoverUpdates = new Map<string, string>()
 
 export const usePlayerStore = defineStore('player', {
   state: (): PlayerState => ({
@@ -143,6 +150,9 @@ export const usePlayerStore = defineStore('player', {
     _shuffleOrder: [],
     _shufflePosition: -1,
     _shuffleHistory: [],
+
+    // 封面加载版本号
+    playlistCoverVersion: 0,
   }),
 
   getters: {
@@ -975,7 +985,11 @@ export const usePlayerStore = defineStore('player', {
         .then(() => {
           const configStore = useConfigStore()
           configStore.audio.volume = newVolume
-          configStore.saveConfigNow()
+          // 拖动音量条时每次 mousemove 都会走到这里：saveConfigNow 会对整个
+          // config（含 lastSession 的播放队列快照）做深比较 + 深拷贝 + 写盘，
+          // 大队列下足以卡住主线程、让滑块看起来掉帧。
+          // 改用防抖保存（2s），停止拖动后仍会落盘，关应用前还有 flushPendingSave 兜底。
+          configStore.saveConfig()
         })
         .catch((err) => logger.error('Failed to set volume:', err))
     },
@@ -1248,21 +1262,34 @@ export const usePlayerStore = defineStore('player', {
       logger.debug(`Cached metadata for ${cached} tracks`)
     },
 
+    /** 记录一条封面更新并通知列表组件（供 PlaylistView 之外的封面加载路径复用） */
+    recordCoverUpdate(path: string, coverPath: string): void {
+      pendingCoverUpdates.set(path, coverPath)
+      this.playlistCoverVersion++
+    },
+
+    /** 取走并清空自上次调用以来累计的封面更新,供 PlaylistView 增量应用 */
+    takeCoverUpdates(): Map<string, string> {
+      if (pendingCoverUpdates.size === 0) return new Map()
+      const taken = new Map(pendingCoverUpdates)
+      pendingCoverUpdates.clear()
+      return taken
+    },
+
     async _loadPlaylistCovers(playlist: Track[]): Promise<void> {
       if (!playlist || playlist.length === 0) return
 
       const metadataCache = this._getMetadataCache()
 
-      // 注意:循环内逐个修改 track.coverPath 会触发 Pinia 响应式更新。
-      // 保持该写法的原因:播放列表项已通过 v-memo 优化重渲染,实际重渲染开销很小;
-      // 且封面加载本身是 IO 密集型,瓶颈不在响应式触发上。
-      // 如需进一步优化,可在所有封面加载完成后统一刷新 (例如先收集到本地 Map 再批量赋值),
-      // 但收益有限、改动风险较高,故暂不调整。
+      // 封面加载后不再依赖响应式 mutation 传播:逐条修改 track.coverPath 仅用于
+      // currentTrack 同步与元数据缓存,列表 UI 通过 pendingCoverUpdates +
+      // playlistCoverVersion 每批一次增量通知 (PlaylistView 以 O(变更数) 应用)。
 
       // 批量加载封面路径，每次处理 10 首歌曲
       const BATCH_SIZE = 10
       for (let i = 0; i < playlist.length; i += BATCH_SIZE) {
         const batch = playlist.slice(i, i + BATCH_SIZE)
+        let foundInBatch = 0
 
         // 并行加载这一批的封面
         await Promise.all(
@@ -1274,6 +1301,8 @@ export const usePlayerStore = defineStore('player', {
                 })
                 if (coverPath) {
                   track.coverPath = coverPath
+                  pendingCoverUpdates.set(track.path, coverPath)
+                  foundInBatch++
                   // 同步 currentTrack: playTrack 会创建 resolvedTrack 浅拷贝,
                   // 导致 currentTrack 与 playlist 内对象脱钩,
                   // 主界面/MiniPlayer 封面基于 currentTrack.coverPath,
@@ -1294,6 +1323,11 @@ export const usePlayerStore = defineStore('player', {
             }
           }),
         )
+
+        // 本批有新封面时通知一次,列表组件增量应用
+        if (foundInBatch > 0) {
+          this.playlistCoverVersion++
+        }
 
         // 让出主线程，避免阻塞 UI
         if (i + BATCH_SIZE < playlist.length) {

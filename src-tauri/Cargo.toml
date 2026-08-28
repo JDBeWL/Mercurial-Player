@@ -44,8 +44,9 @@ tauri-plugin-global-shortcut = "2.3"
 crossbeam-channel = "0.5"
 display-info = "0.5"
 unicode-segmentation = "1"
-# async sleep 用于将阻塞的播放命令改为 async,避免阻塞 Tauri 命令线程
-tokio = { version = "1", features = ["time"] }
+# async sleep 用于将阻塞的播放命令改为 async,避免阻塞 Tauri 命令线程;
+# fs + io-util 用于更新包分片流式落盘
+tokio = { version = "1", features = ["time", "fs", "io-util"] }
 ttf-parser = "0.25.1"
 futures-util = "0.3"
 minisign-verify = "0.2"

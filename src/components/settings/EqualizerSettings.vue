@@ -223,7 +223,34 @@ const stopPreampDrag = (): void => {
   document.removeEventListener('mouseup', stopPreampDrag)
 }
 
-const updatePreampFromEvent = async (e: MouseEvent): Promise<void> => {
+// ===== IPC 抑制：拖拽中 mousemove 可达 60-125Hz =====
+// UI 状态即时更新保证滑块跟手；后端 invoke 每个滑块同一时刻最多一个在途请求，
+// 在途期间的新值合并为最新值，请求完成后若仍有变化自动补发（收敛到最终值）。
+
+let preampSending = false
+let preampPending = 0
+
+const sendPreamp = async (value: number): Promise<void> => {
+  if (preampSending) {
+    preampPending = value
+    return
+  }
+  preampSending = true
+  preampPending = value
+  try {
+    for (;;) {
+      const target = preampPending
+      await invoke('set_eq_preamp', { preamp: target })
+      if (preampPending === target) break
+    }
+  } catch (error) {
+    logger.error('Failed to set preamp:', error)
+  } finally {
+    preampSending = false
+  }
+}
+
+const updatePreampFromEvent = (e: MouseEvent): void => {
   if (!preampSlider.value) return
 
   const rect = preampSlider.value.getBoundingClientRect()
@@ -231,28 +258,26 @@ const updatePreampFromEvent = async (e: MouseEvent): Promise<void> => {
   const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN)
   const roundedValue = Math.round(newValue * 2) / 2 // 四舍五入到 0.5
 
-  try {
-    await invoke('set_eq_preamp', { preamp: roundedValue })
-    preamp.value = roundedValue
-  } catch (error) {
-    logger.error('Failed to set preamp:', error)
-  }
+  // 值未跨过 0.5dB 刻度时不做任何事
+  if (preamp.value === roundedValue) return
+  preamp.value = roundedValue
+  void sendPreamp(roundedValue)
 }
 
 // 频段滑块处理
 const handleBandClick = (e: MouseEvent, index: number): void => {
   if (!enabled.value) return
-  void updateBandFromEvent(e, index)
+  updateBandFromEvent(e, index)
 }
 
 const startBandDrag = (e: MouseEvent, index: number): void => {
   if (!enabled.value) return
   bandDragging.value = index
-  void updateBandFromEvent(e, index)
+  updateBandFromEvent(e, index)
 
   const onDrag = (ev: MouseEvent): void => {
     if (bandDragging.value !== index) return
-    void updateBandFromEvent(ev, index)
+    updateBandFromEvent(ev, index)
   }
 
   const stopDrag = (): void => {
@@ -265,7 +290,36 @@ const startBandDrag = (e: MouseEvent, index: number): void => {
   document.addEventListener('mouseup', stopDrag)
 }
 
-const updateBandFromEvent = async (e: MouseEvent, index: number): Promise<void> => {
+interface BandSendState {
+  sent: number
+  latest: number
+}
+
+const bandInFlight = new Map<number, BandSendState>()
+
+const sendBandGain = async (index: number, value: number): Promise<void> => {
+  const state = bandInFlight.get(index)
+  if (state) {
+    // 在途：仅更新目标值，当前请求完成后由循环补发
+    state.latest = value
+    return
+  }
+  const entry: BandSendState = { sent: value, latest: value }
+  bandInFlight.set(index, entry)
+  try {
+    for (;;) {
+      await invoke('set_eq_band_gain', { band: index, gain: entry.sent })
+      if (entry.latest === entry.sent) break
+      entry.sent = entry.latest
+    }
+  } catch (error) {
+    logger.error('Failed to set band gain:', error)
+  } finally {
+    bandInFlight.delete(index)
+  }
+}
+
+const updateBandFromEvent = (e: MouseEvent, index: number): void => {
   const slider = bandSliders.value[index] as HTMLElement | null
   if (!slider) return
 
@@ -275,13 +329,11 @@ const updateBandFromEvent = async (e: MouseEvent, index: number): Promise<void> 
   const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN)
   const roundedValue = Math.round(newValue * 2) / 2
 
-  try {
-    await invoke('set_eq_band_gain', { band: index, gain: roundedValue })
-    gains.value[index] = roundedValue
-    currentPreset.value = ''
-  } catch (error) {
-    logger.error('Failed to set band gain:', error)
-  }
+  // 值未跨过 0.5dB 刻度时不做任何事
+  if (gains.value[index] === roundedValue) return
+  gains.value[index] = roundedValue
+  currentPreset.value = ''
+  void sendBandGain(index, roundedValue)
 }
 
 // 应用预设

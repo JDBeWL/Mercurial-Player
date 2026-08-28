@@ -42,13 +42,18 @@
           <div
             v-for="(file, index) in searchResults"
             :key="file.path"
+            v-memo="[
+              coverFor(file),
+              file.path,
+              configStore.titleExtraction.hideFileExtension,
+            ]"
             class="list-item"
             @click="playFile(file)"
           >
             <div class="list-item-leading">
               <img
-                v-if="file.coverPath"
-                :src="convertFileSrc(file.coverPath)"
+                v-if="coverFor(file)"
+                :src="convertFileSrc(coverFor(file)!)"
                 :alt="getDisplayName(file)"
                 class="list-item-cover"
                 :loading="index < 3 ? 'eager' : 'lazy'"
@@ -236,6 +241,16 @@ const handleClose = (): void => {
 const { musicFolders, playlists } = storeToRefs(musicLibraryStore)
 const searchTerm = ref<string>('')
 const searchResults = ref<SearchResult[]>([])
+
+// ===== 封面加载去响应式化 =====
+// 搜索结果封面存放在本地 shallowRef Map，模板经 coverFor(file) 读取。
+// 渲染只依赖 Map 本身（非逐条 coverPath），封面加载每批替换一次 Map 触发一次
+// 渲染，v-memo 只重渲染封面真正出现/变化的项目，消除逐条 mutation 的 O(N²) patch。
+// 注意：coverFor 绝不能读 file.coverPath（那是响应式属性，会重建逐条依赖）；
+// 搜索完成时把已有 coverPath 播种进 Map。
+const searchCovers = shallowRef<Map<string, string>>(new Map())
+
+const coverFor = (file: SearchResult): string | undefined => searchCovers.value.get(file.path)
 const isLoading = ref<boolean>(false)
 const directoryStats = reactive<LibraryStats>({
   totalDirectories: 0,
@@ -507,19 +522,28 @@ const handleSearch = async (): Promise<void> => {
       return 0
     })
 
-    // 异步加载搜索结果的封面（从缓存恢复的 track 无 coverPath）
+    // 异步加载搜索结果的封面（从缓存恢复的 track 无 coverPath）。
+    // 先把已有 coverPath 播种进本地 Map，加载循环不再依赖逐条 mutation 传播到 UI
+    searchCovers.value = new Map(
+      searchResults.value
+        .filter((f) => f.coverPath)
+        .map((f) => [f.path, f.coverPath as string]),
+    )
     coverLoadGeneration++
     loadSearchResultCovers(coverLoadGeneration)
   }, 300)
 }
 
-// 批量加载搜索结果封面，每批 5 首并行，加载完成后直接修改原对象触发响应式更新
+// 批量加载搜索结果封面，每批 5 首并行；每批完成后把新封面合并进本地 Map
+// （一次性替换触发一次渲染，v-memo 只重渲染封面变化的项目），
+// 同时通过 store 的版本号机制通知播放队列视图
 const loadSearchResultCovers = async (gen: number): Promise<void> => {
   const files = searchResults.value
   const BATCH = 5
   for (let i = 0; i < files.length; i += BATCH) {
     if (gen !== coverLoadGeneration) return
     const batch = files.slice(i, i + BATCH)
+    const found: Array<[string, string]> = []
     await Promise.all(
       batch.map(async (file) => {
         if (gen !== coverLoadGeneration) return
@@ -530,7 +554,9 @@ const loadSearchResultCovers = async (gen: number): Promise<void> => {
             })
             if (gen !== coverLoadGeneration) return
             if (coverPath) {
+              // 写回原对象供播放等逻辑直接读取 coverPath（本组件渲染不依赖它）
               file.coverPath = coverPath
+              found.push([file.path, coverPath])
             }
           } catch {
             // 忽略单首加载失败
@@ -538,12 +564,21 @@ const loadSearchResultCovers = async (gen: number): Promise<void> => {
         }
       }),
     )
+    if (found.length > 0) {
+      const next = new Map(searchCovers.value)
+      for (const [path, coverPath] of found) {
+        next.set(path, coverPath)
+        playerStore.recordCoverUpdate(path, coverPath)
+      }
+      searchCovers.value = next
+    }
   }
 }
 
 const clearSearch = (): void => {
   searchTerm.value = ''
   searchResults.value = []
+  searchCovers.value = new Map()
   coverLoadGeneration++ // 取消正在进行的封面加载
 }
 

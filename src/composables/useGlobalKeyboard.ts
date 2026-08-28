@@ -15,6 +15,11 @@ import { usePlayerStore } from '@/stores/player'
 export function useGlobalKeyboard(): void {
   const playerStore = usePlayerStore()
 
+  // 音量键节流：按住方向键时 keydown 以系统重复率触发（可达 ~30Hz），
+  // 每次都会跨 IPC 调 set_volume 并触发配置保存，节流到最高 ~12 次/秒
+  const VOLUME_REPEAT_MIN_INTERVAL_MS = 80
+  let lastVolumeChangeAt = 0
+
   const handleKeyDown = (event: KeyboardEvent): void => {
     // 只在用户没有在输入框等元素中编辑时响应键盘事件
     const activeEl = document.activeElement
@@ -49,12 +54,18 @@ export function useGlobalKeyboard(): void {
         break
       case 'ArrowUp': {
         event.preventDefault()
+        const now = performance.now()
+        if (event.repeat && now - lastVolumeChangeAt < VOLUME_REPEAT_MIN_INTERVAL_MS) break
+        lastVolumeChangeAt = now
         const newVolume = Math.min(1, playerStore.volume + 0.05)
         playerStore.setVolume(newVolume)
         break
       }
       case 'ArrowDown': {
         event.preventDefault()
+        const now = performance.now()
+        if (event.repeat && now - lastVolumeChangeAt < VOLUME_REPEAT_MIN_INTERVAL_MS) break
+        lastVolumeChangeAt = now
         const newVolume = Math.max(0, playerStore.volume - 0.05)
         playerStore.setVolume(newVolume)
         break

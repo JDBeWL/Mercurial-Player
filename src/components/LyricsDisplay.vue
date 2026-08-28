@@ -52,14 +52,8 @@
               class="first-line karaoke-line"
               :lang="lineLanguages[index]?.[0] || undefined"
             >
-              <span
-                v-for="(word, idx) in line.words"
-                :key="idx"
-                class="karaoke-text"
-                :class="{ active: isWordActive(word) }"
-                :style="getKaraokeStyle(word)"
-                >{{ word.text }}</span
-              >
+              <!-- 卡拉OK进度隔离在 KaraokeLine 内：父组件渲染不依赖每帧更新的 visualTime -->
+              <KaraokeLine :words="line.words ?? []" />
             </div>
             <div
               v-if="line.texts[1]"
@@ -124,16 +118,26 @@
 <script lang="ts">
 import { usePlayerStore } from '@/stores/player'
 import { useConfigStore } from '@/stores/config'
-import { nextTick, ref, watch, onMounted, onUnmounted, computed, type CSSProperties } from 'vue'
+import {
+  provide,
+  nextTick,
+  ref,
+  watch,
+  onMounted,
+  onUnmounted,
+  computed,
+  type CSSProperties,
+} from 'vue'
 import { useLyrics } from '@/composables/useLyrics'
 import { pluginManager } from '@/plugins'
 import type { ActionButton } from '@/plugins/pluginManager'
 import logger from '@/utils/logger'
-import type { KaraokeWord } from '@/types'
+import KaraokeLine from './KaraokeLine.vue'
 import { detectLyricLanguage, type LyricLanguage } from '@/utils/languageDetect'
 
 export default {
   name: 'LyricsDisplay',
+  components: { KaraokeLine },
   setup() {
     const playerStore = usePlayerStore()
     const configStore = useConfigStore()
@@ -217,6 +221,9 @@ export default {
 
     // --- 视觉时间系统 ---
     const visualTime = ref(0)
+    // 将 visualTime ref 本身提供给 KaraokeLine（provide 不解包 ref），
+    // 使逐字进度渲染依赖只存在于子组件中
+    provide('lyricsVisualTime', visualTime)
     const isUserScroll = ref(false) // 标记用户是否正在交互
     let rafId: number | null = null
     let lastFrameTime = 0
@@ -386,29 +393,6 @@ export default {
 
     // --- 样式计算逻辑 ---
     const isActive = (index: number): boolean => index === activeIndex.value
-
-    const isWordActive = (word: KaraokeWord): boolean => {
-      // 应用歌词偏移
-      const offset = playerStore.lyricsOffset || 0
-      const t = visualTime.value - offset
-      // 只有在时间范围内才算激活，并且考虑下一个单词的开始时间
-      return t >= word.start && t < word.end
-    }
-
-    // 计算卡拉OK单词的填充进度 (0% - 100%)
-    const getKaraokeStyle = (word: KaraokeWord): CSSProperties => {
-      // 应用歌词偏移
-      const offset = playerStore.lyricsOffset || 0
-      const t = visualTime.value - offset
-      if (t >= word.end) return { '--progress': '100%' }
-      if (t < word.start) return { '--progress': '0%' }
-
-      // 确保进度计算精确，避免浮点数误差
-      const duration = word.end - word.start
-      const elapsed = t - word.start
-      const progress = Math.min(100, Math.max(0, (elapsed / duration) * 100))
-      return { '--progress': `${progress.toFixed(2)}%` }
-    }
 
     // --- 滚动控制 ---
     const isAutoScrolling = ref(false) // 标记是否正在自动滚动
@@ -623,8 +607,6 @@ export default {
       showFetchLyricsButton,
       playerStore,
       isActive,
-      isWordActive,
-      getKaraokeStyle,
       handleLyricClick,
       handleScroll,
       isHovering,
