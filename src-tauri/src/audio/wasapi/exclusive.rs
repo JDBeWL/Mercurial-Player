@@ -1251,12 +1251,16 @@ mod simd_tests {
         assert_eq!(scalar_out.len(), simd_out.len(), "输出长度不一致");
 
         let scalar_i16: Vec<i16> = scalar_out
-            .chunks_exact(2)
-            .map(|c| i16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&c| i16::from_le_bytes(c))
             .collect();
         let simd_i16: Vec<i16> = simd_out
-            .chunks_exact(2)
-            .map(|c| i16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&c| i16::from_le_bytes(c))
             .collect();
 
         for (i, (s, v)) in scalar_i16.iter().zip(simd_i16.iter()).enumerate() {
@@ -1289,12 +1293,16 @@ mod simd_tests {
         assert_eq!(scalar_out.len(), simd_out.len(), "输出长度不一致");
 
         let scalar_i32: Vec<i32> = scalar_out
-            .chunks_exact(4)
-            .map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&c| i32::from_le_bytes(c))
             .collect();
         let simd_i32: Vec<i32> = simd_out
-            .chunks_exact(4)
-            .map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&c| i32::from_le_bytes(c))
             .collect();
 
         for (i, (s, v)) in scalar_i32.iter().zip(simd_i32.iter()).enumerate() {
@@ -1316,8 +1324,10 @@ mod simd_tests {
         // 32-bit float 应该是直接的字节拷贝
         assert_eq!(out.len(), samples.len() * 4);
         let as_f32: Vec<f32> = out
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&c| f32::from_le_bytes(c))
             .collect();
         assert_eq!(as_f32, samples);
     }
@@ -1350,12 +1360,16 @@ mod simd_tests {
         assert_eq!(scalar_out.len(), sse2_out.len(), "SSE2 i16 长度不一致");
 
         let scalar_i16: Vec<i16> = scalar_out
-            .chunks_exact(2)
-            .map(|c| i16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&c| i16::from_le_bytes(c))
             .collect();
         let sse2_i16: Vec<i16> = sse2_out
-            .chunks_exact(2)
-            .map(|c| i16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&c| i16::from_le_bytes(c))
             .collect();
 
         for (i, (s, v)) in scalar_i16.iter().zip(sse2_i16.iter()).enumerate() {
@@ -1386,12 +1400,16 @@ mod simd_tests {
         assert_eq!(scalar_out.len(), sse2_out.len(), "SSE2 i32 长度不一致");
 
         let scalar_i32: Vec<i32> = scalar_out
-            .chunks_exact(4)
-            .map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&c| i32::from_le_bytes(c))
             .collect();
         let sse2_i32: Vec<i32> = sse2_out
-            .chunks_exact(4)
-            .map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&c| i32::from_le_bytes(c))
             .collect();
 
         for (i, (s, v)) in scalar_i32.iter().zip(sse2_i32.iter()).enumerate() {

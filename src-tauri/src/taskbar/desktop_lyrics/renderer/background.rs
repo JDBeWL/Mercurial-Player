@@ -113,7 +113,7 @@ unsafe fn capture_region_bgra(
             std::ptr::copy_nonoverlapping(p_bits.cast::<u8>(), data.as_mut_ptr(), len);
         }
         // GDI 位图的 alpha 通道不可靠（常为 0），强制不透明
-        for px in data.chunks_exact_mut(4) {
+        for px in data.as_chunks_mut::<4>().0 {
             px[3] = 255;
         }
         Some((data, out_w, out_h))
@@ -151,7 +151,7 @@ pub(super) unsafe fn sample_background_luma(window_rect: &RECT) -> Option<f32> {
 
     let mut sum = 0f64;
     let mut count = 0usize;
-    for px in data.chunks_exact(4) {
+    for px in data.as_chunks::<4>().0 {
         sum += 0.299 * px[2] as f64 + 0.587 * px[1] as f64 + 0.114 * px[0] as f64;
         count += 1;
     }
