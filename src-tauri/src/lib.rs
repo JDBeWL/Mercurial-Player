@@ -129,8 +129,6 @@ pub struct VisualizationState {
     pub spectrum_data: Arc<Mutex<Vec<f32>>>,
     /// 目标刷新率（用于可视化FFT计算，默认60fps）
     pub target_fps: Arc<AtomicU64>,
-    /// 是否启用垂直同步（启用后FFT频率与屏幕刷新率同步）
-    pub enable_vertical_sync: Arc<AtomicBool>,
 }
 
 /// 解码线程管理

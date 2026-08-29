@@ -174,6 +174,7 @@ fn main() {
             system::commands::clear_font_caches,
             system::commands::get_platform,
             system::commands::get_screen_refresh_rate,
+            system::commands::get_display_refresh_rates,
             system::commands::open_external_url,
             // 音频设备命令
             audio::commands::get_audio_devices,
@@ -182,7 +183,6 @@ fn main() {
             audio::commands::toggle_exclusive_mode,
             audio::commands::get_exclusive_mode,
             audio::commands::set_target_fps,
-            audio::commands::set_vertical_sync,
             audio::commands::set_fade_enabled,
             audio::commands::get_fade_enabled,
             // 上次播放会话恢复命令

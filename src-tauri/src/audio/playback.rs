@@ -234,8 +234,6 @@ pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     eof_sent: bool,
     /// 目标刷新率（用于FFT计算频率）
     target_fps: Arc<AtomicU64>,
-    /// 是否启用垂直同步（启用后FFT与屏幕刷新率同步）
-    enable_vertical_sync: Arc<AtomicBool>,
 }
 
 /// 根据采样率计算最佳FFT缓冲区大小
@@ -260,7 +258,6 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         spectrum_data: Arc<Mutex<Vec<f32>>>,
         app_handle: Option<AppHandle>,
         target_fps: Arc<AtomicU64>,
-        enable_vertical_sync: Arc<AtomicBool>,
     ) -> Self {
         let (sr, ch) = (input.sample_rate().get(), input.channels().get());
         let fft_size = calculate_fft_size(sr);
@@ -287,7 +284,6 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             pending_index: 0,
             eof_sent: false,
             target_fps,
-            enable_vertical_sync,
         }
     }
 
@@ -400,12 +396,8 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
 
         let last_fft = self.last_fft_time.load(Ordering::Relaxed);
 
-        // 根据垂直同步设置决定FFT频率
-        let enable_vsync = self.enable_vertical_sync.load(Ordering::Relaxed);
+        // 限制FFT计算和发送频率（与目标帧率一致；画面同步由前端 rAF 天然保证）
         let target_fps = self.target_fps.load(Ordering::Relaxed).max(1);
-        // 当前实现中垂直同步和目标帧率使用相同算法(1000/fps)
-        // 保留 enable_vsync 标志供未来扩展真实屏幕刷新率读取
-        let _ = enable_vsync;
         let fft_interval_ms = 1000 / target_fps;
 
         // 限制FFT计算和发送频率
@@ -520,12 +512,11 @@ pub fn play_track_shared(
     }
     *lock_or_log!(player.track.current_path.lock()) = Some(path.to_string());
     *lock_or_log!(player.track.current_source.lock()) = None;
-    let (waveform, spectrum, eq_settings, target_fps, enable_vertical_sync) = (
+    let (waveform, spectrum, eq_settings, target_fps) = (
         Arc::clone(&player.visualization.waveform_data),
         Arc::clone(&player.visualization.spectrum_data),
         state.equalizer.get_settings_handle(),
         Arc::clone(&player.visualization.target_fps),
-        Arc::clone(&player.visualization.enable_vertical_sync),
     );
 
     let source: Box<dyn Source<Item = f32> + Send> = match SymphoniaDecoder::new(path) {
@@ -545,7 +536,6 @@ pub fn play_track_shared(
                     spectrum,
                     Some(app.clone()),
                     target_fps,
-                    enable_vertical_sync,
                 )
                 .with_start_position(start_pos)
                 .with_eq_settings(eq_settings)
@@ -562,7 +552,6 @@ pub fn play_track_shared(
                     spectrum,
                     Some(app.clone()),
                     target_fps,
-                    enable_vertical_sync,
                 )
                 .with_start_position(position.unwrap_or(0.0))
                 .with_eq_settings(eq_settings)
@@ -776,7 +765,6 @@ pub fn seek_track_shared(
             Arc::clone(&player.visualization.spectrum_data),
             Some(app.clone()),
             Arc::clone(&player.visualization.target_fps),
-            Arc::clone(&player.visualization.enable_vertical_sync),
         )
         .with_start_position(time)
         .with_eq_settings(eq_settings)

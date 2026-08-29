@@ -892,20 +892,6 @@ pub fn set_target_fps(state: State<AppState>, fps: u32) -> Result<(), AppError> 
     Ok(())
 }
 
-#[command]
-pub fn set_vertical_sync(state: State<AppState>, enabled: bool) -> Result<(), AppError> {
-    state
-        .player
-        .visualization
-        .enable_vertical_sync
-        .store(enabled, Ordering::Relaxed);
-    log::info!(
-        "Vertical sync {}",
-        if enabled { "enabled" } else { "disabled" }
-    );
-    Ok(())
-}
-
 /// 设置是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音)
 /// 立即生效,无需重启
 #[command]

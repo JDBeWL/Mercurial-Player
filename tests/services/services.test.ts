@@ -39,13 +39,13 @@ import {
 } from '@/services/mediaService'
 import {
   clearFontCaches,
+  getDisplayRefreshRates,
   getFontCacheStats,
   getPlatform,
   getScreenRefreshRate,
   getSystemFonts,
   openExternalUrl,
   setTargetFps,
-  setVerticalSync,
 } from '@/services/appService'
 
 beforeEach(() => {
@@ -126,8 +126,8 @@ describe('appService', () => {
     await expectInvoke(() => getFontCacheStats(), 'get_font_cache_stats')
     await expectInvoke(() => clearFontCaches(), 'clear_font_caches')
     await expectInvoke(() => getScreenRefreshRate(), 'get_screen_refresh_rate')
+    await expectInvoke(() => getDisplayRefreshRates(), 'get_display_refresh_rates')
     await expectInvoke(() => setTargetFps(120), 'set_target_fps', { fps: 120 })
-    await expectInvoke(() => setVerticalSync(true), 'set_vertical_sync', { enabled: true })
     await expectInvoke(() => openExternalUrl('https://example.com'), 'open_external_url', {
       url: 'https://example.com',
     })

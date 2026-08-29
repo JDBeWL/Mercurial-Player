@@ -268,7 +268,7 @@
         <button
           class="icon-button"
           :title="$t('config.detectRefreshRate')"
-          @click="detectScreenRefreshRate"
+          @click="refreshDisplayRates"
         >
           <span class="material-symbols-rounded">refresh</span>
         </button>
@@ -295,8 +295,8 @@
 
       <div class="setting-item">
         <div class="setting-info">
-          <span class="setting-label">{{ $t('config.enableVerticalSync') }}</span>
-          <span class="setting-description">{{ $t('config.enableVerticalSyncDesc') }}</span>
+          <span class="setting-label">{{ $t('config.limitFpsToScreenRate') }}</span>
+          <span class="setting-description">{{ $t('config.limitFpsToScreenRateDesc') }}</span>
         </div>
         <div
           class="switch"
@@ -318,12 +318,8 @@ import { useI18n } from 'vue-i18n'
 import logger from '../../utils/logger'
 import { saveConfigSafely } from '../../utils/errorMessages'
 import { useSliderFill } from '../../composables/useSliderFill'
-import {
-  getScreenRefreshRate,
-  getSystemFonts,
-  setTargetFps,
-  setVerticalSync,
-} from '../../services/appService'
+import { getDisplayRefreshRates, getSystemFonts } from '../../services/appService'
+import { applyVisualizerFps } from '../../utils/visualizerFps'
 import {
   bundledFontOptions,
   externalFontOptions,
@@ -350,14 +346,20 @@ const configStore = useConfigStore()
 const { t } = useI18n()
 const systemFonts = ref<string[]>([])
 
-const fpsOptions = computed(() => [
-  { value: 30, label: '30 FPS' },
-  { value: 60, label: '60 FPS' },
-  { value: 120, label: '120 FPS' },
-  { value: 144, label: '144 FPS' },
-  { value: 165, label: '165 FPS' },
-  { value: 240, label: '240 FPS' },
-])
+// 可用的刷新率挡位（由系统枚举，查询失败时回落到常见挡位）
+const FALLBACK_FPS_OPTIONS = [30, 60, 120, 144, 165, 240]
+const availableRates = ref<number[]>([])
+
+const fpsOptions = computed(() => {
+  const rates =
+    availableRates.value.length > 0 ? [...availableRates.value] : [...FALLBACK_FPS_OPTIONS]
+  // 当前配置值必须始终在选项中，否则选择器无法回显
+  const target = visualizerConfig.value.targetFps
+  if (!rates.includes(target)) {
+    rates.push(target)
+  }
+  return rates.sort((a, b) => a - b).map((rate) => ({ value: rate, label: `${rate} FPS` }))
+})
 
 const alignmentOptions = computed(() => [
   { value: 'left', label: t('config.alignLeft') },
@@ -429,75 +431,30 @@ const currentRefreshRate = computed(() => {
   return visualizerConfig.value.detectedRefreshRate || 60
 })
 
-// 检测屏幕刷新率
-const detectScreenRefreshRate = async (): Promise<void> => {
+// 查询窗口所在显示器的实时刷新率与支持挡位（跨屏/改刷新率后可重新查询）
+const refreshDisplayRates = async (): Promise<void> => {
   try {
-    // 首先尝试从系统API获取刷新率
-    const systemRefreshRate = await getScreenRefreshRate()
-
-    if (systemRefreshRate && systemRefreshRate > 0) {
-      // 使用系统检测到的刷新率
-      visualizerConfig.value.detectedRefreshRate = systemRefreshRate
+    const { current, available } = await getDisplayRefreshRates()
+    if (available.length > 0) {
+      availableRates.value = available
+    }
+    if (current > 0 && current !== visualizerConfig.value.detectedRefreshRate) {
+      visualizerConfig.value.detectedRefreshRate = current
       configStore._markDirty()
-
-      logger.info(`Detected screen refresh rate from system: ${systemRefreshRate} Hz`)
-
-      // 如果垂直同步已开启，重新应用FPS（可能需要调整）
-      if (visualizerConfig.value.enableVerticalSync) {
-        await applyFpsBasedOnVsync()
-      }
-
-      // 保存检测结果
+      logger.info(`Detected screen refresh rate: ${current} Hz`)
+      // 刷新率变了，限制值需要重新计算
+      await applyTargetFps()
       await saveConfig()
-      return
     }
-
-    // 如果系统API失败，回退到requestAnimationFrame方法
-    logger.info('System API failed, falling back to requestAnimationFrame detection')
-    let frames = 0
-    const start = performance.now()
-
-    const measure = (): void => {
-      frames++
-      if (performance.now() - start < 1000) {
-        requestAnimationFrame(measure)
-      } else {
-        // 保存检测到的刷新率
-        visualizerConfig.value.detectedRefreshRate = frames
-        configStore._markDirty()
-
-        logger.info(`Detected screen refresh rate from RAF: ${frames} Hz`)
-
-        // 如果垂直同步已开启，重新应用FPS（可能需要调整）
-        if (visualizerConfig.value.enableVerticalSync) {
-          applyFpsBasedOnVsync()
-        }
-
-        // 保存检测结果
-        saveConfig()
-      }
-    }
-    requestAnimationFrame(measure)
   } catch (error) {
     logger.error('Failed to detect refresh rate:', error)
-  }
-}
-
-// 应用刷新率到后端
-const applyRefreshRate = async (fps: number): Promise<void> => {
-  try {
-    await setTargetFps(fps)
-    logger.info(`Applied refresh rate: ${fps} FPS`)
-  } catch (error) {
-    logger.error('Failed to apply refresh rate:', error)
   }
 }
 
 // 处理 FPS 变化
 const handleFpsChange = async (): Promise<void> => {
   try {
-    // 应用正确的FPS设置（考虑垂直同步）
-    await applyFpsBasedOnVsync()
+    await applyTargetFps()
     configStore._markDirty()
     await saveConfig()
   } catch (error) {
@@ -505,42 +462,30 @@ const handleFpsChange = async (): Promise<void> => {
   }
 }
 
-// 切换垂直同步
+// 切换"限制到屏幕刷新率"
 const toggleVerticalSync = async (): Promise<void> => {
   visualizerConfig.value.enableVerticalSync = !visualizerConfig.value.enableVerticalSync
   try {
-    await setVerticalSync(visualizerConfig.value.enableVerticalSync)
-
-    // 应用正确的FPS设置
-    await applyFpsBasedOnVsync()
-
+    await applyTargetFps()
     configStore._markDirty()
     await saveConfig()
   } catch (error) {
-    logger.error('Failed to set vertical sync:', error)
-    visualizerConfig.value.enableVerticalSync = !visualizerConfig.value.enableVerticalSync
+    logger.error('Failed to apply FPS limit toggle:', error)
   }
 }
 
-// 根据垂直同步状态应用FPS
-const applyFpsBasedOnVsync = async (): Promise<void> => {
-  let fpsToApply = visualizerConfig.value.targetFps
-
-  if (visualizerConfig.value.enableVerticalSync && visualizerConfig.value.detectedRefreshRate) {
-    // 垂直同步开启：使用 min(目标帧率, 屏幕刷新率)
-    fpsToApply = Math.min(
-      visualizerConfig.value.targetFps,
-      visualizerConfig.value.detectedRefreshRate,
-    )
-    logger.info(
-      `VSync enabled: using min(${visualizerConfig.value.targetFps}, ${visualizerConfig.value.detectedRefreshRate}) = ${fpsToApply} FPS`,
-    )
-  } else {
-    // 垂直同步关闭：使用目标帧率
-    logger.info(`VSync disabled: using target FPS ${fpsToApply}`)
+// 按配置应用目标帧率（开启限制时 cap 到实时屏幕刷新率）
+const applyTargetFps = async (): Promise<void> => {
+  const result = await applyVisualizerFps(visualizerConfig.value)
+  if (!result) {
+    return
   }
-
-  await applyRefreshRate(fpsToApply)
+  // 顺带把实时刷新率写回配置，设置页显示值保持真实
+  if (result.screenRate && result.screenRate !== visualizerConfig.value.detectedRefreshRate) {
+    visualizerConfig.value.detectedRefreshRate = result.screenRate
+    configStore._markDirty()
+  }
+  logger.info(`Target FPS applied: ${result.fps}`)
 }
 
 // 初始化默认值（在 setup 阶段同步执行，避免 computed 副作用）
@@ -654,28 +599,13 @@ onMounted(() => {
   // 每次打开设置页重新扫描外部字体目录，运行中放入的字体无需重启即可选择
   void loadExternalFonts()
 
-  // 如果没有检测过刷新率，自动检测一次
-  if (
-    !visualizerConfig.value.detectedRefreshRate ||
-    visualizerConfig.value.detectedRefreshRate === 60
-  ) {
-    detectScreenRefreshRate()
-  }
+  // 每次打开设置页都查询实时刷新率与支持挡位，不依赖上次会话的旧值
+  void refreshDisplayRates()
 
   // 确保后端的FPS设置与配置同步
-  if (visualizerConfig.value.targetFps) {
-    // 根据垂直同步状态应用正确的FPS
-    applyFpsBasedOnVsync().catch((error) => {
-      logger.error('Failed to sync FPS on mount:', error)
-    })
-  }
-
-  // 确保后端的垂直同步设置与配置同步
-  if (visualizerConfig.value.enableVerticalSync !== undefined) {
-    setVerticalSync(visualizerConfig.value.enableVerticalSync).catch((error) => {
-      logger.error('Failed to sync vertical sync on mount:', error)
-    })
-  }
+  applyTargetFps().catch((error) => {
+    logger.error('Failed to sync FPS on mount:', error)
+  })
 })
 </script>
 

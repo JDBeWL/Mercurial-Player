@@ -20,19 +20,22 @@ export function clearFontCaches(): Promise<{ extractCacheBytes: number }> {
   return invoke<{ extractCacheBytes: number }>('clear_font_caches')
 }
 
-/** 获取屏幕刷新率（Hz） */
+/** 获取屏幕刷新率（Hz），取窗口当前所在显示器，跨屏后返回值跟随变化 */
 export function getScreenRefreshRate(): Promise<number> {
   return invoke<number>('get_screen_refresh_rate')
+}
+
+/** 获取窗口所在显示器的刷新率挡位（当前值 + 当前分辨率支持的全部挡位） */
+export function getDisplayRefreshRates(): Promise<{
+  current: number
+  available: number[]
+}> {
+  return invoke('get_display_refresh_rates')
 }
 
 /** 设置可视化目标帧率 */
 export function setTargetFps(fps: number): Promise<void> {
   return invoke<void>('set_target_fps', { fps })
-}
-
-/** 设置可视化垂直同步开关 */
-export function setVerticalSync(enabled: boolean): Promise<void> {
-  return invoke<void>('set_vertical_sync', { enabled })
 }
 
 /** 使用系统默认浏览器打开外部 URL（后端有 HTTPS 白名单校验） */

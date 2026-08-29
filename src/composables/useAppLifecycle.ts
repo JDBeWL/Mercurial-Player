@@ -7,6 +7,8 @@ import { useConfigStore } from '@/stores/config'
 import { setLocale } from '@/i18n'
 import { pluginManager } from '@/plugins'
 import logger from '@/utils/logger'
+import { applyVisualizerFps } from '@/utils/visualizerFps'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 type ErrorSeverity = 'error' | 'warning' | 'info'
 
@@ -26,30 +28,6 @@ interface UseAppLifecycleOptions {
 }
 
 /**
- * 通过 requestAnimationFrame 测量屏幕刷新率（持续 1 秒）。
- * 用于动态调整后端 FFT 计算频率，避免在不必要的高频下浪费 CPU。
- */
-function getScreenRefreshRate(): Promise<number> {
-  return new Promise((resolve) => {
-    let frames = 0
-    const lastTime = performance.now()
-    const duration = 1000 // 测量1秒
-
-    const countFrame = () => {
-      frames++
-      const currentTime = performance.now()
-      if (currentTime - lastTime < duration) {
-        requestAnimationFrame(countFrame)
-      } else {
-        // 返回测得的刷新率，至少是1
-        resolve(Math.max(1, frames))
-      }
-    }
-    requestAnimationFrame(countFrame)
-  })
-}
-
-/**
  * 应用生命周期 Composable
  *
  * 集中处理 App 启动初始化序列与卸载清理：
@@ -62,7 +40,7 @@ function getScreenRefreshRate(): Promise<number> {
  *   5. 设置封面缓存路径到后端
  *   6. 初始化音频播放器（注册监听器、启动清理任务）
  *   7. 恢复上次播放会话
- *   8. 测量屏幕刷新率并同步到后端（用于 FFT 频率）
+ *   8. 同步可视化目标帧率到后端（用于 FFT 频率）
  *   9. 检查更新（若启用），通过错误通知容器提示用户
  *   10. 同步窗口全屏/最大化状态
  *
@@ -84,6 +62,10 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
     // 清理插件管理器（停用所有插件、保存存储、清理沙箱）
     await pluginManager.cleanup()
   }
+
+  // 窗口移动监听的取消函数与防抖定时器（onUnmounted 清理）
+  let unlistenWindowMove: (() => void) | null = null
+  let moveDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
   onMounted(async () => {
     // 注册 beforeunload 事件，确保关闭前保存配置
@@ -136,13 +118,35 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
       logger.warn('Failed to resume last session:', error)
     }
 
-    // 获取屏幕刷新率并设置到后端，用于动态调整FFT计算频率
+    // 同步可视化目标帧率到后端（用于 FFT 计算频率）。
+    // 与设置页共用逻辑：限制开启时取 min(目标帧率, 实时屏幕刷新率)。
     try {
-      const refreshRate = await getScreenRefreshRate()
-      await invoke('set_target_fps', { fps: refreshRate })
-      logger.info(`Screen refresh rate set to ${refreshRate}Hz`)
+      const result = await applyVisualizerFps(configStore.visualizer)
+      if (result) {
+        logger.info(`Target FPS set to ${result.fps}`)
+      }
     } catch (error) {
       logger.warn('Failed to set target FPS:', error)
+    }
+
+    // 监听窗口移动：窗口跨屏后所在显示器可能变化，重新应用帧率限制。
+    // onMoved 拖动期间高频触发，防抖后再查询。
+    try {
+      unlistenWindowMove = await getCurrentWindow().onMoved(() => {
+        if (moveDebounceTimer) {
+          clearTimeout(moveDebounceTimer)
+        }
+        moveDebounceTimer = setTimeout(() => {
+          moveDebounceTimer = null
+          if (configStore.visualizer?.enableVerticalSync) {
+            applyVisualizerFps(configStore.visualizer).catch((error) => {
+              logger.warn('Failed to re-apply target FPS after window move:', error)
+            })
+          }
+        }, 500)
+      })
+    } catch (error) {
+      logger.warn('Failed to listen window move:', error)
     }
 
     // 如果用户启用了自动检查更新，则在启动时执行一次检查（仅检查，不自动安装）
@@ -167,6 +171,15 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
   })
 
   onUnmounted(async () => {
+    // 清理窗口移动监听
+    if (moveDebounceTimer) {
+      clearTimeout(moveDebounceTimer)
+      moveDebounceTimer = null
+    }
+    if (unlistenWindowMove) {
+      unlistenWindowMove()
+      unlistenWindowMove = null
+    }
     // 强制保存待处理的配置
     await configStore.flushPendingSave()
     // 移除 beforeunload 事件监听器

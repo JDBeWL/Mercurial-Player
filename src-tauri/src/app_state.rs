@@ -67,7 +67,6 @@ pub fn build_app_state(
                 waveform_data: Arc::new(Mutex::new(Vec::with_capacity(1024))),
                 spectrum_data: Arc::new(Mutex::new(vec![0.0; 128])),
                 target_fps: Arc::new(AtomicU64::new(60)), // 默认60fps
-                enable_vertical_sync: Arc::new(AtomicBool::new(false)), // 默认关闭垂直同步
             },
             decode: DecodeThreadState {
                 generation: Arc::new(AtomicU64::new(0)),

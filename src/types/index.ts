@@ -151,6 +151,7 @@ export interface AudioConfig {
 
 export interface VisualizerConfig {
   targetFps: number
+  /* 开启后目标帧率 cap 到屏幕刷新率（字段名是历史遗留的"垂直同步"，仅作持久化键使用） */
   enableVerticalSync: boolean
   detectedRefreshRate?: number
 }

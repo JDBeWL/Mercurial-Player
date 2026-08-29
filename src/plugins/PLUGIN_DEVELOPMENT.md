@@ -34,9 +34,22 @@ src/plugins/builtins/
   "description": "这是一个示例插件",
   "main": "index.js",
   "permissions": ["player:read", "storage"],
-  "autoActivate": true
+  "auto_activate": true
 }
 ```
+
+**字段说明：**
+
+| 字段            | 必需 | 说明                                                                                       |
+| --------------- | ---- | ------------------------------------------------------------------------------------------ |
+| `id`            | 是   | 插件唯一标识，只能包含字母、数字、连字符和下划线                                           |
+| `name`          | 是   | 插件显示名称                                                                               |
+| `version`       | 否   | 版本号，须为 `x.y.z` 格式                                                                  |
+| `author`        | 否   | 作者                                                                                       |
+| `description`   | 否   | 描述                                                                                       |
+| `main`          | 否   | 入口文件，默认 `index.js`                                                                  |
+| `permissions`   | 否   | 权限列表，未声明则只有无需权限的 API 可用                                                  |
+| `auto_activate` | 否   | 加载后是否自动激活，默认 `true`；设为 `false` 时需用户在设置页手动启用（注意是下划线命名） |
 
 ### 外部插件示例 (index.js)
 
@@ -79,6 +92,8 @@ export const myPlugin: BuiltinPluginDefinition = {
   main: (api: PluginAPI) => {
     // 插件状态变量
     let isActive = false
+    // 保存回调引用,deactivate 时需要用它来移除监听
+    let trackChangedCallback: (data: unknown) => void
 
     return {
       async activate(): Promise<void> {
@@ -86,10 +101,11 @@ export const myPlugin: BuiltinPluginDefinition = {
         isActive = true
 
         // 注册事件监听器
-        api.events.on('player:trackChanged', (data) => {
+        trackChangedCallback = (data) => {
           const { track } = data as { track: Track | null }
           api.log.info('歌曲切换:', track?.title)
-        })
+        }
+        api.events.on('player:trackChanged', trackChangedCallback)
       },
 
       deactivate(): void {
@@ -97,7 +113,8 @@ export const myPlugin: BuiltinPluginDefinition = {
         isActive = false
 
         // 清理事件监听器
-        api.events.off('player:trackChanged')
+        // 注意: off 必须传入注册时的同一个回调引用,只传事件名无法移除监听
+        api.events.off('player:trackChanged', trackChangedCallback)
       },
 
       // 自定义方法
@@ -143,7 +160,7 @@ export const myPlugin: BuiltinPluginDefinition = {
 
 | 权限              | 说明           | 涉及的 API                                                                                                                         |
 | ----------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `player:read`     | 读取播放器状态 | `api.player.getState()`, `api.player.getLyrics()`, `api.player.getCurrentLyricIndex()`                                             |
+| `player:read`     | 读取播放器状态 | `api.player.getState()`, `api.player.getLyrics()`, `api.player.getCurrentLyricIndex()`, `api.player.getCoverPath()`                |
 | `player:control`  | 控制播放器     | `api.player.play()`, `api.player.pause()`, `api.player.next()`, `api.player.seek()`, `api.player.setVolume()`                      |
 | `library:read`    | 读取音乐库     | `api.library.getPlaylists()`, `api.library.getCurrentPlaylist()`, `api.library.getTracks()`                                        |
 | `lyrics:provider` | 提供歌词源     | `api.lyrics.registerProvider()`, `api.player.setLyrics()`                                                                          |
@@ -191,6 +208,9 @@ const lyrics = await api.player.getLyrics()
 
 // 获取当前歌词索引（同步方法）
 const index = api.player.getCurrentLyricIndex()
+
+// 获取当前曲目的封面缓存路径（异步方法，无封面时返回 null）
+const coverPath = await api.player.getCoverPath()
 ```
 
 #### 播放控制 (需要 `player:control`)
@@ -234,6 +254,8 @@ const tracks = api.library.getTracks()
 
 需要 `storage` 权限。每个插件最多 1MB 存储空间。
 
+写入是防抖持久化（300ms），插件停用和应用关闭时会立即保存；超出 1MB 时会自动裁剪过大的数组，localStorage 配额不足时会进一步紧急清理（数组只保留末尾 10 条），仍失败则放弃本次写入。
+
 ```javascript
 // 存储数据（自动持久化）
 api.storage.set('myKey', { foo: 'bar' })
@@ -254,10 +276,11 @@ const all = api.storage.getAll()
 
 ```javascript
 // 监听播放器事件
-api.events.on('player:trackChanged', (data) => {
+const onTrackChanged = (data) => {
   // data: { track, isPlaying }
   api.log.info('歌曲切换:', data.track?.title)
-})
+}
+api.events.on('player:trackChanged', onTrackChanged)
 
 api.events.on('player:stateChanged', (data) => {
   // data: { track, isPlaying }
@@ -270,7 +293,8 @@ api.events.on('plugin:activated', (data) => {
 })
 
 // 取消监听（停用时务必调用）
-api.events.off('player:trackChanged')
+// 必须传入注册时的同一个回调引用,只传事件名无法移除监听
+api.events.off('player:trackChanged', onTrackChanged)
 
 // 触发自定义事件（供其他插件监听）
 // 事件名会自动添加 plugin:{pluginId}: 前缀
@@ -519,8 +543,7 @@ manifest.json:
   "author": "Your Name",
   "description": "生成歌词分享图片",
   "main": "index.js",
-  "permissions": ["player:read", "storage", "ui:extend"],
-  "autoActivate": true
+  "permissions": ["player:read", "storage", "ui:extend"]
 }
 ```
 
@@ -618,8 +641,7 @@ manifest.json:
   "author": "Your Name",
   "description": "记录播放次数",
   "main": "index.js",
-  "permissions": ["player:read", "storage"],
-  "autoActivate": true
+  "permissions": ["player:read", "storage"]
 }
 ```
 
@@ -632,16 +654,13 @@ const plugin = {
   activate() {
     api.log.info('播放统计插件已激活')
 
-    // 监听歌曲切换事件
-    api.events.on('player:trackChanged', (data) => {
-      if (data.track && data.isPlaying) {
-        this.recordPlay(data.track)
-      }
-    })
+    // 监听歌曲切换事件(保存回调引用,停用时移除监听需要用到)
+    api.events.on('player:trackChanged', onTrackChanged)
   },
 
   deactivate() {
-    api.events.off('player:trackChanged')
+    // 必须传入注册时的同一个回调引用
+    api.events.off('player:trackChanged', onTrackChanged)
     lastTrackPath = null
     api.log.info('播放统计插件已停用')
   },
@@ -672,6 +691,12 @@ const plugin = {
       totalPlays: Object.values(counts).reduce((a, b) => a + b, 0),
     }
   },
+}
+
+function onTrackChanged(data) {
+  if (data.track && data.isPlaying) {
+    plugin.recordPlay(data.track)
+  }
 }
 ```
 
@@ -869,24 +894,32 @@ export const playCountPlugin: BuiltinPluginDefinition = {
    - 插件注册、激活、停用、卸载
    - 扩展点管理
    - 事件系统
-   - 存储管理
 
-2. **pluginAPI.ts** - 插件 API 实现
+2. **pluginTypes.ts** - 类型契约
+   - 集中定义所有纯类型（PluginAPI、清单、实例、权限等）
+   - 由 pluginManager.ts re-export 保持向后兼容
+
+3. **pluginStorage.ts** - 存储持久化
+   - 基于 localStorage 的插件数据持久化
+   - 1MB 限额（超限裁剪大型数组）、QuotaExceeded 紧急清理
+   - 防抖保存，插件停用/应用关闭时立即 flush
+
+4. **pluginAPI.ts** - 插件 API 实现
    - 为插件提供安全的接口访问应用功能
    - 权限检查
    - API 方法实现
 
-3. **pluginLoader.ts** - 插件加载器
+5. **pluginLoader.ts** - 插件加载器
    - 从文件系统加载外部插件
    - 验证插件清单
    - 代码安全检查
 
-4. **pluginSandbox.ts** - 沙箱环境
+6. **pluginSandbox.ts** - 沙箱环境
    - 隔离外部插件代码执行
    - 限制访问危险 API
    - 防止恶意代码
 
-5. **builtins/** - 内置插件
+7. **builtins/** - 内置插件
    - TypeScript 编写的官方插件
    - 直接集成到应用中
    - 作为插件开发示例
@@ -910,7 +943,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
 
 ### 核心类型
 
-完整类型定义位于 `src/plugins/pluginManager.ts`，主要类型包括：
+完整类型定义位于 `src/plugins/pluginTypes.ts`（`pluginManager.ts` 对其做了 re-export，因此从两个文件导入均可），主要类型包括：
 
 ```typescript
 // 插件 API 接口
@@ -1105,9 +1138,9 @@ const plugin = {
 ### 通用最佳实践
 
 1. **权限声明**：manifest.json 中必须声明所有需要的权限
-2. **资源清理**：在 `deactivate()` 中取消所有事件监听、快捷键、定时器
+2. **资源清理**：在 `deactivate()` 中取消所有事件监听、快捷键、定时器；`events.off` 必须传入注册时的同一个回调引用
 3. **错误处理**：使用 try-catch 处理异步操作，避免影响主应用
-4. **存储限制**：每个插件最多 1MB 存储空间，超出会自动清理旧数据
+4. **存储限制**：每个插件最多 1MB 存储空间，超出时自动裁剪过大的数组；建议只存储必要的数据
 5. **网络安全**：仅支持 HTTPS 请求
 
 ### TypeScript 插件最佳实践
@@ -1178,7 +1211,7 @@ const plugin = {
 
 ### Q: 插件存储有大小限制吗？
 
-是的，每个插件最多 1MB 存储空间。超出限制时会自动清理旧数据。建议只存储必要的数据。
+是的，每个插件最多 1MB 存储空间。超出限制时会自动裁剪过大的数组（保留后半部分），localStorage 配额不足时会进一步紧急清理（数组只保留末尾 10 条）。写入是防抖持久化的（300ms），插件停用和应用关闭时会立即保存。建议只存储必要的数据。
 
 ### Q: 如何开发内置插件？
 
@@ -1208,8 +1241,10 @@ api.events.on('plugin:pluginA:myEvent', (data) => {
 
 ## 参考资源
 
-- **类型定义**：`src/plugins/pluginManager.ts`
+- **类型契约定义**：`src/plugins/pluginTypes.ts`
 - **API 实现**：`src/plugins/pluginAPI.ts`
+- **插件管理器**：`src/plugins/pluginManager.ts`
+- **存储持久化**：`src/plugins/pluginStorage.ts`
 - **示例插件**：`src/plugins/builtins/playCount.ts`
 - **插件加载器**：`src/plugins/pluginLoader.ts`
 - **沙箱实现**：`src/plugins/pluginSandbox.ts`

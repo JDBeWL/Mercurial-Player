@@ -187,31 +187,130 @@ pub const fn get_platform() -> &'static str {
     }
 }
 
-/// 获取屏幕刷新率
-#[command]
-pub fn get_screen_refresh_rate() -> Result<u32, AppError> {
-    match display_info::DisplayInfo::all() {
-        Ok(displays) => {
-            // 获取主显示器（通常是第一个）
-            if let Some(display) = displays.first() {
-                // frequency 是 f32 类型，不是 Option
-                let refresh_rate = display.frequency;
-                if refresh_rate > 0.0 {
-                    let rate = refresh_rate.round() as u32;
-                    log::info!("Detected screen refresh rate: {rate} Hz");
-                    return Ok(rate);
-                }
-            }
+/// 显示器刷新率信息
+#[derive(Debug, serde::Serialize)]
+pub struct DisplayRefreshRates {
+    /// 窗口当前所在显示器的刷新率
+    pub current: u32,
+    /// 当前分辨率下该显示器支持的全部刷新率挡位（升序，必定包含 current）
+    pub available: Vec<u32>,
+}
 
-            // 如果没有刷新率信息，返回默认值
-            log::info!("No refresh rate information available, using default 60 Hz");
-            Ok(60)
+/// 默认刷新率（显示器信息不可用时回落）
+const DEFAULT_REFRESH_RATE: u32 = 60;
+
+/// 找到窗口中心点所在的显示器；未命中时回落主显示器，再回落第一个显示器
+fn find_window_display(window: &tauri::WebviewWindow) -> Option<display_info::DisplayInfo> {
+    let displays = display_info::DisplayInfo::all().ok()?;
+    let pos = window.outer_position().ok()?;
+    let size = window.outer_size().ok()?;
+    let cx = pos.x + size.width as i32 / 2;
+    let cy = pos.y + size.height as i32 / 2;
+    displays
+        .iter()
+        .find(|d| cx >= d.x && cx < d.x + d.width as i32 && cy >= d.y && cy < d.y + d.height as i32)
+        .or_else(|| displays.iter().find(|d| d.is_primary))
+        .or_else(|| displays.first())
+        .cloned()
+}
+
+fn display_frequency(display: &display_info::DisplayInfo) -> u32 {
+    if display.frequency > 0.0 {
+        display.frequency.round() as u32
+    } else {
+        DEFAULT_REFRESH_RATE
+    }
+}
+
+/// 枚举显示器在当前分辨率下支持的全部刷新率（升序去重）。
+/// display_info 0.5 只暴露当前模式，多挡位需按平台 API 自行枚举；
+/// 非 Windows 平台暂无现成依赖，回落为仅当前挡位。
+#[cfg(windows)]
+#[allow(unsafe_code)] // EnumDisplaySettingsExW 是 unsafe Win32 API
+fn enumerate_refresh_rates(display: &display_info::DisplayInfo) -> Vec<u32> {
+    use std::collections::BTreeSet;
+    use windows::Win32::Graphics::Gdi::{
+        DEVMODEW, ENUM_DISPLAY_SETTINGS_FLAGS, ENUM_DISPLAY_SETTINGS_MODE, EnumDisplaySettingsExW,
+    };
+    use windows::core::PCWSTR;
+
+    let mut device: Vec<u16> = display.name.encode_utf16().collect();
+    device.push(0); // 以 NUL 结尾的宽字符串
+
+    let mut rates = BTreeSet::new();
+    let mut mode = DEVMODEW {
+        dmSize: size_of::<DEVMODEW>() as u16,
+        ..DEVMODEW::default()
+    };
+    for index in 0..4096_u32 {
+        let ok = unsafe {
+            EnumDisplaySettingsExW(
+                PCWSTR(device.as_ptr()),
+                ENUM_DISPLAY_SETTINGS_MODE(index),
+                std::ptr::addr_of_mut!(mode),
+                ENUM_DISPLAY_SETTINGS_FLAGS(0),
+            )
         }
-        Err(e) => {
-            log::error!("Failed to get display info: {e}");
-            // 返回默认值而不是错误
-            Ok(60)
+        .as_bool();
+        if !ok {
+            break;
         }
+        // 只保留当前分辨率下的挡位，避免混入其他分辨率的模式
+        if mode.dmPelsWidth == display.width
+            && mode.dmPelsHeight == display.height
+            && mode.dmDisplayFrequency > 0
+            && mode.dmDisplayFrequency != 1
+        // 1Hz 是驱动用于"未指定"的哨兵值
+        {
+            rates.insert(mode.dmDisplayFrequency);
+        }
+    }
+    rates.into_iter().collect()
+}
+
+#[cfg(not(windows))]
+fn enumerate_refresh_rates(_display: &display_info::DisplayInfo) -> Vec<u32> {
+    Vec::new()
+}
+
+/// 获取窗口所在显示器的刷新率（跨屏移动窗口后返回值跟随变化）
+#[command]
+pub fn get_screen_refresh_rate(window: tauri::WebviewWindow) -> Result<u32, AppError> {
+    if let Some(display) = find_window_display(&window) {
+        let rate = display_frequency(&display);
+        log::info!("Detected screen refresh rate: {rate} Hz");
+        Ok(rate)
+    } else {
+        log::info!("No display info available, using default {DEFAULT_REFRESH_RATE} Hz");
+        Ok(DEFAULT_REFRESH_RATE)
+    }
+}
+
+/// 获取窗口所在显示器支持的刷新率挡位（用于目标帧率选项，免去硬编码猜测）
+#[command]
+pub fn get_display_refresh_rates(
+    window: tauri::WebviewWindow,
+) -> Result<DisplayRefreshRates, AppError> {
+    match find_window_display(&window) {
+        Some(display) => {
+            let current = display_frequency(&display);
+            let mut available = enumerate_refresh_rates(&display);
+            if !available.contains(&current) {
+                available.push(current);
+            }
+            available.sort_unstable();
+            available.dedup();
+            log::info!(
+                "Display {} refresh rates: current {current} Hz, available {:?}",
+                display.name,
+                available
+            );
+            Ok(DisplayRefreshRates { current, available })
+        }
+        None => Ok(DisplayRefreshRates {
+            current: DEFAULT_REFRESH_RATE,
+            available: vec![DEFAULT_REFRESH_RATE],
+        }),
     }
 }
 
