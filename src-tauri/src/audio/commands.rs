@@ -150,7 +150,9 @@ pub fn pause_track(state: State<AppState>) -> Result<(), AppError> {
         }
         #[cfg(not(windows))]
         {
-            return Err("Exclusive mode is only supported on Windows".to_string());
+            return Err(AppError::Audio(
+                "Exclusive mode is only supported on Windows".to_string(),
+            ));
         }
     }
     // 共享模式:fade 启用时启动淡出线程,否则直接 pause
@@ -215,7 +217,9 @@ pub fn resume_track(state: State<AppState>) -> Result<(), AppError> {
         }
         #[cfg(not(windows))]
         {
-            return Err("Exclusive mode is only supported on Windows".to_string());
+            return Err(AppError::Audio(
+                "Exclusive mode is only supported on Windows".to_string(),
+            ));
         }
     }
     // 共享模式:fade 启用时先取消正在进行的 fade,再将音量设为 0,立即 play(),然后启动淡入线程
@@ -304,7 +308,9 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), AppError> {
         }
         #[cfg(not(windows))]
         {
-            return Err("Exclusive mode is only supported on Windows".to_string());
+            return Err(AppError::Audio(
+                "Exclusive mode is only supported on Windows".to_string(),
+            ));
         }
     }
     let player = state
@@ -531,7 +537,9 @@ async fn switch_to_wasapi_exclusive(
     _device_name: &str,
     _current_time: Option<f32>,
 ) -> Result<(), AppError> {
-    Err("Exclusive mode is only supported on Windows".to_string())
+    Err(AppError::Audio(
+        "Exclusive mode is only supported on Windows".to_string(),
+    ))
 }
 
 fn switch_to_shared_mode(

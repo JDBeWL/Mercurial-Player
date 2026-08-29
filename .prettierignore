@@ -10,3 +10,4 @@ pnpm-lock.yaml
 *.woff2
 *.woff
 *.ttf
+src-tauri/gen

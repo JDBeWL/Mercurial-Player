@@ -302,7 +302,9 @@ fn pause_playback(state: &State<AppState>) -> Result<(), AppError> {
         #[cfg(not(windows))]
         {
             let _ = exclusive_mode;
-            return Err("Exclusive mode is only supported on Windows".to_string());
+            return Err(AppError::Audio(
+                "Exclusive mode is only supported on Windows".to_string(),
+            ));
         }
     }
     let player = state

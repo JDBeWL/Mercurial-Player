@@ -806,7 +806,9 @@ pub async fn play_track_exclusive(
     _path: &str,
     _position: Option<f32>,
 ) -> Result<(), AppError> {
-    Err("Exclusive mode is only supported on Windows".to_string())
+    Err(AppError::Audio(
+        "Exclusive mode is only supported on Windows".to_string(),
+    ))
 }
 
 /// 根据采样率计算解码chunk 大小
@@ -1398,7 +1400,9 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, AppError> {
         }
         #[cfg(not(windows))]
         {
-            return Err("Exclusive mode is only supported on Windows".to_string());
+            return Err(AppError::Audio(
+                "Exclusive mode is only supported on Windows".to_string(),
+            ));
         }
     } else {
         let player = state
@@ -1439,7 +1443,9 @@ pub fn check_track_finished(state: &State<AppState>) -> Result<bool, AppError> {
         }
         #[cfg(not(windows))]
         {
-            Err("Exclusive mode is only supported on Windows".to_string())
+            Err(AppError::Audio(
+                "Exclusive mode is only supported on Windows".to_string(),
+            ))
         }
     } else {
         let player = state
