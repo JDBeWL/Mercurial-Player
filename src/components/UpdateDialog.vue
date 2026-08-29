@@ -29,9 +29,8 @@
           </div>
           <div class="progress-detail">
             <span>
-              {{ formatBytes(downloadedBytes) }}<template v-if="totalBytes > 0">
-                / {{ formatBytes(totalBytes) }}</template
-              >
+              {{ formatBytes(downloadedBytes)
+              }}<template v-if="totalBytes > 0"> / {{ formatBytes(totalBytes) }}</template>
             </span>
             <span v-if="downloadSpeed > 0">{{ formatBytes(downloadSpeed) }}/s</span>
           </div>
@@ -416,10 +415,7 @@ const onDismiss = () => {
 }
 
 .markdown-body :deep(thead) {
-  background-color: var(
-    --md-sys-color-surface-container-high,
-    var(--md-sys-color-surface-variant)
-  );
+  background-color: var(--md-sys-color-surface-container-high, var(--md-sys-color-surface-variant));
 }
 
 .markdown-body :deep(th),
@@ -439,10 +435,7 @@ const onDismiss = () => {
 }
 
 .markdown-body :deep(tbody tr:nth-child(even)) {
-  background-color: var(
-    --md-sys-color-surface-container-low,
-    var(--md-sys-color-surface)
-  );
+  background-color: var(--md-sys-color-surface-container-low, var(--md-sys-color-surface));
 }
 
 /* ======== Footer ======== */

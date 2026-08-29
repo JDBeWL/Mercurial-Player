@@ -1,6 +1,7 @@
 //! 配置管理模块
 //!
 //! 提供应用程序配置的加载、保存和管理功能。
+use crate::error::AppError;
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -355,8 +356,9 @@ impl ConfigManager {
         format!("{}/user.json", self.config_dir)
     }
 
-    pub fn initialize_config_files(&self) -> Result<(), String> {
-        std::fs::create_dir_all(&self.config_dir).map_err(|e| format!("创建配置目录失败: {e}"))?;
+    pub fn initialize_config_files(&self) -> Result<(), AppError> {
+        std::fs::create_dir_all(&self.config_dir)
+            .map_err(|e| AppError::Config(format!("创建配置目录失败: {e}")))?;
 
         // 清理上次崩溃/断电可能残留的 .tmp 文件，避免需要手动清理
         self.cleanup_temp_files();
@@ -402,7 +404,7 @@ impl ConfigManager {
         }
     }
 
-    pub fn load_config(&self) -> Result<AppConfig, String> {
+    pub fn load_config(&self) -> Result<AppConfig, AppError> {
         // 缓存命中直接返回，避免每个 command 都重复 读盘 + 解析 + read_dir 扫描
         if let Some(cached) = self.cached_config() {
             return Ok(cached);
@@ -443,27 +445,28 @@ impl ConfigManager {
         Ok(default_config)
     }
 
-    fn load_config_from_file(file_path: &str) -> Result<AppConfig, String> {
+    fn load_config_from_file(file_path: &str) -> Result<AppConfig, AppError> {
         let content = std::fs::read_to_string(file_path)
-            .map_err(|e| format!("Failed to read config file: {e}"))?;
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config file: {e}"))
+            .map_err(|e| AppError::Config(format!("Failed to read config file: {e}")))?;
+        serde_json::from_str(&content)
+            .map_err(|e| AppError::Config(format!("Failed to parse config file: {e}")))
     }
 
-    pub fn save_config(&self, config: &AppConfig) -> Result<(), String> {
+    pub fn save_config(&self, config: &AppConfig) -> Result<(), AppError> {
         Self::save_config_to_file(config, &self.get_user_config_path())?;
         // 写穿：保存成功后同步更新进程内缓存
         self.store_cache(config);
         Ok(())
     }
 
-    pub fn save_default_config(&self, config: &AppConfig) -> Result<(), String> {
+    pub fn save_default_config(&self, config: &AppConfig) -> Result<(), AppError> {
         Self::save_config_to_file(config, &self.get_default_config_path())
     }
 
-    fn save_config_to_file(config: &AppConfig, file_path: &str) -> Result<(), String> {
+    fn save_config_to_file(config: &AppConfig, file_path: &str) -> Result<(), AppError> {
         use std::io::Write;
         let content = serde_json::to_string_pretty(config)
-            .map_err(|e| format!("Failed to serialize config: {e}"))?;
+            .map_err(|e| AppError::Config(format!("Failed to serialize config: {e}")))?;
         // 原子写入:先写临时文件,sync_all 确保数据落盘,再 rename 替换。
         // 避免写入过程中崩溃/断电导致配置文件损坏;
         // sync_all 确保 rename 前数据已落盘,避免 rename 后断电导致内容丢失。
@@ -471,25 +474,25 @@ impl ConfigManager {
         let tmp_path = format!("{file_path}.tmp");
         {
             let mut file = std::fs::File::create(&tmp_path)
-                .map_err(|e| format!("Failed to create temp config file: {e}"))?;
+                .map_err(|e| AppError::Config(format!("Failed to create temp config file: {e}")))?;
             file.write_all(content.as_bytes())
-                .map_err(|e| format!("Failed to write temp config file: {e}"))?;
+                .map_err(|e| AppError::Config(format!("Failed to write temp config file: {e}")))?;
             file.sync_all()
-                .map_err(|e| format!("Failed to sync temp config file: {e}"))?;
+                .map_err(|e| AppError::Config(format!("Failed to sync temp config file: {e}")))?;
         }
         std::fs::rename(&tmp_path, file_path).map_err(|e| {
             // rename 失败时尝试清理临时文件,避免残留
             let _ = std::fs::remove_file(&tmp_path);
-            format!("Failed to rename config file: {e}")
+            AppError::Config(format!("Failed to rename config file: {e}"))
         })?;
         Ok(())
     }
 
-    pub fn export_config(&self, config: &AppConfig, export_path: &str) -> Result<(), String> {
+    pub fn export_config(&self, config: &AppConfig, export_path: &str) -> Result<(), AppError> {
         Self::save_config_to_file(config, export_path)
     }
 
-    pub fn import_config(&self, import_path: &str) -> Result<AppConfig, String> {
+    pub fn import_config(&self, import_path: &str) -> Result<AppConfig, AppError> {
         let mut config = Self::load_config_from_file(import_path)?;
 
         // 合并默认外链白名单，防止导入的配置移除安全域名限制
@@ -508,7 +511,7 @@ impl ConfigManager {
         Ok(config)
     }
 
-    pub fn reset_config(&self) -> Result<AppConfig, String> {
+    pub fn reset_config(&self) -> Result<AppConfig, AppError> {
         let default_config = AppConfig::default();
         let user_config_path = self.get_user_config_path();
         if Path::new(&user_config_path).exists() {

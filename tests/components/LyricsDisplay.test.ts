@@ -63,7 +63,17 @@ function makeTrack(): Track {
 }
 
 /** 初始化所有 mock store/composable */
-function setupMocks(overrides: { lyrics?: LyricLine[]; loading?: boolean; currentTrack?: Track | null; currentTime?: number; isPlaying?: boolean; lyricsOffset?: number; lyricsConfig?: Record<string, unknown> } = {}) {
+function setupMocks(
+  overrides: {
+    lyrics?: LyricLine[]
+    loading?: boolean
+    currentTrack?: Track | null
+    currentTime?: number
+    isPlaying?: boolean
+    lyricsOffset?: number
+    lyricsConfig?: Record<string, unknown>
+  } = {},
+) {
   mocks.playerStore = reactive({
     currentTrack: overrides.currentTrack ?? null,
     currentTime: overrides.currentTime ?? 0,
@@ -114,7 +124,10 @@ describe('LyricsDisplay.vue', () => {
 
   beforeEach(() => {
     // mock requestAnimationFrame 防止动画循环运行
-    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 0))
+    vi.stubGlobal(
+      'requestAnimationFrame',
+      vi.fn(() => 0),
+    )
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
   })
 

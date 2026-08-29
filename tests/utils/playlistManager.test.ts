@@ -98,7 +98,10 @@ describe('PlaylistManager', () => {
         name: 'music',
         depth: 0,
         subdirectories: [],
-        audioFiles: [{ path: '/music/song1.mp3' }, { path: '/music/song2.mp3' }] as unknown as Track[],
+        audioFiles: [
+          { path: '/music/song1.mp3' },
+          { path: '/music/song2.mp3' },
+        ] as unknown as Track[],
       }
       expect(PlaylistManager.countAudioFiles(node)).toBe(2)
     })
@@ -363,7 +366,8 @@ describe('PlaylistManager', () => {
     it('should scan directory and return tree', async () => {
       invokeMock.mockImplementation((cmd: string, args?: unknown) => {
         if (cmd === 'read_directory') {
-          if ((args as Record<string, unknown> | undefined)?.path === '/music') return Promise.resolve(['/music/rock'])
+          if ((args as Record<string, unknown> | undefined)?.path === '/music')
+            return Promise.resolve(['/music/rock'])
           return Promise.resolve([])
         }
         if (cmd === 'get_audio_files') {
@@ -517,7 +521,8 @@ describe('PlaylistManager', () => {
     it('should return playlist for matching path', async () => {
       invokeMock.mockImplementation((cmd: string, args?: unknown) => {
         if (cmd === 'read_directory') {
-          if ((args as Record<string, unknown> | undefined)?.path === '/music') return Promise.resolve(['/music/rock'])
+          if ((args as Record<string, unknown> | undefined)?.path === '/music')
+            return Promise.resolve(['/music/rock'])
           return Promise.resolve([])
         }
         if (cmd === 'get_audio_files') {
@@ -551,7 +556,8 @@ describe('PlaylistManager', () => {
     it('should return directory statistics', async () => {
       invokeMock.mockImplementation((cmd: string, args?: unknown) => {
         if (cmd === 'read_directory') {
-          if ((args as Record<string, unknown> | undefined)?.path === '/music') return Promise.resolve(['/music/rock'])
+          if ((args as Record<string, unknown> | undefined)?.path === '/music')
+            return Promise.resolve(['/music/rock'])
           return Promise.resolve([])
         }
         if (cmd === 'get_audio_files') {

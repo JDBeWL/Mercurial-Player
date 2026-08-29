@@ -29,7 +29,13 @@ describe('MD3Select 分组选项', () => {
         modelValue: 'a',
         options: [
           { label: '组1', options: [{ value: 'a', label: '选项A' }] },
-          { label: '组2', options: [{ value: 'b', label: '选项B' }, { value: 'c', label: '选项C' }] },
+          {
+            label: '组2',
+            options: [
+              { value: 'b', label: '选项B' },
+              { value: 'c', label: '选项C' },
+            ],
+          },
         ],
       },
     })
@@ -56,7 +62,13 @@ describe('MD3Select 分组选项', () => {
 
   it('平铺选项仍然可用（向后兼容）', async () => {
     const wrapper = mount(MD3Select, {
-      props: { modelValue: 1, options: [{ value: 1, label: '一' }, { value: 2, label: '二' }] },
+      props: {
+        modelValue: 1,
+        options: [
+          { value: 1, label: '一' },
+          { value: 2, label: '二' },
+        ],
+      },
     })
     await wrapper.find('.md3-select-trigger').trigger('click')
     const options = wrapper.findAll('.md3-select-option')

@@ -48,10 +48,7 @@
           @click="handleLyricClick(line.time, index)"
         >
           <template v-if="line.karaoke && isActive(index)">
-            <div
-              class="first-line karaoke-line"
-              :lang="lineLanguages[index]?.[0] || undefined"
-            >
+            <div class="first-line karaoke-line" :lang="lineLanguages[index]?.[0] || undefined">
               <!-- 卡拉OK进度隔离在 KaraokeLine 内：父组件渲染不依赖每帧更新的 visualTime -->
               <KaraokeLine :words="line.words ?? []" />
             </div>
@@ -418,7 +415,10 @@ export default {
 
     // 计算目标滚动位置
     const computeCenteredScroll = (container: HTMLElement, activeEl: HTMLElement): number => {
-      return Math.max(0, activeEl.offsetTop - container.clientHeight * 0.5 + activeEl.clientHeight / 2)
+      return Math.max(
+        0,
+        activeEl.offsetTop - container.clientHeight * 0.5 + activeEl.clientHeight / 2,
+      )
     }
 
     // 挂载首帧定位：在浏览器首次绘制前以瞬时滚动 (scroll-behavior: auto)

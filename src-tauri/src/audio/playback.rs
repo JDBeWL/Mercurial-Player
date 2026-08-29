@@ -7,6 +7,7 @@
 //! 无锁设计减少线程竞争
 
 use super::decoder::{LockFreeSymphoniaSource, SymphoniaDecoder};
+use crate::error::AppError;
 
 #[cfg(windows)]
 use super::wasapi::PlaybackState;
@@ -561,7 +562,7 @@ pub fn play_track_shared(
     state: &State<AppState>,
     path: &str,
     position: Option<f32>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let player = &state.player;
     // 取消任何正在进行的淡入淡出,防止其 on_complete(pause) 在新歌播放后执行
     player.fade.generation.fetch_add(1, Ordering::SeqCst);
@@ -669,7 +670,7 @@ pub async fn play_track_exclusive(
     state: &State<'_, AppState>,
     path: &str,
     position: Option<f32>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let player = &state.player;
     // 递增代际计数器取消旧解码推送线程(替代 stop 布尔标志,避免 70ms 窗口内状态不一致)
     player.decode.generation.fetch_add(1, Ordering::SeqCst);
@@ -804,7 +805,7 @@ pub async fn play_track_exclusive(
     _state: &State<'_, AppState>,
     _path: &str,
     _position: Option<f32>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     Err("Exclusive mode is only supported on Windows".to_string())
 }
 
@@ -1308,7 +1309,7 @@ pub fn seek_track_shared(
     state: &State<AppState>,
     path: &str,
     time: f32,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let player = &state.player;
     // 取消任何正在进行的淡入淡出,防止其 on_complete(pause) 在 seek 后执行
     player.fade.generation.fetch_add(1, Ordering::SeqCst);
@@ -1358,7 +1359,7 @@ pub fn seek_track_shared(
 }
 
 /// 获取播放状态
-pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
+pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, AppError> {
     let volume = state
         .player
         .output
@@ -1413,7 +1414,7 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, String> {
 }
 
 /// 检查音轨是否播放完毕
-pub fn check_track_finished(state: &State<AppState>) -> Result<bool, String> {
+pub fn check_track_finished(state: &State<AppState>) -> Result<bool, AppError> {
     let exclusive_mode = state
         .player
         .output

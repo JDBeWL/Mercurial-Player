@@ -2,6 +2,7 @@
 //!
 //! 提供音频设备的检测、切换和管理功能。
 
+use crate::error::AppError;
 use cpal::StreamConfig;
 use cpal::traits::{DeviceTrait, HostTrait};
 use serde::Serialize;
@@ -40,7 +41,7 @@ pub fn get_device_friendly_name(device: &cpal::Device) -> Option<String> {
 }
 
 /// 获取所有可用的音频输出设备
-pub fn get_all_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
+pub fn get_all_audio_devices() -> Result<Vec<AudioDeviceInfo>, AppError> {
     let host = cpal::default_host();
     let default_device_name = host
         .default_output_device()

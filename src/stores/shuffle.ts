@@ -59,11 +59,7 @@ export function isShuffleOrderValid(
   position: number,
   playlistLength: number,
 ): boolean {
-  return (
-    order.length === playlistLength &&
-    order.length > 0 &&
-    position >= 0
-  )
+  return order.length === playlistLength && order.length > 0 && position >= 0
 }
 
 /**

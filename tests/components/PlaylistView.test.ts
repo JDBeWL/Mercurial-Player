@@ -29,7 +29,7 @@ vi.mock('vue-i18n', () => ({
       if (!params) return key
       return Object.entries(params).reduce(
         (text, [name, value]) => text.replace(`{${name}}`, String(value)),
-        key
+        key,
       )
     },
   }),
@@ -63,14 +63,19 @@ vi.mock('@/utils/fileUtils', () => ({
       const lastDot = name.lastIndexOf('.')
       return lastDot > 0 ? name.substring(0, lastDot) : name
     }),
-    getTrackDisplayName: vi.fn((track: { displayTitle?: string; title?: string; name?: string; path: string }, hideExt: boolean) => {
-      if (track.displayTitle) return track.displayTitle
-      if (track.title) return track.title
-      const name = track.name || (path => path.split(/[\\/]/).pop() || path)(track.path)
-      if (!hideExt) return name
-      const lastDot = name.lastIndexOf('.')
-      return lastDot > 0 ? name.substring(0, lastDot) : name
-    }),
+    getTrackDisplayName: vi.fn(
+      (
+        track: { displayTitle?: string; title?: string; name?: string; path: string },
+        hideExt: boolean,
+      ) => {
+        if (track.displayTitle) return track.displayTitle
+        if (track.title) return track.title
+        const name = track.name || ((path) => path.split(/[\\/]/).pop() || path)(track.path)
+        if (!hideExt) return name
+        const lastDot = name.lastIndexOf('.')
+        return lastDot > 0 ? name.substring(0, lastDot) : name
+      },
+    ),
     getFileExtension: vi.fn(() => 'mp3'),
   },
 }))

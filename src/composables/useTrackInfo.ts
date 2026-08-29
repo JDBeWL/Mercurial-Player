@@ -79,9 +79,7 @@ function stripTitleExt(trackPath: string, title: string): string {
   const ext = FileUtils.getFileExtension(trackPath)
   if (!ext) return title
   const suffix = `.${ext}`
-  return title.toLowerCase().endsWith(suffix)
-    ? title.slice(0, -suffix.length)
-    : title
+  return title.toLowerCase().endsWith(suffix) ? title.slice(0, -suffix.length) : title
 }
 
 /** 从缓存读取并更新访问顺序 (LRU) */
@@ -182,7 +180,9 @@ export function useTrackInfo() {
     }
 
     // 优先读 store 已用元数据填充的 title 字段,避免显示原始文件名
-    return (track.title && stripTitleExt(trackPath, track.title)) || getFallbackDisplayName(trackPath)
+    return (
+      (track.title && stripTitleExt(trackPath, track.title)) || getFallbackDisplayName(trackPath)
+    )
   }
 
   /**

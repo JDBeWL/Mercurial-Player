@@ -2,7 +2,15 @@
 import { describe, it, beforeEach, expect, vi, afterEach } from 'vitest'
 
 // 使用 vi.hoisted 避免 TDZ：vi.mock 会被提升到文件顶部，直接引用 const 变量会报错
-const { listenCallbacks, mockListen, registerCallbacks, mockRegister, mockUnregisterAll, mockIsRegistered, mockErrorHandlerHandle } = vi.hoisted(() => {
+const {
+  listenCallbacks,
+  mockListen,
+  registerCallbacks,
+  mockRegister,
+  mockUnregisterAll,
+  mockIsRegistered,
+  mockErrorHandlerHandle,
+} = vi.hoisted(() => {
   // 捕获 listen 回调，按事件名存储
   const listenCallbacks = new Map<string, (event: { payload: unknown }) => void>()
   const mockListen = vi.fn(async (event: string, callback: (e: { payload: unknown }) => void) => {
@@ -22,7 +30,15 @@ const { listenCallbacks, mockListen, registerCallbacks, mockRegister, mockUnregi
   // Mock errorHandler
   const mockErrorHandlerHandle = vi.fn()
 
-  return { listenCallbacks, mockListen, registerCallbacks, mockRegister, mockUnregisterAll, mockIsRegistered, mockErrorHandlerHandle }
+  return {
+    listenCallbacks,
+    mockListen,
+    registerCallbacks,
+    mockRegister,
+    mockUnregisterAll,
+    mockIsRegistered,
+    mockErrorHandlerHandle,
+  }
 })
 
 vi.mock('@tauri-apps/api/event', () => ({

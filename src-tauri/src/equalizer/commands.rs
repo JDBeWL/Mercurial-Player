@@ -1,4 +1,5 @@
 //! EQ 均衡器相关的 Tauri 命令
+use crate::error::AppError;
 
 use super::processor::{EQ_BAND_COUNT, EQ_FREQUENCIES, EqPreset, EqSettings, get_all_presets};
 use crate::AppState;
@@ -39,18 +40,18 @@ pub fn get_eq_settings(state: State<AppState>) -> EqSettings {
 }
 
 #[command]
-pub fn set_eq_enabled(state: State<AppState>, enabled: bool) -> Result<(), String> {
+pub fn set_eq_enabled(state: State<AppState>, enabled: bool) -> Result<(), AppError> {
     state.equalizer.set_enabled(enabled);
     Ok(())
 }
 
 #[command]
-pub fn set_eq_gains(state: State<AppState>, gains: Vec<f32>) -> Result<(), String> {
+pub fn set_eq_gains(state: State<AppState>, gains: Vec<f32>) -> Result<(), AppError> {
     if gains.len() != EQ_BAND_COUNT {
-        return Err(format!(
+        return Err(AppError::msg(format!(
             "Expected {EQ_BAND_COUNT} gains, got {}",
             gains.len()
-        ));
+        )));
     }
 
     let mut gains_array = [0.0f32; EQ_BAND_COUNT];
@@ -63,9 +64,9 @@ pub fn set_eq_gains(state: State<AppState>, gains: Vec<f32>) -> Result<(), Strin
 }
 
 #[command]
-pub fn set_eq_band_gain(state: State<AppState>, band: usize, gain: f32) -> Result<(), String> {
+pub fn set_eq_band_gain(state: State<AppState>, band: usize, gain: f32) -> Result<(), AppError> {
     if band >= EQ_BAND_COUNT {
-        return Err(format!("Invalid band index: {band}"));
+        return Err(AppError::msg(format!("Invalid band index: {band}")));
     }
 
     let clamped_gain = gain.clamp(-8.0, 8.0);
@@ -74,7 +75,7 @@ pub fn set_eq_band_gain(state: State<AppState>, band: usize, gain: f32) -> Resul
 }
 
 #[command]
-pub fn set_eq_preamp(state: State<AppState>, preamp: f32) -> Result<(), String> {
+pub fn set_eq_preamp(state: State<AppState>, preamp: f32) -> Result<(), AppError> {
     let clamped_preamp = preamp.clamp(-8.0, 8.0);
     state.equalizer.set_preamp(clamped_preamp);
     Ok(())
@@ -86,7 +87,7 @@ pub fn get_eq_presets() -> Vec<EqPreset> {
 }
 
 #[command]
-pub fn apply_eq_preset(state: State<AppState>, preset_name: String) -> Result<(), String> {
+pub fn apply_eq_preset(state: State<AppState>, preset_name: String) -> Result<(), AppError> {
     let presets = get_all_presets();
     let preset = presets
         .iter()
@@ -98,7 +99,7 @@ pub fn apply_eq_preset(state: State<AppState>, preset_name: String) -> Result<()
 }
 
 #[command]
-pub fn reset_eq(state: State<AppState>) -> Result<(), String> {
+pub fn reset_eq(state: State<AppState>) -> Result<(), AppError> {
     let default_settings = EqSettings::default();
     state.equalizer.set_settings(default_settings);
     Ok(())

@@ -157,11 +157,7 @@ export class TitleExtractor {
     filePath: string,
     config: Partial<TitleExtractionConfig> = {},
   ): TitleInfo {
-    const {
-      separator = '-',
-      hideFileExtension = true,
-      parseArtistTitle = true,
-    } = config
+    const { separator = '-', hideFileExtension = true, parseArtistTitle = true } = config
 
     const fileName = this.getFileName(filePath, hideFileExtension)
 
@@ -173,9 +169,8 @@ export class TitleExtractor {
       // 优先尝试带空格变体（如 ' - '），再尝试原始分隔符，对所有分隔符一视同仁
       const trimmedSep = separator.trim()
       const withSpaces = trimmedSep ? ` ${trimmedSep} ` : ''
-      const prioritizedSeparators = withSpaces && withSpaces !== separator
-        ? [withSpaces, separator]
-        : [separator]
+      const prioritizedSeparators =
+        withSpaces && withSpaces !== separator ? [withSpaces, separator] : [separator]
 
       for (const sep of prioritizedSeparators) {
         // 使用 lastIndexOf 来处理 "艺术家 - 歌曲 - 专辑" 这类情况

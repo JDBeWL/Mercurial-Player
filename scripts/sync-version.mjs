@@ -1,6 +1,7 @@
 // 同步版本号: 从 src-tauri/Cargo.toml 读取 version,写入 package.json 和 tauri.conf.json
 //
 // 用法: pnpm run version:sync
+// 校验: pnpm run version:check (只读校验三处版本一致,不一致时退出码 1,供 CI 使用)
 //
 // 工作流:
 //   1. 编辑 src-tauri/Cargo.toml 的 version 字段 (唯一来源)
@@ -41,6 +42,23 @@ if (!versionMatch) {
 
 const version = versionMatch[1]
 console.log(`[version:sync] Cargo.toml version = ${version}`)
+
+// --- 校验模式 (--check): 只比对不写入,用于 CI 门禁 ---
+if (process.argv.includes('--check')) {
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  const tauriConf = JSON.parse(readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'))
+  const mismatches = []
+  if (pkg.version !== version) mismatches.push(`package.json: ${pkg.version} != ${version}`)
+  if (tauriConf.version !== version)
+    mismatches.push(`tauri.conf.json: ${tauriConf.version} != ${version}`)
+  if (mismatches.length > 0) {
+    console.error('[version:check] 版本不一致,请运行 pnpm run version:sync:')
+    for (const m of mismatches) console.error(`  - ${m}`)
+    process.exit(1)
+  }
+  console.log('[version:check] 三处版本一致')
+  process.exit(0)
+}
 
 // --- 更新 package.json ---
 const pkgPath = join(root, 'package.json')

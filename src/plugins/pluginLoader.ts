@@ -37,10 +37,10 @@ const builtinPluginModules = import.meta.glob<{
   default: (api: PluginAPI) => Promise<PluginInstance> | PluginInstance
 }>(['../../plugins/*/index.js', '../../plugins/*/index.ts'])
 
-const builtinManifests = import.meta.glob<PluginManifest>(
-  '../../plugins/*/manifest.json',
-  { eager: true, import: 'default' },
-)
+const builtinManifests = import.meta.glob<PluginManifest>('../../plugins/*/manifest.json', {
+  eager: true,
+  import: 'default',
+})
 
 // 构建 id -> 模块加载器 的映射
 const builtinPluginMap = new Map<string, (typeof builtinPluginModules)[string]>()

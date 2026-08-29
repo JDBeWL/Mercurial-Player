@@ -10,6 +10,7 @@
 
 use crate::AppState;
 use crate::config::manager::{LAST_SESSION_MAX_AGE_SECS, LastSession, TrackSnapshot};
+use crate::error::AppError;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -83,7 +84,7 @@ pub struct ResumeResult {
 pub async fn try_resume_last_session(
     app: &AppHandle,
     state: &State<'_, AppState>,
-) -> Result<ResumeResult, String> {
+) -> Result<ResumeResult, AppError> {
     let mut config = state.config_manager.load_config()?;
 
     let session = match config.last_session.take() {
@@ -273,7 +274,7 @@ pub async fn try_resume_last_session(
 /// 暂停当前播放 (用于启动恢复后立即暂停)
 ///
 /// 复用与 pause_track 命令相同的逻辑,但不通过 #[command] 包装
-fn pause_playback(state: &State<AppState>) -> Result<(), String> {
+fn pause_playback(state: &State<AppState>) -> Result<(), AppError> {
     let exclusive_mode = state
         .player
         .output
@@ -294,7 +295,7 @@ fn pause_playback(state: &State<AppState>) -> Result<(), String> {
             if let Some(ref wasapi) = *guard {
                 wasapi.pause()?;
             } else {
-                return Err("WASAPI player not initialized".to_string());
+                return Err("WASAPI player not initialized".to_string().into());
             }
             return Ok(());
         }
@@ -328,7 +329,7 @@ pub fn save_last_session(
     playlist_name: Option<String>,
     track_index_in_playlist: Option<usize>,
     playlist_tracks: Vec<TrackSnapshot>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     // 节流检查: 距上次写盘不足 SAVE_THROTTLE_DURATION 则跳过本次写入,
     // 避免对大型播放列表频繁全量序列化 + 写盘。
     // 检查与更新 last_save_time 在同一把锁内完成,保证原子性。
@@ -379,7 +380,7 @@ pub fn save_last_session(
 }
 
 /// 清除上次播放会话记录 (用于文件失效场景)
-pub fn clear_last_session(state: &State<AppState>) -> Result<(), String> {
+pub fn clear_last_session(state: &State<AppState>) -> Result<(), AppError> {
     let mut config = state.config_manager.load_config()?;
     if config.last_session.is_some() {
         config.last_session = None;

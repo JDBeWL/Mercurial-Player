@@ -1,6 +1,7 @@
 //! 系统相关的 Tauri 命令
 //!
 //! 包含系统信息获取和窗口管理功能。
+use crate::error::AppError;
 
 use crate::AppState;
 use std::collections::HashMap;
@@ -30,7 +31,7 @@ const MIN_SIZE: LogicalSize<f64> = LogicalSize {
 
 /// 获取系统信息
 #[command]
-pub fn get_system_info() -> Result<HashMap<String, String>, String> {
+pub fn get_system_info() -> Result<HashMap<String, String>, AppError> {
     let mut info = HashMap::new();
 
     info.insert("os".to_string(), std::env::consts::OS.to_string());
@@ -49,7 +50,7 @@ pub fn get_system_info() -> Result<HashMap<String, String>, String> {
 
 /// 获取系统可用的字体列表
 #[command]
-pub fn get_system_fonts() -> Result<Vec<String>, String> {
+pub fn get_system_fonts() -> Result<Vec<String>, AppError> {
     // 尝试获取真实的系统字体
     match super::fonts::get_system_fonts() {
         Ok(mut fonts) => {
@@ -94,8 +95,8 @@ pub fn get_system_fonts() -> Result<Vec<String>, String> {
 
 /// 获取软件同级 fonts/ 目录下的外部字体文件列表
 #[command]
-pub fn get_external_fonts() -> Result<Vec<super::fonts::ExternalFont>, String> {
-    super::fonts::list_external_fonts()
+pub fn get_external_fonts() -> Result<Vec<super::fonts::ExternalFont>, AppError> {
+    super::fonts::list_external_fonts().map_err(AppError::from)
 }
 
 /// 获取字体相关缓存的统计信息（TTC/OTC 提取缓存占用）
@@ -110,7 +111,7 @@ pub fn get_font_cache_stats() -> super::fonts::FontCacheStats {
 /// 内存缓存（名字索引/已加载字体集/文本格式），返回清理后的统计。
 /// 提取缓存会在下次扫描 fonts/ 目录时按需重建
 #[command]
-pub fn clear_font_caches() -> Result<super::fonts::FontCacheStats, String> {
+pub fn clear_font_caches() -> Result<super::fonts::FontCacheStats, AppError> {
     super::fonts::clear_font_extract_cache()?;
     #[cfg(windows)]
     {
@@ -124,7 +125,7 @@ pub fn clear_font_caches() -> Result<super::fonts::FontCacheStats, String> {
 
 /// 设置迷你模式
 #[command]
-pub async fn set_mini_mode(app_handle: AppHandle, enable: bool) -> Result<(), String> {
+pub async fn set_mini_mode(app_handle: AppHandle, enable: bool) -> Result<(), AppError> {
     let window = app_handle
         .get_webview_window("main")
         .ok_or("Main window not found")?;
@@ -138,7 +139,7 @@ pub async fn set_mini_mode(app_handle: AppHandle, enable: bool) -> Result<(), St
     Ok(())
 }
 
-fn enable_mini_mode(window: &tauri::WebviewWindow) -> Result<(), String> {
+fn enable_mini_mode(window: &tauri::WebviewWindow) -> Result<(), AppError> {
     let mini_size = Size::Logical(MINI_SIZE);
 
     window
@@ -154,7 +155,7 @@ fn enable_mini_mode(window: &tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-fn disable_mini_mode(window: &tauri::WebviewWindow) -> Result<(), String> {
+fn disable_mini_mode(window: &tauri::WebviewWindow) -> Result<(), AppError> {
     window.set_always_on_top(false).map_err(|e| e.to_string())?;
     window.set_resizable(true).map_err(|e| e.to_string())?;
     window
@@ -188,7 +189,7 @@ pub const fn get_platform() -> &'static str {
 
 /// 获取屏幕刷新率
 #[command]
-pub fn get_screen_refresh_rate() -> Result<u32, String> {
+pub fn get_screen_refresh_rate() -> Result<u32, AppError> {
     match display_info::DisplayInfo::all() {
         Ok(displays) => {
             // 获取主显示器（通常是第一个）
@@ -216,12 +217,12 @@ pub fn get_screen_refresh_rate() -> Result<u32, String> {
 
 /// 安全打开外部链接（仅允许 HTTPS 且主机在白名单内）
 #[command]
-pub fn open_external_url(state: State<AppState>, url: String) -> Result<(), String> {
-    let parsed =
-        tauri_plugin_http::reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
+pub fn open_external_url(state: State<AppState>, url: String) -> Result<(), AppError> {
+    let parsed = tauri_plugin_http::reqwest::Url::parse(&url)
+        .map_err(|e| AppError::msg(format!("Invalid URL: {e}")))?;
 
     if parsed.scheme() != "https" {
-        return Err("Only HTTPS URLs are allowed".to_string());
+        return Err(AppError::msg("Only HTTPS URLs are allowed"));
     }
 
     let host = parsed
@@ -252,7 +253,7 @@ pub fn open_external_url(state: State<AppState>, url: String) -> Result<(), Stri
     if !allowed_hosts.iter().any(|allowed| {
         host.eq_ignore_ascii_case(allowed) || host.ends_with(&format!(".{allowed}").to_lowercase())
     }) {
-        return Err(format!("Host not allowed: {host}"));
+        return Err(AppError::msg(format!("Host not allowed: {host}")));
     }
 
     tauri_plugin_opener::open_url(&url, None::<&str>)

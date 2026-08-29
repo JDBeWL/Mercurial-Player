@@ -22,12 +22,13 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.d.ts', 'src/types/**', 'src/**/*.test.ts', 'src/**/*.spec.ts'],
-      // 初始阈值设低,逐步提升
+      // 初始阈值随测试补齐逐步提升;
+      // 注意 include 仅统计 .ts,.vue 组件未纳入统计
       thresholds: {
-        lines: 40,
-        branches: 30,
-        functions: 30,
-        statements: 40,
+        lines: 43,
+        branches: 42,
+        functions: 43,
+        statements: 43,
       },
     },
   },

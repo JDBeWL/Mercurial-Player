@@ -21,7 +21,7 @@ import type { ImmersiveColorScheme } from '@/types'
  */
 export function useDominantColor(
   coverPath: Ref<string | undefined | null>,
-  mode: Ref<ImmersiveColorScheme> = ref('album')
+  mode: Ref<ImmersiveColorScheme> = ref('album'),
 ) {
   const dominantColor = ref('')
   // 主色的 OKLab 亮度（0~1），取色失败时为 null。
@@ -167,9 +167,12 @@ export function useDominantColor(
         const mid = (lo + hi) / 2
         const { r, g, b: blue } = oklabToRgbFloat(targetL, finalA * mid, finalB * mid)
         if (
-          r >= -1e-6 && r <= 1 + 1e-6 &&
-          g >= -1e-6 && g <= 1 + 1e-6 &&
-          blue >= -1e-6 && blue <= 1 + 1e-6
+          r >= -1e-6 &&
+          r <= 1 + 1e-6 &&
+          g >= -1e-6 &&
+          g <= 1 + 1e-6 &&
+          blue >= -1e-6 &&
+          blue <= 1 + 1e-6
         ) {
           lo = mid
         } else {
@@ -186,7 +189,7 @@ export function useDominantColor(
 
   const pickDominant = (
     pixels: Uint8ClampedArray,
-    mode: ImmersiveColorScheme
+    mode: ImmersiveColorScheme,
   ): { color: string; luminance: number } => {
     // 1. 将不透明像素转入 OKLab 空间。
     //    - album：整张封面均匀取样，选出最具代表性的主题色
@@ -231,11 +234,7 @@ export function useDominantColor(
         suma += p.a
         sumb += p.b
       }
-      return finalizeColor(
-        sumL / pts.length,
-        (suma / pts.length) * 0.5,
-        (sumb / pts.length) * 0.5
-      )
+      return finalizeColor(sumL / pts.length, (suma / pts.length) * 0.5, (sumb / pts.length) * 0.5)
     }
 
     // 2. K‑means++ 初始化种子（最多 6 个）
@@ -372,7 +371,7 @@ export function useDominantColor(
           }
         })
     },
-    { immediate: true }
+    { immediate: true },
   )
 
   return { dominantColor, dominantLuminance }

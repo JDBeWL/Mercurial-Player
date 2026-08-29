@@ -1,6 +1,7 @@
 //! 音频相关的 Tauri 命令
 //!
 //! 包含播放控制、设备管理等命令。
+use crate::error::AppError;
 
 use super::device::{AudioDeviceInfo, get_all_audio_devices};
 use super::playback::{
@@ -75,7 +76,7 @@ fn spawn_shared_fade(
 // ============================================================================
 
 #[command]
-pub fn get_waveform_data(state: State<AppState>) -> Result<Vec<f32>, String> {
+pub fn get_waveform_data(state: State<AppState>) -> Result<Vec<f32>, AppError> {
     // 使用 try_lock 避免阻塞主线程
     match state.player.visualization.waveform_data.try_lock() {
         Ok(data) => Ok(data.clone()),
@@ -84,7 +85,7 @@ pub fn get_waveform_data(state: State<AppState>) -> Result<Vec<f32>, String> {
 }
 
 #[command]
-pub fn get_spectrum_data(state: State<AppState>) -> Result<Vec<f32>, String> {
+pub fn get_spectrum_data(state: State<AppState>) -> Result<Vec<f32>, AppError> {
     // 使用 try_lock 避免阻塞主线程
     match state.player.visualization.spectrum_data.try_lock() {
         Ok(data) => Ok(data.clone()),
@@ -98,7 +99,7 @@ pub async fn play_track(
     state: State<'_, AppState>,
     path: String,
     position: Option<f32>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let exclusive_mode = state
         .player
         .output
@@ -115,7 +116,7 @@ pub async fn play_track(
 }
 
 #[command]
-pub fn pause_track(state: State<AppState>) -> Result<(), String> {
+pub fn pause_track(state: State<AppState>) -> Result<(), AppError> {
     // 用 lock() 阻塞等待,避免热切换期间用户操作失败
     let exclusive_mode = state
         .player
@@ -143,7 +144,7 @@ pub fn pause_track(state: State<AppState>) -> Result<(), String> {
                     wasapi.pause_no_fade()?;
                 }
             } else {
-                return Err("WASAPI player not initialized".to_string());
+                return Err("WASAPI player not initialized".to_string().into());
             }
             return Ok(());
         }
@@ -183,7 +184,7 @@ pub fn pause_track(state: State<AppState>) -> Result<(), String> {
 }
 
 #[command]
-pub fn resume_track(state: State<AppState>) -> Result<(), String> {
+pub fn resume_track(state: State<AppState>) -> Result<(), AppError> {
     let exclusive_mode = state
         .player
         .output
@@ -208,7 +209,7 @@ pub fn resume_track(state: State<AppState>) -> Result<(), String> {
                     wasapi.resume_no_fade()?;
                 }
             } else {
-                return Err("WASAPI player not initialized".to_string());
+                return Err("WASAPI player not initialized".to_string().into());
             }
             return Ok(());
         }
@@ -259,9 +260,9 @@ pub fn resume_track(state: State<AppState>) -> Result<(), String> {
 }
 
 #[command]
-pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), String> {
+pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), AppError> {
     if !(0.0..=1.0).contains(&volume) {
-        return Err("Volume must be between 0.0 and 1.0".to_string());
+        return Err("Volume must be between 0.0 and 1.0".to_string().into());
     }
 
     {
@@ -297,7 +298,7 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), String> {
             if let Some(ref wasapi) = *guard {
                 wasapi.set_volume(volume)?;
             } else {
-                return Err("WASAPI player not initialized".to_string());
+                return Err("WASAPI player not initialized".to_string().into());
             }
             return Ok(());
         }
@@ -318,12 +319,12 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), String> {
 }
 
 #[command]
-pub fn get_playback_status(state: State<AppState>) -> Result<PlaybackStatus, String> {
+pub fn get_playback_status(state: State<AppState>) -> Result<PlaybackStatus, AppError> {
     get_status(&state)
 }
 
 #[command]
-pub fn is_track_finished(state: State<AppState>) -> Result<bool, String> {
+pub fn is_track_finished(state: State<AppState>) -> Result<bool, AppError> {
     check_track_finished(&state)
 }
 
@@ -332,7 +333,7 @@ pub async fn seek_track(
     app: AppHandle,
     state: State<'_, AppState>,
     time: f32,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     // 用 lock() 阻塞等待:用户拖动进度条时不应失败
     let path = state
         .player
@@ -363,7 +364,7 @@ pub async fn seek_track(
 // ============================================================================
 
 #[command]
-pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
+pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, AppError> {
     get_all_audio_devices()
 }
 
@@ -373,7 +374,7 @@ pub async fn set_audio_device(
     state: State<'_, AppState>,
     device_name: String,
     current_time: Option<f32>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     log::info!("Attempting to switch to audio device: {device_name}");
 
     // 用 lock() 阻塞等待:播放期间切换设备不应失败
@@ -407,7 +408,7 @@ async fn switch_to_wasapi_exclusive(
     state: &State<'_, AppState>,
     device_name: &str,
     current_time: Option<f32>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     log::info!("Switching to WASAPI exclusive mode for device: {device_name}");
 
     // 1. 先记录当前播放路径 (在停止旧播放器前)
@@ -517,7 +518,7 @@ async fn switch_to_wasapi_exclusive(
             }
             Err(format!(
                 "Failed to initialize WASAPI exclusive mode: {e}. The device may be in use by another application."
-            ))
+            ).into())
         }
     }
 }
@@ -529,7 +530,7 @@ async fn switch_to_wasapi_exclusive(
     _state: &State<'_, AppState>,
     _device_name: &str,
     _current_time: Option<f32>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     Err("Exclusive mode is only supported on Windows".to_string())
 }
 
@@ -538,7 +539,7 @@ fn switch_to_shared_mode(
     state: &State<AppState>,
     device_name: &str,
     current_time: Option<f32>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     log::info!("Switching to shared mode for device: {device_name}");
 
     // 1. 先记录当前播放状态和路径 (在停止旧播放器前)
@@ -584,18 +585,18 @@ fn switch_to_shared_mode(
     // 3. 等待设备释放 (WASAPI 独占模式释放有延迟)
     // 短暂 sleep + 重试机制,避免设备未完全释放就尝试打开
     // 注意:output_devices() 返回迭代器,设备只能消费一次,因此每次重试都要重新获取
-    let get_device = || -> Result<cpal::Device, String> {
+    let get_device = || -> Result<cpal::Device, AppError> {
         let host = cpal::default_host();
         host.output_devices()
             .map_err(|e| format!("Failed to get output devices: {e}"))?
             .find(|d| super::device::get_device_friendly_name(d).is_some_and(|n| n == device_name))
-            .ok_or_else(|| format!("Audio device not found: {device_name}"))
+            .ok_or_else(|| format!("Audio device not found: {device_name}").into())
     };
 
     // 4. 尝试打开新的 cpal/rodio stream (带重试)
     // WASAPI 独占模式释放后,OS 可能需要短暂时间才让其他程序打开设备
     let new_mixer_sink = {
-        let mut last_err: Option<String> = None;
+        let mut last_err: Option<AppError> = None;
         let mut sink: Option<rodio::MixerDeviceSink> = None;
         for attempt in 1..=5 {
             let dev = match get_device() {
@@ -618,13 +619,13 @@ fn switch_to_shared_mode(
                     Err(e) => {
                         last_err = Some(format!(
                             "Failed to create mixer sink: {e}. The device may be in use by another application."
-                        ));
+                        ).into());
                         log::warn!("cpal open_stream attempt {attempt}/5 failed: {e}");
                         std::thread::sleep(Duration::from_millis(50));
                     }
                 },
                 Err(e) => {
-                    last_err = Some(format!("Failed to create device sink builder: {e}"));
+                    last_err = Some(format!("Failed to create device sink builder: {e}").into());
                     log::warn!("cpal DeviceSinkBuilder attempt {attempt}/5 failed: {e}");
                     std::thread::sleep(Duration::from_millis(50));
                 }
@@ -633,8 +634,9 @@ fn switch_to_shared_mode(
         match sink {
             Some(s) => s,
             None => {
-                return Err(last_err
-                    .unwrap_or_else(|| "Failed to create mixer sink after retries".to_string()));
+                return Err(last_err.unwrap_or_else(|| {
+                    AppError::msg("Failed to create mixer sink after retries")
+                }));
             }
         }
     };
@@ -697,7 +699,7 @@ pub async fn toggle_exclusive_mode(
     state: State<'_, AppState>,
     enabled: bool,
     current_time: Option<f32>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     log::info!("Toggling exclusive mode: {enabled}");
 
     // 用 lock() 阻塞等待:用户切换独占模式时不应失败,即使播放期间
@@ -727,7 +729,7 @@ pub async fn toggle_exclusive_mode(
             config.audio.exclusive_mode = enabled;
             state.config_manager.save_config(&config)?;
         }
-        return Err("RESTART_REQUIRED".to_string());
+        return Err("RESTART_REQUIRED".to_string().into());
     }
 
     // 先保存配置,无论切换成功与否都持久化用户选择
@@ -773,25 +775,25 @@ pub async fn toggle_exclusive_mode(
             }
             Err(format!(
                 "Failed to switch exclusive mode: {e}. The device may be in use by another application."
-            ))
+            ).into())
         }
     }
 }
 
 #[command]
-pub fn get_exclusive_mode(state: State<AppState>) -> Result<bool, String> {
+pub fn get_exclusive_mode(state: State<AppState>) -> Result<bool, AppError> {
     state
         .player
         .output
         .exclusive_mode
         .try_lock()
         .map(|g| *g)
-        .map_err(|_| "Failed to acquire exclusive mode lock".to_string())
+        .map_err(|_| AppError::msg("Failed to acquire exclusive mode lock"))
 }
 
 #[command]
 #[allow(clippy::branches_sharing_code)] // 非 Windows 下 if/else 均返回 "standard",但 Windows 下有不同分支
-pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInfo, String> {
+pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInfo, AppError> {
     let current_device_name = state
         .player
         .output
@@ -823,7 +825,7 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
         .exclusive_mode
         .try_lock()
         .map(|g| *g)
-        .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
+        .map_err(|_| AppError::msg("Failed to acquire exclusive mode lock"))?;
 
     let audio_mode_status = if is_exclusive_mode {
         #[cfg(windows)]
@@ -868,7 +870,7 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
 pub async fn resume_last_session(
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<super::session::ResumeResult, String> {
+) -> Result<super::session::ResumeResult, AppError> {
     super::session::try_resume_last_session(&app, &state).await
 }
 
@@ -884,7 +886,7 @@ pub fn save_last_session(
     playlist_name: Option<String>,
     track_index_in_playlist: Option<usize>,
     playlist_tracks: Vec<crate::config::manager::TrackSnapshot>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     super::session::save_last_session(
         &state,
         track_path,
@@ -900,14 +902,14 @@ pub fn save_last_session(
 
 /// 清除上次播放会话记录 (用于文件失效场景)
 #[command]
-pub fn clear_last_session(state: State<AppState>) -> Result<(), String> {
+pub fn clear_last_session(state: State<AppState>) -> Result<(), AppError> {
     super::session::clear_last_session(&state)
 }
 
 #[command]
-pub fn set_target_fps(state: State<AppState>, fps: u32) -> Result<(), String> {
+pub fn set_target_fps(state: State<AppState>, fps: u32) -> Result<(), AppError> {
     if fps == 0 {
-        return Err("FPS cannot be zero".to_string());
+        return Err("FPS cannot be zero".to_string().into());
     }
     // 限制最大刷新率为 240fps，防止过高频率
     let clamped_fps = fps.min(240);
@@ -921,7 +923,7 @@ pub fn set_target_fps(state: State<AppState>, fps: u32) -> Result<(), String> {
 }
 
 #[command]
-pub fn set_vertical_sync(state: State<AppState>, enabled: bool) -> Result<(), String> {
+pub fn set_vertical_sync(state: State<AppState>, enabled: bool) -> Result<(), AppError> {
     state
         .player
         .visualization
@@ -937,7 +939,7 @@ pub fn set_vertical_sync(state: State<AppState>, enabled: bool) -> Result<(), St
 /// 设置是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音)
 /// 立即生效,无需重启
 #[command]
-pub fn set_fade_enabled(state: State<AppState>, enabled: bool) -> Result<(), String> {
+pub fn set_fade_enabled(state: State<AppState>, enabled: bool) -> Result<(), AppError> {
     state.player.fade.enabled.store(enabled, Ordering::SeqCst);
     // 取消任何正在进行的 fade 线程,防止禁用 fade 后残留线程执行 on_complete
     state.player.fade.generation.fetch_add(1, Ordering::SeqCst);
@@ -947,6 +949,6 @@ pub fn set_fade_enabled(state: State<AppState>, enabled: bool) -> Result<(), Str
 
 /// 获取当前是否启用淡入淡出
 #[command]
-pub fn get_fade_enabled(state: State<AppState>) -> Result<bool, String> {
+pub fn get_fade_enabled(state: State<AppState>) -> Result<bool, AppError> {
     Ok(state.player.fade.enabled.load(Ordering::SeqCst))
 }

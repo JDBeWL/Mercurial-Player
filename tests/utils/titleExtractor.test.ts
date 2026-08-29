@@ -114,7 +114,6 @@ describe('TitleExtractor', () => {
       )
     })
   })
-
 })
 
 describe('extractTitle (with Tauri mock)', () => {

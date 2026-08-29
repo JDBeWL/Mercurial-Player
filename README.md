@@ -207,12 +207,12 @@ pnpm run tauri build
 
 本项目为GPL-3.0许可证，以下资源以各自的许可证随软件分发（与GPL-3.0兼容，且适用于各自的条款）：
 
-| 资源 | 用途 | 许可证 | 许可证文本 |
-| --- | --- | --- | --- |
+| 资源                                                                                                       | 用途                    | 许可证      | 许可证文本                                                                               |
+| ---------------------------------------------------------------------------------------------------------- | ----------------------- | ----------- | ---------------------------------------------------------------------------------------- |
 | [Noto Sans SC](https://github.com/google/fonts/tree/main/ofl/notosanssc)（含 VF，仓库内为 WOFF2 格式转换） | 全局默认字体 / 歌词字体 | SIL OFL 1.1 | [src/assets/fonts/lyrics/OFL-NotoSansSC.txt](src/assets/fonts/lyrics/OFL-NotoSansSC.txt) |
-| [霞鹜文楷屏幕版 LXGW WenKai Screen](https://github.com/lxgw/LxgwWenKai-Screen) | 内置歌词字体 | SIL OFL 1.1 | 见上游仓库 |
-| [Material Symbols Rounded](https://github.com/google/material-design-icons) | 图标字体 | Apache-2.0 | 见上游仓库 |
-| [Roboto](https://github.com/googlefonts/roboto)（@fontsource 自托管） | 可选歌词字体 | Apache-2.0 | 见上游仓库 |
+| [霞鹜文楷屏幕版 LXGW WenKai Screen](https://github.com/lxgw/LxgwWenKai-Screen)                             | 内置歌词字体            | SIL OFL 1.1 | 见上游仓库                                                                               |
+| [Material Symbols Rounded](https://github.com/google/material-design-icons)                                | 图标字体                | Apache-2.0  | 见上游仓库                                                                               |
+| [Roboto](https://github.com/googlefonts/roboto)（@fontsource 自托管）                                      | 可选歌词字体            | Apache-2.0  | 见上游仓库                                                                               |
 
 # 致谢
 

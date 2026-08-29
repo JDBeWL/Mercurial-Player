@@ -232,7 +232,10 @@ const upscaleCover = async (path: string, targetSide: number): Promise<string | 
   }
 }
 
-export function useImmersiveCover(coverPath: Ref<string | undefined | null>, enabled: Ref<boolean>) {
+export function useImmersiveCover(
+  coverPath: Ref<string | undefined | null>,
+  enabled: Ref<boolean>,
+) {
   const coverDisplayUrl = ref('')
   let generation = 0
   let objectUrl = ''

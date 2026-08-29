@@ -36,14 +36,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Version consistency check
+        run: pnpm run version:check
+
+      - name: Format check
+        run: pnpm run format:check
+
       - name: Lint
         run: pnpm run lint
 
       - name: Typecheck
         run: pnpm run typecheck
 
-      - name: Test
-        run: pnpm run test
+      - name: Test (coverage gate)
+        run: pnpm run test:coverage
 
       - name: Build frontend
         run: pnpm run build
@@ -148,6 +154,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
+
+      # 非 tag 时的编译验证：Windows 专属 Rust 代码（wasapi、taskbar/desktop_lyrics 等）
+      - name: Build frontend (compile verification)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: pnpm run build
+
+      - name: Cargo check (per-platform)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        working-directory: src-tauri
+        run: cargo check --all-targets
 
       - name: Build and Release Tauri app
         if: startsWith(github.ref, 'refs/tags/')

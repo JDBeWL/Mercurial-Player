@@ -1,6 +1,12 @@
 //! 应用统一错误类型
 //!
-//! 提供 [`AppError`] 枚举以替代全项目 `Result<T, String>` + `format!` 的错误构造方式。
+//! 提供 [`AppError`] 作为 Tauri 命令层与核心模块（audio/config/plugins/updater）的
+//! 统一错误类型；命令层通过 [`AppError::Serialize`] 实现序列化为 Display 字符串，
+//! 与历史 `Result<T, String>` 在 IPC 上的表现一致，前端契约不变。
+//!
+//! 尚未迁移的模块（media/system/taskbar 核心实现）仍返回 `Result<T, String>`，
+//! 命令层通过 `From<String>` 自动转换；`From<AppError> for String` 保证反向兼容，
+//! 新代码可在内部返回 `AppError` 并用 `?` 直接接入旧签名。
 //!
 //! ## 示例
 //!
@@ -18,6 +24,21 @@
 //! ```
 
 use std::fmt;
+
+// ── Tauri 命令层序列化 ─────────────────────────────────────────────────
+//
+// Tauri 要求 command 的错误类型实现 Serialize。这里序列化为 Display 字符串，
+// 与历史 `Result<T, String>` 在 IPC 上的表现完全一致，前端契约不变；
+// 未来若需要结构化错误（分类码 + 消息），只需改这一处。
+
+impl serde::Serialize for AppError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
 
 /// 应用统一错误类型
 ///

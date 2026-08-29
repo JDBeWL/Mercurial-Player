@@ -3,6 +3,7 @@
 //! 检查/安装流程复用 tauri-plugin-updater（配置、签名、安装器行为一致），
 //! 下载阶段替换为多线程分片下载（HTTP Range 并发请求），
 //! 下载完成后按插件相同逻辑做 minisign 签名校验，再走插件原生安装。
+use crate::error::AppError;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -111,7 +112,7 @@ struct DownloadProgress {
 pub async fn updater_check(
     app: AppHandle,
     pending: State<'_, PendingUpdate>,
-) -> Result<Option<UpdateInfo>, String> {
+) -> Result<Option<UpdateInfo>, AppError> {
     let updater = app
         .updater_builder()
         .build()
@@ -150,7 +151,7 @@ pub async fn updater_check(
 pub async fn updater_download(
     app: AppHandle,
     pending: State<'_, PendingUpdate>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let update = lock_or_log!(pending.update.lock())
         .clone()
         .ok_or("没有可用的更新，请先检查更新")?;
@@ -203,16 +204,16 @@ pub async fn updater_download(
     // 读临时文件到内存校验后立即释放，随后只保留文件路径
     let Some(pubkey) = updater_pubkey(&app) else {
         remove_temp_file(&temp_path);
-        return Err("无法读取更新公钥配置".to_string());
+        return Err(AppError::Network("无法读取更新公钥配置".to_string()));
     };
     let signature = update.signature.clone();
     let verify_path = temp_path.clone();
-    let verify_result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+    let verify_result = tauri::async_runtime::spawn_blocking(move || -> Result<(), AppError> {
         let buffer = std::fs::read(&verify_path).map_err(|e| format!("读取下载文件失败: {e}"))?;
         verify_signature(&buffer, &signature, &pubkey)
     })
     .await
-    .map_err(|e| format!("校验任务执行失败: {e}"))
+    .map_err(|e| AppError::msg(format!("校验任务执行失败: {e}")))
     .and_then(|inner| inner);
 
     if let Err(e) = verify_result {
@@ -232,7 +233,7 @@ pub async fn updater_download(
 /// 委托给 tauri-plugin-updater 原生安装流程
 /// （Windows 下拉起安装器并退出进程，由安装器完成替换和重启）
 #[tauri::command]
-pub async fn updater_install(pending: State<'_, PendingUpdate>) -> Result<(), String> {
+pub async fn updater_install(pending: State<'_, PendingUpdate>) -> Result<(), AppError> {
     let update = lock_or_log!(pending.update.lock())
         .clone()
         .ok_or("没有待安装的更新，请先检查更新")?;
@@ -242,14 +243,15 @@ pub async fn updater_install(pending: State<'_, PendingUpdate>) -> Result<(), St
 
     // 读文件和安装都涉及大文件 IO 与拉起安装器，放到阻塞线程池执行
     let install_path = temp_path.clone();
-    let install_result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+    let install_result = tauri::async_runtime::spawn_blocking(move || -> Result<(), AppError> {
         // tauri-plugin-updater 的 install 接口以字节为输入，此处读取是瞬时峰值
-        let data =
-            std::fs::read(&install_path).map_err(|e| format!("读取更新包文件失败: {e}"))?;
-        update.install(&data).map_err(|e| format!("安装更新失败: {e}"))
+        let data = std::fs::read(&install_path).map_err(|e| format!("读取更新包文件失败: {e}"))?;
+        update
+            .install(&data)
+            .map_err(|e| AppError::msg(format!("安装更新失败: {e}")))
     })
     .await
-    .map_err(|e| format!("安装任务执行失败: {e}"))
+    .map_err(|e| AppError::msg(format!("安装任务执行失败: {e}")))
     .and_then(|inner| inner);
 
     match install_result {
@@ -306,7 +308,7 @@ async fn download_parallel(
     total: u64,
     path: &Path,
     app: &AppHandle,
-) -> Result<u64, String> {
+) -> Result<u64, AppError> {
     // 先创建并截断目标文件；各分片任务各自持有写句柄，seek 到自己的偏移写入
     std::fs::File::create(path).map_err(|e| format!("创建临时文件失败: {e}"))?;
 
@@ -340,12 +342,12 @@ async fn download_parallel(
         }));
     }
 
-    let download_result: Result<u64, String> = async {
+    let download_result: Result<u64, AppError> = async {
         let mut written = 0u64;
         for handle in handles {
             let (_, part_written) = handle
                 .await
-                .map_err(|e| format!("下载任务执行失败: {e}"))??;
+                .map_err(|e| AppError::msg(format!("下载任务执行失败: {e}")))??;
             written += part_written;
         }
 
@@ -354,7 +356,9 @@ async fn download_parallel(
             .map_err(|e| format!("校验下载文件失败: {e}"))?
             .len();
         if actual != total {
-            return Err(format!("下载数据不完整: {actual}/{total} 字节"));
+            return Err(AppError::Network(format!(
+                "下载数据不完整: {actual}/{total} 字节"
+            )));
         }
         Ok(written)
     }
@@ -374,7 +378,7 @@ async fn download_range(
     end: u64,
     path: PathBuf,
     fetched: &AtomicU64,
-) -> Result<u64, String> {
+) -> Result<u64, AppError> {
     let expected = end.saturating_sub(start).saturating_add(1) as usize;
     let response = client
         .get(url.clone())
@@ -384,7 +388,10 @@ async fn download_range(
         .map_err(|e| format!("分片请求失败: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!("分片下载失败，状态码: {}", response.status()));
+        return Err(AppError::Network(format!(
+            "分片下载失败，状态码: {}",
+            response.status()
+        )));
     }
 
     let mut file = tokio::fs::OpenOptions::new()
@@ -411,9 +418,9 @@ async fn download_range(
         .map_err(|e| format!("刷新分片数据失败: {e}"))?;
 
     if written != expected {
-        return Err(format!(
+        return Err(AppError::Network(format!(
             "分片数据不完整: 期望 {expected} 字节，实际 {written} 字节"
-        ));
+        )));
     }
     Ok(written as u64)
 }
@@ -424,7 +431,7 @@ async fn download_single(
     url: &reqwest::Url,
     path: &Path,
     app: &AppHandle,
-) -> Result<u64, String> {
+) -> Result<u64, AppError> {
     let response = client
         .get(url.clone())
         .send()
@@ -432,7 +439,10 @@ async fn download_single(
         .map_err(|e| format!("下载请求失败: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!("下载失败，状态码: {}", response.status()));
+        return Err(AppError::Network(format!(
+            "下载失败，状态码: {}",
+            response.status()
+        )));
     }
 
     let total = response
@@ -447,7 +457,7 @@ async fn download_single(
     let reporter =
         spawn_progress_reporter(app.clone(), Arc::clone(&fetched), Arc::clone(&done), total);
 
-    let download_result: Result<u64, String> = async {
+    let download_result: Result<u64, AppError> = async {
         let mut file = tokio::fs::File::create(path)
             .await
             .map_err(|e| format!("创建临时文件失败: {e}"))?;
@@ -467,7 +477,9 @@ async fn download_single(
             .map_err(|e| format!("刷新下载数据失败: {e}"))?;
 
         if total > 0 && written != total {
-            return Err(format!("下载数据不完整: {written}/{total} 字节"));
+            return Err(AppError::Network(format!(
+                "下载数据不完整: {written}/{total} 字节"
+            )));
         }
         Ok(written)
     }
@@ -480,7 +492,7 @@ async fn download_single(
 
 /// minisign 签名校验（与 tauri-plugin-updater 内部实现一致：
 /// 公钥与签名均为 base64 编码的 minisign 格式）
-fn verify_signature(data: &[u8], release_signature: &str, pub_key: &str) -> Result<(), String> {
+fn verify_signature(data: &[u8], release_signature: &str, pub_key: &str) -> Result<(), AppError> {
     let pub_key_decoded =
         base64_decode_to_string(pub_key).map_err(|e| format!("更新公钥解码失败: {e}"))?;
     let public_key =
@@ -498,7 +510,84 @@ fn verify_signature(data: &[u8], release_signature: &str, pub_key: &str) -> Resu
 }
 
 /// base64 解码为 UTF-8 字符串
-fn base64_decode_to_string(input: &str) -> Result<String, String> {
+fn base64_decode_to_string(input: &str) -> Result<String, AppError> {
     let decoded = BASE64_STANDARD.decode(input).map_err(|e| e.to_string())?;
-    String::from_utf8(decoded).map_err(|e| e.to_string())
+    String::from_utf8(decoded).map_err(|e| AppError::msg(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_base64_decode_to_string() {
+        assert_eq!(base64_decode_to_string("aGVsbG8=").unwrap(), "hello");
+        assert_eq!(base64_decode_to_string("").unwrap(), "");
+
+        // 非 base64 字符
+        assert!(base64_decode_to_string("!!!").is_err());
+        // 合法 base64 但不是 UTF-8 (0xFF 单字节)
+        assert!(base64_decode_to_string("/w==").is_err());
+    }
+
+    #[test]
+    fn test_unique_temp_path_is_unique_and_nonexistent() {
+        let a = unique_temp_path();
+        let b = unique_temp_path();
+        assert!(a != b, "两次调用应产生不同路径");
+        assert!(!a.exists(), "路径不应已存在: {}", a.display());
+        assert!(a.to_string_lossy().contains("mercurial-player-update-"));
+    }
+
+    #[test]
+    fn test_remove_temp_file_is_idempotent() {
+        let path = std::env::temp_dir().join(format!(
+            "mercurial-player-update-test-{}.tmp",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"data").unwrap();
+        remove_temp_file(&path);
+        assert!(!path.exists());
+        // 不存在的路径: 不应 panic
+        remove_temp_file(&path);
+    }
+
+    /// 从 tauri.conf.json 读取真实的 updater 公钥 (发布配置),
+    /// 保证测试与生产使用同一密钥材料
+    fn production_pubkey() -> String {
+        let conf = include_str!("../tauri.conf.json");
+        let value: serde_json::Value = serde_json::from_str(conf).unwrap();
+        value["plugins"]["updater"]["pubkey"]
+            .as_str()
+            .expect("tauri.conf.json 应包含 updater pubkey")
+            .to_string()
+    }
+
+    #[test]
+    fn test_verify_signature_rejects_invalid_pubkey_base64() {
+        let err = verify_signature(b"data", "c2ln", "not-base64!!").unwrap_err();
+        assert!(err.to_string().contains("更新公钥解码失败"));
+    }
+
+    #[test]
+    fn test_verify_signature_rejects_malformed_pubkey() {
+        // 合法 base64 但不是 minisign 公钥二进制格式
+        let garbage = BASE64_STANDARD.encode("garbage");
+        let err = verify_signature(b"data", "c2ln", &garbage).unwrap_err();
+        assert!(err.to_string().contains("更新公钥解析失败"));
+    }
+
+    #[test]
+    fn test_verify_signature_rejects_invalid_signature_base64() {
+        let err = verify_signature(b"data", "!!!not-base64!!!", &production_pubkey()).unwrap_err();
+        assert!(err.to_string().contains("更新签名解码失败"));
+    }
+
+    #[test]
+    fn test_verify_signature_rejects_malformed_signature() {
+        // 真实公钥 + 合法 base64 但非 minisign 签名结构
+        let garbage = BASE64_STANDARD.encode("garbage");
+        let err = verify_signature(b"data", &garbage, &production_pubkey()).unwrap_err();
+        assert!(err.to_string().contains("更新签名解析失败"));
+    }
 }

@@ -1,4 +1,5 @@
 //! 插件系统 Tauri 命令
+use crate::error::AppError;
 
 use super::manager::{self, PluginManifest};
 use crate::security::{has_allowed_extension, is_simple_filename};
@@ -18,19 +19,19 @@ pub struct InstallResult {
 
 /// 列出所有插件
 #[command]
-pub fn list_plugins() -> Result<Vec<String>, String> {
+pub fn list_plugins() -> Result<Vec<String>, AppError> {
     manager::list_plugin_dirs()
 }
 
 /// 读取插件清单
 #[command]
-pub fn read_plugin_manifest(path: &str) -> Result<PluginManifest, String> {
+pub fn read_plugin_manifest(path: &str) -> Result<PluginManifest, AppError> {
     manager::read_manifest(path)
 }
 
 /// 读取插件主文件
 #[command]
-pub fn read_plugin_main(path: &str, main: &str) -> Result<String, String> {
+pub fn read_plugin_main(path: &str, main: &str) -> Result<String, AppError> {
     let main_file = if main.is_empty() { "index.js" } else { main };
     manager::read_main_file(path, main_file)
 }
@@ -48,26 +49,26 @@ pub fn install_plugin(source: &str) -> InstallResult {
         Err(e) => InstallResult {
             success: false,
             path: None,
-            error: Some(e),
+            error: Some(e.into_string()),
         },
     }
 }
 
 /// 卸载插件
 #[command]
-pub fn uninstall_plugin(plugin_id: &str) -> Result<(), String> {
+pub fn uninstall_plugin(plugin_id: &str) -> Result<(), AppError> {
     manager::uninstall_plugin(plugin_id)
 }
 
 /// 获取插件目录路径
 #[command]
-pub fn get_plugins_directory() -> Result<String, String> {
+pub fn get_plugins_directory() -> Result<String, AppError> {
     manager::get_plugins_dir().map(|p| p.to_string_lossy().to_string())
 }
 
 /// 在文件管理器中打开插件目录
 #[command]
-pub fn open_plugins_directory() -> Result<(), String> {
+pub fn open_plugins_directory() -> Result<(), AppError> {
     let plugins_dir = manager::get_plugins_dir()?;
 
     tauri_plugin_opener::reveal_item_in_dir(&plugins_dir)
@@ -78,10 +79,12 @@ pub fn open_plugins_directory() -> Result<(), String> {
 
 /// 保存截图到程序目录下的 screenshots 文件夹
 #[command]
-pub fn save_screenshot(filename: &str, data: Vec<u8>) -> Result<String, String> {
+pub fn save_screenshot(filename: &str, data: Vec<u8>) -> Result<String, AppError> {
     // 校验文件名：必须为简单文件名且为图片扩展名，防止路径穿越任意写
     if !is_simple_filename(filename) || !has_allowed_extension(filename, &SCREENSHOT_EXTENSIONS) {
-        return Err("非法的截图文件名（仅允许 png/jpg/jpeg/webp）".to_string());
+        return Err(AppError::Plugin(
+            "非法的截图文件名（仅允许 png/jpg/jpeg/webp）".to_string(),
+        ));
     }
 
     let exe_path = std::env::current_exe().map_err(|e| format!("无法获取可执行文件路径: {e}"))?;
@@ -103,7 +106,7 @@ pub fn save_screenshot(filename: &str, data: Vec<u8>) -> Result<String, String> 
 
 /// 打开截图目录
 #[command]
-pub fn open_screenshots_directory() -> Result<(), String> {
+pub fn open_screenshots_directory() -> Result<(), AppError> {
     let exe_path = std::env::current_exe().map_err(|e| format!("无法获取可执行文件路径: {e}"))?;
     let exe_dir = exe_path.parent().ok_or("无法获取可执行文件目录")?;
 

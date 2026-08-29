@@ -1,6 +1,7 @@
 //! 媒体相关的 Tauri 命令
 //!
 //! 包含文件系统操作和元数据获取命令。
+use crate::error::AppError;
 
 use super::filesystem::{
     check_file_exists_internal, get_all_audio_files_from_dirs, get_audio_files_from_dir, read_dir,
@@ -18,14 +19,14 @@ use tauri::{State, command};
 
 /// 读取指定目录中的子目录列表
 #[command]
-pub fn read_directory(path: String) -> Result<Vec<String>, String> {
-    read_dir(&path)
+pub fn read_directory(path: String) -> Result<Vec<String>, AppError> {
+    read_dir(&path).map_err(AppError::from)
 }
 
 /// 获取指定目录中的所有音频文件，并创建播放列表
 #[command]
-pub fn get_audio_files(path: String) -> Result<Playlist, String> {
-    get_audio_files_from_dir(&path)
+pub fn get_audio_files(path: String) -> Result<Playlist, AppError> {
+    get_audio_files_from_dir(&path).map_err(AppError::from)
 }
 
 /// 获取多个目录中的所有音频文件，并创建播放列表
@@ -33,33 +34,33 @@ pub fn get_audio_files(path: String) -> Result<Playlist, String> {
 pub fn get_all_audio_files(
     state: State<AppState>,
     paths: Vec<String>,
-) -> Result<Vec<Playlist>, String> {
+) -> Result<Vec<Playlist>, AppError> {
     let config = state.config_manager.load_config()?;
-    get_all_audio_files_from_dirs(&paths, &config)
+    get_all_audio_files_from_dirs(&paths, &config).map_err(AppError::from)
 }
 
 /// 检查文件是否存在
 #[command]
-pub fn check_file_exists(path: String) -> Result<bool, String> {
+pub fn check_file_exists(path: String) -> Result<bool, AppError> {
     Ok(check_file_exists_internal(&path))
 }
 
 /// 读取歌词文件内容
 #[command]
-pub fn read_lyrics_file(path: String) -> Result<String, String> {
-    read_lyrics_file_internal(&path)
+pub fn read_lyrics_file(path: String) -> Result<String, AppError> {
+    read_lyrics_file_internal(&path).map_err(AppError::from)
 }
 
 /// 写入歌词文件内容
 #[command]
-pub fn write_lyrics_file(path: String, content: String) -> Result<(), String> {
-    write_lyrics_file_internal(&path, &content)
+pub fn write_lyrics_file(path: String, content: String) -> Result<(), AppError> {
+    write_lyrics_file_internal(&path, &content).map_err(AppError::from)
 }
 
 /// 获取音轨的元数据信息（轻量）
 #[command]
-pub fn get_track_metadata(path: String) -> Result<TrackMetadata, String> {
-    get_track_metadata_internal(&path)
+pub fn get_track_metadata(path: String) -> Result<TrackMetadata, AppError> {
+    get_track_metadata_internal(&path).map_err(AppError::from)
 }
 
 /// 批量获取多个音轨的元数据信息
@@ -73,8 +74,8 @@ pub fn get_tracks_metadata_batch(paths: Vec<String>) -> Vec<TrackMetadata> {
 
 /// 按需提取并返回音轨封面缓存路径
 #[command]
-pub fn get_track_cover_path(path: String) -> Result<Option<String>, String> {
-    get_track_cover_path_internal(&path)
+pub fn get_track_cover_path(path: String) -> Result<Option<String>, AppError> {
+    get_track_cover_path_internal(&path).map_err(AppError::from)
 }
 
 /// 搜索网易云音乐歌曲
@@ -83,38 +84,40 @@ pub async fn netease_search_songs(
     keyword: String,
     limit: Option<u32>,
     offset: Option<u32>,
-) -> Result<Vec<netease::SearchSongResult>, String> {
-    netease::search_songs(&keyword, limit.unwrap_or(10), offset.unwrap_or(0)).await
+) -> Result<Vec<netease::SearchSongResult>, AppError> {
+    netease::search_songs(&keyword, limit.unwrap_or(10), offset.unwrap_or(0))
+        .await
+        .map_err(AppError::from)
 }
 
 /// 获取网易云音乐歌词
 #[command]
-pub async fn netease_get_lyrics(song_id: String) -> Result<netease::LyricsData, String> {
-    netease::get_lyrics(&song_id).await
+pub async fn netease_get_lyrics(song_id: String) -> Result<netease::LyricsData, AppError> {
+    netease::get_lyrics(&song_id).await.map_err(AppError::from)
 }
 
 /// 提取音频文件的封面并保存到指定路径
 #[command]
-pub fn extract_cover(audio_path: String, output_path: String) -> Result<String, String> {
-    extract_cover_internal(&audio_path, &output_path)
+pub fn extract_cover(audio_path: String, output_path: String) -> Result<String, AppError> {
+    extract_cover_internal(&audio_path, &output_path).map_err(AppError::from)
 }
 
 /// 清理封面缓存
 #[command]
-pub fn clean_cover_cache_command(max_cache_size_mb: Option<u64>) -> Result<usize, String> {
-    clean_cover_cache(max_cache_size_mb)
+pub fn clean_cover_cache_command(max_cache_size_mb: Option<u64>) -> Result<usize, AppError> {
+    clean_cover_cache(max_cache_size_mb).map_err(AppError::from)
 }
 
 /// 设置封面缓存路径
 #[command]
-pub fn set_cover_cache_path_command(path: Option<String>) -> Result<(), String> {
-    set_cover_cache_path(path)
+pub fn set_cover_cache_path_command(path: Option<String>) -> Result<(), AppError> {
+    set_cover_cache_path(path).map_err(AppError::from)
 }
 
 /// 清除元数据缓存
 #[command]
-pub fn clear_metadata_cache_command() -> Result<(), String> {
-    clear_metadata_cache()
+pub fn clear_metadata_cache_command() -> Result<(), AppError> {
+    clear_metadata_cache().map_err(AppError::from)
 }
 
 /// 获取元数据缓存统计信息
@@ -125,8 +128,8 @@ pub fn get_metadata_cache_stats_command() -> (usize, u64) {
 
 /// 手动刷新元数据缓存到磁盘
 #[command]
-pub fn flush_metadata_cache_command() -> Result<(), String> {
-    flush_metadata_cache()
+pub fn flush_metadata_cache_command() -> Result<(), AppError> {
+    flush_metadata_cache().map_err(AppError::from)
 }
 
 /// 搜索音轨
@@ -134,32 +137,32 @@ pub fn flush_metadata_cache_command() -> Result<(), String> {
 pub fn search_tracks_command(
     query: String,
     limit: Option<usize>,
-) -> Result<Vec<TrackMetadata>, String> {
-    tantivy_index::search_tracks(&query, limit.unwrap_or(50))
+) -> Result<Vec<TrackMetadata>, AppError> {
+    tantivy_index::search_tracks(&query, limit.unwrap_or(50)).map_err(AppError::from)
 }
 
 /// 获取索引文档数量
 #[command]
-pub fn get_index_doc_count_command() -> Result<usize, String> {
-    tantivy_index::get_index_doc_count()
+pub fn get_index_doc_count_command() -> Result<usize, AppError> {
+    tantivy_index::get_index_doc_count().map_err(AppError::from)
 }
 
 /// 重建 Tantivy 索引
 #[command]
-pub fn rebuild_tantivy_index_command() -> Result<(), String> {
-    tantivy_index::rebuild_tantivy_index()
+pub fn rebuild_tantivy_index_command() -> Result<(), AppError> {
+    tantivy_index::rebuild_tantivy_index().map_err(AppError::from)
 }
 
 /// 清除 Tantivy 索引
 #[command]
-pub fn clear_tantivy_index_command() -> Result<(), String> {
-    tantivy_index::clear_tantivy_index()
+pub fn clear_tantivy_index_command() -> Result<(), AppError> {
+    tantivy_index::clear_tantivy_index().map_err(AppError::from)
 }
 
 /// 提交 Tantivy 索引
 #[command]
-pub fn commit_tantivy_index_command() -> Result<(), String> {
-    tantivy_index::commit_index()
+pub fn commit_tantivy_index_command() -> Result<(), AppError> {
+    tantivy_index::commit_index().map_err(AppError::from)
 }
 
 /// 获取系统临时目录路径

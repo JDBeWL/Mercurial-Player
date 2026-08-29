@@ -569,18 +569,15 @@ const immersiveBackground = computed(
 
 // 沉浸式模式：根据封面主色亮度自动切换深/浅主题（亮背景配浅色主题、暗背景配深色主题），
 // 保证前景文字可读；退出时恢复用户主题偏好。取色失败（亮度为 null）时保持当前主题。
-watch(
-  [immersiveCover, dominantLuminance],
-  ([active, luminance]) => {
-    if (!active) {
-      themeStore.setImmersiveDarkMode(null)
-      return
-    }
-    if ((configStore.general.immersiveAutoTheme ?? true) && luminance !== null) {
-      themeStore.setImmersiveDarkMode(luminance < 0.5)
-    }
-  },
-)
+watch([immersiveCover, dominantLuminance], ([active, luminance]) => {
+  if (!active) {
+    themeStore.setImmersiveDarkMode(null)
+    return
+  }
+  if ((configStore.general.immersiveAutoTheme ?? true) && luminance !== null) {
+    themeStore.setImmersiveDarkMode(luminance < 0.5)
+  }
+})
 
 // 封面展示 URL（供沉浸式封面的 <img> 使用）：
 // 源图不够大时用 pica(Lanczos3) 预放大到精确显示尺寸，避免浏览器双线性放大发糊

@@ -139,9 +139,7 @@ export class FileUtils {
       const ext = this.getFileExtension(track.path)
       if (!ext) return s
       const suffix = `.${ext}`
-      return s.toLowerCase().endsWith(suffix)
-        ? s.slice(0, -suffix.length)
-        : s
+      return s.toLowerCase().endsWith(suffix) ? s.slice(0, -suffix.length) : s
     }
 
     if (track.displayTitle) return stripTrailingExt(track.displayTitle)

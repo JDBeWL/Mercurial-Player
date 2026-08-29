@@ -72,8 +72,8 @@ describe('parseFontFileName', () => {
     })
     expect(parseFontFileName('Poppins-Black.ttf')).toMatchObject({ family: 'Poppins', weight: 900 })
     // 同族多字重合并为一个族名
-    const weights = ['Light', 'Regular', 'Bold'].map((w) =>
-      parseFontFileName(`Poppins-${w}.ttf`).family,
+    const weights = ['Light', 'Regular', 'Bold'].map(
+      (w) => parseFontFileName(`Poppins-${w}.ttf`).family,
     )
     expect(new Set(weights).size).toBe(1)
   })

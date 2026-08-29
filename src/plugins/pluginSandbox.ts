@@ -223,6 +223,20 @@ export function validatePluginCode(code: string): boolean {
     .replace(/\/\/.*$/gm, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
 
+  // 字符串形式的危险属性访问必须在字符串剥离之前检查:
+  // 这些模式的命中依赖字符串内容 (如 obj['\x63onstructor']),
+  // 而下方字符串剥离会把内容替换为 "" 使规则永远无法命中。
+  const stringFormForbidden: ForbiddenPattern[] = [
+    { pattern: /\[\s*['"`]constructor['"`]\s*\]/, msg: '字符串形式的constructor访问' },
+    { pattern: /\[\s*['"`]\\x/, msg: '十六进制转义访问' },
+    { pattern: /\[\s*['"`]\\u/, msg: 'Unicode 转义访问' },
+  ]
+  for (const { pattern, msg } of stringFormForbidden) {
+    if (pattern.test(codeWithoutComments)) {
+      throw new Error(`插件代码包含不安全的模式: ${msg}`)
+    }
+  }
+
   // 移除字符串内容（更严格的字符串移除）
   const codeWithoutStrings = codeWithoutComments
     .replace(/"(?:[^"\\]|\\.)*"/g, '""')
@@ -261,8 +275,6 @@ export function validatePluginCode(code: string): boolean {
     { pattern: /\bindexedDB\b/, msg: 'indexedDB' },
     { pattern: /\bimport\s*\(/, msg: '动态 import' },
     { pattern: /\bimportScripts\b/, msg: 'importScripts' },
-    { pattern: /\['\\x/, msg: '十六进制转义访问' },
-    { pattern: /\['\\u/, msg: 'Unicode 转义访问' },
     { pattern: /fromCharCode/, msg: 'fromCharCode' },
     { pattern: /fromCodePoint/, msg: 'fromCodePoint' },
     { pattern: /\bnew\s+Proxy\b/, msg: 'Proxy' },
@@ -272,7 +284,6 @@ export function validatePluginCode(code: string): boolean {
     { pattern: /Object\s*\.\s*keys\s*\(\s*this\s*\)/, msg: '遍历this对象' },
     { pattern: /Object\s*\.\s*getOwnPropertyNames/, msg: 'getOwnPropertyNames' },
     { pattern: /Object\s*\.\s*getOwnPropertyDescriptor/, msg: 'getOwnPropertyDescriptor' },
-    { pattern: /\[\s*['"`]constructor['"`]\s*\]/, msg: '字符串形式的constructor访问' },
     { pattern: /\+\s*['"`]\s*['"`]\s*\+/, msg: '可疑的字符串拼接' },
   ]
 

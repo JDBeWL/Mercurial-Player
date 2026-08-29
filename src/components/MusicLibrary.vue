@@ -42,11 +42,7 @@
           <div
             v-for="(file, index) in searchResults"
             :key="file.path"
-            v-memo="[
-              coverFor(file),
-              file.path,
-              configStore.titleExtraction.hideFileExtension,
-            ]"
+            v-memo="[coverFor(file), file.path, configStore.titleExtraction.hideFileExtension]"
             class="list-item"
             @click="playFile(file)"
           >
@@ -525,9 +521,7 @@ const handleSearch = async (): Promise<void> => {
     // 异步加载搜索结果的封面（从缓存恢复的 track 无 coverPath）。
     // 先把已有 coverPath 播种进本地 Map，加载循环不再依赖逐条 mutation 传播到 UI
     searchCovers.value = new Map(
-      searchResults.value
-        .filter((f) => f.coverPath)
-        .map((f) => [f.path, f.coverPath as string]),
+      searchResults.value.filter((f) => f.coverPath).map((f) => [f.path, f.coverPath as string]),
     )
     coverLoadGeneration++
     loadSearchResultCovers(coverLoadGeneration)

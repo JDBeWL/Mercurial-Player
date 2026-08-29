@@ -9,7 +9,6 @@ import logger from '../utils/logger'
 import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
 import { classifyAudioInvokeError } from '../utils/audioErrorClassifier'
 import { useConfigStore } from './config'
-import { useMusicLibraryStore } from './musicLibrary'
 import {
   setupTrackEndedListener,
   setupPositionListener,
@@ -26,7 +25,14 @@ import {
   adjustShuffleAfterRemove,
 } from './shuffle'
 import { PlayerCacheManager } from './playerCache'
-import type { Track, AudioInfo, LyricLine, RepeatMode, ResumeResult, TrackSnapshot } from '@/types'
+import { saveLastSessionNow, resumeLastSession } from './playerSession'
+import {
+  cachePlaylistMetadata,
+  loadPlaylistCovers,
+  recordCoverUpdate as recordCoverUpdateToMap,
+  takeCoverUpdates as takeCoverUpdatesFromMap,
+} from './playerMediaCache'
+import type { Track, AudioInfo, LyricLine, RepeatMode, ResumeResult } from '@/types'
 
 interface PlayerState {
   currentTrack: Track | null
@@ -46,7 +52,7 @@ interface PlayerState {
   _isLoading: boolean
   _statusPollId: ReturnType<typeof setTimeout> | null
   lastTrackIndex: number
-  /** 缓存管理器 (文件存在性 + 元数据 LRU 缓存),用 any 避免 Pinia 响应式对 class 私有字段的类型问题 */
+  /** 缓存管理器 (文件存在性 + 元数据 LRU 缓存),markRaw 避免深度代理 class 实例 */
   _cacheManager: PlayerCacheManager | null
   _isDestroyed: boolean
   _isInitializing: boolean
@@ -80,9 +86,7 @@ interface PlayerState {
   playlistCoverVersion: number
 }
 
-// 待通知的封面更新 (path -> coverPath):非响应式,由 takeCoverUpdates 一次性取走。
-// 放在 store 实例外,避免 Pinia 深度代理整个 Map。
-const pendingCoverUpdates = new Map<string, string>()
+// 待通知的封面更新队列与批量加载实现见 playerMediaCache.ts
 
 export const usePlayerStore = defineStore('player', {
   state: (): PlayerState => ({
@@ -283,185 +287,18 @@ export const usePlayerStore = defineStore('player', {
 
     /**
      * 立即保存 last_session (无节流,用于 pause/切曲/关闭等关键节点)
-     *
-     * 不在 playback-position 事件中写入,避免播放期间频繁写盘。
-     * 仅在以下场景触发:
-     * - pause():暂停时立即保存
-     * - playTrack():切曲前保存上一曲的最后位置
-     * - cleanup():关闭窗口前 await 保存
-     * 风险:程序崩溃/断电时丢失自上次关键节点以来的进度。
+     * 实现在 playerSession.ts
      */
     async _saveLastSessionNow(): Promise<void> {
-      if (!this.currentTrack || this._isDestroyed) return
-      const track = this.currentTrack
-      // 从 musicLibraryStore 获取当前播放列表名 (用于启动恢复)
-      let playlistName: string | null = null
-      let trackIndexInPlaylist: number | null = null
-      try {
-        const musicLibraryStore = useMusicLibraryStore()
-        if (musicLibraryStore.currentPlaylist) {
-          playlistName = musicLibraryStore.currentPlaylist.name
-          const idx = musicLibraryStore.currentPlaylist.files.findIndex(
-            (f) => f.path === track.path,
-          )
-          if (idx >= 0) trackIndexInPlaylist = idx
-        }
-      } catch (err) {
-        logger.debug('Failed to get current playlist name:', err)
-      }
-      // 提取 player.playlist 的元数据快照 (不依赖 musicLibrary 缓存)
-      // 这样启动恢复时即使 musicLibrary 还没加载,也能直接重建 player.playlist
-      const playlistTracks: TrackSnapshot[] = this.playlist.map((t) => ({
-        path: t.path,
-        title: t.title ?? null,
-        artist: t.artist ?? null,
-        album: t.album ?? null,
-        duration: t.duration ?? null,
-        bitrate: t.bitrate ?? null,
-        sampleRate: t.sampleRate ?? null,
-        channels: t.channels ?? null,
-        bitDepth: t.bitDepth ?? null,
-        format: t.format ?? null,
-      }))
-      try {
-        await invoke('save_last_session', {
-          trackPath: track.path,
-          trackTitle: track.title || track.displayTitle || track.name || '',
-          trackArtist: track.artist || track.displayArtist || '',
-          durationSecs: this.duration || 0,
-          positionSecs: this.currentTime,
-          playlistName,
-          trackIndexInPlaylist,
-          playlistTracks,
-        })
-      } catch (err) {
-        logger.debug('Failed to save last session:', err)
-      }
+      await saveLastSessionNow(this)
     },
 
     /**
      * 启动时调用 - 尝试恢复上次播放会话
-     *
-     * 行为:
-     * - resumed=true: 后端已加载文件并暂停在 position,前端设置 UI 状态
-     *   (currentTrack/duration/currentTime/audioInfo/playlist),isPlaying=false 保持暂停
-     * - resumed=false 且 status='not_found': 文件不存在,从播放列表移除该路径
-     * - 其他 false 状态: 静默忽略,无需 UI 反馈
+     * 实现在 playerSession.ts
      */
     async resumeLastSession(): Promise<ResumeResult | null> {
-      try {
-        const result = await invoke<ResumeResult>('resume_last_session')
-        if (result.resumed && result.trackPath) {
-          const trackPath = result.trackPath
-
-          // 1. 用返回的 playlistTracks 直接构造 player.playlist
-          //    不依赖 musicLibrary 缓存是否加载,保证恢复后播放列表完整
-          const playlistTracks = result.playlistTracks ?? []
-          const playlist: Track[] = playlistTracks.map((s) => ({
-            path: s.path,
-            title: s.title ?? undefined,
-            artist: s.artist ?? undefined,
-            album: s.album ?? undefined,
-            displayTitle: s.title ?? undefined,
-            displayArtist: s.artist ?? undefined,
-            duration: s.duration ?? undefined,
-            bitrate: s.bitrate ?? null,
-            sampleRate: s.sampleRate ?? null,
-            channels: s.channels ?? null,
-            bitDepth: s.bitDepth ?? null,
-            format: s.format ?? null,
-          }))
-          this.playlist = playlist
-
-          // 2. 在 playlist 中查找当前曲目 (含完整元数据: bitrate/sampleRate 等)
-          let matchedTrack: Track | null = playlist.find((t) => t.path === trackPath) ?? null
-
-          // 3. 如果 playlistTracks 为空或没找到,用 lastSession 快照构造一个最小 Track
-          if (!matchedTrack) {
-            matchedTrack = {
-              path: trackPath,
-              title: result.trackTitle || undefined,
-              artist: result.trackArtist || undefined,
-              displayTitle: result.trackTitle || undefined,
-              displayArtist: result.trackArtist || undefined,
-              duration: result.durationSecs ?? undefined,
-            }
-            // 当前曲目不在 playlistTracks 中,把它加到 playlist 末尾
-            this.playlist.push(matchedTrack)
-          }
-
-          // 4. 尝试同步 musicLibrary 的 currentPlaylist (让 UI 高亮,但不依赖它)
-          if (result.playlistName) {
-            try {
-              const musicLibraryStore = useMusicLibraryStore()
-              if (musicLibraryStore.playlists.length === 0) {
-                await musicLibraryStore.loadPlaylistsFromCache()
-              }
-              const mlPlaylist = musicLibraryStore.playlists.find(
-                (p) => p.name === result.playlistName,
-              )
-              if (mlPlaylist) {
-                musicLibraryStore.selectPlaylist(mlPlaylist)
-                // 如果 musicLibrary 中的曲目有更完整的元数据 (比如 coverPath 已加载),用它
-                const mlTrack = mlPlaylist.files.find((t) => t.path === trackPath)
-                if (mlTrack && mlTrack.bitrate && !matchedTrack.bitrate) {
-                  matchedTrack = mlTrack
-                }
-              }
-            } catch (err) {
-              logger.warn('Failed to sync musicLibrary playlist for resume:', err)
-            }
-          }
-
-          // 5. 触发元数据缓存和封面预加载 (与 loadPlaylist 一致)
-          if (this._cacheAbortController) {
-            this._cacheAbortController.abort()
-          }
-          this._cachePlaylistMetadata(this.playlist)
-          this._loadPlaylistCovers(this.playlist)
-
-          // 6. 设置播放状态 (currentTrack/audioInfo/duration/currentTime)
-          this.currentTrack = matchedTrack
-          this.duration = matchedTrack.duration ?? result.durationSecs ?? 0
-          this.currentTime = result.positionSecs ?? 0
-          // 从 matchedTrack 提取完整音频元数据 (bitrate/sampleRate/channels/bitDepth/format)
-          this.audioInfo = {
-            bitrate: matchedTrack.bitrate || null,
-            sampleRate: matchedTrack.sampleRate || null,
-            channels: matchedTrack.channels || null,
-            bitDepth: matchedTrack.bitDepth || null,
-            format: matchedTrack.format || null,
-          }
-          // 保持暂停状态 - 用户主动点播放才会开始
-          this.isPlaying = false
-          this._updateTaskbarState()
-          logger.info(
-            `Resumed last session (paused): ${trackPath} @ ${result.positionSecs}s (${result.status}), playlist=${playlist.length} tracks`,
-          )
-
-          // 7. 加载当前曲目封面 (异步,不阻塞恢复)
-          invoke<string | null>('get_track_cover_path', { path: trackPath })
-            .then((coverPath) => {
-              // 守卫:应用关闭后不再修改已销毁的 store state
-              if (this._isDestroyed) return
-              if (this.currentTrack && this.currentTrack.path === trackPath && coverPath) {
-                this.currentTrack.coverPath = coverPath
-              }
-            })
-            .catch((err) => logger.debug('Failed to load cover for resumed track:', err))
-        } else if (result.status === 'not_found' && result.trackPath) {
-          // 静默处理:从当前播放列表移除该文件 (用户选择)
-          const idx = this.playlist.findIndex((t) => t.path === result.trackPath)
-          if (idx >= 0) {
-            this.playlist.splice(idx, 1)
-            logger.info(`Removed missing track from playlist: ${result.trackPath}`)
-          }
-        }
-        return result
-      } catch (err) {
-        logger.error('Failed to resume last session:', err)
-        return null
-      }
+      return resumeLastSession(this)
     },
 
     async _switchAudioDevice(
@@ -1049,11 +886,7 @@ export const usePlayerStore = defineStore('player', {
     },
 
     _isShuffleOrderValid(): boolean {
-      return isShuffleOrderValid(
-        this._shuffleOrder,
-        this._shufflePosition,
-        this.playlist.length,
-      )
+      return isShuffleOrderValid(this._shuffleOrder, this._shufflePosition, this.playlist.length)
     },
 
     // --- 歌词偏移 ---
@@ -1216,126 +1049,25 @@ export const usePlayerStore = defineStore('player', {
       this._loadPlaylistCovers(playlist)
     },
 
+    /** 批量缓存播放列表元数据 (实现见 playerMediaCache.ts) */
     async _cachePlaylistMetadata(playlist: Track[]): Promise<void> {
-      if (!playlist || playlist.length === 0) return
-
-      // 创建新的 AbortController，使此次缓存任务可被后续调用取消
-      const abortController = new AbortController()
-
-      this._cacheAbortController = abortController
-
-      const cache = this._getMetadataCache()
-      const CHUNK_SIZE = 200
-      let cached = 0
-
-      for (let i = 0; i < playlist.length; i++) {
-        // 检查是否已被取消
-        if (abortController.signal.aborted) {
-          logger.debug(`Metadata caching aborted after ${cached} tracks`)
-          return
-        }
-
-        const track = playlist[i]
-        if (!track.path || cache.has(track.path)) continue
-
-        cache.set(track.path, {
-          title:
-            track.displayTitle ||
-            track.title ||
-            FileUtils.getFileNameWithoutExtension(track.path),
-          artist: track.displayArtist || track.artist || '',
-          album: track.album || '',
-          duration: track.duration || 0,
-          bitrate: track.bitrate || null,
-          sampleRate: track.sampleRate || null,
-          channels: track.channels || null,
-          bitDepth: track.bitDepth || null,
-          format: track.format || null,
-        })
-        cached++
-
-        if (cached > 0 && cached % CHUNK_SIZE === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 0))
-        }
-      }
-
-      logger.debug(`Cached metadata for ${cached} tracks`)
+      await cachePlaylistMetadata(this, playlist)
     },
 
     /** 记录一条封面更新并通知列表组件（供 PlaylistView 之外的封面加载路径复用） */
     recordCoverUpdate(path: string, coverPath: string): void {
-      pendingCoverUpdates.set(path, coverPath)
+      recordCoverUpdateToMap(path, coverPath)
       this.playlistCoverVersion++
     },
 
     /** 取走并清空自上次调用以来累计的封面更新,供 PlaylistView 增量应用 */
     takeCoverUpdates(): Map<string, string> {
-      if (pendingCoverUpdates.size === 0) return new Map()
-      const taken = new Map(pendingCoverUpdates)
-      pendingCoverUpdates.clear()
-      return taken
+      return takeCoverUpdatesFromMap()
     },
 
+    /** 批量加载播放列表封面 (实现见 playerMediaCache.ts) */
     async _loadPlaylistCovers(playlist: Track[]): Promise<void> {
-      if (!playlist || playlist.length === 0) return
-
-      const metadataCache = this._getMetadataCache()
-
-      // 封面加载后不再依赖响应式 mutation 传播:逐条修改 track.coverPath 仅用于
-      // currentTrack 同步与元数据缓存,列表 UI 通过 pendingCoverUpdates +
-      // playlistCoverVersion 每批一次增量通知 (PlaylistView 以 O(变更数) 应用)。
-
-      // 批量加载封面路径，每次处理 10 首歌曲
-      const BATCH_SIZE = 10
-      for (let i = 0; i < playlist.length; i += BATCH_SIZE) {
-        const batch = playlist.slice(i, i + BATCH_SIZE)
-        let foundInBatch = 0
-
-        // 并行加载这一批的封面
-        await Promise.all(
-          batch.map(async (track) => {
-            if (!track.coverPath) {
-              try {
-                const coverPath = await invoke<string | null>('get_track_cover_path', {
-                  path: track.path,
-                })
-                if (coverPath) {
-                  track.coverPath = coverPath
-                  pendingCoverUpdates.set(track.path, coverPath)
-                  foundInBatch++
-                  // 同步 currentTrack: playTrack 会创建 resolvedTrack 浅拷贝,
-                  // 导致 currentTrack 与 playlist 内对象脱钩,
-                  // 主界面/MiniPlayer 封面基于 currentTrack.coverPath,
-                  // 不同步会导致切歌时封面丢失
-                  if (this.currentTrack?.path === track.path) {
-                    this.currentTrack.coverPath = coverPath
-                  }
-                  // 同时更新元数据缓存中的封面路径
-                  const cachedMetadata = metadataCache.get(track.path)
-                  if (cachedMetadata) {
-                    cachedMetadata.coverPath = coverPath
-                    metadataCache.set(track.path, cachedMetadata)
-                  }
-                }
-              } catch (err) {
-                logger.debug(`Failed to load cover for ${track.path}:`, err)
-              }
-            }
-          }),
-        )
-
-        // 本批有新封面时通知一次,列表组件增量应用
-        if (foundInBatch > 0) {
-          this.playlistCoverVersion++
-        }
-
-        // 让出主线程，避免阻塞 UI
-        if (i + BATCH_SIZE < playlist.length) {
-          await new Promise((resolve) => setTimeout(resolve, 0))
-        }
-      }
-
-      logger.debug(`Loaded covers for playlist`)
+      await loadPlaylistCovers(this, playlist)
     },
 
     async loadLyrics(trackPath: string, requestId?: number): Promise<void> {

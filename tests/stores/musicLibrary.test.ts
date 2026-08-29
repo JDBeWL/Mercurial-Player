@@ -247,10 +247,7 @@ describe('useMusicLibraryStore', () => {
     it('重复选择同一播放列表不会重复排序', () => {
       const store = useMusicLibraryStore()
       mockConfigStore.playlist.sortOrder = 'asc'
-      const playlist = makePlaylist('test', [
-        makeTrack('/c.mp3', 'C'),
-        makeTrack('/a.mp3', 'A'),
-      ])
+      const playlist = makePlaylist('test', [makeTrack('/c.mp3', 'C'), makeTrack('/a.mp3', 'A')])
       store.selectPlaylist(playlist)
       expect(playlist.files[0].title).toBe('A')
       // 手动打乱顺序后再次选择

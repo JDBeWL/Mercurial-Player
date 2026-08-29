@@ -51,7 +51,7 @@ const extractErrorMessage = (err: unknown): string =>
     ? err.message
     : typeof err === 'string'
       ? err
-      : (err as { message?: string })?.message ?? JSON.stringify(err)
+      : ((err as { message?: string })?.message ?? JSON.stringify(err))
 
 /**
  * 获取当前应用版本
