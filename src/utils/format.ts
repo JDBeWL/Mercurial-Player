@@ -7,7 +7,7 @@
  * 非法输入（0 / NaN / Infinity 等）返回 "0:00"
  */
 export const formatTime = (seconds: number): string => {
-  if (!seconds || isNaN(seconds) || !isFinite(seconds)) return '0:00'
+  if (!seconds || !Number.isFinite(seconds) || seconds < 0) return '0:00'
 
   const hours = Math.floor(seconds / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)

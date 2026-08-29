@@ -190,6 +190,8 @@ impl EqProcessor {
     }
 
     /// 逐采样处理(独占模式解码线程使用)
+    // 独占模式仅存在于 Windows(WASAPI),Linux 编译时这两个方法无调用方
+    #[cfg(windows)]
     #[inline(always)]
     pub(super) fn process_sample_cached(&mut self, input: f32, channel: usize) -> f32 {
         if !self.cached_enabled {
@@ -198,6 +200,7 @@ impl EqProcessor {
         self.process_one(input, channel, self.cached_preamp_multiplier)
     }
 
+    #[cfg(windows)]
     pub(super) const fn is_enabled(&self) -> bool {
         self.cached_enabled
     }
