@@ -22,10 +22,24 @@ import {
   isShuffleOrderValid,
   getNextShuffleIndex,
   getPreviousShuffleIndex,
-  adjustShuffleAfterRemove,
 } from './shuffle'
 import { PlayerCacheManager } from './playerCache'
 import { saveLastSessionNow, resumeLastSession } from './playerSession'
+
+// ============================================================================
+// 常量
+// ============================================================================
+
+/// play_track IPC 的超时(毫秒),超时视为后端无响应并报错
+const PLAY_TRACK_TIMEOUT_MS = 5000
+/// 播放结束自动跳到下一首的延迟(毫秒),给 UI 留出状态刷新窗口
+const AUTO_NEXT_TRACK_DELAY_MS = 100
+
+import {
+  addTrackNextInPlaylist,
+  addTracksNextInPlaylist,
+  removeTrackFromPlaylist,
+} from './playerPlaylist'
 import {
   cachePlaylistMetadata,
   loadPlaylistCovers,
@@ -50,7 +64,6 @@ interface PlayerState {
   lyricsOffset: number
   audioInfo: AudioInfo
   _isLoading: boolean
-  _statusPollId: ReturnType<typeof setTimeout> | null
   lastTrackIndex: number
   /** 缓存管理器 (文件存在性 + 元数据 LRU 缓存),markRaw 避免深度代理 class 实例 */
   _cacheManager: PlayerCacheManager | null
@@ -120,7 +133,6 @@ export const usePlayerStore = defineStore('player', {
 
     // 加载状态
     _isLoading: false,
-    _statusPollId: null,
     lastTrackIndex: -1,
 
     // 缓存管理器
@@ -333,7 +345,6 @@ export const usePlayerStore = defineStore('player', {
         if (!wasPlaying && this.currentTrack) {
           await invoke('pause_track')
           this.isPlaying = false
-          this.stopStatusPolling()
         }
 
         logger.info(`Successfully switched audio device: ${deviceName}`)
@@ -424,7 +435,6 @@ export const usePlayerStore = defineStore('player', {
       }
 
       this._isLoading = true
-      this.stopStatusPolling()
 
       const metadataCache = this._getMetadataCache()
       let metadata = metadataCache.get(resolvedPath) ?? metadataCache.get(track.path)
@@ -509,7 +519,10 @@ export const usePlayerStore = defineStore('player', {
         let timeoutId: ReturnType<typeof setTimeout> | null = null
         const playPromise = invoke('play_track', { path: resolvedPath })
         const timeoutPromise = new Promise((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error(i18n.global.t('errors.playTimeout'))), 5000)
+          timeoutId = setTimeout(
+            () => reject(new Error(i18n.global.t('errors.playTimeout'))),
+            PLAY_TRACK_TIMEOUT_MS,
+          )
         })
 
         try {
@@ -526,7 +539,6 @@ export const usePlayerStore = defineStore('player', {
         }
 
         this.isPlaying = true
-        this.startStatusPolling()
         this._updateTaskbarState()
 
         this.loadLyrics(resolvedPath, requestId).catch((err) => {
@@ -556,7 +568,7 @@ export const usePlayerStore = defineStore('player', {
             if (!this._isDestroyed && this._activePlayRequestId === requestId) {
               this.nextTrack()
             }
-          }, 100)
+          }, AUTO_NEXT_TRACK_DELAY_MS)
           // 保存定时器ID以便在cleanup时清理
           this._nextTrackTimeoutId = nextTrackTimeoutId
         }
@@ -572,7 +584,6 @@ export const usePlayerStore = defineStore('player', {
       invoke('pause_track')
         .then(() => {
           this.isPlaying = false
-          this.stopStatusPolling()
           this._updateTaskbarState()
           // 暂停时立即保存 last_session (无节流)
           void this._saveLastSessionNow()
@@ -585,7 +596,6 @@ export const usePlayerStore = defineStore('player', {
       invoke('resume_track')
         .then(() => {
           this.isPlaying = true
-          this.startStatusPolling()
           this._updateTaskbarState()
         })
         .catch((err) => logger.error('Failed to resume:', err))
@@ -606,18 +616,7 @@ export const usePlayerStore = defineStore('player', {
 
     // --- 进度控制 ---
 
-    startStatusPolling(): void {
-      // 不再需要轮询 - 使用 track-ended 事件代替
-      // 保留方法以保持 API 兼容性
-    },
 
-    stopStatusPolling(): void {
-      // 保留方法以保持 API 兼容性
-      if (this._statusPollId) {
-        clearTimeout(this._statusPollId)
-        this._statusPollId = null
-      }
-    },
 
     // --- 播放结束 ---
 
@@ -627,7 +626,6 @@ export const usePlayerStore = defineStore('player', {
       // 空播放列表守卫:停止播放,避免后续 list 模式分支 % 0 得到 NaN
       if (this.playlist.length === 0) {
         this.isPlaying = false
-        this.stopStatusPolling()
         invoke('pause_track').catch((err) =>
           logger.warn('pause on ended with empty playlist:', err),
         )
@@ -652,7 +650,6 @@ export const usePlayerStore = defineStore('player', {
           isShuffleOrderValid && this._shufflePosition >= this._shuffleOrder.length - 1
         if (this.repeatMode === 'none' && isAtEnd) {
           this.isPlaying = false
-          this.stopStatusPolling()
           this.currentTime = this.duration
           invoke('pause_track').catch((err) => logger.warn('pause after shuffle ended:', err))
         } else {
@@ -666,7 +663,6 @@ export const usePlayerStore = defineStore('player', {
         await this.playTrack(this.playlist[nextIndex])
       } else {
         this.isPlaying = false
-        this.stopStatusPolling()
         this.currentTime = this.duration
         invoke('pause_track').catch((err) => logger.warn('pause after playlist ended:', err))
       }
@@ -698,7 +694,6 @@ export const usePlayerStore = defineStore('player', {
       logger.info('Resetting player state')
 
       this.isPlaying = false
-      this.stopStatusPolling()
 
       this.currentTrack = null
       if (clearPlaylist) {
@@ -906,111 +901,21 @@ export const usePlayerStore = defineStore('player', {
     // --- 播放列表管理 ---
 
     removeTrack(path: string): void {
-      const index = this.playlist.findIndex((t) => t.path === path)
-      if (index === -1) return
-
-      // 先从播放列表中移除
-      this.playlist.splice(index, 1)
-
-      // 如果播放列表为空，重置状态
-      if (this.playlist.length === 0) {
-        this.resetPlayerState(false)
-        return
-      }
-
-      // 如果删除的是当前播放的歌曲
-      if (this.currentTrack?.path === path) {
-        const nextIndex = index >= this.playlist.length ? 0 : index
-        const wasPlaying = this.isPlaying
-
-        // 暂停当前播放，避免音频状态不一致
-        if (wasPlaying) {
-          invoke('pause_track').catch((err) => logger.warn('pause before remove:', err))
-        }
-
-        this.playTrack(this.playlist[nextIndex]).then(() => {
-          if (!wasPlaying) {
-            this.pause()
-          }
-        })
-      } else {
-        // 如果删除的不是当前播放的歌曲，但删除了当前歌曲前面的歌曲，
-        // 我们不需要更新 currentTrack，但需要处理 vue 响应式带来的潜在问题
-        // 虽然在目前的设计中 currentTrackIndex 是一个 getter，所以它会自动更新
-
-        // 同步更新 shuffle 顺序，避免 _shuffleOrder.length 与 playlist.length 不一致
-        // 导致 _isShuffleOrderValid() 返回 false，进而造成 shuffle 模式下单曲列表无限重播
-        if (this._shuffleOrder.length > 0) {
-          const adjusted = adjustShuffleAfterRemove(
-            this._shuffleOrder,
-            this._shufflePosition,
-            this._shuffleHistory,
-            index,
-          )
-          this._shuffleOrder = adjusted.order
-          this._shufflePosition = adjusted.position
-          this._shuffleHistory = adjusted.history
-        }
-      }
+      removeTrackFromPlaylist(this, path)
     },
 
     /**
      * 将曲目添加到当前播放列表的下一首位置
      */
     addTrackNext(track: Track): void {
-      if (!track) return
-
-      const currentIndex = this.currentTrackIndex
-
-      // 如果没有当前曲目或播放列表为空，直接添加到开头
-      if (currentIndex === -1 || this.playlist.length === 0) {
-        this.playlist.unshift(track)
-        logger.info('Added track to beginning of playlist:', track.path)
-        return
-      }
-
-      // 检查曲目是否已经在播放列表中
-      const existingIndex = this.playlist.findIndex((t) => t.path === track.path)
-
-      if (existingIndex !== -1) {
-        // 如果曲目已存在，先移除它
-        this.playlist.splice(existingIndex, 1)
-
-        // 移除后当前曲目的实际索引可能已偏移，需要重新计算
-        const adjustedCurrentIndex = existingIndex < currentIndex ? currentIndex - 1 : currentIndex
-        // 插入到当前曲目之后
-        const adjustedIndex = adjustedCurrentIndex + 1
-        this.playlist.splice(adjustedIndex, 0, track)
-        logger.info('Moved existing track to next position:', track.path)
-      } else {
-        // 如果曲目不存在，直接插入到当前曲目后面
-        this.playlist.splice(currentIndex + 1, 0, track)
-        logger.info('Added new track to next position:', track.path)
-      }
+      addTrackNextInPlaylist(this, track)
     },
 
     /**
      * 将多个曲目添加到当前播放列表的下一首位置
      */
     addTracksNext(tracks: Track[]): void {
-      if (!tracks || tracks.length === 0) return
-
-      const currentIndex = this.currentTrackIndex
-
-      // 如果没有当前曲目或播放列表为空，直接添加到开头
-      if (currentIndex === -1 || this.playlist.length === 0) {
-        this.playlist.unshift(...tracks)
-        logger.info(`Added ${tracks.length} tracks to beginning of playlist`)
-        return
-      }
-
-      // 过滤掉已存在的曲目并记录它们的位置
-      const existingPaths = new Set(this.playlist.map((t) => t.path))
-      const newTracks = tracks.filter((t) => !existingPaths.has(t.path))
-
-      // 插入到当前曲目后面
-      this.playlist.splice(currentIndex + 1, 0, ...newTracks)
-      logger.info(`Added ${newTracks.length} new tracks to next position`)
+      addTracksNextInPlaylist(this, tracks)
     },
 
     // --- 数据加载 ---
@@ -1042,7 +947,6 @@ export const usePlayerStore = defineStore('player', {
         this.isPlaying = false
         this.currentTime = 0
         this.duration = 0
-        this.stopStatusPolling()
       }
 
       this._cachePlaylistMetadata(playlist)
@@ -1135,7 +1039,6 @@ export const usePlayerStore = defineStore('player', {
       this._isSwitchingDevice = false
       this._lastDeviceSwitchTarget = null
 
-      this.stopStatusPolling()
       this._stopCleanupTask()
       this._cacheManager?.destroy()
       this._cacheManager = null
@@ -1188,7 +1091,9 @@ export const usePlayerStore = defineStore('player', {
       try {
         invoke('pause_track').catch((err) => logger.warn('pause during cleanup:', err))
         // 设置任务栏为停止状态
-        invoke('set_taskbar_stopped').catch(() => {})
+        invoke('set_taskbar_stopped').catch((e) =>
+          errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false }),
+        )
       } catch {
         // 忽略错误
       }

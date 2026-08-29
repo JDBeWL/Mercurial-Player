@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { usePlayerStore } from '@/stores/player'
 import { useConfigStore } from '@/stores/config'
 import logger from '@/utils/logger'
+import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
 import type { LyricLine, KaraokeWord } from '@/types'
 
 let lastCurrentLine = ''
@@ -184,8 +185,9 @@ async function updateDesktopLyrics() {
       currentTime: syncedTime,
       isPlaying,
     })
-  } catch {
+  } catch (e) {
     // non-Windows platform or not initialized
+    errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
   }
 }
 
@@ -249,8 +251,9 @@ async function syncLockState() {
   const locked = configStore.lyrics?.desktopLyrics?.locked ?? true
   try {
     await invoke('set_desktop_lyrics_locked', { locked })
-  } catch {
-    // ignore
+  } catch (e) {
+    // 桌面歌词窗口未初始化或非 Windows 平台，静默降级
+    errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
   }
 }
 
@@ -259,8 +262,9 @@ async function syncFontSize() {
   const fontSize = configStore.lyrics?.desktopLyrics?.fontSize ?? 28
   try {
     await invoke('set_desktop_lyrics_font_size', { size: fontSize })
-  } catch {
-    // ignore
+  } catch (e) {
+    // 桌面歌词窗口未初始化或非 Windows 平台，静默降级
+    errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
   }
 }
 
@@ -270,8 +274,9 @@ async function syncFontFamily() {
   const translationFontFamily = configStore.lyrics?.translationFontFamily ?? ''
   try {
     await invoke('set_desktop_lyrics_font_family', { fontFamily, translationFontFamily })
-  } catch {
+  } catch (e) {
     // non-Windows platform or not initialized
+    errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
   }
 }
 
@@ -280,8 +285,9 @@ async function syncColorPreset() {
   const preset = configStore.lyrics?.desktopLyrics?.colorPreset ?? 'auto'
   try {
     await invoke('set_desktop_lyrics_color_preset', { preset })
-  } catch {
-    // ignore
+  } catch (e) {
+    // 桌面歌词窗口未初始化或非 Windows 平台，静默降级
+    errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
   }
 }
 

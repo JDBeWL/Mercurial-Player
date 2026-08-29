@@ -5,6 +5,7 @@
 use super::metadata::{Playlist, flush_metadata_cache, get_track_metadata_internal};
 use super::tantivy_index;
 use crate::config::AppConfig;
+use crate::error::AppError;
 use crate::security::{has_allowed_extension, is_sensitive_path};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -19,37 +20,37 @@ pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav", "ogg", "m4a", "aac
 const LYRICS_EXTENSIONS: [&str; 3] = ["lrc", "ass", "srt"];
 
 /// 校验歌词文件路径：仅允许歌词扩展名，且不允许访问敏感目录
-fn validate_lyrics_path(path: &str) -> Result<(), String> {
+fn validate_lyrics_path(path: &str) -> Result<(), AppError> {
     if !has_allowed_extension(path, &LYRICS_EXTENSIONS) {
-        return Err("仅允许读写歌词文件（.lrc/.ass/.srt）".to_string());
+        return Err("仅允许读写歌词文件（.lrc/.ass/.srt）".to_string().into());
     }
     if is_sensitive_path(path) {
-        return Err("安全限制：不允许访问敏感目录".to_string());
+        return Err("安全限制：不允许访问敏感目录".to_string().into());
     }
     Ok(())
 }
 
 /// 读取指定目录中的子目录列表
-pub fn read_dir(path: &str) -> Result<Vec<String>, String> {
+pub fn read_dir(path: &str) -> Result<Vec<String>, AppError> {
     let dir = Path::new(path);
     if !dir.is_dir() {
-        return Err("Provided path is not a directory".to_string());
+        return Err("Provided path is not a directory".to_string().into());
     }
 
     fs::read_dir(dir)
-        .map_err(|e| e.to_string())?
+        .map_err(|e| AppError::msg(e.to_string()))?
         .filter_map(Result::ok)
         .filter(|entry| entry.path().is_dir())
         .map(|entry| entry.path().to_str().map(String::from))
         .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| "Failed to convert paths".to_string())
+        .ok_or_else(|| "Failed to convert paths".to_string().into())
 }
 
 /// 获取指定目录中的所有音频文件，并创建播放列表
-pub fn get_audio_files_from_dir(path: &str) -> Result<Playlist, String> {
+pub fn get_audio_files_from_dir(path: &str) -> Result<Playlist, AppError> {
     let dir = Path::new(path);
     if !dir.is_dir() {
-        return Err("Provided path is not a directory".to_string());
+        return Err("Provided path is not a directory".to_string().into());
     }
 
     let audio_files: Vec<_> = WalkDir::new(dir)
@@ -83,7 +84,7 @@ pub fn get_audio_files_from_dir(path: &str) -> Result<Playlist, String> {
 pub fn get_all_audio_files_from_dirs(
     paths: &[String],
     config: &AppConfig,
-) -> Result<Vec<Playlist>, String> {
+) -> Result<Vec<Playlist>, AppError> {
     let mut all_playlists: Vec<Playlist> = Vec::new();
 
     for path in paths {
@@ -215,13 +216,13 @@ pub fn check_file_exists_internal(path: &str) -> bool {
 }
 
 /// 读取歌词文件内容
-pub fn read_lyrics_file_internal(path: &str) -> Result<String, String> {
+pub fn read_lyrics_file_internal(path: &str) -> Result<String, AppError> {
     validate_lyrics_path(path)?;
-    fs::read_to_string(path).map_err(|e| e.to_string())
+    fs::read_to_string(path).map_err(|e| e.to_string().into())
 }
 
 /// 写入歌词文件内容
-pub fn write_lyrics_file_internal(path: &str, content: &str) -> Result<(), String> {
+pub fn write_lyrics_file_internal(path: &str, content: &str) -> Result<(), AppError> {
     validate_lyrics_path(path)?;
 
     // 确保父目录存在
@@ -231,7 +232,7 @@ pub fn write_lyrics_file_internal(path: &str, content: &str) -> Result<(), Strin
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {e}"))?;
     }
 
-    fs::write(path, content).map_err(|e| format!("Failed to write file: {e}"))
+    fs::write(path, content).map_err(|e| format!("Failed to write file: {e}").into())
 }
 
 /// 检查是否为音频文件

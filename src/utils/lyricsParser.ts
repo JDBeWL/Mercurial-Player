@@ -7,6 +7,27 @@ import type { LyricLine, LyricsFormat, KaraokeWord } from '@/types'
 // 让出主线程的辅助函数
 const yieldToMain = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
+/**
+ * 二分查找当前应高亮的歌词索引(最后一条 time <= time 的行)
+ *
+ * 供 useLyrics 与 pluginAPI 共用,调用方各自负责换算偏移后的时间。
+ */
+export function findLyricIndex(lyrics: Pick<LyricLine, 'time'>[], time: number): number {
+  let l = 0
+  let r = lyrics.length - 1
+  let idx = -1
+  while (l <= r) {
+    const mid = (l + r) >> 1
+    if (lyrics[mid].time <= time) {
+      idx = mid
+      l = mid + 1
+    } else {
+      r = mid - 1
+    }
+  }
+  return idx
+}
+
 export class LyricsParser {
   /**
    * 解析歌词文件（同步版本，用于简单场景）

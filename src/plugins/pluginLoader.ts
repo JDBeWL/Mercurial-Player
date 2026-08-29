@@ -5,33 +5,16 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import logger from '../utils/logger'
-import pluginManager, {
+import pluginManager from './pluginManager'
+import {
+  PluginPermission,
   type PluginAPI,
   type PluginInstance,
   type PluginMainFunction,
+  type PluginManifest,
   type PluginPermissionType,
-  PluginPermission,
-} from './pluginManager'
-import { validatePluginCode } from './pluginSandbox'
-
-// 插件清单类型
-interface PluginManifest {
-  id: string
-  name: string
-  version?: string
-  author?: string
-  description?: string
-  permissions?: PluginPermissionType[]
-  main?: string
-  auto_activate?: boolean
-}
-
-// 安装结果类型
-interface InstallResult {
-  success: boolean
-  path?: string
-  error?: string
-}
+} from './pluginTypes'
+import { validatePluginCode, createSafeConsole, createSafeTimers } from './pluginSandbox'
 
 const builtinPluginModules = import.meta.glob<{
   default: (api: PluginAPI) => Promise<PluginInstance> | PluginInstance
@@ -212,63 +195,10 @@ interface SafeParams {
 function createPluginFunction(code: string, pluginId: string) {
   return async (api: PluginAPI) => {
     try {
-      const safeConsole = {
-        log: api.log.info,
-        info: api.log.info,
-        warn: api.log.warn,
-        error: api.log.error,
-        debug: api.log.debug,
-      }
+      const safeConsole = createSafeConsole(api.log)
 
-      const timers = new Set<number>()
-      const intervals = new Set<number>()
-
-      const safeSetTimeout = (
-        fn: (...args: unknown[]) => void,
-        delay?: number,
-        ...args: unknown[]
-      ): number => {
-        const id = setTimeout(
-          () => {
-            timers.delete(id as unknown as number)
-            try {
-              fn(...args)
-            } catch (e) {
-              api.log.error('定时器错误:', e)
-            }
-          },
-          Math.min(delay || 0, 60000),
-        ) as unknown as number
-        timers.add(id)
-        return id
-      }
-
-      const safeClearTimeout = (id: number): void => {
-        timers.delete(id)
-        clearTimeout(id)
-      }
-
-      const safeSetInterval = (
-        fn: (...args: unknown[]) => void,
-        delay?: number,
-        ...args: unknown[]
-      ): number => {
-        const safeDelay = Math.max(delay || 100, 100)
-        const id = setInterval(() => {
-          try {
-            fn(...args)
-          } catch (e) {
-            api.log.error('定时器错误:', e)
-          }
-        }, safeDelay) as unknown as number
-        intervals.add(id)
-        return id
-      }
-
-      const safeClearInterval = (id: number): void => {
-        intervals.delete(id)
-        clearInterval(id)
-      }
+      // 安全的定时器（带清理追踪）
+      const safeTimers = createSafeTimers((e) => api.log.error('定时器错误:', e))
 
       const safeParams: SafeParams = {
         Object,
@@ -302,10 +232,10 @@ function createPluginFunction(code: string, pluginId: string) {
         NaN,
         Infinity,
         console: safeConsole,
-        setTimeout: safeSetTimeout,
-        clearTimeout: safeClearTimeout,
-        setInterval: safeSetInterval,
-        clearInterval: safeClearInterval,
+        setTimeout: safeTimers.setTimeout,
+        clearTimeout: safeTimers.clearTimeout,
+        setInterval: safeTimers.setInterval,
+        clearInterval: safeTimers.clearInterval,
         api,
         window: undefined,
         document: undefined,
@@ -362,23 +292,6 @@ function createPluginFunction(code: string, pluginId: string) {
       logger.error(`插件执行失败: ${pluginId}`, error)
       throw error
     }
-  }
-}
-
-/**
- * 安装插件
- */
-export async function installPlugin(source: string): Promise<InstallResult> {
-  try {
-    const result = await invoke<InstallResult>('install_plugin', { source })
-    if (result.success && result.path) {
-      await loadPlugin(result.path)
-      return result
-    }
-    throw new Error(result.error || '安装失败')
-  } catch (error) {
-    logger.error('安装插件失败:', error)
-    throw error
   }
 }
 

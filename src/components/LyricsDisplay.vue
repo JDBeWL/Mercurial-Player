@@ -126,6 +126,10 @@ import {
   type CSSProperties,
 } from 'vue'
 import { useLyrics } from '@/composables/useLyrics'
+import { useVisualTime } from '@/composables/useVisualTime'
+import { useLyricsScroll } from '@/composables/useLyricsScroll'
+import { useLyricsTypography } from '@/composables/useLyricsTypography'
+import { findLyricIndex } from '@/utils/lyricsParser'
 import { pluginManager } from '@/plugins'
 import type { ActionButton } from '@/plugins/pluginManager'
 import logger from '@/utils/logger'
@@ -217,44 +221,21 @@ export default {
     }
 
     // --- 视觉时间系统 ---
-    const visualTime = ref(0)
     // 将 visualTime ref 本身提供给 KaraokeLine（provide 不解包 ref），
     // 使逐字进度渲染依赖只存在于子组件中
+    const { visualTime, advanceVisualTime, resetFrameClock, syncToCurrentTime } = useVisualTime()
     provide('lyricsVisualTime', visualTime)
-    const isUserScroll = ref(false) // 标记用户是否正在交互
     let rafId: number | null = null
-    let lastFrameTime = 0
 
     // 启动高频时间循环（仅在播放时运行）
     const startAnimationLoop = (): void => {
       if (rafId) return // 防止重复启动
-      lastFrameTime = 0 // 重置时间戳
+      resetFrameClock()
       // 启动时先同步到真实时间
-      visualTime.value = playerStore.currentTime
+      syncToCurrentTime()
 
       const animate = (timestamp: number): void => {
-        if (!lastFrameTime) lastFrameTime = timestamp
-        const deltaTime = Math.min((timestamp - lastFrameTime) / 1000, 0.1) // 限制最大 deltaTime 为 100ms
-        lastFrameTime = timestamp
-
-        const realTime = playerStore.currentTime
-
-        // 播放中：基于帧间隔累加时间，并动态调整速度以消除漂移
-        const diff = visualTime.value - realTime // 正值表示视觉领先，负值表示落后
-
-        if (Math.abs(diff) > 0.5) {
-          // 误差超过 0.5s，直接硬同步
-          visualTime.value = realTime
-        } else if (Math.abs(diff) > 0.05) {
-          // 误差在 0.05s ~ 0.5s 之间，使用 P 控制器平滑追赶
-          const speed = 1.0 - diff * 2.0
-          const clampedSpeed = Math.max(0.7, Math.min(1.3, speed))
-          visualTime.value += deltaTime * clampedSpeed
-        } else {
-          // 误差很小，正常累加
-          visualTime.value += deltaTime
-        }
-
+        advanceVisualTime(timestamp)
         rafId = requestAnimationFrame(animate)
       }
       rafId = requestAnimationFrame(animate)
@@ -277,23 +258,10 @@ export default {
         } else {
           stopAnimationLoop()
           // 暂停时同步到真实时间
-          visualTime.value = playerStore.currentTime
+          syncToCurrentTime()
         }
       },
       { immediate: true },
-    )
-
-    // 监听真实时间跳变（如拖拽进度条），立即同步
-    watch(
-      () => playerStore.currentTime,
-      (newTime, oldTime) => {
-        // 检测 seek 操作：时间跳变超过 1.5s（正常播放每次只增加 0.5s）
-        // 或者时间倒退（说明用户往回拖了）
-        const jump = newTime - oldTime
-        if (Math.abs(jump) > 1.5 || jump < -0.1) {
-          visualTime.value = newTime
-        }
-      },
     )
 
     // 监听歌曲切换，立即重置 visualTime
@@ -301,7 +269,7 @@ export default {
       () => playerStore.currentTrack?.path,
       () => {
         // 切歌时立即同步到当前时间（通常是 0）
-        visualTime.value = playerStore.currentTime
+        syncToCurrentTime()
         activeIndex.value = -1
       },
     )
@@ -312,19 +280,7 @@ export default {
       const offset = playerStore.lyricsOffset || 0
       const currentTime = time - offset
 
-      // 二分查找当前歌词索引
-      let l = 0,
-        r = lyrics.value.length - 1,
-        idx = -1
-      while (l <= r) {
-        const mid = (l + r) >> 1
-        if (lyrics.value[mid].time <= currentTime) {
-          idx = mid
-          l = mid + 1
-        } else {
-          r = mid - 1
-        }
-      }
+      const idx = findLyricIndex(lyrics.value, currentTime)
 
       if (idx !== activeIndex.value) {
         activeIndex.value = idx
@@ -351,8 +307,10 @@ export default {
       updateActiveIndex(time)
     })
 
-    // 歌词行样式：将对齐方式、字体和缩放锚点合并为 computed,
+    // 歌词行样式：将对齐方式与共享的歌词字体合并为 computed,
     // 避免在模板内联 style 中使用 CSS 自定义属性导致 vue-tsc 类型报错
+    const { lyricFontStyle, translationStyle } = useLyricsTypography()
+
     const lyricLineStyle = computed<CSSProperties>(() => {
       const alignment = (configStore.lyrics?.lyricsAlignment || 'center') as
         'left' | 'center' | 'right'
@@ -364,19 +322,8 @@ export default {
               ? 'center center'
               : 'left center',
         textAlign: alignment,
-        // 字体名必须加引号：不带引号的 font-family 标识符不允许以数字开头
-        // （如按文件名解析出的 "975"），赋给 CSSOM 会被整体丢弃
-        fontFamily: `"${configStore.lyrics?.lyricsFontFamily || 'Noto Sans SC'}"`,
+        ...lyricFontStyle.value,
       }
-    })
-
-    // 译文字体：为空时跟随原文（不设置该样式，继承行容器的字体）
-    const translationStyle = computed<CSSProperties | undefined>(() => {
-      const family = configStore.lyrics?.translationFontFamily
-      if (!family) {
-        return undefined
-      }
-      return { fontFamily: `"${family}"` }
     })
 
     // 每行歌词的语言标注（原文/译文分别检测），供 lang 属性使用；
@@ -391,120 +338,16 @@ export default {
     // --- 样式计算逻辑 ---
     const isActive = (index: number): boolean => index === activeIndex.value
 
-    // --- 滚动控制 ---
-    const isAutoScrolling = ref(false) // 标记是否正在自动滚动
-    const isHovering = ref(false) // 标记鼠标是否悬停
-    let scrollTimeout: ReturnType<typeof setTimeout> | null = null
-
-    const handleScroll = (): void => {
-      // 如果是自动滚动触发的事件，忽略
-      if (isAutoScrolling.value) return
-
-      // 只有当鼠标悬停在歌词区域时，才认为是用户的主动滚动
-      if (!isHovering.value) return
-
-      // 用户手动滚动
-      isUserScroll.value = true
-
-      // 用户停止滚动 2.5s 后恢复自动跟随
-      if (scrollTimeout) clearTimeout(scrollTimeout)
-      scrollTimeout = setTimeout(() => {
-        isUserScroll.value = false
-      }, 2500)
-    }
-
-    // 计算目标滚动位置
-    const computeCenteredScroll = (container: HTMLElement, activeEl: HTMLElement): number => {
-      return Math.max(
-        0,
-        activeEl.offsetTop - container.clientHeight * 0.5 + activeEl.clientHeight / 2,
-      )
-    }
-
-    // 挂载首帧定位：在浏览器首次绘制前以瞬时滚动 (scroll-behavior: auto)
-    // 注：active 行 font-size 过渡 (24px→32px) 只影响其自身高度
-    // (中心定位偏差约 4px，可忽略)，不影响 offsetTop，无需等过渡完成。
-    const jumpToActiveLyric = (): void => {
-      const container = containerRef.value
-      if (!container) return
-      const idx = activeIndex.value
-      if (idx === -1 || !lyrics.value.length) return
-      const activeEl = container.querySelectorAll<HTMLElement>('.lyrics')[idx]
-      if (!activeEl) return
-
-      isAutoScrolling.value = true
-      container.style.scrollBehavior = 'auto'
-      container.scrollTop = computeCenteredScroll(container, activeEl)
-      // 下一帧恢复 smooth，供后续自动跟随使用；同时避免程序化滚动被误判为用户滚动
-      requestAnimationFrame(() => {
-        container.style.scrollBehavior = 'smooth'
-        setTimeout(() => (isAutoScrolling.value = false), 100)
-      })
-    }
-
-    const scrollToActiveLyric = (
-      immediate = false,
-      isUserClick = false,
-      targetIndex = -1,
-    ): void => {
-      if (!containerRef.value) return
-
-      const idx = targetIndex !== -1 ? targetIndex : activeIndex.value
-      // 如果索引无效或列表为空
-      if (idx === -1 || !lyrics.value.length) return
-
-      const container = containerRef.value
-      // 直接通过索引查找元素，比 querySelector(".active") 更可靠
-      const lyricElements = container.querySelectorAll<HTMLElement>('.lyrics')
-      if (!lyricElements || !lyricElements[idx]) return
-
-      const activeEl = lyricElements[idx]
-      const computeTargetScroll = (): number => computeCenteredScroll(container, activeEl)
-
-      // 标记开始自动滚动，防止 handleScroll 误判
-      isAutoScrolling.value = true
-
-      // 双阶段滚动策略:
-      // 经典模式 active 行 font-size 从 24px→32px (0.15s transition),
-      // 过渡期间 offsetTop/clientHeight 是中间值,直接读会导致定位不准
-      // (多行多句场景高度变化更大,偏差更明显)。
-      //
-      // 阶段 1 (nextTick): 立即用当前尺寸做预估滚动,让用户立即看到响应
-      // 阶段 2 (setTimeout 160ms): 等 font-size 过渡完成后,用稳定尺寸修正
-      //
-      // immediate/isUserClick 场景 (用户点击跳转): 只做一次立即滚动 (用稳定后的尺寸),
-      //   因为用户点击的行之前不是 active,立即读到的尺寸是稳定的 24px 状态,
-      //   但目标位置应该是 32px 状态,所以也等过渡完成
-      const FONT_SIZE_TRANSITION_MS = 160 // 0.15s + 10ms 余量
-
-      if (immediate || isUserClick) {
-        // 用户点击: 等 font-size 过渡完成后一次性滚到准确位置
-        setTimeout(() => {
-          const targetScroll = computeTargetScroll()
-          container.style.scrollBehavior = 'auto'
-          container.scrollTop = targetScroll
-          requestAnimationFrame(() => {
-            container.style.scrollBehavior = 'smooth'
-            setTimeout(() => (isAutoScrolling.value = false), 100)
-          })
-        }, FONT_SIZE_TRANSITION_MS)
-      } else {
-        // 自动跟随: 立即预估滚动 + 过渡完成后修正
-        nextTick(() => {
-          // 阶段 1: 立即用当前 (过渡中) 尺寸预估
-          const estimatedScroll = computeTargetScroll()
-          container.style.scrollBehavior = 'smooth'
-          container.scrollTop = estimatedScroll
-
-          // 阶段 2: 等 font-size 过渡完成后用稳定尺寸修正
-          setTimeout(() => {
-            const correctedScroll = computeTargetScroll()
-            container.scrollTop = correctedScroll
-            setTimeout(() => (isAutoScrolling.value = false), 500)
-          }, FONT_SIZE_TRANSITION_MS)
-        })
-      }
-    }
+    // --- 滚动控制(状态机实现见 composables/useLyricsScroll) ---
+    const {
+      isUserScroll,
+      isHovering,
+      handleScroll,
+      jumpToActiveLyric,
+      scrollToActiveLyric,
+      breakUserScrollLock,
+      dispose,
+    } = useLyricsScroll({ containerRef, activeIndex, lyrics })
 
     // 挂载初始化期间由 onMounted 显式定位，抑制 activeIndex 变化触发的自动跟随滚动
     let suppressAutoScrollOnMount = false
@@ -532,8 +375,7 @@ export default {
       if (time < 0) return
 
       // 点击跳转应打破用户滚动锁定，并强制执行
-      isUserScroll.value = false
-      if (scrollTimeout) clearTimeout(scrollTimeout)
+      breakUserScrollLock()
 
       await playerStore.seek(time)
 
@@ -584,16 +426,10 @@ export default {
 
     onUnmounted(() => {
       stopAnimationLoop()
-      // 清理 scrollTimeout
-      if (scrollTimeout) {
-        clearTimeout(scrollTimeout)
-        scrollTimeout = null
-      }
+      // 清理滚动冷却定时器与状态
+      dispose()
       // 清理 resize 事件监听器
       window.removeEventListener('resize', handleResize)
-      // 清理任何其他可能的定时器或事件监听器
-      isUserScroll.value = false
-      isAutoScrolling.value = false
     })
 
     return {

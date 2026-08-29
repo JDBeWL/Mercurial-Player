@@ -68,6 +68,7 @@ import { useI18n } from 'vue-i18n'
 import { useAutoUpdate } from '@/composables/useAutoUpdate'
 import { renderMarkdown } from '@/utils/markdownRenderer'
 import logger from '@/utils/logger'
+import { formatBytes } from '@/utils/format'
 
 interface Emits {
   (e: 'update'): void
@@ -94,19 +95,6 @@ const {
   runInstaller,
   resetUpdateState,
 } = useAutoUpdate()
-
-/** 字节数格式化为带单位的可读文本（如 12.5 MB） */
-const formatBytes = (bytes: number): string => {
-  if (!Number.isFinite(bytes) || bytes < 0) return '--'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
-  }
-  return `${value >= 100 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`
-}
 
 /** 将release notes渲染为HTML */
 const renderedNotes = computed(() => {

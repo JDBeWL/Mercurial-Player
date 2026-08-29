@@ -4,307 +4,65 @@
  */
 
 import { reactive, markRaw, watch, type WatchStopHandle } from 'vue'
-import type { Track } from '@/types'
 import logger from '../utils/logger'
 import { createPluginAPI } from './pluginAPI'
 import { createPluginSandbox, type PluginSandbox } from './pluginSandbox'
+import {
+  createPluginStorage,
+  PLUGIN_STORAGE_PREFIX,
+  type PluginPersistentStorage,
+} from './pluginStorage'
 import { usePlayerStore } from '../stores/player'
+import {
+  PluginState,
+  type PluginAPI,
+  type Plugin,
+  type ActionButton,
+  type BuiltinPluginDefinition,
+  type Command,
+  type EventCallback,
+  type LyricsProvider,
+  type MenuItem,
+  type PlayerDecorator,
+  type PluginDefinition,
+  type PluginInstance,
+  type PluginMainFunction,
+  type PluginPermissionType,
+  type SettingsPanel,
+  type Shortcut,
+  type Visualizer,
+} from './pluginTypes'
 
-// 插件 API 使用的曲目类型(规范定义在 @/types,此处仅作 re-export 保持向后兼容)
-export type { Track } from '@/types'
-
-// 插件存储的 localStorage key 前缀
-const STORAGE_PREFIX = 'mercurial-plugin-storage-'
-
-// 插件状态
-export const PluginState = {
-  UNREGISTERED: 'unregistered',
-  REGISTERED: 'registered',
-  LOADING: 'loading',
-  ACTIVE: 'active',
-  UNLOADING: 'unloading',
-  INACTIVE: 'inactive',
-  ERROR: 'error',
-  DISABLED: 'disabled',
-} as const
-
-export type PluginStateType = (typeof PluginState)[keyof typeof PluginState]
-
-// 插件权限
-export const PluginPermission = {
-  PLAYER_READ: 'player:read', // 读取播放器状态
-  PLAYER_CONTROL: 'player:control', // 控制播放器
-  LIBRARY_READ: 'library:read', // 读取音乐库
-  LYRICS_PROVIDER: 'lyrics:provider', // 提供歌词源
-  UI_EXTEND: 'ui:extend', // 扩展 UI
-  VISUALIZER: 'visualizer', // 可视化效果
-  THEME: 'theme', // 主题
-  STORAGE: 'storage', // 本地存储
-  NETWORK: 'network', // 网络请求
-} as const
-
-export type PluginPermissionType = (typeof PluginPermission)[keyof typeof PluginPermission]
-
-// 插件 API 类型
-export interface PluginAPI {
-  pluginId: string
-  permissions: readonly string[]
-  log: {
-    info: (...args: unknown[]) => void
-    warn: (...args: unknown[]) => void
-    error: (...args: unknown[]) => void
-    debug: (...args: unknown[]) => void
-  }
-  player: {
-    getState: () => PlayerState
-    getLyrics: () => Promise<LyricLine[] | null>
-    getCurrentLyricIndex: () => number
-    getCoverPath: () => Promise<string | null>
-    play: () => void
-    pause: () => void
-    togglePlay: () => void
-    next: () => Promise<void>
-    previous: () => Promise<void>
-    seek: (time: number) => void
-    setVolume: (volume: number) => void
-    setLyrics: (lyrics: LyricLine[]) => void
-  }
-  library: {
-    getPlaylists: () => Playlist[]
-    getCurrentPlaylist: () => Playlist | null
-    getTracks: () => Track[]
-  }
-  theme: {
-    getCurrent: () => ThemeInfo
-    setColors: (colors: Record<string, string>) => Promise<void>
-    getCSSVariable: (name: string) => string
-    getAllColors: () => Record<string, string>
-  }
-  ui: {
-    registerSettingsPanel: (panel: SettingsPanel) => void
-    registerMenuItem: (item: MenuItem) => void
-    registerPlayerDecorator: (decorator: PlayerDecorator) => void
-    registerActionButton: (button: ActionButton) => void
-    unregisterActionButton: (buttonId: string) => void
-    showNotification: (message: string, type?: 'error' | 'warning' | 'info') => void
-  }
-  lyrics: {
-    registerProvider: (provider: LyricsProvider) => void
-  }
-  visualizer: {
-    register: (visualizer: Visualizer) => void
-  }
-  commands: {
-    register: (command: Command) => void
-    execute: (commandId: string) => Promise<void>
-  }
-  shortcuts: {
-    register: (shortcut: Shortcut) => void
-    unregister: (shortcutId: string) => void
-  }
-  storage: {
-    get: <T>(key: string, defaultValue?: T) => T
-    set: <T>(key: string, value: T) => void
-    remove: (key: string) => void
-    getAll: () => Record<string, unknown>
-  }
-  events: {
-    on: (event: string, callback: EventCallback) => void
-    off: (event: string, callback: EventCallback) => void
-    emit: (event: string, data?: unknown) => void
-  }
-  network: {
-    fetch: (url: string, options?: RequestInit) => Promise<Response>
-  }
-  utils: {
-    createCanvas: (
-      width: number,
-      height: number,
-    ) => { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null }
-    canvasToBlob: (canvas: HTMLCanvasElement, type?: string, quality?: number) => Promise<Blob>
-    canvasToDataURL: (canvas: HTMLCanvasElement, type?: string, quality?: number) => string
-    loadImage: (src: string) => Promise<HTMLImageElement>
-    blobToArrayBuffer: (blob: Blob) => Promise<ArrayBuffer>
-    dataURLToBlob: (dataURL: string) => Blob
-    formatTime: (seconds: number) => string
-    generateId: () => string
-  }
-  file: {
-    saveAs: (data: Blob | Uint8Array | string, options?: SaveAsOptions) => Promise<string | null>
-    saveImage: (
-      image: HTMLCanvasElement | Blob | string,
-      defaultName?: string,
-      format?: string,
-    ) => Promise<string | null>
-    openScreenshotsDirectory: () => Promise<void>
-  }
-  clipboard: {
-    writeImage: (image: HTMLCanvasElement | Blob | string) => Promise<void>
-    writeText: (text: string) => Promise<void>
-  }
-}
-
-// 辅助类型定义
-export interface PlayerState {
-  currentTrack: Track | null
-  isPlaying: boolean
-  currentTime: number
-  duration: number
-  volume: number
-  repeatMode: string
-  isShuffle: boolean
-}
-
-// 注意: LyricLine 与 Playlist 与 @/types 中的同名类型结构不同。
-// @/types 的版本是应用内部的规范定义(由 LRC/ASS 解析器产生);
-// 此处的版本是插件 API 契约,用于插件间歌词提供者交互与翻译支持,
-// 在 pluginAPI.ts 的 convertLyricLine / getPlaylists 中做显式格式转换。
-// 修改任一类型时需同步检查转换逻辑。
-export interface LyricLine {
-  time: number
-  texts: { text: string; translation?: string }[]
-  [key: string]: unknown
-}
-
-export interface Playlist {
-  id: string
-  name: string
-  tracks?: Track[]
-  [key: string]: unknown
-}
-
-export interface ThemeInfo {
-  preference: string
-  isDark: boolean
-  primaryColor: string
-}
-
-export interface SettingsPanel {
-  id: string
-  name: string
-  component: unknown
-  [key: string]: unknown
-}
-
-export interface MenuItem {
-  id: string
-  name: string
-  action: () => void
-  [key: string]: unknown
-}
-
-export interface PlayerDecorator {
-  id: string
-  component: unknown
-  [key: string]: unknown
-}
-
-export interface ActionButton {
-  id: string
-  name: string
-  icon: string
-  action: () => void
-  location?: string
-  [key: string]: unknown
-}
-
-export interface LyricsProvider {
-  id: string
-  name: string
-  search: (query: LyricsSearchQuery) => Promise<LyricsSearchResult[]>
-  [key: string]: unknown
-}
-
-export interface LyricsSearchQuery {
-  title: string
-  artist?: string
-  album?: string
-  duration?: number
-}
-
-export interface LyricsSearchResult {
-  id: string
-  title: string
-  artist?: string
-  lyrics?: string
-  [key: string]: unknown
-}
-
-export interface Visualizer {
-  id: string
-  name: string
-  render: (ctx: CanvasRenderingContext2D, data: Float32Array) => void
-  [key: string]: unknown
-}
-
-export interface Command {
-  id: string
-  name: string
-  execute: () => void | Promise<void>
-  [key: string]: unknown
-}
-
-export interface Shortcut {
-  id: string
-  name: string
-  key: string
-  action: () => void
-  description?: string
-  [key: string]: unknown
-}
-
-export interface SaveAsOptions {
-  defaultName?: string
-  filters?: { name: string; extensions: string[] }[]
-  title?: string
-}
-
-export type EventCallback = (data?: unknown) => void
-
-// 插件主函数类型
-export type PluginMainFunction = (api: PluginAPI) => Promise<PluginInstance> | PluginInstance
-
-// 插件实例类型
-export interface PluginInstance {
-  activate?: () => void | Promise<void>
-  deactivate?: () => void | Promise<void>
-  [key: string]: unknown
-}
-
-// 插件定义类型
-export interface PluginDefinition {
-  id: string
-  name: string
-  version?: string
-  author?: string
-  description?: string
-  permissions?: PluginPermissionType[]
-  main: PluginMainFunction
-}
-
-// 内置插件定义类型（main 可以是简化形式）
-export interface BuiltinPluginDefinition {
-  id: string
-  name: string
-  version?: string
-  author?: string
-  description?: string
-  permissions?: PluginPermissionType[]
-  main: PluginMainFunction | ((api: PluginAPI) => PluginInstance)
-}
-
-// 插件类型
-export interface Plugin {
-  id: string
-  name: string
-  version: string
-  author: string
-  description: string
-  permissions: PluginPermissionType[]
-  state: PluginStateType
-  error: string | null
-  main: PluginMainFunction
-}
+// 纯类型契约定义已拆分至 pluginTypes.ts,此处 re-export 保持向后兼容
+// (现有 `import { pluginManager, PluginState, PluginPermission } from './pluginManager'` 等不受影响)
+export { PluginState, PluginPermission } from './pluginTypes'
+export type {
+  Track,
+  PluginAPI,
+  PluginStateType,
+  PluginPermissionType,
+  PlayerState,
+  LyricLine,
+  Playlist,
+  ThemeInfo,
+  SettingsPanel,
+  MenuItem,
+  PlayerDecorator,
+  ActionButton,
+  LyricsProvider,
+  LyricsSearchQuery,
+  LyricsSearchResult,
+  Visualizer,
+  Command,
+  Shortcut,
+  SaveAsOptions,
+  EventCallback,
+  PluginMainFunction,
+  PluginInstance,
+  PluginDefinition,
+  BuiltinPluginDefinition,
+  Plugin,
+} from './pluginTypes'
 
 // 插件实例数据
 interface PluginInstanceData {
@@ -342,7 +100,7 @@ class PluginManager {
   // 事件监听器
   private eventListeners: Map<string, EventListener[]>
   // 插件存储
-  private storage: Map<string, Record<string, unknown>>
+  private storage: Map<string, PluginPersistentStorage>
   // 播放器状态监听器
   private _playerWatcherStop: WatchStopHandle | null
 
@@ -435,10 +193,7 @@ class PluginManager {
     // 强制保存所有插件存储(覆盖未在 deactivate 中处理的场景)
     for (const [pluginId, storage] of this.storage) {
       try {
-        const flushMethod = (storage as Record<string, unknown>)._flush
-        if (typeof flushMethod === 'function') {
-          flushMethod()
-        }
+        storage.flush()
       } catch (e) {
         logger.warn(`强制保存插件 ${pluginId} 存储失败:`, e)
       }
@@ -567,11 +322,7 @@ class PluginManager {
     // 确保插件存储立即保存（清除 debounce 并立即保存）
     if (this.storage.has(pluginId)) {
       try {
-        const storage = this.storage.get(pluginId)
-        const flushMethod = (storage as Record<string, unknown>)._flush
-        if (typeof flushMethod === 'function') {
-          flushMethod()
-        }
+        this.storage.get(pluginId)!.flush()
       } catch (e) {
         logger.warn(`插件停用时保存存储失败: ${pluginId}`, e)
       }
@@ -592,7 +343,7 @@ class PluginManager {
 
     if (clearStorage) {
       try {
-        localStorage.removeItem(STORAGE_PREFIX + pluginId)
+        localStorage.removeItem(PLUGIN_STORAGE_PREFIX + pluginId)
         logger.info(`插件存储已清除: ${pluginId}`)
       } catch (e) {
         logger.warn(`清除插件存储失败: ${pluginId}`, e)
@@ -676,102 +427,11 @@ class PluginManager {
 
   /**
    * 插件存储
+   * 具体的存储实现(1MB 限额、紧急清理、防抖保存)在 pluginStorage.ts
    */
-  getStorage(pluginId: string): Record<string, unknown> {
+  getStorage(pluginId: string): PluginPersistentStorage {
     if (!this.storage.has(pluginId)) {
-      const storageKey = STORAGE_PREFIX + pluginId
-      let savedData: Record<string, unknown> = {}
-
-      try {
-        const saved = localStorage.getItem(storageKey)
-        if (saved) {
-          savedData = JSON.parse(saved)
-        }
-      } catch (e) {
-        logger.warn(`加载插件 ${pluginId} 存储失败:`, e)
-      }
-
-      const storage = reactive(savedData)
-      const maxStorageSize = 1024 * 1024
-      let saveTimeout: ReturnType<typeof setTimeout> | null = null
-      let isSaving = false
-
-      const safeSave = async (target: Record<string, unknown>) => {
-        if (isSaving) return // 防止并发保存
-        isSaving = true
-
-        try {
-          const json = JSON.stringify(target)
-          if (json.length > maxStorageSize) {
-            logger.warn(`插件 ${pluginId} 存储超过限制`)
-            // 清理大型数组数据
-            for (const key of Object.keys(target)) {
-              if (Array.isArray(target[key]) && (target[key] as unknown[]).length > 10) {
-                target[key] = (target[key] as unknown[]).slice(
-                  -Math.floor((target[key] as unknown[]).length / 2),
-                )
-              }
-            }
-          }
-          localStorage.setItem(storageKey, JSON.stringify(target))
-        } catch (e) {
-          if ((e as Error).name === 'QuotaExceededError') {
-            logger.error(`插件 ${pluginId} 存储空间不足`)
-            // 紧急清理策略
-            for (const key of Object.keys(target)) {
-              if (Array.isArray(target[key])) {
-                target[key] = (target[key] as unknown[]).slice(-10)
-              }
-            }
-            try {
-              localStorage.setItem(storageKey, JSON.stringify(target))
-            } catch {
-              localStorage.removeItem(storageKey)
-            }
-          } else {
-            logger.warn(`保存插件 ${pluginId} 存储失败:`, e)
-          }
-        } finally {
-          isSaving = false
-        }
-      }
-
-      const debouncedSave = (target: Record<string, unknown>) => {
-        if (saveTimeout) clearTimeout(saveTimeout)
-        saveTimeout = setTimeout(() => safeSave(target), 300) // 减少延迟
-      }
-
-      const persistentStorage = new Proxy(storage, {
-        set(target, key: string, value) {
-          target[key] = value
-          debouncedSave(target)
-          return true
-        },
-        deleteProperty(target, key: string) {
-          delete target[key]
-          debouncedSave(target)
-          return true
-        },
-      })
-
-      // 添加强制保存方法（用于应用关闭时）
-      ;(persistentStorage as Record<string, unknown>)._flush = () => {
-        if (saveTimeout) {
-          clearTimeout(saveTimeout)
-          saveTimeout = null
-        }
-        return safeSave(storage)
-      }
-
-      // 添加清理方法（用于插件卸载时）
-      ;(persistentStorage as Record<string, unknown>)._cleanup = () => {
-        if (saveTimeout) {
-          clearTimeout(saveTimeout)
-          saveTimeout = null
-        }
-      }
-
-      this.storage.set(pluginId, persistentStorage)
+      this.storage.set(pluginId, createPluginStorage(pluginId))
     }
     return this.storage.get(pluginId)!
   }

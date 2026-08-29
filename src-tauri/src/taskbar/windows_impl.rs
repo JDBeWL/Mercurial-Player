@@ -4,6 +4,7 @@
 
 #![allow(unsafe_code)] // Windows API交互需要unsafe
 
+use crate::error::AppError;
 use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -71,8 +72,16 @@ impl Drop for TaskbarIcons {
     }
 }
 
-// SAFETY: TaskbarManager只在主线程创建和使用，且通过Mutex保护
-// ITaskbarList3和HICON是Windows COM对象，实际上通过Mutex序列化访问是安全的
+// SAFETY: TaskbarManager 持有裸的 ITaskbarList3 COM 指针与 HICON。
+// 本实现的线程安全依据:
+// 1. 所有对 taskbar_list/图标的方法调用都经外部 Mutex(见 commands 层)串行化,
+//    不存在对同一 COM 对象的并发访问;
+// 2. HICON 句柄是进程全局资源,跨线程使用合法;
+// 3. 已知妥协:ITaskbarList3 按严格 COM 规则属于创建它的 STA,跨线程调用应经
+//    编组(marshaling)。本应用与 Windows 任务栏集成的实际行为是各方法仅向
+//    任务栏窗口投递消息,跨线程调用在实践中是安全的 —— 这也是 windows-rs
+//    生态中 TaskbarList 的通行用法。若未来出现 COM RpcImpersonate 相关报错,
+//    应改为把调用转发回主窗口线程执行。
 #[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl Send for TaskbarManager {}
 unsafe impl Sync for TaskbarManager {}
@@ -91,9 +100,9 @@ impl TaskbarManager {
 
     /// 初始化任务栏按钮
     ///
-    /// # 也许它是安全的（？）
-    /// 调用Windows COM API，需要有效的窗口句柄
-    pub fn initialize(&mut self, hwnd: isize) -> Result<(), String> {
+    /// 调用 Windows COM API(`CoCreateInstance`/`HrInit`),必须传入有效的窗口句柄;
+    /// 跨线程安全性依据见本文件 `unsafe impl Send/Sync` 处的 SAFETY 注释。
+    pub fn initialize(&mut self, hwnd: isize) -> Result<(), AppError> {
         if self.initialized.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -127,7 +136,7 @@ impl TaskbarManager {
     }
 
     /// 创建按钮图标
-    fn create_icons(&mut self) -> Result<(), String> {
+    fn create_icons(&mut self) -> Result<(), AppError> {
         // 使用简单的形状创建图标
         self.icons.prev_icon = Some(create_prev_icon()?);
         self.icons.play_icon = Some(create_play_icon()?);
@@ -137,7 +146,7 @@ impl TaskbarManager {
     }
 
     /// 添加缩略图按钮
-    fn add_thumb_buttons(&self, taskbar_list: &ITaskbarList3) -> Result<(), String> {
+    fn add_thumb_buttons(&self, taskbar_list: &ITaskbarList3) -> Result<(), AppError> {
         let prev_tooltip: Vec<u16> = "上一首\0".encode_utf16().collect();
         let play_tooltip: Vec<u16> = "播放\0".encode_utf16().collect();
         let next_tooltip: Vec<u16> = "下一首\0".encode_utf16().collect();
@@ -189,9 +198,9 @@ impl TaskbarManager {
     }
 
     /// 更新播放/暂停按钮状态
-    pub fn update_playback_state(&mut self, state: TaskbarPlaybackState) -> Result<(), String> {
+    pub fn update_playback_state(&mut self, state: TaskbarPlaybackState) -> Result<(), AppError> {
         if !self.initialized.load(Ordering::SeqCst) {
-            return Err("Taskbar not initialized".to_string());
+            return Err("Taskbar not initialized".to_string().into());
         }
 
         if self.current_state == state {
@@ -260,7 +269,7 @@ fn get_icon_size() -> i32 {
 }
 
 /// 创建上一首图标 (|◀)
-fn create_prev_icon() -> Result<HICON, String> {
+fn create_prev_icon() -> Result<HICON, AppError> {
     let size = get_icon_size();
 
     create_icon_from_pixels(size, size, |x, y, w, h| {
@@ -285,7 +294,7 @@ fn create_prev_icon() -> Result<HICON, String> {
 }
 
 /// 创建播放图标 (▶)
-fn create_play_icon() -> Result<HICON, String> {
+fn create_play_icon() -> Result<HICON, AppError> {
     let size = get_icon_size();
 
     create_icon_from_pixels(size, size, |x, y, w, h| {
@@ -301,7 +310,7 @@ fn create_play_icon() -> Result<HICON, String> {
 }
 
 /// 创建暂停图标 (❚❚)
-fn create_pause_icon() -> Result<HICON, String> {
+fn create_pause_icon() -> Result<HICON, AppError> {
     let size = get_icon_size();
 
     create_icon_from_pixels(size, size, |x, y, w, h| {
@@ -325,7 +334,7 @@ fn create_pause_icon() -> Result<HICON, String> {
 }
 
 /// 创建下一首图标 (▶|)
-fn create_next_icon() -> Result<HICON, String> {
+fn create_next_icon() -> Result<HICON, AppError> {
     let size = get_icon_size();
 
     create_icon_from_pixels(size, size, |x, y, w, h| {
@@ -350,14 +359,14 @@ fn create_next_icon() -> Result<HICON, String> {
 }
 
 /// 从像素回调创建图标
-fn create_icon_from_pixels<F>(width: i32, height: i32, pixel_fn: F) -> Result<HICON, String>
+fn create_icon_from_pixels<F>(width: i32, height: i32, pixel_fn: F) -> Result<HICON, AppError>
 where
     F: Fn(i32, i32, i32, i32) -> bool,
 {
     unsafe {
         let hdc = CreateCompatibleDC(None);
         if hdc.is_invalid() {
-            return Err("Failed to create compatible DC".to_string());
+            return Err("Failed to create compatible DC".to_string().into());
         }
 
         let bmi = BITMAPINFO {
@@ -390,7 +399,7 @@ where
 
         if bits.is_null() {
             let _ = DeleteDC(hdc);
-            return Err("DIB bits is null".to_string());
+            return Err("DIB bits is null".to_string().into());
         }
 
         // 填充像素数据
@@ -517,7 +526,7 @@ pub fn get_taskbar_manager() -> Arc<Mutex<TaskbarManager>> {
 }
 
 /// 初始化任务栏（在主窗口创建后调用）
-pub fn init_taskbar(hwnd: isize) -> Result<(), String> {
+pub fn init_taskbar(hwnd: isize) -> Result<(), AppError> {
     let manager = get_taskbar_manager();
     let mut guard = manager
         .lock()
@@ -526,7 +535,7 @@ pub fn init_taskbar(hwnd: isize) -> Result<(), String> {
 }
 
 /// 更新播放状态
-pub fn update_playback_state(state: TaskbarPlaybackState) -> Result<(), String> {
+pub fn update_playback_state(state: TaskbarPlaybackState) -> Result<(), AppError> {
     let manager = get_taskbar_manager();
     let mut guard = manager
         .lock()

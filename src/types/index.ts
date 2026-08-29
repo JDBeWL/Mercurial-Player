@@ -352,10 +352,3 @@ export interface LibraryStats {
   totalPlaylists: number
   maxDepth: number
 }
-
-export interface ErrorStats {
-  total: number
-  byType: Record<string, number>
-  bySeverity: Record<string, number>
-  recent: Array<{ error: object; timestamp: string }>
-}

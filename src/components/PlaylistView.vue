@@ -111,6 +111,7 @@ import FileUtils from '../utils/fileUtils'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 import type { Track } from '../types'
+import { formatTime } from '../utils/format'
 
 // 处理后的 track 类型 (扩展自 Track, 添加缓存字段)
 interface ProcessedTrack extends Track {
@@ -120,7 +121,7 @@ interface ProcessedTrack extends Track {
 }
 
 const emit = defineEmits<{
-  (e: 'close'): void
+  close: []
 }>()
 
 const playerStore = usePlayerStore()
@@ -142,15 +143,7 @@ const queueInfoText = computed(() => {
   const total = playlist.value.reduce((sum, track) => sum + (track.duration || 0), 0)
   if (!total) return base
 
-  const hours = Math.floor(total / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  const seconds = Math.floor(total % 60)
-  const duration =
-    hours > 0
-      ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-      : `${minutes}:${String(seconds).padStart(2, '0')}`
-
-  return `${base} · ${duration}`
+  return `${base} · ${formatTime(total)}`
 })
 
 // 滚动容器引用

@@ -411,7 +411,7 @@ describe('useConfigStore', () => {
   describe('_getSaveableConfig', () => {
     it('excludes internal state fields', () => {
       const store = useConfigStore()
-      const config = store._getSaveableConfig() as Record<string, unknown>
+      const config = store._getSaveableConfig() as unknown as Record<string, unknown>
       expect(config).not.toHaveProperty('_isInitializing')
       expect(config).not.toHaveProperty('_isDirty')
       expect(config).not.toHaveProperty('_lastSavedConfig')

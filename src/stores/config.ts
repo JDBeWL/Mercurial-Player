@@ -4,6 +4,13 @@ import { load, type Store } from '@tauri-apps/plugin-store'
 import { useThemeStore } from './theme'
 import { useMusicLibraryStore } from './musicLibrary'
 import logger from '../utils/logger'
+import { debounce, type DebouncedFunction } from '../utils/function'
+import { deepClone, deepEqual } from '../utils/object'
+import {
+  createDefaultLyricsConfig,
+  ensureLyricsConfigDefaults,
+  migrateLyricsFieldsFromGeneral,
+} from '../utils/configDefaults'
 import { ErrorType, ErrorSeverity, handlePromise } from '../utils/errorHandler'
 import type {
   DirectoryScanConfig,
@@ -28,45 +35,6 @@ async function getStore(): Promise<Store> {
     })
   }
   return _storeInstance
-}
-
-// 防抖函数（带取消功能）
-interface DebouncedFunction<T extends (...args: unknown[]) => unknown> {
-  (...args: Parameters<T>): void
-  cancel: () => void
-}
-
-function debounce<T extends (...args: unknown[]) => unknown>(
-  func: T,
-  wait: number,
-): DebouncedFunction<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined
-  const debounced = function (this: unknown, ...args: Parameters<T>) {
-    clearTimeout(timeout)
-    timeout = setTimeout(() => func.apply(this, args), wait)
-  } as DebouncedFunction<T>
-  debounced.cancel = () => clearTimeout(timeout)
-  return debounced
-}
-
-// 深度比较两个对象是否相等
-function deepEqual(obj1: unknown, obj2: unknown): boolean {
-  if (obj1 === obj2) return true
-  if (typeof obj1 !== 'object' || typeof obj2 !== 'object') return false
-  if (obj1 === null || obj2 === null) return false
-
-  const keys1 = Object.keys(obj1 as object)
-  const keys2 = Object.keys(obj2 as object)
-
-  if (keys1.length !== keys2.length) return false
-
-  for (const key of keys1) {
-    if (!keys2.includes(key)) return false
-    if (!deepEqual((obj1 as Record<string, unknown>)[key], (obj2 as Record<string, unknown>)[key]))
-      return false
-  }
-
-  return true
 }
 
 interface ConfigState {
@@ -133,25 +101,8 @@ export const useConfigStore = defineStore('config', {
       coverCachePath: undefined, // 默认使用系统临时目录
     },
 
-    // 歌词设置
-    lyrics: {
-      enableOnlineFetch: false,
-      autoSaveOnlineLyrics: true,
-      preferTranslation: true,
-      onlineSource: 'netease',
-      lyricsAlignment: 'center',
-      lyricsFontFamily: 'Noto Sans SC',
-      translationFontFamily: '',
-      lyricsStyle: 'modern',
-      showNoLyricsHint: true,
-      showFetchLyricsButton: true,
-      desktopLyrics: {
-        enabled: false,
-        locked: true,
-        fontSize: 28,
-        colorPreset: 'auto' as const,
-      },
-    },
+    // 歌词设置(默认值统一由 utils/configDefaults 维护)
+    lyrics: createDefaultLyricsConfig(),
 
     // UI设置
     ui: {
@@ -194,7 +145,9 @@ export const useConfigStore = defineStore('config', {
 
   actions: {
     // 获取可保存的配置（排除内部状态）
-    _getSaveableConfig(): Partial<AppConfig> {
+    // 返回完整 AppConfig(而非 Partial):$state 本就包含全部配置分区,
+    // 标成 Partial 会让调用方的字段访问失去类型保护
+    _getSaveableConfig(): AppConfig {
       const { _isInitializing, _isDirty, _lastSavedConfig, _savePromise, ...config } = this.$state
 
       // 创建一个副本以避免修改当前状态，因为 UI 临时状态不应持久化
@@ -277,48 +230,9 @@ export const useConfigStore = defineStore('config', {
 
       if (configData) {
         // 迁移旧的歌词设置从 general 到 lyrics
-        if (configData.general) {
-          const general = configData.general as GeneralConfig & {
-            lyricsAlignment?: string
-            lyricsFontFamily?: string
-            lyricsStyle?: string
-          }
-          if (general.lyricsAlignment || general.lyricsFontFamily || general.lyricsStyle) {
-            if (!configData.lyrics) {
-              configData.lyrics = {
-                enableOnlineFetch: false,
-                autoSaveOnlineLyrics: true,
-                preferTranslation: true,
-                onlineSource: 'netease',
-                lyricsAlignment: 'center',
-                lyricsFontFamily: 'Noto Sans SC',
-                translationFontFamily: '',
-                lyricsStyle: 'modern',
-                showNoLyricsHint: true,
-                showFetchLyricsButton: true,
-              }
-            }
-            if (general.lyricsAlignment) {
-              configData.lyrics.lyricsAlignment =
-                general.lyricsAlignment as LyricsConfig['lyricsAlignment']
-              delete general.lyricsAlignment
-            }
-            if (general.lyricsFontFamily) {
-              configData.lyrics.lyricsFontFamily = general.lyricsFontFamily
-              delete general.lyricsFontFamily
-            }
-            if (general.lyricsStyle) {
-              configData.lyrics.lyricsStyle = general.lyricsStyle
-              delete general.lyricsStyle
-            }
-            if (!configData.lyrics.lyricsAlignment) configData.lyrics.lyricsAlignment = 'center'
-            if (!configData.lyrics.lyricsFontFamily)
-              configData.lyrics.lyricsFontFamily = 'Noto Sans SC'
-            if (!configData.lyrics.lyricsStyle) configData.lyrics.lyricsStyle = 'modern'
-
-            logger.info('Migrated lyrics settings from general to lyrics config')
-            this._markDirty()
-          }
+        if (migrateLyricsFieldsFromGeneral(configData)) {
+          logger.info('Migrated lyrics settings from general to lyrics config')
+          this._markDirty()
         }
 
         this.$patch(configData)
@@ -329,7 +243,7 @@ export const useConfigStore = defineStore('config', {
           this.ui.showConfigPanel = false
         }
 
-        this._lastSavedConfig = JSON.parse(JSON.stringify(this._getSaveableConfig()))
+        this._lastSavedConfig = deepClone(this._getSaveableConfig())
 
         const themeStore = useThemeStore()
         if (configData.general && configData.general.theme !== themeStore.themePreference) {
@@ -373,50 +287,15 @@ export const useConfigStore = defineStore('config', {
         await this._savePromise
       }
 
-      const configToSave = JSON.parse(JSON.stringify(this._getSaveableConfig()))
+      const configToSave = deepClone(this._getSaveableConfig())
       const themeStore = useThemeStore()
       configToSave.general.theme = themeStore.themePreference
 
-      // 确保 lyrics 配置包含所有必需字段
+      // 确保 lyrics 配置包含所有必需字段(旧版本配置文件兼容)
       if (!configToSave.lyrics) {
-        configToSave.lyrics = {
-          enableOnlineFetch: false,
-          autoSaveOnlineLyrics: true,
-          preferTranslation: true,
-          onlineSource: 'netease',
-          lyricsAlignment: 'center',
-          lyricsFontFamily: 'Noto Sans SC',
-          translationFontFamily: '',
-          lyricsStyle: 'modern',
-          showNoLyricsHint: true,
-          showFetchLyricsButton: true,
-          desktopLyrics: {
-            enabled: false,
-            locked: true,
-            fontSize: 28,
-          },
-        }
+        configToSave.lyrics = createDefaultLyricsConfig()
       } else {
-        if (!configToSave.lyrics.lyricsAlignment) configToSave.lyrics.lyricsAlignment = 'center'
-        if (!configToSave.lyrics.lyricsFontFamily)
-          configToSave.lyrics.lyricsFontFamily = 'Noto Sans SC'
-        if (configToSave.lyrics.translationFontFamily === undefined)
-          configToSave.lyrics.translationFontFamily = ''
-        if (!configToSave.lyrics.lyricsStyle) configToSave.lyrics.lyricsStyle = 'modern'
-        if (configToSave.lyrics.onlineSource === undefined)
-          configToSave.lyrics.onlineSource = 'netease'
-        if (configToSave.lyrics.showNoLyricsHint === undefined)
-          configToSave.lyrics.showNoLyricsHint = true
-        if (configToSave.lyrics.showFetchLyricsButton === undefined)
-          configToSave.lyrics.showFetchLyricsButton = true
-        if (!configToSave.lyrics.desktopLyrics) {
-          configToSave.lyrics.desktopLyrics = {
-            enabled: false,
-            locked: true,
-            fontSize: 28,
-            colorPreset: 'auto' as const,
-          }
-        }
+        configToSave.lyrics = ensureLyricsConfigDefaults(configToSave.lyrics)
       }
 
       // 主存储：plugin-store
@@ -465,7 +344,7 @@ export const useConfigStore = defineStore('config', {
 
     async exportConfig(filePath: string): Promise<void> {
       try {
-        const configToExport = JSON.parse(JSON.stringify(this._getSaveableConfig()))
+        const configToExport = deepClone(this._getSaveableConfig())
         await invoke('export_config', { config: configToExport, filePath })
         logger.info('Configuration exported successfully')
       } catch (error) {
@@ -493,28 +372,29 @@ export const useConfigStore = defineStore('config', {
       this._markDirty()
     },
 
-    setDirectoryScanConfig(config: Partial<DirectoryScanConfig>): void {
-      this.directoryScan = { ...this.directoryScan, ...config }
+    /**
+     * 通用的"合并分区 → 标脏 → 自动保存"逻辑。
+     * 各 setXxxConfig 只负责指明目标分区与补丁,不再各自重复收尾代码。
+     */
+    _patchSection<K extends keyof AppConfig>(section: K, patch: Partial<AppConfig[K]>): void {
+      const state = this.$state as unknown as AppConfig
+      state[section] = { ...state[section], ...patch }
       this._markDirty()
       if (this.general.autoSaveConfig && !this._isInitializing) {
         this.saveConfig()
       }
+    },
+
+    setDirectoryScanConfig(config: Partial<DirectoryScanConfig>): void {
+      this._patchSection('directoryScan', config)
     },
 
     setTitleExtractionConfig(config: Partial<TitleExtractionConfig>): void {
-      this.titleExtraction = { ...this.titleExtraction, ...config }
-      this._markDirty()
-      if (this.general.autoSaveConfig && !this._isInitializing) {
-        this.saveConfig()
-      }
+      this._patchSection('titleExtraction', config)
     },
 
     setPlaylistConfig(config: Partial<PlaylistConfig>): void {
-      this.playlist = { ...this.playlist, ...config }
-      this._markDirty()
-      if (this.general.autoSaveConfig && !this._isInitializing) {
-        this.saveConfig()
-      }
+      this._patchSection('playlist', config)
     },
 
     toggleSortOrder(): void {
@@ -526,43 +406,25 @@ export const useConfigStore = defineStore('config', {
     },
 
     setGeneralConfig(config: Partial<GeneralConfig>): void {
-      this.general = { ...this.general, ...config }
-      this._markDirty()
-      if (this.general.autoSaveConfig && !this._isInitializing) {
-        this.saveConfig()
-      }
+      this._patchSection('general', config)
     },
 
     setAudioConfig(config: Partial<AudioConfig>): void {
-      this.audio = { ...this.audio, ...config }
-      this._markDirty()
-      if (this.general.autoSaveConfig && !this._isInitializing) {
-        this.saveConfig()
-      }
+      this._patchSection('audio', config)
     },
 
     setLyricsConfig(config: Partial<LyricsConfig>): void {
-      this.lyrics = { ...this.lyrics, ...config }
-      this._markDirty()
-      if (this.general.autoSaveConfig && !this._isInitializing) {
-        this.saveConfig()
-      }
+      this._patchSection('lyrics', config)
     },
 
     setDesktopLyricsConfig(config: Partial<DesktopLyricsConfig>): void {
-      if (!this.lyrics.desktopLyrics) {
-        this.lyrics.desktopLyrics = {
-          enabled: false,
-          locked: true,
-          fontSize: 28,
-          colorPreset: 'auto' as const,
-        }
+      const desktopLyrics = this.lyrics.desktopLyrics ?? {
+        enabled: false,
+        locked: true,
+        fontSize: 28,
+        colorPreset: 'auto' as const,
       }
-      this.lyrics.desktopLyrics = { ...this.lyrics.desktopLyrics, ...config }
-      this._markDirty()
-      if (this.general.autoSaveConfig && !this._isInitializing) {
-        this.saveConfig()
-      }
+      this._patchSection('lyrics', { desktopLyrics: { ...desktopLyrics, ...config } })
     },
 
     markInitializationComplete(): void {

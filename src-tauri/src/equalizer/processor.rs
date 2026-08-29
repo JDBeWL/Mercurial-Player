@@ -14,25 +14,6 @@ pub const EQ_Q_VALUES: [f32; EQ_BAND_COUNT] = [0.7, 0.7, 0.8, 0.9, 1.0, 1.0, 1.1
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub struct EqBand {
-    pub frequency: f32,
-    pub gain: f32,
-    pub q: f32,
-}
-
-impl Default for EqBand {
-    fn default() -> Self {
-        Self {
-            frequency: 1000.0,
-            gain: 0.0,
-            q: 1.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct EqPreset {
     pub name: String,
     pub gains: [f32; EQ_BAND_COUNT],

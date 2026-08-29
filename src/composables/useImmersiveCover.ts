@@ -3,6 +3,7 @@ import { readFile } from '@tauri-apps/plugin-fs'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import createPica from 'pica'
 import CoverUpscaleWorker from '../workers/coverUpscale.worker?worker'
+import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
 
 /**
  * 沉浸式封面高清放大。
@@ -171,8 +172,9 @@ const ensureWorker = (): Worker | null => {
         workerBroken = true
         try {
           w.terminate()
-        } catch {
-          /* ignore */
+        } catch (e) {
+          // 终止失败仅是资源清理问题，不影响回退路径
+          errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
         }
         upscaleWorker = null
         job.reject(new Error(ev.data.error))
@@ -191,13 +193,16 @@ const ensureWorker = (): Worker | null => {
       failPendingJobs('upscale worker failed to load')
       try {
         w.terminate()
-      } catch {
-        /* ignore */
+      } catch (e) {
+        // 终止失败仅是资源清理问题，不影响回退路径
+        errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
       }
     }
     upscaleWorker = w
     return w
-  } catch {
+  } catch (e) {
+    // worker 创建失败：停用通道，后续请求走主线程回退路径
+    errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
     workerBroken = true
     return null
   }
@@ -227,7 +232,9 @@ const upscaleViaWorker = (path: string, targetSide: number): Promise<string | nu
 const upscaleCover = async (path: string, targetSide: number): Promise<string | null> => {
   try {
     return await upscaleViaWorker(path, targetSide)
-  } catch {
+  } catch (e) {
+    // worker 通道失败（不可用/超时/报错）：按设计回退主线程路径
+    errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
     return upscaleCoverOnMainThread(path, targetSide)
   }
 }
@@ -279,8 +286,9 @@ export function useImmersiveCover(
         objectUrl = url
         coverDisplayUrl.value = url
       })
-      .catch(() => {
+      .catch((e) => {
         // 处理失败：保留原始 URL
+        errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
       })
   }
 

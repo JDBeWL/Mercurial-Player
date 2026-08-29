@@ -4,9 +4,10 @@
 //! 统一错误类型；命令层通过 [`AppError::Serialize`] 实现序列化为 Display 字符串，
 //! 与历史 `Result<T, String>` 在 IPC 上的表现一致，前端契约不变。
 //!
-//! 尚未迁移的模块（media/system/taskbar 核心实现）仍返回 `Result<T, String>`，
-//! 命令层通过 `From<String>` 自动转换；`From<AppError> for String` 保证反向兼容，
-//! 新代码可在内部返回 `AppError` 并用 `?` 直接接入旧签名。
+//! 全部核心模块（media/system/taskbar/audio 内部实现）均已迁移到 `AppError`。
+//! `From<String> for AppError` 与 `From<AppError> for String` 双向转换保证新旧
+//! 签名互通：字符串错误经 `?` 自动进入 `Other` 变体（Display 原样输出，不改变
+//! IPC 错误文案），旧 `Result<T, String>` 签名也可直接用 `?` 接收 `AppError`。
 //!
 //! ## 示例
 //!

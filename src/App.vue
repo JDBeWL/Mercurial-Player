@@ -285,7 +285,9 @@
               ? 'error'
               : notification.severity === 'warning'
                 ? 'warning'
-                : 'info'
+                : notification.severity === 'success'
+                  ? 'check_circle'
+                  : 'info'
           }}
         </span>
         <span class="error-message">{{ notification.message }}</span>
@@ -303,8 +305,9 @@ import { storeToRefs } from 'pinia'
 import { usePlayerStore } from './stores/player'
 import { useThemeStore } from './stores/theme'
 import { useConfigStore } from './stores/config'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { useErrorNotification } from './composables/useErrorNotification'
+import errorHandler, { ErrorSeverity } from './utils/errorHandler'
 import { useTrackInfo } from './composables/useTrackInfo'
 import { useLyrics } from './composables/useLyrics'
 import { useAutoUpdate } from './composables/useAutoUpdate'
@@ -312,6 +315,7 @@ import { useDesktopLyrics } from './composables/useDesktopLyrics'
 import { useWindowControls } from './composables/useWindowControls'
 import { useAlbumArtInteraction } from './composables/useAlbumArtInteraction'
 import { useDominantColor } from './composables/useDominantColor'
+import { useImmersiveAutoHide } from '@/composables/useImmersiveAutoHide'
 import { useImmersiveCover } from './composables/useImmersiveCover'
 import { useGlobalKeyboard } from './composables/useGlobalKeyboard'
 import { useAppLifecycle } from './composables/useAppLifecycle'
@@ -400,88 +404,9 @@ const handleCoverKeydown = (e: KeyboardEvent): void => {
   }
 }
 
-// ===== 沉浸式模式：控制栏自动隐藏 =====
-const IMMERSIVE_IDLE_DELAY = 3000 // 无操作隐藏延时（ms）
-const IMMERSIVE_TOP_AREA = 96 // 顶部控制栏热区高度（覆盖顶栏及其下方缓冲区）
-const IMMERSIVE_BOTTOM_AREA = 140 // 底部控制栏热区高度（覆盖磨砂玻璃底栏及其上方缓冲区）
-
-const immersiveControlsVisible = ref(true)
-let immersiveHideTimer: ReturnType<typeof setTimeout> | null = null
-let immersivePointerY = -1
-
-// 鼠标是否位于顶/底控制栏热区（悬停时不隐藏，保证可点击）
-const immersivePointerInControls = (): boolean => {
-  if (immersivePointerY < 0) return false
-  return (
-    immersivePointerY <= IMMERSIVE_TOP_AREA ||
-    immersivePointerY >= window.innerHeight - IMMERSIVE_BOTTOM_AREA
-  )
-}
-
-// 用户活动：显示控制栏并重置隐藏计时
-const markImmersiveActivity = (): void => {
-  immersiveControlsVisible.value = true
-  if (immersiveHideTimer) clearTimeout(immersiveHideTimer)
-  immersiveHideTimer = setTimeout(() => {
-    immersiveHideTimer = null
-    // 鼠标仍悬停在控制栏区域时继续等待，否则隐藏
-    if (immersivePointerInControls()) {
-      markImmersiveActivity()
-      return
-    }
-    immersiveControlsVisible.value = false
-  }, IMMERSIVE_IDLE_DELAY)
-}
-
-const handleImmersivePointerMove = (e: MouseEvent): void => {
-  immersivePointerY = e.clientY
-  markImmersiveActivity()
-}
-
-// 鼠标移出窗口：清空热区判定。
-const handleImmersivePointerLeave = (): void => {
-  immersivePointerY = -1
-  markImmersiveActivity()
-}
-
-// 窗口失焦：用户已转向其他窗口（如点击桌面），立即隐藏控制栏
-const handleImmersiveBlur = (): void => {
-  immersivePointerY = -1
-  if (immersiveHideTimer) {
-    clearTimeout(immersiveHideTimer)
-    immersiveHideTimer = null
-  }
-  immersiveControlsVisible.value = false
-}
-
-// 窗口重新聚焦：恢复控制栏并重新进入空闲计时
-const handleImmersiveFocus = (): void => {
-  markImmersiveActivity()
-}
-
-// 进入/退出沉浸模式时挂载/卸载自动隐藏逻辑
-watch(immersiveCover, (active) => {
-  if (active) {
-    immersiveControlsVisible.value = true
-    immersivePointerY = -1
-    window.addEventListener('mousemove', handleImmersivePointerMove, { passive: true })
-    document.addEventListener('mouseleave', handleImmersivePointerLeave)
-    window.addEventListener('blur', handleImmersiveBlur)
-    window.addEventListener('focus', handleImmersiveFocus)
-    markImmersiveActivity()
-  } else {
-    window.removeEventListener('mousemove', handleImmersivePointerMove)
-    document.removeEventListener('mouseleave', handleImmersivePointerLeave)
-    window.removeEventListener('blur', handleImmersiveBlur)
-    window.removeEventListener('focus', handleImmersiveFocus)
-    if (immersiveHideTimer) {
-      clearTimeout(immersiveHideTimer)
-      immersiveHideTimer = null
-    }
-    immersiveControlsVisible.value = true
-    immersivePointerY = -1
-  }
-})
+// ===== 沉浸式模式：控制栏自动隐藏（状态机实现见 composables/useImmersiveAutoHide） =====
+const { immersiveControlsVisible, markImmersiveActivity, cleanup: cleanupImmersiveAutoHide } =
+  useImmersiveAutoHide(immersiveCover)
 
 // 打开设置时退出沉浸模式（设置面板为不透明界面，顶栏需恢复底色），关闭时恢复
 const wasImmersiveBeforeSettings = ref(false)
@@ -514,14 +439,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleCoverKeydown)
-  window.removeEventListener('mousemove', handleImmersivePointerMove)
-  document.removeEventListener('mouseleave', handleImmersivePointerLeave)
-  window.removeEventListener('blur', handleImmersiveBlur)
-  window.removeEventListener('focus', handleImmersiveFocus)
-  if (immersiveHideTimer) {
-    clearTimeout(immersiveHideTimer)
-    immersiveHideTimer = null
-  }
+  cleanupImmersiveAutoHide()
 })
 
 const toggleViewMode = () => {
@@ -627,11 +545,34 @@ const formattedAudioInfo = computed(() => {
   return parts.join(' | ')
 })
 
-// 检查当前歌曲文件是否存在
-const isTrackFileExists = computed(() => {
-  if (!currentTrack.value) return true
-  return !!currentTrack.value.path
-})
+// 检查当前歌曲文件是否存在：通过后端命令异步校验真实文件，
+// 结果写入 ref 供模板绑定。切歌时自增请求序号防竞态——快速切歌时，
+// 旧曲目的异步检查结果不会覆盖新曲目的状态。
+const isTrackFileExists = ref(true)
+let fileCheckSeq = 0
+
+watch(
+  () => currentTrack.value?.path,
+  (path) => {
+    const requestId = ++fileCheckSeq
+    // 切歌/清空曲目时先复位为"存在"，避免展示上一首的过期结论
+    isTrackFileExists.value = true
+    if (!path) return
+
+    invoke<boolean>('check_file_exists', { path })
+      .then((exists) => {
+        // 仅当仍是最新一次检查时才写入结果
+        if (requestId === fileCheckSeq) {
+          isTrackFileExists.value = exists
+        }
+      })
+      .catch((e) => {
+        // 检查失败（如非 Tauri 环境）时不打扰用户，保持"存在"的默认状态
+        errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
+      })
+  },
+  { immediate: true },
+)
 
 // 监听当前音轨变化，自动处理标题信息
 const stopWatchTrack = watchTrack(() => currentTrack.value)
@@ -1321,6 +1262,12 @@ useAppLifecycle({
   border-left: 4px solid var(--md-sys-color-on-primary-container);
   background-color: var(--md-sys-color-secondary-container);
   color: var(--md-sys-color-on-primary-container);
+}
+
+.error-notification--success {
+  border-left: 4px solid #22c55e;
+  background-color: #dcfce7;
+  color: #166534;
 }
 
 .error-icon {

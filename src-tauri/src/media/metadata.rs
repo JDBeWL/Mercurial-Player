@@ -2,6 +2,7 @@
 //!
 //! 提供音轨元数据结构和处理函数。
 
+use crate::error::AppError;
 use crate::security::{has_allowed_extension, is_sensitive_path};
 use lofty::picture::Picture;
 use lofty::prelude::{Accessor, AudioFile, TaggedFileExt};
@@ -95,7 +96,7 @@ fn load_metadata_cache() -> MetadataCache {
 }
 
 /// 保存元数据缓存
-fn save_metadata_cache(cache: &MetadataCache) -> Result<(), String> {
+fn save_metadata_cache(cache: &MetadataCache) -> Result<(), AppError> {
     let cache_path = metadata_cache_path();
 
     // 确保父目录存在
@@ -143,7 +144,7 @@ pub fn save_metadata_to_cache(path: &str, metadata: &TrackMetadata) {
 }
 
 /// 清理元数据缓存中不存在的文件
-pub fn clean_metadata_cache() -> Result<usize, String> {
+pub fn clean_metadata_cache() -> Result<usize, AppError> {
     let mut cache = load_metadata_cache();
     let original_count = cache.entries.len();
 
@@ -161,7 +162,7 @@ pub fn clean_metadata_cache() -> Result<usize, String> {
 }
 
 /// 清除所有元数据缓存
-pub fn clear_metadata_cache() -> Result<(), String> {
+pub fn clear_metadata_cache() -> Result<(), AppError> {
     let cache_path = metadata_cache_path();
     if cache_path.exists() {
         fs::remove_file(&cache_path).map_err(|e| format!("删除缓存文件失败: {e}"))?;
@@ -213,7 +214,7 @@ fn get_cached_entry(path: &str) -> Option<CachedMetadata> {
 }
 
 /// 将内存缓存持久化到磁盘（在锁外执行 I/O，不阻塞其他读者）
-fn flush_memory_cache() -> Result<(), String> {
+fn flush_memory_cache() -> Result<(), AppError> {
     // 读锁下克隆缓存快照，然后释放锁
     let snapshot = {
         let lock = lock_or_log!(MEMORY_CACHE.read());
@@ -250,20 +251,22 @@ pub fn save_metadata_to_memory_cache(path: &str, metadata: &TrackMetadata) {
 }
 
 /// 批量保存内存缓存到磁盘
-pub fn flush_metadata_cache() -> Result<(), String> {
+pub fn flush_metadata_cache() -> Result<(), AppError> {
     flush_memory_cache()
 }
 
 /// 设置自定义封面缓存路径
 ///
 /// 校验路径合法性，防止缓存清理逻辑被引导到敏感目录执行任意删除
-pub fn set_cover_cache_path(path: Option<String>) -> Result<(), String> {
+pub fn set_cover_cache_path(path: Option<String>) -> Result<(), AppError> {
     if let Some(p) = &path {
         if p.is_empty() {
-            return Err("缓存路径不能为空".to_string());
+            return Err("缓存路径不能为空".to_string().into());
         }
         if is_sensitive_path(p) {
-            return Err("安全限制：不允许使用敏感目录作为缓存路径".to_string());
+            return Err("安全限制：不允许使用敏感目录作为缓存路径"
+                .to_string()
+                .into());
         }
     }
 
@@ -351,7 +354,7 @@ struct CacheFileInfo {
 }
 
 /// 清理过期的缓存文件
-fn clean_expired_cache_files() -> Result<usize, String> {
+fn clean_expired_cache_files() -> Result<usize, AppError> {
     let cache_dir = cover_cache_dir();
 
     if !cache_dir.exists() {
@@ -396,7 +399,7 @@ fn clean_expired_cache_files() -> Result<usize, String> {
 }
 
 /// 获取缓存文件列表，按最后访问时间排序（最旧的在前）
-fn get_cache_files_sorted() -> Result<Vec<CacheFileInfo>, String> {
+fn get_cache_files_sorted() -> Result<Vec<CacheFileInfo>, AppError> {
     let cache_dir = cover_cache_dir();
     let mut files = Vec::new();
 
@@ -435,7 +438,7 @@ fn get_cache_files_sorted() -> Result<Vec<CacheFileInfo>, String> {
 }
 
 /// 清理超出大小限制的缓存文件
-fn clean_cache_by_size(max_cache_size_mb: u64) -> Result<usize, String> {
+fn clean_cache_by_size(max_cache_size_mb: u64) -> Result<usize, AppError> {
     let max_cache_size_bytes = max_cache_size_mb * 1024 * 1024;
     let mut files = get_cache_files_sorted()?;
     let mut total_size: u64 = files.iter().map(|f| f.size).sum();
@@ -465,7 +468,7 @@ fn clean_cache_by_size(max_cache_size_mb: u64) -> Result<usize, String> {
 ///
 /// # Arguments
 /// * max_cache_size_mb - 最大缓存大小（单位：MB），如果为 None 则使用默认值 1GB
-pub fn clean_cover_cache(max_cache_size_mb: Option<u64>) -> Result<usize, String> {
+pub fn clean_cover_cache(max_cache_size_mb: Option<u64>) -> Result<usize, AppError> {
     let max_size = max_cache_size_mb.unwrap_or(DEFAULT_MAX_CACHE_SIZE_MB);
     log::info!("开始清理封面缓存（最大大小: {max_size}MB）...");
 
@@ -503,7 +506,7 @@ fn get_picture_hash(picture: &Picture) -> u64 {
     hasher.finish()
 }
 
-fn get_cover_cache_path(_audio_path: &Path, picture: &Picture) -> Result<PathBuf, String> {
+fn get_cover_cache_path(_audio_path: &Path, picture: &Picture) -> Result<PathBuf, AppError> {
     // 使用封面数据哈希作为缓存键，相同封面的不同歌曲会共享缓存
     let hash = get_picture_hash(picture);
     let ext = cover_extension_from_mime(picture.mime_type().map(lofty::picture::MimeType::as_str));
@@ -512,7 +515,7 @@ fn get_cover_cache_path(_audio_path: &Path, picture: &Picture) -> Result<PathBuf
     Ok(cache_dir.join(format!("{hash}.{ext}")))
 }
 
-fn extract_cover_to_cache(audio_path: &Path, picture: &Picture) -> Result<String, String> {
+fn extract_cover_to_cache(audio_path: &Path, picture: &Picture) -> Result<String, AppError> {
     let cache_file = get_cover_cache_path(audio_path, picture)?;
     log::debug!("Cache file path: {}", cache_file.display());
 
@@ -531,7 +534,7 @@ fn extract_cover_to_cache(audio_path: &Path, picture: &Picture) -> Result<String
 ///
 /// 默认轻量模式：不提取封面，降低扫描负担，避免前端长时间卡顿。
 /// 优先从缓存读取，如果文件未修改则直接使用缓存。
-pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> {
+pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, AppError> {
     // 首先尝试从缓存获取
     if let Some(cached) = get_metadata_from_cache(path) {
         log::debug!("使用缓存的元数据: {path}");
@@ -548,7 +551,7 @@ pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, String> 
 }
 
 /// 获取音轨元数据（包含封面路径）
-pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, String> {
+pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, AppError> {
     // 首先尝试从缓存获取
     if let Some(mut cached) = get_metadata_from_cache(path) {
         log::debug!("使用缓存的元数据: {path}");
@@ -601,7 +604,7 @@ pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, String
 fn get_track_metadata_with_options(
     path: &str,
     include_cover: bool,
-) -> Result<TrackMetadata, String> {
+) -> Result<TrackMetadata, AppError> {
     let file_path = Path::new(path);
 
     let tagged_file = Probe::open(file_path)
@@ -653,7 +656,7 @@ fn get_track_metadata_with_options(
 }
 
 /// 获取音频封面缓存路径（按需提取）
-pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, String> {
+pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, AppError> {
     let file_path = Path::new(path);
     log::debug!("Getting cover for: {path}");
 
@@ -680,15 +683,15 @@ pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, Strin
 }
 
 /// 提取音频文件的封面并保存到指定路径
-pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<String, String> {
+pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<String, AppError> {
     // 校验输出路径：显式扩展名必须是图片格式，且不允许写入敏感目录
     if Path::new(output_path).extension().is_some()
         && !has_allowed_extension(output_path, &COVER_OUTPUT_EXTENSIONS)
     {
-        return Err("封面输出路径必须是图片文件".to_string());
+        return Err("封面输出路径必须是图片文件".to_string().into());
     }
     if is_sensitive_path(output_path) {
-        return Err("安全限制：不允许写入敏感目录".to_string());
+        return Err("安全限制：不允许写入敏感目录".to_string().into());
     }
 
     let file_path = Path::new(audio_path);

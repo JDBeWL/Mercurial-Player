@@ -274,9 +274,22 @@ import { computed, ref, onMounted } from 'vue'
 import { useConfigStore } from '../../stores/config'
 import { setLocale } from '../../i18n'
 import logger from '../../utils/logger'
+import { formatKbMb } from '../../utils/format'
+import { saveConfigSafely } from '../../utils/errorMessages'
+import { useSliderFill } from '../../composables/useSliderFill'
 import MD3Select from '../MD3Select.vue'
-import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
+import {
+  cleanCoverCache,
+  clearMetadataCache as clearMetadataCacheCommand,
+  getMetadataCacheStats,
+  getTempDir,
+  setCoverCachePath,
+} from '../../services/mediaService'
+import {
+  clearFontCaches as clearFontCachesCommand,
+  getFontCacheStats,
+} from '../../services/appService'
 import type { ImmersiveColorScheme } from '../../types'
 
 const configStore = useConfigStore()
@@ -316,11 +329,10 @@ const coverCacheSizeMb = computed({
   },
 })
 
+const cacheFillPercent = useSliderFill(1024, 8192, coverCacheSizeMb)
+
 const cacheSliderStyle = computed(() => {
-  const min = 1024
-  const max = 8192
-  const value = coverCacheSizeMb.value
-  const percentage = ((value - min) / (max - min)) * 100
+  const percentage = cacheFillPercent.value
   return {
     background: `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`,
   }
@@ -349,7 +361,7 @@ const tempDirPath = ref('')
 
 const loadTempDirPath = async () => {
   try {
-    tempDirPath.value = await invoke<string>('get_temp_dir_command')
+    tempDirPath.value = await getTempDir()
   } catch (error) {
     tempDirPath.value = t('config.systemTempDir')
     logger.error('Failed to get temp dir:', error)
@@ -365,14 +377,12 @@ const metadataCacheDesc = computed(() => {
   if (count === 0) {
     return t('config.metadataCacheEmpty')
   }
-  const sizeStr =
-    size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(2)} MB` : `${(size / 1024).toFixed(2)} KB`
-  return t('config.metadataCacheStats', { count, size: sizeStr })
+  return t('config.metadataCacheStats', { count, size: formatKbMb(size) })
 })
 
 const loadMetadataCacheStats = async () => {
   try {
-    const [count, size] = await invoke<[number, number]>('get_metadata_cache_stats_command')
+    const [count, size] = await getMetadataCacheStats()
     metadataCacheStats.value = { count, size }
   } catch (error) {
     logger.error('Failed to load metadata cache stats:', error)
@@ -387,14 +397,12 @@ const fontCacheDesc = computed(() => {
   if (size === 0) {
     return t('config.fontCacheEmpty')
   }
-  const sizeStr =
-    size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(2)} MB` : `${(size / 1024).toFixed(2)} KB`
-  return t('config.fontCacheStats', { size: sizeStr })
+  return t('config.fontCacheStats', { size: formatKbMb(size) })
 })
 
 const loadFontCacheStats = async () => {
   try {
-    fontCacheStats.value = await invoke<{ extractCacheBytes: number }>('get_font_cache_stats')
+    fontCacheStats.value = await getFontCacheStats()
   } catch (error) {
     logger.error('Failed to load font cache stats:', error)
   }
@@ -405,7 +413,7 @@ const clearFontCaches = async () => {
 
   isClearingFontCache.value = true
   try {
-    fontCacheStats.value = await invoke<{ extractCacheBytes: number }>('clear_font_caches')
+    fontCacheStats.value = await clearFontCachesCommand()
     logger.info('Font caches cleared')
   } catch (error) {
     logger.error('Failed to clear font caches:', error)
@@ -414,13 +422,7 @@ const clearFontCaches = async () => {
   }
 }
 
-const saveConfig = async () => {
-  try {
-    await configStore.saveConfigNow()
-  } catch (error) {
-    logger.error('Failed to save config:', error)
-  }
-}
+const saveConfig = () => saveConfigSafely(configStore)
 
 const toggleSetting = async (key: string) => {
   ;(configStore.general as Record<string, unknown>)[key] = !(
@@ -475,9 +477,7 @@ const clearCoverCache = async () => {
 
   isClearingCache.value = true
   try {
-    const count = await invoke<number>('clean_cover_cache_command', {
-      maxCacheSizeMb: configStore.general.coverCacheSizeMb,
-    })
+    const count = await cleanCoverCache(configStore.general.coverCacheSizeMb)
     logger.info(`Cleaned ${count} cover cache files`)
   } catch (error) {
     logger.error('Failed to clear cover cache:', error)
@@ -497,7 +497,7 @@ const selectCachePath = async () => {
     if (selected && typeof selected === 'string') {
       coverCachePath.value = selected
       // 通知后端更新缓存路径
-      await invoke('set_cover_cache_path_command', { path: selected })
+      await setCoverCachePath(selected)
       await saveConfig()
     }
   } catch (error) {
@@ -508,7 +508,7 @@ const selectCachePath = async () => {
 const resetCachePath = async () => {
   coverCachePath.value = undefined
   // 通知后端恢复默认路径
-  await invoke('set_cover_cache_path_command', { path: null })
+  await setCoverCachePath(null)
   await saveConfig()
 }
 
@@ -517,7 +517,7 @@ const clearMetadataCache = async () => {
 
   isClearingMetadataCache.value = true
   try {
-    await invoke('clear_metadata_cache_command')
+    await clearMetadataCacheCommand()
     logger.info('Metadata cache cleared')
     await loadMetadataCacheStats()
   } catch (error) {

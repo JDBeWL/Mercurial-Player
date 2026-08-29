@@ -3,50 +3,18 @@ import { usePlayerStore } from '@/stores/player'
 import { useConfigStore } from '@/stores/config'
 import { FileUtils } from '@/utils/fileUtils'
 import { neteaseApi } from '@/utils/neteaseApi'
-import { LyricsParser } from '@/utils/lyricsParser'
+import { LyricsParser, findLyricIndex } from '@/utils/lyricsParser'
+import { LRUCache } from '@/utils/lruCache'
 import { invoke } from '@tauri-apps/api/core'
 import logger from '@/utils/logger'
 import type { LyricLine, Track } from '@/types'
 
-/**
- * 简单的 LRU 缓存，用于在线歌词
- */
-class LyricsLRUCache {
-  private maxSize: number
-  private cache: Map<string, { lrc: string; parsed: LyricLine[]; source: string }>
-
-  constructor(maxSize: number = 50) {
-    this.maxSize = maxSize
-    this.cache = new Map()
-  }
-
-  get(key: string): { lrc: string; parsed: LyricLine[]; source: string } | null {
-    if (!this.cache.has(key)) return null
-    // 移到末尾（最近使用）
-    const value = this.cache.get(key)!
-    this.cache.delete(key)
-    this.cache.set(key, value)
-    return value
-  }
-
-  set(key: string, value: { lrc: string; parsed: LyricLine[]; source: string }): void {
-    if (this.cache.has(key)) {
-      this.cache.delete(key)
-    } else if (this.cache.size >= this.maxSize) {
-      // 删除最旧的
-      const firstKey = this.cache.keys().next().value
-      if (firstKey) this.cache.delete(firstKey)
-    }
-    this.cache.set(key, value)
-  }
-
-  delete(key: string): void {
-    this.cache.delete(key)
-  }
-}
-
-// 模块级别的在线歌词缓存，限制最多50首，避免内存泄漏
-const onlineLyricsCache = new LyricsLRUCache(50)
+// 模块级别的在线歌词缓存，限制最多50首，避免内存泄漏。
+// 复用通用 LRU 实现;TTL 传 Infinity 表示本会话内不过期(歌词内容不可变)。
+const onlineLyricsCache = new LRUCache<{ lrc: string; parsed: LyricLine[]; source: string }>(
+  50,
+  Infinity,
+)
 
 // 模块级别的共享状态：
 // 所有 useLyrics 实例共享同一份 lyrics / loading / activeIndex / lyricsSource / onlineLyricsError,
@@ -240,18 +208,7 @@ function initializeSharedWatchers(): void {
       const adjustedTime = currentTime - offset
 
       // 二分查找当前歌词索引
-      let l = 0,
-        r = sharedLyrics.value.length - 1,
-        idx = -1
-      while (l <= r) {
-        const mid = (l + r) >> 1
-        if (sharedLyrics.value[mid].time <= adjustedTime) {
-          idx = mid
-          l = mid + 1
-        } else {
-          r = mid - 1
-        }
-      }
+      const idx = findLyricIndex(sharedLyrics.value, adjustedTime)
 
       if (idx !== sharedActiveIndex.value) {
         sharedActiveIndex.value = idx

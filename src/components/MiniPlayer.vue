@@ -110,6 +110,7 @@ import { usePlayerStore } from '../stores/player'
 import { useConfigStore } from '../stores/config'
 import { useTrackInfo } from '../composables/useTrackInfo'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { formatTime } from '../utils/format'
 
 const playerStore = usePlayerStore()
 const configStore = useConfigStore()
@@ -145,14 +146,6 @@ const previewTime = computed<number>(() => {
   if (!duration.value) return 0
   return (dragPercentage.value / 100) * duration.value
 })
-
-// 格式化时间
-const formatTime = (seconds: number): string => {
-  if (!seconds || isNaN(seconds)) return '0:00'
-  const mins = Math.floor(seconds / 60)
-  const secs = Math.floor(seconds % 60)
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
 
 // 方法
 const exitMiniMode = (): void => {

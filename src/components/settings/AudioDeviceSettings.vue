@@ -140,18 +140,21 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import {
+  getAudioDevices,
+  getCurrentAudioDevice,
+  getExclusiveMode,
+  getFadeEnabled,
+  setAudioDevice,
+  setFadeEnabled,
+  toggleExclusiveMode as toggleExclusiveModeCommand,
+  type AudioDevice,
+} from '../../services/audioService'
+import { getPlatform } from '../../services/appService'
 import { usePlayerStore } from '../../stores/player'
 import { useConfigStore } from '../../stores/config'
 import logger from '../../utils/logger'
-
-// 音频设备类型
-interface AudioDevice {
-  name: string
-  isDefault: boolean
-  supportsExclusiveMode: boolean
-  audioModeStatus: string
-}
+import { getErrorMessage } from '../../utils/errorMessages'
 
 const playerStore = usePlayerStore()
 const configStore = useConfigStore()
@@ -177,15 +180,15 @@ const fetchAudioDevices = async (): Promise<void> => {
   error.value = null
 
   try {
-    const devices = await invoke<AudioDevice[]>('get_audio_devices')
+    const devices = await getAudioDevices()
     audioDevices.value = devices
 
     // 获取当前设备
-    const current = await invoke<AudioDevice>('get_current_audio_device')
+    const current = await getCurrentAudioDevice()
     currentDevice.value = current
   } catch (err) {
     logger.error('Failed to fetch audio devices:', err)
-    error.value = err instanceof Error ? err.message : 'Unknown error'
+    error.value = getErrorMessage(err, 'Unknown error')
   } finally {
     loading.value = false
   }
@@ -201,14 +204,11 @@ const selectDevice = async (device: AudioDevice): Promise<void> => {
   error.value = null
 
   try {
-    await invoke('set_audio_device', {
-      deviceName: device.name,
-      currentTime: playerStore.currentTime,
-    })
+    await setAudioDevice(device.name, playerStore.currentTime)
     currentDevice.value = device
   } catch (err) {
     logger.error('Failed to set audio device:', err)
-    error.value = err instanceof Error ? err.message : 'Unknown error'
+    error.value = getErrorMessage(err, 'Unknown error')
   } finally {
     loading.value = false
   }
@@ -217,7 +217,7 @@ const selectDevice = async (device: AudioDevice): Promise<void> => {
 // 检查是否需要重启以应用独占模式设置
 const checkRestartRequired = async (): Promise<void> => {
   try {
-    const activeExclusiveMode = await invoke<boolean>('get_exclusive_mode')
+    const activeExclusiveMode = await getExclusiveMode()
     // 如果当前活跃状态与 store 中的意向状态不一致，则需要重启
     restartRequired.value = activeExclusiveMode !== useExclusiveMode.value
   } catch (err) {
@@ -244,10 +244,7 @@ const toggleExclusiveMode = async (): Promise<void> => {
   }
 
   try {
-    await invoke('toggle_exclusive_mode', {
-      enabled: !useExclusiveMode.value,
-      currentTime: playerStore.currentTime,
-    })
+    await toggleExclusiveModeCommand(!useExclusiveMode.value, playerStore.currentTime)
 
     // 如果成功返回（说明切换到了当前已生效的状态），更新状态并清除提示
     useExclusiveMode.value = !useExclusiveMode.value
@@ -255,13 +252,13 @@ const toggleExclusiveMode = async (): Promise<void> => {
 
     // 重新获取当前设备信息以更新状态
     try {
-      const updatedDevice = await invoke<AudioDevice>('get_current_audio_device')
+      const updatedDevice = await getCurrentAudioDevice()
       currentDevice.value = updatedDevice
     } catch (deviceErr) {
       logger.error('Failed to update current device info:', deviceErr)
     }
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err)
+    const errorMessage = getErrorMessage(err, String(err))
 
     // 检查是否是需要重启的提示
     if (errorMessage.includes('RESTART_REQUIRED')) {
@@ -280,12 +277,12 @@ const toggleExclusiveMode = async (): Promise<void> => {
 const toggleFadeEnabled = async (): Promise<void> => {
   const newValue = !fadeEnabled.value
   try {
-    await invoke('set_fade_enabled', { enabled: newValue })
+    await setFadeEnabled(newValue)
     fadeEnabled.value = newValue
     configStore.setAudioConfig({ fadeEnabled: newValue })
   } catch (err) {
     logger.error('Failed to toggle fade enabled:', err)
-    error.value = err instanceof Error ? err.message : 'Failed to toggle fade'
+    error.value = getErrorMessage(err, 'Failed to toggle fade')
   }
 }
 
@@ -298,7 +295,7 @@ const refreshDevices = (): void => {
 onMounted(async () => {
   // 获取平台信息
   try {
-    currentPlatform.value = await invoke<string>('get_platform')
+    currentPlatform.value = await getPlatform()
     logger.debug('Detected platform:', currentPlatform.value)
   } catch (err) {
     logger.error('Failed to detect platform:', err)
@@ -310,7 +307,7 @@ onMounted(async () => {
     useExclusiveMode.value = configStore.audio.exclusiveMode
   } else {
     try {
-      useExclusiveMode.value = (await invoke<boolean>('get_exclusive_mode')) ?? false
+      useExclusiveMode.value = (await getExclusiveMode()) ?? false
     } catch (err) {
       logger.warn('Failed to get exclusive mode from backend:', err)
       useExclusiveMode.value = false
@@ -322,7 +319,7 @@ onMounted(async () => {
     fadeEnabled.value = configStore.audio.fadeEnabled
   } else {
     try {
-      fadeEnabled.value = (await invoke<boolean>('get_fade_enabled')) ?? true
+      fadeEnabled.value = (await getFadeEnabled()) ?? true
     } catch (err) {
       logger.warn('Failed to get fade enabled from backend:', err)
       fadeEnabled.value = true
@@ -337,7 +334,7 @@ onMounted(async () => {
 
   // 获取当前设备信息
   try {
-    currentDevice.value = await invoke<AudioDevice>('get_current_audio_device')
+    currentDevice.value = await getCurrentAudioDevice()
   } catch (err) {
     logger.error('Failed to get current audio device:', err)
   }

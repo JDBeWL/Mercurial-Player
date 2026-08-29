@@ -3,6 +3,7 @@
 //! 提供获取系统已安装字体列表，以及扫描软件同级 fonts/ 目录外部字体的功能。
 //! TTC/OTC 字体集合会在此处提取为单字体缓存文件，供前端按普通字体注册
 
+use crate::error::AppError;
 use std::collections::HashSet;
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -32,7 +33,7 @@ const FONT_EXTENSIONS: [&str; 4] = ["ttf", "otf", "woff", "woff2"];
 const COLLECTION_EXTENSIONS: [&str; 2] = ["ttc", "otc"];
 
 /// 获取外部字体目录路径（与可执行文件同级，约定为 fonts/，不存在时自动创建）
-pub fn get_external_fonts_dir() -> Result<PathBuf, String> {
+pub fn get_external_fonts_dir() -> Result<PathBuf, AppError> {
     let exe_path = std::env::current_exe().map_err(|e| format!("无法获取可执行文件路径: {e}"))?;
     let exe_dir = exe_path.parent().ok_or("无法获取可执行文件目录")?;
     let fonts_dir = exe_dir.join("fonts");
@@ -46,7 +47,7 @@ pub fn get_external_fonts_dir() -> Result<PathBuf, String> {
 }
 
 /// 列出软件同级 fonts/ 目录下的全部字体文件
-pub fn list_external_fonts() -> Result<Vec<ExternalFont>, String> {
+pub fn list_external_fonts() -> Result<Vec<ExternalFont>, AppError> {
     let fonts_dir = get_external_fonts_dir()?;
 
     let mut fonts = Vec::new();
@@ -382,7 +383,7 @@ pub fn font_extract_cache_size() -> u64 {
 
 /// 清空字体集合提取缓存目录（TTC/OTC 提取出的单字体成员文件），
 /// 返回释放的字节数。下次扫描 fonts/ 目录时按需重新提取
-pub fn clear_font_extract_cache() -> Result<u64, String> {
+pub fn clear_font_extract_cache() -> Result<u64, AppError> {
     let dir = get_font_extract_cache_dir()?;
     let freed = dir_size(&dir);
     let entries = fs::read_dir(&dir).map_err(|e| format!("无法读取字体提取缓存目录: {e}"))?;
@@ -398,7 +399,7 @@ pub fn clear_font_extract_cache() -> Result<u64, String> {
 }
 
 /// 字体集合成员提取缓存目录（temp/mercurial-player/font-extract）
-pub fn get_font_extract_cache_dir() -> Result<PathBuf, String> {
+pub fn get_font_extract_cache_dir() -> Result<PathBuf, AppError> {
     let dir = std::env::temp_dir()
         .join("mercurial-player")
         .join("font-extract");
@@ -408,11 +409,11 @@ pub fn get_font_extract_cache_dir() -> Result<PathBuf, String> {
 
 /// 提取字体集合的全部成员到缓存目录，返回可注册的外部字体列表。
 /// 缓存键含源文件大小与修改时间，源文件变化后自动重新提取
-fn extract_collection_to_cache(path: &Path) -> Result<Vec<ExternalFont>, String> {
+fn extract_collection_to_cache(path: &Path) -> Result<Vec<ExternalFont>, AppError> {
     let bytes = fs::read(path).map_err(|e| format!("无法读取字体集合: {e}"))?;
     let metas = collection_member_metas(&bytes);
     if metas.is_empty() {
-        return Err("集合内没有可解析的字体成员".to_string());
+        return Err("集合内没有可解析的字体成员".to_string().into());
     }
 
     // 缓存键：文件名 + 大小 + 修改时间
@@ -486,7 +487,7 @@ fn extract_collection_to_cache(path: &Path) -> Result<Vec<ExternalFont>, String>
 }
 
 /// 获取系统已安装的字体列表
-pub fn get_system_fonts() -> Result<Vec<String>, String> {
+pub fn get_system_fonts() -> Result<Vec<String>, AppError> {
     #[cfg(target_os = "windows")]
     {
         get_windows_fonts()
@@ -504,7 +505,7 @@ pub fn get_system_fonts() -> Result<Vec<String>, String> {
 }
 
 #[cfg(target_os = "windows")]
-fn get_windows_fonts() -> Result<Vec<String>, String> {
+fn get_windows_fonts() -> Result<Vec<String>, AppError> {
     let mut fonts = HashSet::new();
 
     // 读取注册表中的字体信息
@@ -532,7 +533,7 @@ fn get_windows_fonts() -> Result<Vec<String>, String> {
 }
 
 #[cfg(target_os = "macos")]
-fn get_macos_fonts() -> Result<Vec<String>, String> {
+fn get_macos_fonts() -> Result<Vec<String>, AppError> {
     use std::process::Command;
 
     // 使用 system_profiler 获取字体列表
@@ -565,7 +566,7 @@ fn get_macos_fonts() -> Result<Vec<String>, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn get_linux_fonts() -> Result<Vec<String>, String> {
+fn get_linux_fonts() -> Result<Vec<String>, AppError> {
     use std::process::Command;
 
     // 使用 fc-list 命令获取字体列表

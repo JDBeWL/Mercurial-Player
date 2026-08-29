@@ -2,6 +2,7 @@
 //!
 //! 提供基于 Tantivy 的全文搜索索引功能，用于快速搜索歌曲、艺术家、专辑等。
 
+use crate::error::AppError;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -32,7 +33,7 @@ const INDEX_DIR_NAME: &str = "tantivy-index";
 static INDEX_MANAGER: Mutex<Option<Arc<Mutex<TantivyIndexManager>>>> = Mutex::new(None);
 
 /// 获取或创建索引管理器
-fn get_index_manager() -> Result<Arc<Mutex<TantivyIndexManager>>, String> {
+fn get_index_manager() -> Result<Arc<Mutex<TantivyIndexManager>>, AppError> {
     let mut guard = crate::lock_or_log!(INDEX_MANAGER.lock());
     if let Some(manager) = guard.as_ref() {
         return Ok(Arc::clone(manager));
@@ -71,7 +72,7 @@ struct IndexFields {
 
 impl TantivyIndexManager {
     /// 创建新的索引管理器
-    fn new() -> Result<Self, String> {
+    fn new() -> Result<Self, AppError> {
         let index_dir = index_dir_path();
         fs::create_dir_all(&index_dir).map_err(|e| format!("创建索引目录失败: {e}"))?;
 
@@ -168,7 +169,7 @@ impl TantivyIndexManager {
     }
 
     /// 获取或创建写入器
-    fn get_writer(&mut self) -> Result<&mut IndexWriter, String> {
+    fn get_writer(&mut self) -> Result<&mut IndexWriter, AppError> {
         if self.writer.is_none() {
             let writer = self
                 .index
@@ -179,11 +180,11 @@ impl TantivyIndexManager {
 
         self.writer
             .as_mut()
-            .ok_or_else(|| "写入器未初始化".to_string())
+            .ok_or_else(|| AppError::msg("写入器未初始化"))
     }
 
     /// 添加或更新文档
-    fn add_document(&mut self, metadata: &TrackMetadata) -> Result<(), String> {
+    fn add_document(&mut self, metadata: &TrackMetadata) -> Result<(), AppError> {
         let mut doc = TantivyDocument::default();
 
         doc.add_text(self.fields.path, &metadata.path);
@@ -214,7 +215,7 @@ impl TantivyIndexManager {
     }
 
     /// 删除文档（按路径）
-    fn delete_document(&mut self, path: &str) -> Result<(), String> {
+    fn delete_document(&mut self, path: &str) -> Result<(), AppError> {
         let term = Term::from_field_text(self.fields.path, path);
         let writer = self.get_writer()?;
         writer.delete_term(term);
@@ -222,7 +223,7 @@ impl TantivyIndexManager {
     }
 
     /// 提交更改
-    fn commit(&mut self) -> Result<(), String> {
+    fn commit(&mut self) -> Result<(), AppError> {
         if let Some(ref mut writer) = self.writer {
             writer.commit().map_err(|e| format!("提交索引失败: {e}"))?;
             log::info!("索引已提交");
@@ -231,7 +232,7 @@ impl TantivyIndexManager {
     }
 
     /// 搜索文档
-    fn search(&self, query: &str, limit: usize) -> Result<Vec<TrackMetadata>, String> {
+    fn search(&self, query: &str, limit: usize) -> Result<Vec<TrackMetadata>, AppError> {
         let searcher = self.reader.searcher();
 
         // 构建多字段查询
@@ -312,14 +313,14 @@ fn index_dir_path() -> PathBuf {
 }
 
 /// 添加或更新音轨到索引
-pub fn index_track(metadata: &TrackMetadata) -> Result<(), String> {
+pub fn index_track(metadata: &TrackMetadata) -> Result<(), AppError> {
     let manager = get_index_manager()?;
     let mut manager = manager.lock().map_err(|e| format!("获取索引锁失败: {e}"))?;
     manager.add_document(metadata)
 }
 
 /// 批量添加音轨到索引
-pub fn index_tracks_batch(metadatas: &[TrackMetadata]) -> Result<(), String> {
+pub fn index_tracks_batch(metadatas: &[TrackMetadata]) -> Result<(), AppError> {
     let manager = get_index_manager()?;
     let mut manager = manager.lock().map_err(|e| format!("获取索引锁失败: {e}"))?;
     for metadata in metadatas {
@@ -329,7 +330,7 @@ pub fn index_tracks_batch(metadatas: &[TrackMetadata]) -> Result<(), String> {
 }
 
 /// 从索引中删除音轨
-pub fn remove_track_from_index(path: &str) -> Result<(), String> {
+pub fn remove_track_from_index(path: &str) -> Result<(), AppError> {
     let manager = get_index_manager()?;
     let mut manager = manager.lock().map_err(|e| format!("获取索引锁失败: {e}"))?;
     manager.delete_document(path)?;
@@ -337,28 +338,28 @@ pub fn remove_track_from_index(path: &str) -> Result<(), String> {
 }
 
 /// 搜索音轨
-pub fn search_tracks(query: &str, limit: usize) -> Result<Vec<TrackMetadata>, String> {
+pub fn search_tracks(query: &str, limit: usize) -> Result<Vec<TrackMetadata>, AppError> {
     let manager = get_index_manager()?;
     let manager = manager.lock().map_err(|e| format!("获取索引锁失败: {e}"))?;
     manager.search(query, limit)
 }
 
 /// 获取索引文档数量
-pub fn get_index_doc_count() -> Result<usize, String> {
+pub fn get_index_doc_count() -> Result<usize, AppError> {
     let manager = get_index_manager()?;
     let manager = manager.lock().map_err(|e| format!("获取索引锁失败: {e}"))?;
     Ok(manager.doc_count())
 }
 
 /// 提交索引更改
-pub fn commit_index() -> Result<(), String> {
+pub fn commit_index() -> Result<(), AppError> {
     let manager = get_index_manager()?;
     let mut manager = manager.lock().map_err(|e| format!("获取索引锁失败: {e}"))?;
     manager.commit()
 }
 
 /// 重建索引
-pub fn rebuild_tantivy_index() -> Result<(), String> {
+pub fn rebuild_tantivy_index() -> Result<(), AppError> {
     // 清除现有索引
     let index_dir = index_dir_path();
     if index_dir.exists() {
@@ -377,7 +378,7 @@ pub fn rebuild_tantivy_index() -> Result<(), String> {
 }
 
 /// 清除所有索引数据
-pub fn clear_tantivy_index() -> Result<(), String> {
+pub fn clear_tantivy_index() -> Result<(), AppError> {
     let index_dir = index_dir_path();
     if index_dir.exists() {
         fs::remove_dir_all(&index_dir).map_err(|e| format!("删除索引目录失败: {e}"))?;

@@ -232,6 +232,17 @@
     "equalizer": "Equalizer",
     "enableEq": "Enable Equalizer",
     "eqPreset": "Preset",
+    "eqPresetNames": {
+      "Bass Boost": "Bass Boost",
+      "Treble Boost": "Treble Boost",
+      "Vocal": "Vocal",
+      "Rock": "Rock",
+      "Pop": "Pop",
+      "Jazz": "Jazz",
+      "Classical": "Classical",
+      "Electronic": "Electronic",
+      "Acoustic": "Acoustic"
+    },
     "preamp": "Preamp",
     "eqBands": "Band Adjustment",
     "visualizerSettings": "Visualizer Settings",

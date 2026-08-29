@@ -96,7 +96,7 @@ pub fn get_system_fonts() -> Result<Vec<String>, AppError> {
 /// 获取软件同级 fonts/ 目录下的外部字体文件列表
 #[command]
 pub fn get_external_fonts() -> Result<Vec<super::fonts::ExternalFont>, AppError> {
-    super::fonts::list_external_fonts().map_err(AppError::from)
+    super::fonts::list_external_fonts()
 }
 
 /// 获取字体相关缓存的统计信息（TTC/OTC 提取缓存占用）

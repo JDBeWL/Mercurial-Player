@@ -3,10 +3,10 @@
  * 提供安全的执行环境
  */
 
-import type { PluginAPI, PluginInstance, PluginMainFunction } from './pluginManager'
+import type { PluginAPI, PluginInstance, PluginMainFunction } from './pluginTypes'
 
 // 安全的 console 类型
-interface SafeConsole {
+export interface SafeConsole {
   log: (...args: unknown[]) => void
   info: (...args: unknown[]) => void
   warn: (...args: unknown[]) => void
@@ -63,19 +63,36 @@ export interface PluginSandbox {
 }
 
 /**
- * 创建插件沙箱环境
+ * 创建安全的 console 代理(log/info 映射到 info,其余映射到同级方法)
  */
-export function createPluginSandbox(api: PluginAPI): PluginSandbox {
-  // 安全的 console 代理
-  const safeConsole: SafeConsole = {
-    log: api.log.info,
-    info: api.log.info,
-    warn: api.log.warn,
-    error: api.log.error,
-    debug: api.log.debug,
+export function createSafeConsole(log: PluginAPI['log']): SafeConsole {
+  return {
+    log: log.info,
+    info: log.info,
+    warn: log.warn,
+    error: log.error,
+    debug: log.debug,
   }
+}
 
-  // 安全的定时器（带清理追踪）
+// 共享的安全定时器组
+export interface SafeTimers {
+  setTimeout: (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => number
+  clearTimeout: (id: number) => void
+  setInterval: (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => number
+  clearInterval: (id: number) => void
+  cleanup: () => void
+}
+
+/**
+ * 创建带清理追踪的安全定时器组
+ * - setTimeout 延迟上限 60s
+ * - setInterval 最小间隔 100ms
+ * - 回调执行出错时交给 onError 处理(错误文案由调用方注入)
+ *
+ * pluginSandbox 与 pluginLoader 原本各自维护一份逐行同构的实现,现统一到此处。
+ */
+export function createSafeTimers(onError: (error: unknown) => void): SafeTimers {
   const timers = new Set<number>()
   const intervals = new Set<number>()
 
@@ -86,15 +103,15 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
   ): number => {
     const id = setTimeout(
       () => {
-        timers.delete(id as unknown as number)
+        timers.delete(id)
         try {
           fn(...args)
         } catch (e) {
-          api.log.error('定时器执行错误:', e)
+          onError(e)
         }
       },
       Math.min(delay || 0, 60000),
-    ) as unknown as number
+    )
     timers.add(id)
     return id
   }
@@ -114,9 +131,9 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
       try {
         fn(...args)
       } catch (e) {
-        api.log.error('定时器执行错误:', e)
+        onError(e)
       }
-    }, safeDelay) as unknown as number
+    }, safeDelay)
     intervals.add(id)
     return id
   }
@@ -125,6 +142,38 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
     intervals.delete(id)
     clearInterval(id)
   }
+
+  return {
+    setTimeout: safeSetTimeout,
+    clearTimeout: safeClearTimeout,
+    setInterval: safeSetInterval,
+    clearInterval: safeClearInterval,
+
+    /**
+     * 清理所有未触发的定时器
+     */
+    cleanup(): void {
+      for (const id of timers) {
+        clearTimeout(id)
+      }
+      timers.clear()
+      for (const id of intervals) {
+        clearInterval(id)
+      }
+      intervals.clear()
+    },
+  }
+}
+
+/**
+ * 创建插件沙箱环境
+ */
+export function createPluginSandbox(api: PluginAPI): PluginSandbox {
+  // 安全的 console 代理
+  const safeConsole = createSafeConsole(api.log)
+
+  // 安全的定时器（带清理追踪）
+  const safeTimers = createSafeTimers((e) => api.log.error('定时器执行错误:', e))
 
   // 允许插件访问的全局对象
   const allowedGlobals: AllowedGlobals = Object.freeze({
@@ -150,10 +199,10 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
     Math,
     console: Object.freeze(safeConsole),
     Promise,
-    setTimeout: safeSetTimeout,
-    clearTimeout: safeClearTimeout,
-    setInterval: safeSetInterval,
-    clearInterval: safeClearInterval,
+    setTimeout: safeTimers.setTimeout,
+    clearTimeout: safeTimers.clearTimeout,
+    setInterval: safeTimers.setInterval,
+    clearInterval: safeTimers.clearInterval,
     encodeURIComponent,
     decodeURIComponent,
     encodeURI,
@@ -189,14 +238,7 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
      * 清理所有定时器
      */
     cleanup(): void {
-      for (const id of timers) {
-        clearTimeout(id)
-      }
-      timers.clear()
-      for (const id of intervals) {
-        clearInterval(id)
-      }
-      intervals.clear()
+      safeTimers.cleanup()
     },
   }
 }

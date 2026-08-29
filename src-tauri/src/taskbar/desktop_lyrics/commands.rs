@@ -1,3 +1,4 @@
+use crate::error::AppError;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use tauri::command;
@@ -11,7 +12,7 @@ static DESKTOP_LYRICS_MANAGER: OnceLock<Arc<Mutex<DesktopLyricsManager>>> = Once
 /// 使桌面歌词的字体内存缓存全部失效：渲染线程在下一帧重建外部字体
 /// 名字索引、丢弃已按需加载的字体集合与文本格式缓存。
 /// fonts/ 目录文件变化或用户主动清理字体缓存后调用
-pub fn invalidate_font_caches() -> Result<(), String> {
+pub fn invalidate_font_caches() -> Result<(), AppError> {
     let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
     {
         let mut guard = state.lock().map_err(|e| format!("Lock error: {e}"))?;
@@ -29,7 +30,7 @@ pub fn get_desktop_lyrics_manager() -> Arc<Mutex<DesktopLyricsManager>> {
 }
 
 #[command]
-pub fn show_desktop_lyrics(app: tauri::AppHandle) -> Result<(), String> {
+pub fn show_desktop_lyrics(app: tauri::AppHandle) -> Result<(), AppError> {
     let manager = get_desktop_lyrics_manager();
     let mut guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard.initialize(app)?;
@@ -37,7 +38,7 @@ pub fn show_desktop_lyrics(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[command]
-pub fn hide_desktop_lyrics() -> Result<(), String> {
+pub fn hide_desktop_lyrics() -> Result<(), AppError> {
     let manager = get_desktop_lyrics_manager();
     let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard.hide()
@@ -51,7 +52,7 @@ pub fn update_desktop_lyric(
     words: Vec<DesktopLyricWord>,
     current_time: f32,
     is_playing: bool,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let manager = get_desktop_lyrics_manager();
     let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard.update_lyric(
@@ -65,14 +66,14 @@ pub fn update_desktop_lyric(
 }
 
 #[command]
-pub fn set_desktop_lyrics_locked(locked: bool) -> Result<(), String> {
+pub fn set_desktop_lyrics_locked(locked: bool) -> Result<(), AppError> {
     let manager = get_desktop_lyrics_manager();
     let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard.set_locked(locked)
 }
 
 #[command]
-pub fn set_desktop_lyrics_font_size(size: i32) -> Result<(), String> {
+pub fn set_desktop_lyrics_font_size(size: i32) -> Result<(), AppError> {
     let manager = get_desktop_lyrics_manager();
     let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard.set_font_size(size)
@@ -82,21 +83,21 @@ pub fn set_desktop_lyrics_font_size(size: i32) -> Result<(), String> {
 pub fn set_desktop_lyrics_font_family(
     font_family: String,
     translation_font_family: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let manager = get_desktop_lyrics_manager();
     let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard.set_font_family(&font_family, &translation_font_family)
 }
 
 #[command]
-pub fn set_desktop_lyrics_color_preset(preset: String) -> Result<(), String> {
+pub fn set_desktop_lyrics_color_preset(preset: String) -> Result<(), AppError> {
     let manager = get_desktop_lyrics_manager();
     let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard.set_color_preset(&preset)
 }
 
 #[command]
-pub fn is_desktop_lyrics_visible() -> Result<bool, String> {
+pub fn is_desktop_lyrics_visible() -> Result<bool, AppError> {
     let manager = get_desktop_lyrics_manager();
     let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
     Ok(guard.is_visible())

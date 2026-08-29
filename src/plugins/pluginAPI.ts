@@ -27,7 +27,7 @@ import {
   type Shortcut,
   type SaveAsOptions,
   type EventCallback,
-} from './pluginManager'
+} from './pluginTypes'
 import type { PluginManager } from './pluginManager'
 import logger from '../utils/logger'
 import { usePlayerStore } from '../stores/player'
@@ -35,6 +35,55 @@ import { useMusicLibraryStore } from '../stores/musicLibrary'
 import { useThemeStore } from '../stores/theme'
 import { useErrorNotification } from '../composables/useErrorNotification'
 import FileUtils from '../utils/fileUtils'
+import { findLyricIndex } from '../utils/lyricsParser'
+
+/**
+ * Canvas 转 Blob 的 Promise 包装
+ * @param errorMessage 转换失败时抛出的错误文案(保持各调用方原有文案)
+ */
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  type = 'image/png',
+  quality = 0.92,
+  errorMessage = 'Canvas 转换 Blob 失败',
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob)
+        else reject(new Error(errorMessage))
+      },
+      type,
+      quality,
+    )
+  })
+}
+
+/**
+ * 解析 data URL 并解码为 Blob
+ * @param options.mimeType 显式指定 MIME 类型(跳过 dataURL 头部解析,如 saveImage 的格式参数)
+ * @param options.fallbackMime dataURL 头部解析失败时使用的默认 MIME 类型
+ */
+function dataURLToBlob(
+  dataURL: string,
+  options: { mimeType?: string; fallbackMime?: string } = {},
+): Blob {
+  const arr = dataURL.split(',')
+  let mime: string
+  if (options.mimeType) {
+    mime = options.mimeType
+  } else {
+    const mimeMatch = arr[0].match(/:(.*?);/)
+    mime = mimeMatch ? mimeMatch[1] : (options.fallbackMime ?? 'application/octet-stream')
+  }
+  const bstr = atob(arr[1])
+  let n = bstr.length
+  const u8arr = new Uint8Array(n)
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n)
+  }
+  return new Blob([u8arr], { type: mime })
+}
 
 /**
  * 创建插件 API
@@ -175,25 +224,11 @@ export function createPluginAPI(
           return -1
         }
 
-        // 应用歌词偏移
+        // 应用歌词偏移(额外 +0.05s 提前量,保持既有插件行为)
         const offset = store.lyricsOffset || 0
         const adjustedTime = store.currentTime + 0.05 - offset
 
-        // 二分查找当前歌词索引（与 useLyrics.ts 中的逻辑一致）
-        let l = 0,
-          r = store.lyrics.length - 1,
-          idx = -1
-        while (l <= r) {
-          const mid = (l + r) >> 1
-          if (store.lyrics[mid].time <= adjustedTime) {
-            idx = mid
-            l = mid + 1
-          } else {
-            r = mid - 1
-          }
-        }
-
-        return idx
+        return findLyricIndex(store.lyrics, adjustedTime)
       },
 
       play(): void {
@@ -584,18 +619,7 @@ export function createPluginAPI(
         return { canvas, ctx }
       },
 
-      canvasToBlob(canvas: HTMLCanvasElement, type = 'image/png', quality = 0.92): Promise<Blob> {
-        return new Promise((resolve, reject) => {
-          canvas.toBlob(
-            (blob) => {
-              if (blob) resolve(blob)
-              else reject(new Error('Canvas 转换 Blob 失败'))
-            },
-            type,
-            quality,
-          )
-        })
-      },
+      canvasToBlob,
 
       canvasToDataURL(canvas: HTMLCanvasElement, type = 'image/png', quality = 0.92): string {
         return canvas.toDataURL(type, quality)
@@ -642,18 +666,7 @@ export function createPluginAPI(
         return blob.arrayBuffer()
       },
 
-      dataURLToBlob(dataURL: string): Blob {
-        const arr = dataURL.split(',')
-        const mimeMatch = arr[0].match(/:(.*?);/)
-        const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream'
-        const bstr = atob(arr[1])
-        let n = bstr.length
-        const u8arr = new Uint8Array(n)
-        while (n--) {
-          u8arr[n] = bstr.charCodeAt(n)
-        }
-        return new Blob([u8arr], { type: mime })
-      },
+      dataURLToBlob,
 
       formatTime(seconds: number): string {
         if (isNaN(seconds) || !isFinite(seconds)) return '0:00'
@@ -720,27 +733,11 @@ export function createPluginAPI(
         let blob: Blob
 
         if (image instanceof HTMLCanvasElement) {
-          blob = await new Promise<Blob>((resolve, reject) => {
-            image.toBlob(
-              (b) => {
-                if (b) resolve(b)
-                else reject(new Error('Canvas 转换失败'))
-              },
-              mimeType,
-              0.92,
-            )
-          })
+          blob = await canvasToBlob(image, mimeType, 0.92, 'Canvas 转换失败')
         } else if (image instanceof Blob) {
           blob = image
         } else if (typeof image === 'string' && image.startsWith('data:')) {
-          const arr = image.split(',')
-          const bstr = atob(arr[1])
-          let n = bstr.length
-          const u8arr = new Uint8Array(n)
-          while (n--) {
-            u8arr[n] = bstr.charCodeAt(n)
-          }
-          blob = new Blob([u8arr], { type: mimeType })
+          blob = dataURLToBlob(image, { mimeType })
         } else {
           throw new Error('不支持的图片格式')
         }
@@ -767,25 +764,11 @@ export function createPluginAPI(
           let blob: Blob
 
           if (image instanceof HTMLCanvasElement) {
-            blob = await new Promise<Blob>((resolve, reject) => {
-              image.toBlob((b) => {
-                if (b) resolve(b)
-                else reject(new Error('Canvas 转换失败'))
-              }, 'image/png')
-            })
+            blob = await canvasToBlob(image, 'image/png', 0.92, 'Canvas 转换失败')
           } else if (image instanceof Blob) {
             blob = image
           } else if (typeof image === 'string' && image.startsWith('data:')) {
-            const arr = image.split(',')
-            const mimeMatch = arr[0].match(/:(.*?);/)
-            const mime = mimeMatch ? mimeMatch[1] : 'image/png'
-            const bstr = atob(arr[1])
-            let n = bstr.length
-            const u8arr = new Uint8Array(n)
-            while (n--) {
-              u8arr[n] = bstr.charCodeAt(n)
-            }
-            blob = new Blob([u8arr], { type: mime })
+            blob = dataURLToBlob(image, { fallbackMime: 'image/png' })
           } else {
             throw new Error('不支持的图片格式')
           }

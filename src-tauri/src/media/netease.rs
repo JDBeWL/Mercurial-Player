@@ -2,6 +2,7 @@
 //!
 //! 提供从网易云音乐搜索和获取歌词的功能
 
+use crate::error::AppError;
 use crate::media::http_client::get_client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -17,7 +18,7 @@ const MAX_RETRIES: u32 = 3;
 /// 对网络错误（连接超时、DNS 失败等）重试，对 HTTP 错误状态码不重试
 async fn send_with_retry(
     request_builder: tauri_plugin_http::reqwest::RequestBuilder,
-) -> Result<Response, String> {
+) -> Result<Response, AppError> {
     let mut last_err = String::new();
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
@@ -38,7 +39,7 @@ async fn send_with_retry(
             }
         }
     }
-    Err(format!("请求失败，已重试 {MAX_RETRIES} 次: {last_err}"))
+    Err(format!("请求失败，已重试 {MAX_RETRIES} 次: {last_err}").into())
 }
 
 /// 搜索结果中的歌曲信息
@@ -142,12 +143,12 @@ fn build_headers() -> HeaderMap {
 const MAX_RESPONSE_SIZE: usize = 5 * 1024 * 1024;
 
 /// 读取响应体文本，带大小限制
-async fn read_response_text(mut response: Response) -> Result<String, String> {
+async fn read_response_text(mut response: Response) -> Result<String, AppError> {
     // 优先根据 Content-Length 拒绝过大响应
     if let Some(len) = response.content_length()
         && len as usize > MAX_RESPONSE_SIZE
     {
-        return Err(format!("响应过大: {len} 字节（上限 {MAX_RESPONSE_SIZE}）"));
+        return Err(format!("响应过大: {len} 字节（上限 {MAX_RESPONSE_SIZE}）").into());
     }
 
     let mut body = Vec::new();
@@ -158,7 +159,7 @@ async fn read_response_text(mut response: Response) -> Result<String, String> {
     {
         body.extend_from_slice(&chunk);
         if body.len() > MAX_RESPONSE_SIZE {
-            return Err(format!("响应超过大小限制（{MAX_RESPONSE_SIZE} 字节）"));
+            return Err(format!("响应超过大小限制（{MAX_RESPONSE_SIZE} 字节）").into());
         }
     }
 
@@ -170,7 +171,7 @@ pub async fn search_songs(
     keyword: &str,
     limit: u32,
     offset: u32,
-) -> Result<Vec<SearchSongResult>, String> {
+) -> Result<Vec<SearchSongResult>, AppError> {
     let client = get_client()?;
 
     // 使用 cloudsearch API
@@ -189,7 +190,7 @@ pub async fn search_songs(
     let response_text = read_response_text(response).await?;
 
     if !status.is_success() {
-        return Err(format!("HTTP error: {status} - {response_text}"));
+        return Err(format!("HTTP error: {status} - {response_text}").into());
     }
 
     let data: CloudSearchResponse = serde_json::from_str(&response_text).map_err(|e| {
@@ -200,7 +201,7 @@ pub async fn search_songs(
     })?;
 
     if data.code != 200 {
-        return Err(format!("API error: code {}", data.code));
+        return Err(format!("API error: code {}", data.code).into());
     }
 
     let songs: Vec<SearchSongResult> = data
@@ -226,10 +227,10 @@ pub async fn search_songs(
 }
 
 /// 获取歌词 - 使用 Web API
-pub async fn get_lyrics(song_id: &str) -> Result<LyricsData, String> {
+pub async fn get_lyrics(song_id: &str) -> Result<LyricsData, AppError> {
     // 歌曲 ID 必须为纯数字，防止 URL 参数注入
     if song_id.is_empty() || !song_id.chars().all(|c| c.is_ascii_digit()) {
-        return Err("非法的歌曲 ID".to_string());
+        return Err("非法的歌曲 ID".to_string().into());
     }
 
     let client = get_client()?;
@@ -242,7 +243,7 @@ pub async fn get_lyrics(song_id: &str) -> Result<LyricsData, String> {
     let response_text = read_response_text(response).await?;
 
     if !status.is_success() {
-        return Err(format!("HTTP error: {status} - {response_text}"));
+        return Err(format!("HTTP error: {status} - {response_text}").into());
     }
 
     let data: LyricResponse = serde_json::from_str(&response_text).map_err(|e| {
@@ -253,7 +254,7 @@ pub async fn get_lyrics(song_id: &str) -> Result<LyricsData, String> {
     })?;
 
     if data.code != 200 {
-        return Err(format!("API error: code {}", data.code));
+        return Err(format!("API error: code {}", data.code).into());
     }
 
     Ok(LyricsData {

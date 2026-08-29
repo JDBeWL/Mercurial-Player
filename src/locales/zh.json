@@ -232,6 +232,17 @@
     "equalizer": "EQ 均衡器",
     "enableEq": "启用均衡器",
     "eqPreset": "预设",
+    "eqPresetNames": {
+      "Bass Boost": "低音增强",
+      "Treble Boost": "高音增强",
+      "Vocal": "人声",
+      "Rock": "摇滚",
+      "Pop": "流行",
+      "Jazz": "爵士",
+      "Classical": "古典",
+      "Electronic": "电子",
+      "Acoustic": "原声"
+    },
     "preamp": "前置增益",
     "eqBands": "频段调节",
     "visualizerSettings": "可视化设置",

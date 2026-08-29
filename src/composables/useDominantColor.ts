@@ -1,6 +1,7 @@
 import { ref, watch, type Ref } from 'vue'
 import { readFile } from '@tauri-apps/plugin-fs'
 import type { ImmersiveColorScheme } from '@/types'
+import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
 
 /**
  * 从封面图片提取主色，用于沉浸式封面模式的背景填充。
@@ -364,7 +365,9 @@ export function useDominantColor(
             }
           }
         })
-        .catch(() => {
+        .catch((e) => {
+          // 取色失败：回退为无主色状态，沉浸层使用主题后备色
+          errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
           if (gen === generation) {
             dominantColor.value = ''
             dominantLuminance.value = null

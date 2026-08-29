@@ -49,8 +49,9 @@
 <script>
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { usePlayerStore } from '@/stores/player'
-import { useConfigStore } from '@/stores/config'
 import { useLyrics } from '@/composables/useLyrics'
+import { useVisualTime } from '@/composables/useVisualTime'
+import { useLyricsTypography } from '@/composables/useLyricsTypography'
 import { listen } from '@tauri-apps/api/event'
 import logger from '@/utils/logger'
 import { detectLyricLanguage } from '@/utils/languageDetect'
@@ -59,7 +60,6 @@ export default {
   name: 'VisualizerPanel',
   setup() {
     const playerStore = usePlayerStore()
-    const configStore = useConfigStore()
     const { lyrics, activeIndex } = useLyrics()
 
     const canvasRef = ref(null)
@@ -119,40 +119,20 @@ export default {
       return currentLyric.value && currentLyric.value.words && currentLyric.value.words.length > 0
     })
 
-    // --- 歌词字体（与主歌词页共用同一配置） ---
-    // 字体名加引号：不带引号的 font-family 标识符不允许以数字开头（如 "975"）
-    const lyricFontStyle = computed(() => ({
-      fontFamily: `"${configStore.lyrics?.lyricsFontFamily || 'Noto Sans SC'}"`,
-    }))
-
-    // 译文字体：为空时跟随原文（不设置该样式，继承原文字体）
-    const translationStyle = computed(() => {
-      const family = configStore.lyrics?.translationFontFamily
-      return family ? { fontFamily: `"${family}"` } : undefined
-    })
+    // --- 歌词字体（与主歌词页共用同一配置，见 useLyricsTypography） ---
+    const { lyricFontStyle, translationStyle } = useLyricsTypography()
 
     // 当前行的语言标注（原文/译文分别检测），供 lang 属性与字体 locl 区域字形使用
     const originalLang = computed(() => detectLyricLanguage(currentLyric.value?.texts[0]))
     const translationLang = computed(() => detectLyricLanguage(currentLyric.value?.texts[1]))
 
     // --- 视觉时间 (用于卡拉OK) ---
-    const visualTime = ref(0)
-    let lastFrameTime = 0
-
-    watch(
-      () => playerStore.currentTime,
-      (newTime, oldTime) => {
-        const jump = newTime - oldTime
-        if (Math.abs(jump) > 1.5 || jump < -0.1) {
-          visualTime.value = newTime
-        }
-      },
-    )
+    const { visualTime, advanceVisualTime, resetFrameClock, syncToCurrentTime } = useVisualTime()
 
     watch(
       () => playerStore.currentTrack?.path,
       () => {
-        visualTime.value = playerStore.currentTime
+        syncToCurrentTime()
         karaokeStyleCache.clear()
       },
     )
@@ -304,28 +284,8 @@ export default {
 
       ctx.shadowBlur = 0
 
-      // 更新视觉时间
-      if (!lastFrameTime) lastFrameTime = timestamp
-      const deltaTime = Math.min((timestamp - lastFrameTime) / 1000, 0.1)
-      lastFrameTime = timestamp
-
-      const realTime = playerStore.currentTime
-
-      // 播放中：基于帧间隔累加时间，并动态调整速度以消除漂移 (P控制器)
-      const diff = visualTime.value - realTime
-
-      if (Math.abs(diff) > 0.5) {
-        // 误差超过 0.5s，硬同步
-        visualTime.value = realTime
-      } else if (Math.abs(diff) > 0.05) {
-        // 误差在 0.05s ~ 0.5s 之间，平滑追赶
-        const speed = 1.0 - diff * 2.0
-        const clampedSpeed = Math.max(0.7, Math.min(1.3, speed))
-        visualTime.value += deltaTime * clampedSpeed
-      } else {
-        // 误差很小，正常累加
-        visualTime.value += deltaTime
-      }
+      // 更新视觉时间 (P 控制器在 useVisualTime 内)
+      advanceVisualTime(timestamp)
 
       animationId = requestAnimationFrame(drawVisualizer)
     }
@@ -334,7 +294,7 @@ export default {
     const startAnimation = () => {
       if (isAnimating) return
       isAnimating = true
-      lastFrameTime = 0
+      resetFrameClock()
       animationId = requestAnimationFrame(drawVisualizer)
     }
 

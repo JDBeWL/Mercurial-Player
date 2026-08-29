@@ -10,7 +10,7 @@ import errorHandler, { AppError, ErrorSeverity } from '../utils/errorHandler'
 interface ErrorNotification {
   id: number
   message: string
-  severity: 'error' | 'warning' | 'info'
+  severity: 'error' | 'warning' | 'info' | 'success'
   duration: number
   timestamp: Date
 }
@@ -36,7 +36,7 @@ export function useErrorNotification() {
    */
   const showError = (
     message: string,
-    severity: 'error' | 'warning' | 'info' = 'error',
+    severity: 'error' | 'warning' | 'info' | 'success' = 'error',
     duration: number = 5000,
   ): number => {
     const notification: ErrorNotification = {
@@ -70,6 +70,19 @@ export function useErrorNotification() {
 
     return notification.id
   }
+
+  /**
+   * 显示成功通知
+   *
+   * 复用通知 UI 机制（success 为独立严重程度，App.vue 渲染对应的成功样式），
+   * title 可选，提供时以「title: message」形式合并为单行文案。
+   * 成功提示默认 3 秒自动关闭，比错误通知更短暂。
+   */
+  const showSuccess = (
+    message: string,
+    title?: string,
+    duration: number = 3000,
+  ): number => showError(title ? `${title}: ${message}` : message, 'success', duration)
 
   /**
    * 移除错误通知
@@ -128,6 +141,7 @@ export function useErrorNotification() {
   return {
     errorNotifications,
     showError,
+    showSuccess,
     removeError,
     clearErrors,
     unsubscribe,

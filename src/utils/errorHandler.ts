@@ -5,8 +5,23 @@
  */
 
 import logger from './logger'
-import i18n from '@/i18n'
-import type { ErrorContext, ErrorHandlerOptions, HandleResult, ErrorStats } from '@/types'
+import type { ErrorContext, ErrorHandlerOptions, HandleResult } from '@/types'
+
+/**
+ * 翻译函数注入点:由应用装配层(src/i18n.ts)注入 i18n.global.t,
+ * 避免本工具模块反向依赖 app 装配层,也便于单元测试注入假翻译。
+ * 未注入时回退返回 key 本身。
+ */
+type Translator = (key: string) => string
+let translator: Translator | null = null
+
+export function setErrorHandlerTranslator(t: Translator): void {
+  translator = t
+}
+
+function translate(key: string): string {
+  return translator ? translator(key) : key
+}
 
 /**
  * 错误类型枚举
@@ -121,17 +136,6 @@ class ErrorHandler {
   // 错误监听器列表
   private listeners: ErrorListener[] = []
 
-  // 错误统计
-  private errorStats: ErrorStats = {
-    total: 0,
-    byType: {},
-    bySeverity: {},
-    recent: [],
-  }
-
-  // 最大最近错误记录数
-  private maxRecentErrors = 50
-
   /**
    * 注册错误监听器
    */
@@ -166,7 +170,7 @@ class ErrorHandler {
       appError.context = { ...appError.context, ...context }
     } else if (error instanceof Error) {
       appError = new AppError(
-        error.message || i18n.global.t('errors.unknownError'),
+        error.message || translate('errors.unknownError'),
         type,
         severity,
         error,
@@ -174,16 +178,13 @@ class ErrorHandler {
       )
     } else {
       appError = new AppError(
-        String(error) || i18n.global.t('errors.unknownError'),
+        String(error) || translate('errors.unknownError'),
         type,
         severity,
         error,
         context,
       )
     }
-
-    // 更新统计
-    this.updateStats(appError)
 
     // 记录错误
     if (!silent) {
@@ -194,36 +195,6 @@ class ErrorHandler {
     this.notifyListeners(appError, { showToUser, userMessage })
 
     return appError
-  }
-
-  /**
-   * 更新错误统计
-   */
-  private updateStats(error: AppError): void {
-    this.errorStats.total++
-
-    // 按类型统计
-    if (!this.errorStats.byType[error.type]) {
-      this.errorStats.byType[error.type] = 0
-    }
-    this.errorStats.byType[error.type]++
-
-    // 按严重程度统计
-    if (!this.errorStats.bySeverity[error.severity]) {
-      this.errorStats.bySeverity[error.severity] = 0
-    }
-    this.errorStats.bySeverity[error.severity]++
-
-    // 记录最近错误
-    this.errorStats.recent.push({
-      error: error.toJSON(),
-      timestamp: new Date().toISOString(),
-    })
-
-    // 限制最近错误数量
-    if (this.errorStats.recent.length > this.maxRecentErrors) {
-      this.errorStats.recent.shift()
-    }
   }
 
   /**
@@ -282,80 +253,30 @@ class ErrorHandler {
   getUserFriendlyMessage(error: AppError): string {
     // 根据错误类型返回友好的消息
     const messages: Record<ErrorType, string> = {
-      [ErrorType.NETWORK]: i18n.global.t('errors.network'),
-      [ErrorType.NETWORK_TIMEOUT]: i18n.global.t('errors.networkTimeout'),
-      [ErrorType.NETWORK_OFFLINE]: i18n.global.t('errors.networkOffline'),
-      [ErrorType.FILE_NOT_FOUND]: i18n.global.t('errors.fileNotFound'),
-      [ErrorType.FILE_READ_ERROR]: i18n.global.t('errors.fileReadError'),
-      [ErrorType.FILE_WRITE_ERROR]: i18n.global.t('errors.fileWriteError'),
-      [ErrorType.FILE_PERMISSION_DENIED]: i18n.global.t('errors.filePermissionDenied'),
-      [ErrorType.AUDIO_DECODE_ERROR]: i18n.global.t('errors.audioDecodeError'),
-      [ErrorType.AUDIO_PLAYBACK_ERROR]: i18n.global.t('errors.audioPlaybackError'),
-      [ErrorType.AUDIO_DEVICE_ERROR]: i18n.global.t('errors.audioDeviceError'),
-      [ErrorType.CONFIG_LOAD_ERROR]: i18n.global.t('errors.configLoadError'),
-      [ErrorType.CONFIG_SAVE_ERROR]: i18n.global.t('errors.configSaveError'),
-      [ErrorType.CONFIG_INVALID]: i18n.global.t('errors.configInvalid'),
-      [ErrorType.DATA_PARSE_ERROR]: i18n.global.t('errors.dataParseError'),
-      [ErrorType.DATA_VALIDATION_ERROR]: i18n.global.t('errors.dataValidationError'),
-      [ErrorType.UNKNOWN]: i18n.global.t('errors.genericError'),
+      [ErrorType.NETWORK]: translate('errors.network'),
+      [ErrorType.NETWORK_TIMEOUT]: translate('errors.networkTimeout'),
+      [ErrorType.NETWORK_OFFLINE]: translate('errors.networkOffline'),
+      [ErrorType.FILE_NOT_FOUND]: translate('errors.fileNotFound'),
+      [ErrorType.FILE_READ_ERROR]: translate('errors.fileReadError'),
+      [ErrorType.FILE_WRITE_ERROR]: translate('errors.fileWriteError'),
+      [ErrorType.FILE_PERMISSION_DENIED]: translate('errors.filePermissionDenied'),
+      [ErrorType.AUDIO_DECODE_ERROR]: translate('errors.audioDecodeError'),
+      [ErrorType.AUDIO_PLAYBACK_ERROR]: translate('errors.audioPlaybackError'),
+      [ErrorType.AUDIO_DEVICE_ERROR]: translate('errors.audioDeviceError'),
+      [ErrorType.CONFIG_LOAD_ERROR]: translate('errors.configLoadError'),
+      [ErrorType.CONFIG_SAVE_ERROR]: translate('errors.configSaveError'),
+      [ErrorType.CONFIG_INVALID]: translate('errors.configInvalid'),
+      [ErrorType.DATA_PARSE_ERROR]: translate('errors.dataParseError'),
+      [ErrorType.DATA_VALIDATION_ERROR]: translate('errors.dataValidationError'),
+      [ErrorType.UNKNOWN]: translate('errors.genericError'),
     }
 
-    return messages[error.type] || error.message || i18n.global.t('errors.genericError')
-  }
-
-  /**
-   * 获取错误统计信息
-   */
-  getStats(): ErrorStats {
-    return {
-      ...this.errorStats,
-      recent: [...this.errorStats.recent],
-    }
-  }
-
-  /**
-   * 清空错误统计
-   */
-  clearStats(): void {
-    this.errorStats = {
-      total: 0,
-      byType: {},
-      bySeverity: {},
-      recent: [],
-    }
+    return messages[error.type] || error.message || translate('errors.genericError')
   }
 }
 
 // 创建全局错误处理器实例
 const errorHandler = new ErrorHandler()
-
-/**
- * 异步操作错误处理包装器
- */
-export function withErrorHandling<T, Args extends unknown[]>(
-  asyncFn: (...args: Args) => Promise<T>,
-  options: ErrorHandlerOptions = {},
-): (...args: Args) => Promise<T | HandleResult<T>> {
-  return async (...args: Args): Promise<T | HandleResult<T>> => {
-    try {
-      return await asyncFn(...args)
-    } catch (error) {
-      const handledError = errorHandler.handle(error, options)
-
-      // 如果设置了 throw，则重新抛出错误
-      if (options.throw !== false) {
-        throw handledError
-      }
-
-      // 否则返回错误结果
-      return {
-        success: false,
-        error: handledError,
-        data: null,
-      }
-    }
-  }
-}
 
 /**
  * Promise 错误处理包装器
@@ -378,46 +299,6 @@ export async function handlePromise<T>(
       data: null,
       error: handledError,
     }
-  }
-}
-
-/**
- * 创建错误处理装饰器（用于类方法）
- */
-export function errorHandlerDecorator(options: ErrorHandlerOptions = {}) {
-  return function <T>(
-    _target: object,
-    propertyKey: string,
-    descriptor: TypedPropertyDescriptor<(...args: unknown[]) => Promise<T>>,
-  ) {
-    const originalMethod = descriptor.value!
-
-    descriptor.value = async function (this: object, ...args: unknown[]): Promise<T> {
-      try {
-        return await originalMethod.apply(this, args)
-      } catch (error) {
-        const handledError = errorHandler.handle(error, {
-          ...options,
-          context: {
-            ...options.context,
-            method: propertyKey,
-            className: this.constructor.name,
-          },
-        })
-
-        if (options.throw !== false) {
-          throw handledError
-        }
-
-        return {
-          success: false,
-          error: handledError,
-          data: null,
-        } as unknown as T
-      }
-    }
-
-    return descriptor
   }
 }
 

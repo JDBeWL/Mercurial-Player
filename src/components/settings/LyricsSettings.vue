@@ -314,9 +314,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useConfigStore } from '../../stores/config'
-import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 import logger from '../../utils/logger'
+import { saveConfigSafely } from '../../utils/errorMessages'
+import { useSliderFill } from '../../composables/useSliderFill'
+import {
+  getScreenRefreshRate,
+  getSystemFonts,
+  setTargetFps,
+  setVerticalSync,
+} from '../../services/appService'
 import {
   bundledFontOptions,
   externalFontOptions,
@@ -324,6 +331,20 @@ import {
 } from '../../utils/bundledFonts'
 import MD3Select from '../MD3Select.vue'
 import type { LyricsConfig, DesktopLyricsConfig, VisualizerConfig } from '@/types'
+
+// 歌词默认配置：store 缺省时初始化与字段补全共用（与 config store 中的默认值保持一致）
+const DEFAULT_LYRICS_CONFIG: LyricsConfig = {
+  enableOnlineFetch: false,
+  autoSaveOnlineLyrics: true,
+  preferTranslation: true,
+  onlineSource: 'netease',
+  lyricsAlignment: 'center',
+  lyricsFontFamily: 'Noto Sans SC',
+  translationFontFamily: '',
+  lyricsStyle: 'modern',
+  showNoLyricsHint: true,
+  showFetchLyricsButton: true,
+}
 
 const configStore = useConfigStore()
 const { t } = useI18n()
@@ -412,7 +433,7 @@ const currentRefreshRate = computed(() => {
 const detectScreenRefreshRate = async (): Promise<void> => {
   try {
     // 首先尝试从系统API获取刷新率
-    const systemRefreshRate = await invoke<number>('get_screen_refresh_rate')
+    const systemRefreshRate = await getScreenRefreshRate()
 
     if (systemRefreshRate && systemRefreshRate > 0) {
       // 使用系统检测到的刷新率
@@ -465,7 +486,7 @@ const detectScreenRefreshRate = async (): Promise<void> => {
 // 应用刷新率到后端
 const applyRefreshRate = async (fps: number): Promise<void> => {
   try {
-    await invoke('set_target_fps', { fps })
+    await setTargetFps(fps)
     logger.info(`Applied refresh rate: ${fps} FPS`)
   } catch (error) {
     logger.error('Failed to apply refresh rate:', error)
@@ -488,7 +509,7 @@ const handleFpsChange = async (): Promise<void> => {
 const toggleVerticalSync = async (): Promise<void> => {
   visualizerConfig.value.enableVerticalSync = !visualizerConfig.value.enableVerticalSync
   try {
-    await invoke('set_vertical_sync', { enabled: visualizerConfig.value.enableVerticalSync })
+    await setVerticalSync(visualizerConfig.value.enableVerticalSync)
 
     // 应用正确的FPS设置
     await applyFpsBasedOnVsync()
@@ -524,18 +545,7 @@ const applyFpsBasedOnVsync = async (): Promise<void> => {
 
 // 初始化默认值（在 setup 阶段同步执行，避免 computed 副作用）
 if (!configStore.lyrics) {
-  configStore.lyrics = {
-    enableOnlineFetch: false,
-    autoSaveOnlineLyrics: true,
-    preferTranslation: true,
-    onlineSource: 'netease',
-    lyricsAlignment: 'center',
-    lyricsFontFamily: 'Noto Sans SC',
-    translationFontFamily: '',
-    lyricsStyle: 'modern',
-    showNoLyricsHint: true,
-    showFetchLyricsButton: true,
-  }
+  configStore.lyrics = { ...DEFAULT_LYRICS_CONFIG }
 } else {
   // 确保所有字段都存在
   if (!configStore.lyrics.lyricsAlignment) {
@@ -567,7 +577,7 @@ const lyricsConfig = computed<LyricsConfig>({
 
 const loadSystemFonts = async (): Promise<void> => {
   try {
-    const fonts = await invoke<string[]>('get_system_fonts')
+    const fonts = await getSystemFonts()
     // 过滤掉已经在默认列表中的字体
     const defaultFonts = ['Roboto', 'sans-serif', 'serif', 'monospace']
     systemFonts.value = fonts.filter((font) => !defaultFonts.includes(font))
@@ -579,13 +589,7 @@ const loadSystemFonts = async (): Promise<void> => {
   }
 }
 
-const saveConfig = async (): Promise<void> => {
-  try {
-    await configStore.saveConfigNow()
-  } catch (error) {
-    logger.error('Failed to save config:', error)
-  }
-}
+const saveConfig = (): Promise<void> => saveConfigSafely(configStore)
 
 const toggleSetting = async (
   key:
@@ -597,18 +601,7 @@ const toggleSetting = async (
 ): Promise<void> => {
   // 确保 lyrics 配置存在
   if (!configStore.lyrics) {
-    configStore.lyrics = {
-      enableOnlineFetch: false,
-      autoSaveOnlineLyrics: true,
-      preferTranslation: true,
-      onlineSource: 'netease',
-      lyricsAlignment: 'center',
-      lyricsFontFamily: 'Noto Sans SC',
-      translationFontFamily: '',
-      lyricsStyle: 'modern',
-      showNoLyricsHint: true,
-      showFetchLyricsButton: true,
-    }
+    configStore.lyrics = { ...DEFAULT_LYRICS_CONFIG }
   }
   configStore.lyrics[key] = !configStore.lyrics[key]
   await saveConfig()
@@ -626,11 +619,10 @@ const desktopLyricsConfig = computed<DesktopLyricsConfig>({
   },
 })
 
+const fontSizeFillPercent = useSliderFill(16, 48, () => desktopLyricsConfig.value.fontSize)
+
 const fontSizeSliderStyle = computed(() => {
-  const min = 16
-  const max = 48
-  const value = desktopLyricsConfig.value.fontSize
-  const percentage = ((value - min) / (max - min)) * 100
+  const percentage = fontSizeFillPercent.value
   return {
     background: `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`,
   }
@@ -680,11 +672,9 @@ onMounted(() => {
 
   // 确保后端的垂直同步设置与配置同步
   if (visualizerConfig.value.enableVerticalSync !== undefined) {
-    invoke('set_vertical_sync', { enabled: visualizerConfig.value.enableVerticalSync }).catch(
-      (error) => {
-        logger.error('Failed to sync vertical sync on mount:', error)
-      },
-    )
+    setVerticalSync(visualizerConfig.value.enableVerticalSync).catch((error) => {
+      logger.error('Failed to sync vertical sync on mount:', error)
+    })
   }
 })
 </script>

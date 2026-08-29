@@ -3,7 +3,6 @@
 //! 提供音频设备的检测、切换和管理功能。
 
 use crate::error::AppError;
-use cpal::StreamConfig;
 use cpal::traits::{DeviceTrait, HostTrait};
 use serde::Serialize;
 
@@ -83,25 +82,4 @@ fn check_wasapi_exclusive_support(device_name: &str) -> bool {
         let _ = device_name;
         false
     }
-}
-
-/// 检测设备是否支持独占模式（使用 cpal）
-#[allow(dead_code)]
-pub fn check_exclusive_mode_support(device: &cpal::Device) -> bool {
-    let config = match device.default_output_config() {
-        Ok(config) => config,
-        Err(_) => return false,
-    };
-
-    let mut stream_config: StreamConfig = config.into();
-    stream_config.buffer_size = cpal::BufferSize::Fixed(256);
-
-    device
-        .build_output_stream(
-            &stream_config,
-            |_data: &mut [f32], _: &cpal::OutputCallbackInfo| {},
-            |_err| {},
-            None,
-        )
-        .is_ok()
 }

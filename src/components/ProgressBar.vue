@@ -30,6 +30,7 @@
 <script setup lang="ts">
 import { computed, ref, onUnmounted, watch } from 'vue'
 import { usePlayerStore } from '../stores/player'
+import { formatTime } from '../utils/format'
 
 const playerStore = usePlayerStore()
 const progressBarWrapper = ref<HTMLElement | null>(null)
@@ -128,14 +129,6 @@ const handleMouseLeave = () => {
   if (!isDragging.value) {
     isHovering.value = false
   }
-}
-
-const formatTime = (seconds: number): string => {
-  if (isNaN(seconds) || !isFinite(seconds)) return '0:00'
-
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = Math.floor(seconds % 60)
-  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
 }
 
 onUnmounted(() => {

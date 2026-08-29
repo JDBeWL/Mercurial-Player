@@ -8,12 +8,14 @@ import {
   Hct,
 } from '@material/material-color-utilities'
 import logger from '../utils/logger'
+import { LRUCache } from '@/utils/lruCache'
 import { validateThemeContrast, enforceThemeContrast } from '../utils/themeContrastValidator'
 import { useConfigStore } from './config'
 import type { TonalVariants, HarmonyColors, ThemePreference } from '@/types'
 
 // 缓存已生成的主题样式
-const customStyleCache = new Map<string, string>()
+// 复用通用 LRU 实现(上限 20 条);TTL Infinity 表示 CSS 文本不过期
+const customStyleCache = new LRUCache<string>(20, Infinity)
 let customStyleElement: HTMLStyleElement | null = null
 
 // 检测是否为中性灰色（低饱和度）
@@ -236,6 +238,11 @@ export const useThemeStore = defineStore('theme', {
       await this.saveThemeToConfig()
     },
 
+    /**
+     * 设置自定义主色(取色器选择的任意 hex)并持久化。
+     * 注意:本方法与预设主题共用 `themePreference` 字段 —— 写入 hex 颜色字符串
+     * 即表示"自定义色"模式,写入预设 id 表示"预设"模式,读取方按是否以 '#' 开头区分。
+     */
     async setPrimaryColor(color: string): Promise<void> {
       this.primaryColor = color
       this.themePreference = color
@@ -339,19 +346,15 @@ export const useThemeStore = defineStore('theme', {
       // 3. 生成并应用自定义 CSS
       const cacheKey = `${this.primaryColor}-${this.isDarkMode}-${this.enableGlassEffect}-${this.enableGradients}`
 
-      if (!customStyleCache.has(cacheKey)) {
-        const customCSS = generateCustomCSS(
+      let customCSS = customStyleCache.get(cacheKey)
+      if (!customCSS) {
+        customCSS = generateCustomCSS(
           this.primaryColor,
           this.isDarkMode,
           this.enableGlassEffect,
           this.enableGradients,
         )
         customStyleCache.set(cacheKey, customCSS)
-
-        if (customStyleCache.size > 20) {
-          const firstKey = customStyleCache.keys().next().value
-          if (firstKey) customStyleCache.delete(firstKey)
-        }
       }
 
       if (!customStyleElement) {

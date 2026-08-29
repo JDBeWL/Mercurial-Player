@@ -2,6 +2,7 @@
 //!
 //! 使用 Symphonia 库实现高性能音频解码，支持多种格式。
 
+use crate::error::AppError;
 use crossbeam_channel::{Receiver, bounded};
 use rodio::Source;
 use std::fs::File;
@@ -106,6 +107,12 @@ impl AudioBuffer {
         }
     }
 }
+
+/// 解码填充目标:每次填充到缓冲区容量的 80%,留出余量避免写满后阻塞
+const TARGET_FILL_RATIO_NUMER: usize = 80;
+const TARGET_FILL_RATIO_DENOM: usize = 100;
+/// 单次填充最多解码的包数,限制单次填充耗时,避免阻塞播放线程过久
+const MAX_PACKETS_PER_FILL: u32 = 50;
 
 pub struct LockFreeSymphoniaSource {
     receiver: Receiver<f32>,
@@ -338,14 +345,14 @@ pub struct SymphoniaDecoder {
 }
 
 impl SymphoniaDecoder {
-    pub fn new(path: &str) -> Result<Self, String> {
+    pub fn new(path: &str) -> Result<Self, AppError> {
         Self::new_with_buffer_duration(path, None)
     }
 
     pub fn new_with_buffer_duration(
         path: &str,
         buffer_duration_ms: Option<u32>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, AppError> {
         let file = File::open(path).map_err(|e| e.to_string())?;
         let mss = MediaSourceStream::new(
             Box::new(file.try_clone().map_err(|e| e.to_string())?),
@@ -520,7 +527,7 @@ impl SymphoniaDecoder {
         self.total_duration
     }
 
-    pub fn prefill_buffer(&mut self) -> Result<(), String> {
+    pub fn prefill_buffer(&mut self) -> Result<(), AppError> {
         if self.state == DecoderState::Uninitialized {
             self.initialize_decoder()?;
         }
@@ -532,9 +539,9 @@ impl SymphoniaDecoder {
                     break;
                 }
                 if attempts > 10 && self.buffer.remaining() < (self.buffer.capacity * 50) / 100 {
-                    return Err(format!(
-                        "Buffer prefill failed after {attempts} attempts: {e}"
-                    ));
+                    return Err(
+                        format!("Buffer prefill failed after {attempts} attempts: {e}").into(),
+                    );
                 }
             }
             attempts += 1;
@@ -543,17 +550,23 @@ impl SymphoniaDecoder {
             return Err(format!(
                 "Buffer prefill incomplete: only {}% filled",
                 (self.buffer.remaining() * 100) / self.buffer.capacity
-            ));
+            )
+            .into());
         }
         Ok(())
     }
 
-    pub fn seek(&mut self, time: Duration) -> Result<(), String> {
+    pub fn seek(&mut self, time: Duration) -> Result<(), AppError> {
         let target_ts = (time.as_secs_f64() * self.sample_rate as f64) as u64;
-        if let (Some(format), Some(decoder)) = (&mut self.format, &mut self.decoder) {
+        // format/decoder/track_id 三者在异步初始化完成前可能尚未就绪;
+        // 此时走下方 else 分支优雅降级(记录目标位置),而不是报错 ——
+        // seek 在初始化完成前被调用是正常场景(如切歌后立即点击歌词)。
+        if let (Some(format), Some(decoder), Some(track_id)) =
+            (&mut self.format, &mut self.decoder, self.track_id)
+        {
             let seek_to = symphonia::core::formats::SeekTo::Timestamp {
                 ts: Timestamp::new(target_ts as i64),
-                track_id: self.track_id.unwrap(),
+                track_id,
             };
             match format.seek(symphonia::core::formats::SeekMode::Accurate, seek_to) {
                 Ok(_) => {
@@ -566,7 +579,7 @@ impl SymphoniaDecoder {
                 }
                 Err(e) => {
                     // seek 失败:保持原有状态(缓冲区、当前位置)不变,直接返回错误
-                    Err(format!("Seek failed: {e:?}"))
+                    Err(format!("Seek failed: {e:?}").into())
                 }
             }
         } else {
@@ -578,7 +591,7 @@ impl SymphoniaDecoder {
         }
     }
 
-    fn initialize_decoder(&mut self) -> Result<(), String> {
+    fn initialize_decoder(&mut self) -> Result<(), AppError> {
         let file = File::open(&self.path).map_err(|e| e.to_string())?;
         let mss = MediaSourceStream::new(
             Box::new(file.try_clone().map_err(|e| e.to_string())?),
@@ -628,7 +641,7 @@ impl SymphoniaDecoder {
         Ok(())
     }
 
-    fn fill_buffer(&mut self) -> Result<(), String> {
+    fn fill_buffer(&mut self) -> Result<(), AppError> {
         if self.state == DecoderState::Uninitialized {
             self.initialize_decoder()?;
         }
@@ -638,13 +651,18 @@ impl SymphoniaDecoder {
         ) {
             return Ok(());
         }
-        let format = self.format.as_mut().unwrap();
-        let decoder = self.decoder.as_mut().unwrap();
-        let track_id = self.track_id.unwrap();
+        // 解码器三件套由 initialize_decoder() 保证在 Ready/缓冲状态下均为 Some,
+        // 但显式检查而非 unwrap,避免不变量被破坏时 panic
+        let (format, decoder, track_id) =
+            match (self.format.as_mut(), self.decoder.as_mut(), self.track_id) {
+                (Some(format), Some(decoder), Some(track_id)) => (format, decoder, track_id),
+                _ => return Err(AppError::msg("Decoder not initialized")),
+            };
         let mut decoded_packets = 0;
-        let target_fill = (self.buffer.capacity * 80) / 100;
+        let target_fill =
+            (self.buffer.capacity * TARGET_FILL_RATIO_NUMER) / TARGET_FILL_RATIO_DENOM;
 
-        while self.buffer.remaining() < target_fill && decoded_packets < 50 {
+        while self.buffer.remaining() < target_fill && decoded_packets < MAX_PACKETS_PER_FILL {
             let packet = match format.next_packet() {
                 Ok(Some(p)) => p,
                 Ok(None) => {
@@ -661,7 +679,7 @@ impl SymphoniaDecoder {
                 }
                 Err(e) => {
                     self.state = DecoderState::Error(format!("Read packet error: {e}"));
-                    return Err(format!("Read packet error: {e}"));
+                    return Err(format!("Read packet error: {e}").into());
                 }
             };
             if packet.track_id != track_id {
@@ -686,7 +704,7 @@ impl SymphoniaDecoder {
                 Err(Error::DecodeError(_)) => {}
                 Err(e) => {
                     self.state = DecoderState::Error(format!("Decode error: {e}"));
-                    return Err(format!("Decode error: {e}"));
+                    return Err(format!("Decode error: {e}").into());
                 }
             }
         }

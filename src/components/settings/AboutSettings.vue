@@ -144,10 +144,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { getVersion } from '@tauri-apps/api/app'
-import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 import UpdateDialog from '@/components/UpdateDialog.vue'
 import { useAutoUpdate } from '@/composables/useAutoUpdate'
+import { openExternalUrl as openExternalUrlCommand } from '../../services/appService'
 import logger from '../../utils/logger'
 
 // 技术栈条目
@@ -327,7 +327,7 @@ const openExternalUrl = async (url: string): Promise<void> => {
       logger.error('Blocked non-HTTPS URL:', url)
       return
     }
-    await invoke('open_external_url', { url })
+    await openExternalUrlCommand(url)
   } catch (error) {
     logger.error('Failed to open external URL:', error)
   }

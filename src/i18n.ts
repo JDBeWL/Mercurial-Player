@@ -19,6 +19,10 @@ const i18n = createI18n({
   messages, // 翻译信息
 })
 
+// 注入翻译函数到统一错误处理(避免 utils 反向依赖 i18n 装配层)
+import { setErrorHandlerTranslator } from './utils/errorHandler'
+setErrorHandlerTranslator(i18n.global.t)
+
 // 导出i18n实例和设置语言的方法
 export default i18n
 

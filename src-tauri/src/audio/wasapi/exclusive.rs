@@ -2,14 +2,16 @@
 //!
 //! 这个模块实现了WASAPI独占模式音频输出。
 
-#![allow(dead_code)]
-
+use crate::error::AppError;
 use crossbeam_channel::{Receiver, Sender, bounded};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+
+/// WASAPI 独占模式默认淡入/淡出时长(毫秒),用于消除暂停/恢复时的 audible click
+const WASAPI_FADE_MS: u32 = 30;
 
 /// 音频线程命令
 pub enum AudioCommand {
@@ -97,8 +99,6 @@ enum FadeState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FadeAction {
-    /// 淡出后无动作(继续播放)
-    None,
     /// 淡出后暂停(stop_stream)
     Pause,
     /// 淡出后停止(stop_stream + clear_buffer)
@@ -208,7 +208,7 @@ impl WasapiExclusivePlayback {
         }
     }
 
-    pub fn initialize(&self, device_name: Option<&str>) -> Result<(u32, u16, String), String> {
+    pub fn initialize(&self, device_name: Option<&str>) -> Result<(u32, u16, String), AppError> {
         self.command_tx
             .send(AudioCommand::Initialize {
                 device_name: device_name.map(String::from),
@@ -239,8 +239,8 @@ impl WasapiExclusivePlayback {
 
                 Ok((sample_rate, channels, device_name))
             }
-            Ok(AudioResponse::InitFailed(e)) => Err(e),
-            Ok(other) => Err(format!("Unexpected response: {other:?}")),
+            Ok(AudioResponse::InitFailed(e)) => Err(e.into()),
+            Ok(other) => Err(format!("Unexpected response: {other:?}").into()),
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                 log::warn!("WASAPI initialize timed out, cleaning up stale responses");
                 // 清空可能残留的过时响应,避免影响后续命令
@@ -249,14 +249,15 @@ impl WasapiExclusivePlayback {
                 *lock_or_log!(self.state.lock()) = PlaybackState::Uninitialized;
                 Err(
                     "Device initialization timeout - device may be in use or unavailable"
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 )
             }
-            Err(e) => Err(format!("Failed to receive response: {e}")),
+            Err(e) => Err(format!("Failed to receive response: {e}").into()),
         }
     }
 
-    pub fn start(&self) -> Result<(), String> {
+    pub fn start(&self) -> Result<(), AppError> {
         self.command_tx
             .send(AudioCommand::Start)
             .map_err(|e| format!("Failed to send start command: {e}"))?;
@@ -264,7 +265,7 @@ impl WasapiExclusivePlayback {
         Ok(())
     }
 
-    pub fn stop(&self) -> Result<(), String> {
+    pub fn stop(&self) -> Result<(), AppError> {
         self.command_tx
             .send(AudioCommand::Stop)
             .map_err(|e| format!("Failed to send stop command: {e}"))?;
@@ -275,7 +276,7 @@ impl WasapiExclusivePlayback {
     /// 带淡出的停止(用于切歌/退出)
     /// 主线程发送命令后立即返回,音频线程内部完成淡出再 stop_stream
     #[allow(dead_code)]
-    pub fn stop_with_fade_out(&self, duration_ms: u32) -> Result<(), String> {
+    pub fn stop_with_fade_out(&self, duration_ms: u32) -> Result<(), AppError> {
         self.command_tx
             .send(AudioCommand::StopWithFadeOut { duration_ms })
             .map_err(|e| format!("Failed to send stop_with_fade_out command: {e}"))?;
@@ -284,13 +285,12 @@ impl WasapiExclusivePlayback {
         Ok(())
     }
 
-    pub fn pause(&self) -> Result<(), String> {
-        // 默认 30ms 淡出消除 audible click
-        self.pause_with_fade_out(30)
+    pub fn pause(&self) -> Result<(), AppError> {
+        self.pause_with_fade_out(WASAPI_FADE_MS)
     }
 
     /// 不带淡出的暂停(用于用户禁用淡入淡出的场景)
-    pub fn pause_no_fade(&self) -> Result<(), String> {
+    pub fn pause_no_fade(&self) -> Result<(), AppError> {
         self.command_tx
             .send(AudioCommand::Pause)
             .map_err(|e| format!("Failed to send pause command: {e}"))?;
@@ -299,7 +299,7 @@ impl WasapiExclusivePlayback {
     }
 
     /// 带淡出的暂停(默认用于用户暂停)
-    pub fn pause_with_fade_out(&self, duration_ms: u32) -> Result<(), String> {
+    pub fn pause_with_fade_out(&self, duration_ms: u32) -> Result<(), AppError> {
         self.command_tx
             .send(AudioCommand::PauseWithFadeOut { duration_ms })
             .map_err(|e| format!("Failed to send pause_with_fade_out command: {e}"))?;
@@ -308,13 +308,12 @@ impl WasapiExclusivePlayback {
         Ok(())
     }
 
-    pub fn resume(&self) -> Result<(), String> {
-        // 默认 30ms 淡入消除 audible click
-        self.resume_with_fade_in(30)
+    pub fn resume(&self) -> Result<(), AppError> {
+        self.resume_with_fade_in(WASAPI_FADE_MS)
     }
 
     /// 不带淡入的恢复(用于用户禁用淡入淡出的场景)
-    pub fn resume_no_fade(&self) -> Result<(), String> {
+    pub fn resume_no_fade(&self) -> Result<(), AppError> {
         self.command_tx
             .send(AudioCommand::Resume)
             .map_err(|e| format!("Failed to send resume command: {e}"))?;
@@ -323,7 +322,7 @@ impl WasapiExclusivePlayback {
     }
 
     /// 带淡入的恢复(默认用于用户恢复)
-    pub fn resume_with_fade_in(&self, duration_ms: u32) -> Result<(), String> {
+    pub fn resume_with_fade_in(&self, duration_ms: u32) -> Result<(), AppError> {
         self.command_tx
             .send(AudioCommand::ResumeWithFadeIn { duration_ms })
             .map_err(|e| format!("Failed to send resume_with_fade_in command: {e}"))?;
@@ -331,15 +330,15 @@ impl WasapiExclusivePlayback {
         Ok(())
     }
 
-    pub fn set_volume(&self, vol: f32) -> Result<(), String> {
+    pub fn set_volume(&self, vol: f32) -> Result<(), AppError> {
         let vol = vol.clamp(0.0, 1.0);
         *lock_or_log!(self.volume.lock()) = vol;
         self.command_tx
             .send(AudioCommand::SetVolume(vol))
-            .map_err(|e| format!("Failed to send volume command: {e}"))
+            .map_err(|e| format!("Failed to send volume command: {e}").into())
     }
 
-    pub fn push_samples(&self, samples: &[f32]) -> Result<(), String> {
+    pub fn push_samples(&self, samples: &[f32]) -> Result<(), AppError> {
         let (buffer, cvar) = &*self.sample_buffer;
         let mut buf = lock_or_log!(buffer.lock());
         // 预先 reserve 避免多次扩容(VecDeque 的 extend 走迭代器路径无 slice 特化)
@@ -368,7 +367,7 @@ impl WasapiExclusivePlayback {
         guard.len() < max_samples
     }
 
-    pub fn clear_buffer(&self) -> Result<(), String> {
+    pub fn clear_buffer(&self) -> Result<(), AppError> {
         let (buffer, _) = &*self.sample_buffer;
         lock_or_log!(buffer.lock()).clear();
         self.samples_written.store(0, Ordering::SeqCst);
@@ -588,7 +587,6 @@ fn audio_thread_main(
                     fade_state = FadeState::Idle;
                     // 执行淡出后的动作
                     match action {
-                        FadeAction::None => {}
                         FadeAction::Pause => {
                             if let Some(ref client) = audio_client {
                                 let _ = client.stop_stream();
@@ -714,7 +712,7 @@ fn handle_initialize(
             }
         }
         Err(e) => {
-            let _ = response_tx.send(AudioResponse::InitFailed(e));
+            let _ = response_tx.send(AudioResponse::InitFailed(e.to_string()));
         }
     }
 }
@@ -805,7 +803,7 @@ fn process_audio_output(
 
 fn initialize_exclusive_device(
     device_name: Option<&str>,
-) -> Result<(wasapi::AudioClient, (u32, u16, String, u16, bool)), String> {
+) -> Result<(wasapi::AudioClient, (u32, u16, String, u16, bool)), AppError> {
     use wasapi::{DeviceEnumerator, Direction, SampleType, ShareMode, StreamMode, WaveFormat};
 
     let enumerator = DeviceEnumerator::new()
@@ -931,7 +929,8 @@ fn initialize_exclusive_device(
 
     Err(format!(
         "Failed to initialize exclusive mode after 3 attempts: {last_error:?}. The device may be in use by another application or does not support exclusive mode."
-    ))
+    )
+    .into())
 }
 
 /// SIMD 加速的样本转换模块

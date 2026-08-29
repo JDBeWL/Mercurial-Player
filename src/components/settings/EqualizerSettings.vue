@@ -84,28 +84,20 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { useI18n } from 'vue-i18n'
 import logger from '../../utils/logger'
-
-// EQ 频段信息(由后端 get_eq_bands 返回)
-interface EqBandInfo {
-  index: number
-  frequency: number
-  label: string
-}
-
-// EQ 设置(由后端 get_eq_settings 返回)
-interface EqSettings {
-  enabled: boolean
-  gains: number[]
-  preamp: number
-}
-
-// EQ 预设(由后端 get_eq_presets 返回)
-interface EqPreset {
-  name: string
-  gains: number[]
-}
+import {
+  applyEqPreset,
+  getEqBands,
+  getEqPresets,
+  getEqSettings,
+  resetEq as resetEqCommand,
+  setEqBandGain,
+  setEqEnabled,
+  setEqPreamp,
+  type EqBandInfo,
+  type EqPreset,
+} from '../../services/eqService'
 
 // 状态
 const enabled = ref<boolean>(false)
@@ -129,20 +121,13 @@ const bandDragging = ref<number>(-1)
 const MIN_GAIN = -8
 const MAX_GAIN = 8
 
-// 预设名称映射
-const presetLabels: Record<string, string> = {
-  'Bass Boost': '低音增强',
-  'Treble Boost': '高音增强',
-  Vocal: '人声',
-  Rock: '摇滚',
-  Pop: '流行',
-  Jazz: '爵士',
-  Classical: '古典',
-  Electronic: '电子',
-  Acoustic: '原声',
-}
+// 预设名称走 i18n（key 见语言文件 config.eqPresetNames），缺失时回退到原名
+const { t, te } = useI18n()
 
-const getPresetLabel = (name: string): string => presetLabels[name] || name
+const getPresetLabel = (name: string): string => {
+  const key = `config.eqPresetNames.${name}`
+  return te(key) ? t(key) : name
+}
 
 // 计算前置增益百分比 (0-100)
 const preampPercent = computed<number>(() => {
@@ -158,9 +143,9 @@ const getBandPercent = (index: number): number => {
 const loadSettings = async (): Promise<void> => {
   try {
     const [bandsData, settings, presetsData] = await Promise.all([
-      invoke<EqBandInfo[]>('get_eq_bands'),
-      invoke<EqSettings>('get_eq_settings'),
-      invoke<EqPreset[]>('get_eq_presets'),
+      getEqBands(),
+      getEqSettings(),
+      getEqPresets(),
     ])
 
     bands.value = bandsData
@@ -190,7 +175,7 @@ const detectCurrentPreset = (): void => {
 // 切换启用状态
 const toggleEnabled = async (): Promise<void> => {
   try {
-    await invoke('set_eq_enabled', { enabled: !enabled.value })
+    await setEqEnabled(!enabled.value)
     enabled.value = !enabled.value
   } catch (error) {
     logger.error('Failed to toggle EQ:', error)
@@ -240,7 +225,7 @@ const sendPreamp = async (value: number): Promise<void> => {
   try {
     for (;;) {
       const target = preampPending
-      await invoke('set_eq_preamp', { preamp: target })
+      await setEqPreamp(target)
       if (preampPending === target) break
     }
   } catch (error) {
@@ -275,19 +260,20 @@ const startBandDrag = (e: MouseEvent, index: number): void => {
   bandDragging.value = index
   updateBandFromEvent(e, index)
 
-  const onDrag = (ev: MouseEvent): void => {
-    if (bandDragging.value !== index) return
-    updateBandFromEvent(ev, index)
-  }
+  document.addEventListener('mousemove', onBandDrag)
+  document.addEventListener('mouseup', stopBandDrag)
+}
 
-  const stopDrag = (): void => {
-    bandDragging.value = -1
-    document.removeEventListener('mousemove', onDrag)
-    document.removeEventListener('mouseup', stopDrag)
-  }
+// 使用稳定具名函数而非闭包,保证卸载时能按引用移除监听器
+const onBandDrag = (ev: MouseEvent): void => {
+  if (bandDragging.value === -1) return
+  updateBandFromEvent(ev, bandDragging.value)
+}
 
-  document.addEventListener('mousemove', onDrag)
-  document.addEventListener('mouseup', stopDrag)
+const stopBandDrag = (): void => {
+  bandDragging.value = -1
+  document.removeEventListener('mousemove', onBandDrag)
+  document.removeEventListener('mouseup', stopBandDrag)
 }
 
 interface BandSendState {
@@ -308,7 +294,7 @@ const sendBandGain = async (index: number, value: number): Promise<void> => {
   bandInFlight.set(index, entry)
   try {
     for (;;) {
-      await invoke('set_eq_band_gain', { band: index, gain: entry.sent })
+      await setEqBandGain(index, entry.sent)
       if (entry.latest === entry.sent) break
       entry.sent = entry.latest
     }
@@ -339,7 +325,7 @@ const updateBandFromEvent = (e: MouseEvent, index: number): void => {
 // 应用预设
 const applyPreset = async (preset: EqPreset): Promise<void> => {
   try {
-    await invoke('apply_eq_preset', { presetName: preset.name })
+    await applyEqPreset(preset.name)
     gains.value = [...preset.gains]
     currentPreset.value = preset.name
   } catch (error) {
@@ -350,7 +336,7 @@ const applyPreset = async (preset: EqPreset): Promise<void> => {
 // 重置 EQ
 const resetEq = async (): Promise<void> => {
   try {
-    await invoke('reset_eq')
+    await resetEqCommand()
     await loadSettings()
   } catch (error) {
     logger.error('Failed to reset EQ:', error)
@@ -365,6 +351,8 @@ onUnmounted(() => {
   // 清理可能残留的事件监听器
   document.removeEventListener('mousemove', onPreampDrag)
   document.removeEventListener('mouseup', stopPreampDrag)
+  document.removeEventListener('mousemove', onBandDrag)
+  document.removeEventListener('mouseup', stopBandDrag)
 })
 </script>
 

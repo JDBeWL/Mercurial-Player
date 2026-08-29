@@ -5,7 +5,7 @@ import {
   AppError,
   ErrorHandler,
   handlePromise,
-  withErrorHandling,
+  setErrorHandlerTranslator,
 } from '@/utils/errorHandler'
 
 describe('ErrorHandler', () => {
@@ -13,6 +13,15 @@ describe('ErrorHandler', () => {
 
   beforeEach(() => {
     handler = new ErrorHandler()
+    // errorHandler 已与 i18n 装配层解耦,测试注入最小假翻译验证消息映射
+    setErrorHandlerTranslator((key) => {
+      const messages: Record<string, string> = {
+        'errors.network': '网络错误',
+        'errors.fileNotFound': '文件未找到',
+        'errors.genericError': '发生错误',
+      }
+      return messages[key] ?? key
+    })
   })
 
   describe('AppError', () => {
@@ -143,52 +152,6 @@ describe('ErrorHandler', () => {
     })
   })
 
-  describe('error stats', () => {
-    it('should track error count', () => {
-      handler.handle(new Error('1'), { silent: true })
-      handler.handle(new Error('2'), { silent: true })
-
-      const stats = handler.getStats()
-      expect(stats.total).toBe(2)
-    })
-
-    it('should track errors by type', () => {
-      handler.handle(new Error('1'), { type: ErrorType.NETWORK, silent: true })
-      handler.handle(new Error('2'), { type: ErrorType.NETWORK, silent: true })
-      handler.handle(new Error('3'), { type: ErrorType.FILE_NOT_FOUND, silent: true })
-
-      const stats = handler.getStats()
-      expect(stats.byType[ErrorType.NETWORK]).toBe(2)
-      expect(stats.byType[ErrorType.FILE_NOT_FOUND]).toBe(1)
-    })
-
-    it('should track errors by severity', () => {
-      handler.handle(new Error('1'), { severity: ErrorSeverity.HIGH, silent: true })
-      handler.handle(new Error('2'), { severity: ErrorSeverity.LOW, silent: true })
-
-      const stats = handler.getStats()
-      expect(stats.bySeverity[ErrorSeverity.HIGH]).toBe(1)
-      expect(stats.bySeverity[ErrorSeverity.LOW]).toBe(1)
-    })
-
-    it('should track recent errors', () => {
-      handler.handle(new Error('recent'), { silent: true })
-
-      const stats = handler.getStats()
-      expect(stats.recent).toHaveLength(1)
-      expect(stats.recent[0].error).toHaveProperty('message', 'recent')
-    })
-
-    it('should clear stats', () => {
-      handler.handle(new Error('test'), { silent: true })
-      handler.clearStats()
-
-      const stats = handler.getStats()
-      expect(stats.total).toBe(0)
-      expect(stats.recent).toHaveLength(0)
-    })
-  })
-
   describe('getUserFriendlyMessage', () => {
     it('should return friendly message for known error types', () => {
       const error = new AppError('test', ErrorType.NETWORK)
@@ -228,36 +191,6 @@ describe('handlePromise', () => {
     expect(result.success).toBe(false)
     expect(result.data).toBeNull()
     expect(result.error).toBeInstanceOf(AppError)
-  })
-})
-
-describe('withErrorHandling', () => {
-  it('should return result for successful function', async () => {
-    const fn = async () => 'success'
-    const wrapped = withErrorHandling(fn, { throw: false })
-
-    const result = await wrapped()
-    expect(result).toBe('success')
-  })
-
-  it('should handle errors and return result when throw is false', async () => {
-    const fn = async () => {
-      throw new Error('failed')
-    }
-    const wrapped = withErrorHandling(fn, { throw: false, silent: true })
-
-    const result = await wrapped()
-    expect(result.success).toBe(false)
-    expect(result.error).toBeInstanceOf(AppError)
-  })
-
-  it('should throw when throw option is true', async () => {
-    const fn = async () => {
-      throw new Error('failed')
-    }
-    const wrapped = withErrorHandling(fn, { throw: true, silent: true })
-
-    await expect(wrapped()).rejects.toThrow(AppError)
   })
 })
 

@@ -65,6 +65,7 @@ vi.mock('@/utils/errorHandler', () => ({
   default: {
     handle: mockErrorHandlerHandle,
   },
+  setErrorHandlerTranslator: () => {},
   ErrorType: {
     AUDIO_DEVICE_ERROR: 'AUDIO_DEVICE_ERROR',
     NETWORK: 'NETWORK',

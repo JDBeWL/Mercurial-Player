@@ -6,8 +6,13 @@
 //! 预计算查找表避免热路径上的数学运算
 //! 无锁设计减少线程竞争
 
+#[cfg(windows)]
+use super::decode_push::decode_and_push_to_wasapi;
 use super::decoder::{LockFreeSymphoniaSource, SymphoniaDecoder};
+use super::dsp::{db_to_linear_fast, precompute_hann_window, soft_clip_fast};
 use crate::error::AppError;
+
+use super::{FADE_IN_MS, FADE_IN_ON_SEEK_MS, LockOrErr};
 
 #[cfg(windows)]
 use super::wasapi::PlaybackState;
@@ -28,82 +33,8 @@ use tauri::{AppHandle, Emitter, State};
 // ============================================================================
 
 /// 软削波查找表大小（覆盖0.0到2.0范围，精度0.001）
-const SOFT_CLIP_TABLE_SIZE: usize = 2001;
-
-/// 预计算的软削波查找表
-static SOFT_CLIP_TABLE: std::sync::LazyLock<[f32; SOFT_CLIP_TABLE_SIZE]> =
-    std::sync::LazyLock::new(|| {
-        let mut table = [0.0f32; SOFT_CLIP_TABLE_SIZE];
-        for (i, item) in table.iter_mut().enumerate() {
-            let x = i as f32 / 1000.0; // 0.0到2.0
-            *item = compute_soft_clip(x);
-        }
-        table
-    });
-
-/// 计算软削波值（用于生成查找表）
-#[inline]
-fn compute_soft_clip(x: f32) -> f32 {
-    let threshold = 0.95;
-    if x <= threshold {
-        x
-    } else {
-        let over = x - threshold;
-        threshold + (1.0 - threshold) * (over / (1.0 - threshold) * 0.5).tanh()
-    }
-}
-
-/// 快速软削波 - 使用查找表
-#[inline(always)]
-fn soft_clip_fast(x: f32) -> f32 {
-    let sign = x.signum();
-    let abs_x = x.abs();
-
-    // 快速路径：大多数采样在[-0.95, 0.95]范围内
-    if abs_x <= 0.95 {
-        return x;
-    }
-
-    // 查表路径
-    let index = ((abs_x * 1000.0) as usize).min(SOFT_CLIP_TABLE_SIZE - 1);
-    sign * SOFT_CLIP_TABLE[index]
-}
-
-/// Preamp增益查找表（-8dB到+8dB，精度0.1dB）
-const PREAMP_TABLE_SIZE: usize = 161;
-
-static PREAMP_TABLE: std::sync::LazyLock<[f32; PREAMP_TABLE_SIZE]> =
-    std::sync::LazyLock::new(|| {
-        let mut table = [0.0f32; PREAMP_TABLE_SIZE];
-        for (i, item) in table.iter_mut().enumerate() {
-            let db = (i as f32 - 80.0) / 10.0; // -8.0 到 +8.0 dB
-            *item = 10.0_f32.powf(db / 20.0);
-        }
-        table
-    });
-
-/// 快速dB到线性增益转换
-#[inline(always)]
-fn db_to_linear_fast(db: f32) -> f32 {
-    let clamped = db.clamp(-8.0, 8.0);
-    let index = ((clamped + 8.0) * 10.0) as usize;
-    PREAMP_TABLE[index.min(PREAMP_TABLE_SIZE - 1)]
-}
-
 /// 批量处理块大小（对齐到SIMD友好的边界）
 const BATCH_SIZE: usize = 64;
-
-/// 预计算 Hann 窗口(避免每次 FFT 都堆分配)
-/// 公式: hann[i] = 0.5 - 0.5 * cos(2π * i / N)
-fn precompute_hann_window(size: usize) -> Vec<f32> {
-    let n = size as f32;
-    (0..size)
-        .map(|i| {
-            let angle = 2.0 * std::f32::consts::PI * (i as f32) / n;
-            0.5 - 0.5 * angle.cos()
-        })
-        .collect()
-}
 
 #[derive(Debug, serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -150,7 +81,9 @@ fn emit_spectrum_update(
 }
 
 #[inline]
-fn emit_track_ended(app: &AppHandle) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub(super) fn emit_track_ended(
+    app: &AppHandle,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     app.emit("track-ended", TrackEndedEvent {})?;
     Ok(())
 }
@@ -161,7 +94,7 @@ pub struct PlaybackPositionEvent {
     pub position: f32, // 秒
 }
 
-fn emit_playback_position(
+pub(super) fn emit_playback_position(
     app: &AppHandle,
     position: f32,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -173,19 +106,19 @@ fn emit_playback_position(
 // 批量处理缓冲区
 // ============================================================================
 
-/// 批量EQ处理器
+/// EQ 处理器(共享模式与独占模式共用)
 ///
-/// 注意:本 EQ 处理器与 EqProcessor(独占模式)是两套独立实现。
-/// 修改 EQ 算法(频段增益、Q 因子、滤波器类型)时必须同步修改另一处。
+/// 共享模式通过 [`EqProcessor::process_batch`] 批量处理,
+/// 独占模式通过 [`EqProcessor::process_sample_cached`] 逐采样处理。
 ///
 /// 性能优化要点:
-/// 1. states 采用扁平布局 `[channel][band]` (channel × EQ_BAND_COUNT),避免双层 Vec 解引用
+/// 1. states 采用扁平布局 `[channel * EQ_BAND_COUNT + band]`,同一 channel 的所有
+///    band 状态在内存中连续,避免双层 Vec 解引用,提升 cache 命中率
 /// 2. 三个处理阶段(preamp/biquad/soft_clip)合并为单次循环,提升 cache 局部性
 /// 3. i % channels 在 channels=2 时编译器会优化为位运算,无需手动展开
-struct BatchEqProcessor {
+pub(super) struct EqProcessor {
     coefficients: Vec<crate::equalizer::BiquadCoefficients>,
     /// 扁平布局: states[channel * EQ_BAND_COUNT + band]
-    /// 这样同一 channel 的所有 band 状态在内存中连续,提升 cache 命中率
     states: Vec<crate::equalizer::BiquadState>,
     sample_rate: f32,
     channels: usize,
@@ -193,8 +126,8 @@ struct BatchEqProcessor {
     cached_preamp_multiplier: f32,
 }
 
-impl BatchEqProcessor {
-    fn new(sample_rate: u32, channels: u16) -> Self {
+impl EqProcessor {
+    pub(super) fn new(sample_rate: u32, channels: u16) -> Self {
         let channels = channels as usize;
         Self {
             coefficients: vec![crate::equalizer::BiquadCoefficients::default(); EQ_BAND_COUNT],
@@ -208,7 +141,7 @@ impl BatchEqProcessor {
     }
 
     /// 更新缓存的设置和滤波器系数
-    fn update_settings(&mut self, settings: &EqSettings) {
+    pub(super) fn update_settings(&mut self, settings: &EqSettings) {
         self.cached_enabled = settings.enabled;
         // 使用查找表获取preamp乘数
         self.cached_preamp_multiplier = db_to_linear_fast(settings.preamp);
@@ -239,27 +172,38 @@ impl BatchEqProcessor {
 
         let preamp = self.cached_preamp_multiplier;
         let channels = self.channels;
-        let band_count = EQ_BAND_COUNT;
 
         // 单次循环完成 preamp + biquad + soft_clip,提升 cache 局部性
         // 注: i % channels 在 channels=2 时编译器优化为 i & 1,无取模开销
         for (i, sample) in samples.iter_mut().enumerate() {
             let channel = i % channels;
-            let state_base = channel * band_count;
-
-            // 1. preamp
-            *sample *= preamp;
-
-            // 2. 逐频段 biquad 处理(使用扁平 states 数组,连续内存访问)
-            for band in 0..band_count {
-                let coeffs = &self.coefficients[band];
-                let state = &mut self.states[state_base + band];
-                *sample = state.process(*sample, coeffs);
-            }
-
-            // 3. 软削波
-            *sample = soft_clip_fast(*sample);
+            *sample = self.process_one(*sample, channel, preamp);
         }
+    }
+
+    /// 处理单个采样(preamp + biquad + soft_clip)
+    #[inline(always)]
+    fn process_one(&mut self, input: f32, channel: usize, preamp: f32) -> f32 {
+        let mut sample = input * preamp;
+        let state_base = channel * EQ_BAND_COUNT;
+        for (band, coeffs) in self.coefficients.iter().enumerate() {
+            let state = &mut self.states[state_base + band];
+            sample = state.process(sample, coeffs);
+        }
+        soft_clip_fast(sample)
+    }
+
+    /// 逐采样处理(独占模式解码线程使用)
+    #[inline(always)]
+    pub(super) fn process_sample_cached(&mut self, input: f32, channel: usize) -> f32 {
+        if !self.cached_enabled {
+            return input;
+        }
+        self.process_one(input, channel, self.cached_preamp_multiplier)
+    }
+
+    pub(super) const fn is_enabled(&self) -> bool {
+        self.cached_enabled
     }
 }
 
@@ -274,7 +218,7 @@ pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     last_fft_time: AtomicU64,
     last_position_emit_time: AtomicU64,
     eq_settings: Arc<RwLock<EqSettings>>,
-    eq_processor: BatchEqProcessor,
+    eq_processor: EqProcessor,
     eq_update_counter: u32,
     fft_buffer: Vec<f32>,
     /// 预计算的 Hann 窗口(按 fft_size 一次预计算,避免每次 FFT 堆分配)
@@ -331,7 +275,7 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             last_fft_time: AtomicU64::new(0),
             last_position_emit_time: AtomicU64::new(0),
             eq_settings: Arc::new(RwLock::new(EqSettings::default())),
-            eq_processor: BatchEqProcessor::new(sr, ch),
+            eq_processor: EqProcessor::new(sr, ch),
             eq_update_counter: 0,
             fft_buffer: vec![0.0; fft_size],
             hann_window: precompute_hann_window(fft_size),
@@ -606,7 +550,7 @@ pub fn play_track_shared(
                 )
                 .with_start_position(start_pos)
                 .with_eq_settings(eq_settings)
-                .fade_in(Duration::from_millis(80)), // 稍长的淡入来补偿没有淡出
+                .fade_in(Duration::from_millis(FADE_IN_MS)), // 稍长的淡入来补偿没有淡出
             )
         }
         Err(e) => {
@@ -623,7 +567,7 @@ pub fn play_track_shared(
                 )
                 .with_start_position(position.unwrap_or(0.0))
                 .with_eq_settings(eq_settings)
-                .fade_in(Duration::from_millis(80)),
+                .fade_in(Duration::from_millis(FADE_IN_MS)),
             )
         }
     };
@@ -811,500 +755,6 @@ pub async fn play_track_exclusive(
     ))
 }
 
-/// 根据采样率计算解码chunk 大小
-/// 目标是保持约~21ms的处理块（1024@48kHz）
-#[must_use]
-#[cfg(windows)]
-const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
-    match sample_rate {
-        0..=32000 => 512,        // ≤32kHz
-        32001..=64000 => 1024,   // 44.1k/48k
-        64001..=128_000 => 2048, // 88.2k/96k
-        _ => 4096,               // 176.4k/192k/384k
-    }
-}
-
-/// 注意:本 EQ 处理器与 BatchEqProcessor(共享模式)是两套独立实现。
-/// 修改 EQ 算法(频段增益、Q 因子、滤波器类型)时必须同步修改另一处。
-#[cfg(windows)]
-struct EqProcessor {
-    coefficients: Vec<crate::equalizer::BiquadCoefficients>,
-    states: Vec<Vec<crate::equalizer::BiquadState>>,
-    sample_rate: f32,
-    #[allow(dead_code)]
-    channels: usize,
-    cached_enabled: bool,
-    cached_preamp_multiplier: f32,
-}
-
-#[cfg(windows)]
-impl EqProcessor {
-    fn new(sample_rate: u32, channels: u16) -> Self {
-        Self {
-            coefficients: vec![crate::equalizer::BiquadCoefficients::default(); EQ_BAND_COUNT],
-            states: vec![
-                vec![crate::equalizer::BiquadState::default(); channels as usize];
-                EQ_BAND_COUNT
-            ],
-            sample_rate: sample_rate as f32,
-            channels: channels as usize,
-            cached_enabled: false,
-            cached_preamp_multiplier: 1.0,
-        }
-    }
-
-    fn update_settings(&mut self, settings: &EqSettings) {
-        self.cached_enabled = settings.enabled;
-        self.cached_preamp_multiplier = 10.0_f32.powf(settings.preamp / 20.0);
-
-        if settings.enabled {
-            self.update_coefficients(settings);
-        }
-    }
-
-    fn update_coefficients(&mut self, settings: &EqSettings) {
-        use crate::equalizer::{BiquadCoefficients, EQ_FREQUENCIES, EQ_Q_VALUES};
-        for (i, &freq) in EQ_FREQUENCIES.iter().enumerate() {
-            self.coefficients[i] = BiquadCoefficients::peaking_eq(
-                self.sample_rate,
-                freq,
-                settings.gains[i],
-                EQ_Q_VALUES[i],
-            );
-        }
-    }
-
-    #[inline(always)]
-    fn process_sample_cached(&mut self, input: f32, channel: usize) -> f32 {
-        if !self.cached_enabled {
-            return input;
-        }
-        let mut sample = input * self.cached_preamp_multiplier;
-        for (band, coeffs) in self.coefficients.iter().enumerate() {
-            sample = self.states[band][channel].process(sample, coeffs);
-        }
-        soft_clip_fast(sample)
-    }
-
-    #[inline(always)]
-    const fn is_enabled(&self) -> bool {
-        self.cached_enabled
-    }
-}
-
-#[cfg(windows)]
-fn decode_and_push_to_wasapi(
-    mut source: LockFreeSymphoniaSource,
-    wasapi: Arc<Mutex<Option<super::wasapi::WasapiExclusivePlayback>>>,
-    _waveform: Arc<Mutex<Vec<f32>>>,
-    _spectrum: Arc<Mutex<Vec<f32>>>,
-    app: AppHandle,
-    generation: Arc<AtomicU64>,
-    thread_id_ref: Arc<AtomicU64>,
-    my_id: u64,
-    src_sr: u32,
-    src_ch: u16,
-    target_sr: u32,
-    target_ch: u16,
-    eq_settings: Arc<RwLock<EqSettings>>,
-    start_position: f32,
-) {
-    use audioadapter_buffers::direct::SequentialSliceOfVecs;
-    use rubato::{
-        Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
-        WindowFunction,
-    };
-    // 记录启动时的代际,循环中检测代际变化即退出(替代 stop 布尔标志)
-    let my_generation = generation.load(Ordering::SeqCst);
-    if generation.load(Ordering::SeqCst) != my_generation
-        || thread_id_ref.load(Ordering::SeqCst) != my_id
-    {
-        return;
-    }
-
-    let mut eq_proc = EqProcessor::new(src_sr, src_ch);
-    if let Ok(settings) = eq_settings.read() {
-        eq_proc.update_settings(&settings);
-    }
-    let need_resample = src_sr != target_sr;
-    let chunk_size = calculate_decode_chunk_size(src_sr);
-    let resample_ratio = target_sr as f64 / src_sr as f64;
-    let mut eq_update_counter: u32 = 0;
-    let mut resampler: Option<Async<f32>> = if need_resample {
-        // rubato 4.0: 用 builder 模式构造 SincInterpolationParameters
-        let params = SincInterpolationParameters::new(128, WindowFunction::BlackmanHarris2)
-            .f_cutoff(0.925)
-            .interpolation(SincInterpolationType::Linear)
-            .oversampling_factor(128);
-        Async::<f32>::new_sinc(
-            resample_ratio,
-            2.0,
-            &params,
-            chunk_size,
-            src_ch as usize,
-            FixedAsync::Input,
-        )
-        .ok()
-    } else {
-        None
-    };
-
-    let mut input_frames: Vec<Vec<f32>> = vec![Vec::with_capacity(chunk_size); src_ch as usize];
-    // 精确计算最大输出缓冲区大小
-    let max_output_frames = ((chunk_size as f64 * resample_ratio).ceil() as usize).max(chunk_size);
-    let mut output_buffer: Vec<f32> = Vec::with_capacity(max_output_frames * target_ch as usize);
-    // rubato 4.0: 预分配输出帧 buffer (复用,避免每次循环堆分配)
-    // 每通道预留 max_output_frames + chunk_size 作为安全余量 (rubato 启动延迟可能导致首帧输出更多)
-    let output_frames_capacity = max_output_frames + chunk_size;
-    let mut output_frames_resampled: Vec<Vec<f32>> =
-        vec![Vec::with_capacity(output_frames_capacity); src_ch as usize];
-    // 复用 interleaved 缓冲区,避免每帧堆分配
-    let samples_needed = chunk_size * src_ch as usize;
-    let mut interleaved: Vec<f32> = Vec::with_capacity(samples_needed);
-    // 通道转换用复用缓冲区
-    let mut converted_buffer: Vec<f32> = Vec::with_capacity(max_output_frames * target_ch as usize);
-
-    // 播放位置追踪
-    let mut last_position_emit_time: u64 = 0;
-
-    // 发送播放位置的闭包
-    let emit_position = |last_time: &mut u64| {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        if now - *last_time >= 100 {
-            *last_time = now;
-            let samples_played = lock_or_log!(wasapi.lock())
-                .as_ref()
-                .map_or(0, |p| p.get_samples_written());
-            let position =
-                start_position + samples_played as f32 / (target_sr as f32 * target_ch as f32);
-            let _ = emit_playback_position(&app, position);
-        }
-    };
-
-    loop {
-        if generation.load(Ordering::SeqCst) != my_generation
-            || thread_id_ref.load(Ordering::SeqCst) != my_id
-            || lock_or_log!(wasapi.lock()).is_none()
-        {
-            break;
-        }
-        for ch in &mut input_frames {
-            ch.clear();
-        }
-
-        // 复用 interleaved 缓冲区
-        interleaved.clear();
-        let mut eof = false;
-        for _ in 0..samples_needed {
-            if let Some(s) = source.next() {
-                interleaved.push(s);
-            } else {
-                eof = true;
-                break;
-            }
-        }
-        if interleaved.is_empty() {
-            break;
-        }
-
-        // 发送播放位置
-        emit_position(&mut last_position_emit_time);
-
-        for (i, s) in interleaved.iter().enumerate() {
-            input_frames[i % src_ch as usize].push(*s);
-        }
-
-        eq_update_counter += 1;
-        if eq_update_counter >= 4 {
-            eq_update_counter = 0;
-            if let Ok(settings) = eq_settings.try_read() {
-                eq_proc.update_settings(&settings);
-            }
-        }
-
-        if eq_proc.is_enabled() {
-            for (ch, frame) in input_frames.iter_mut().enumerate() {
-                for s in frame.iter_mut() {
-                    *s = eq_proc.process_sample_cached(*s, ch);
-                }
-            }
-        }
-
-        // 处理重采样 - 用 Cow 避免成功路径的 clone
-        use std::borrow::Cow;
-        let output_frames: Cow<'_, [Vec<f32>]> = if let Some(ref mut r) = resampler {
-            let actual = input_frames[0].len();
-            if actual < chunk_size && !eof {
-                // 非EOF情况下填充到chunk_size
-                for ch in &mut input_frames {
-                    let last_sample = ch.last().copied().unwrap_or(0.0);
-                    let samples_to_add = chunk_size - ch.len();
-                    ch.extend((0..samples_to_add).map(|i| {
-                        let fade = 1.0 - (i as f32 / samples_to_add as f32);
-                        last_sample * fade
-                    }));
-                }
-                // rubato 4.0: 用 SequentialSliceOfVecs adapter 包装输入输出
-                match SequentialSliceOfVecs::new(&input_frames, src_ch as usize, chunk_size) {
-                    Ok(input_adapter) => {
-                        // 清空并预分配输出 buffer
-                        for ch in &mut output_frames_resampled {
-                            ch.clear();
-                            ch.resize(output_frames_capacity, 0.0);
-                        }
-                        match SequentialSliceOfVecs::new_mut(
-                            &mut output_frames_resampled,
-                            src_ch as usize,
-                            output_frames_capacity,
-                        ) {
-                            Ok(mut output_adapter) => {
-                                let indexing = Indexing::new();
-                                match r.process_into_buffer(
-                                    &input_adapter,
-                                    &mut output_adapter,
-                                    Some(&indexing),
-                                ) {
-                                    Ok((_in_used, out_written)) => {
-                                        for ch in &mut output_frames_resampled {
-                                            ch.truncate(out_written);
-                                        }
-                                        // 成功路径借用即可：output_frames_resampled
-                                        // 在本迭代内只读，下一轮循环才会被 clear/resize
-                                        Cow::Borrowed(&output_frames_resampled)
-                                    }
-                                    Err(_) => Cow::Borrowed(&input_frames),
-                                }
-                            }
-                            Err(_) => Cow::Borrowed(&input_frames),
-                        }
-                    }
-                    Err(_) => Cow::Borrowed(&input_frames),
-                }
-            } else if eof && actual < chunk_size {
-                // EOF情况下 - 直接借用 input_frames,避免 clone
-                Cow::Borrowed(&input_frames)
-            } else {
-                // rubato 4.0: 正常路径
-                let frames_in = input_frames[0].len();
-                match SequentialSliceOfVecs::new(&input_frames, src_ch as usize, frames_in) {
-                    Ok(input_adapter) => {
-                        for ch in &mut output_frames_resampled {
-                            ch.clear();
-                            ch.resize(output_frames_capacity, 0.0);
-                        }
-                        match SequentialSliceOfVecs::new_mut(
-                            &mut output_frames_resampled,
-                            src_ch as usize,
-                            output_frames_capacity,
-                        ) {
-                            Ok(mut output_adapter) => {
-                                let indexing = Indexing::new();
-                                match r.process_into_buffer(
-                                    &input_adapter,
-                                    &mut output_adapter,
-                                    Some(&indexing),
-                                ) {
-                                    Ok((_in_used, out_written)) => {
-                                        for ch in &mut output_frames_resampled {
-                                            ch.truncate(out_written);
-                                        }
-                                        // 成功路径借用即可：output_frames_resampled
-                                        // 在本迭代内只读，下一轮循环才会被 clear/resize
-                                        Cow::Borrowed(&output_frames_resampled)
-                                    }
-                                    Err(_) => Cow::Borrowed(&input_frames),
-                                }
-                            }
-                            Err(_) => Cow::Borrowed(&input_frames),
-                        }
-                    }
-                    Err(_) => Cow::Borrowed(&input_frames),
-                }
-            }
-        } else {
-            Cow::Borrowed(&input_frames)
-        };
-
-        // 交错输出帧
-        output_buffer.clear();
-        let out_len = output_frames.first().map_or(0, Vec::len);
-        for i in 0..out_len {
-            for ch in 0..output_frames.len() {
-                output_buffer.push(output_frames[ch].get(i).copied().unwrap_or(0.0));
-            }
-        }
-
-        // 通道转换:使用复用缓冲区,避免 clone
-        // current_ch 是重采样后实际声道数
-        let current_ch = output_frames.len() as u16;
-        let final_out: &[f32] = if current_ch == target_ch {
-            &output_buffer
-        } else {
-            convert_channels_into(&output_buffer, current_ch, target_ch, &mut converted_buffer);
-            &converted_buffer
-        };
-
-        if !final_out.is_empty() {
-            // 等待缓冲区有空间 (Condvar 等待,被 WASAPI 消费线程唤醒)
-            // 缓冲区容量约为 target_sr * target_ch * 4 秒,保持在 2 秒以下
-            let max_buffer = target_sr as usize * target_ch as usize * 2;
-            loop {
-                if generation.load(Ordering::SeqCst) != my_generation
-                    || thread_id_ref.load(Ordering::SeqCst) != my_id
-                {
-                    break;
-                }
-                // 用 condvar 等待 50ms 超时,期间 WASAPI 消费端 notify 会唤醒本线程
-                let has_space = lock_or_log!(wasapi.lock())
-                    .as_ref()
-                    .is_none_or(|p| p.wait_for_buffer_space(max_buffer, Duration::from_millis(50)));
-                if has_space {
-                    break;
-                }
-                // 等待时继续发送播放位置
-                emit_position(&mut last_position_emit_time);
-            }
-            if generation.load(Ordering::SeqCst) != my_generation
-                || thread_id_ref.load(Ordering::SeqCst) != my_id
-            {
-                break;
-            }
-
-            if let Some(ref p) = *lock_or_log!(wasapi.lock()) {
-                if p.push_samples(final_out).is_err() {
-                    break;
-                }
-            }
-        }
-
-        if eof && interleaved.len() < samples_needed {
-            loop {
-                if generation.load(Ordering::SeqCst) != my_generation
-                    || thread_id_ref.load(Ordering::SeqCst) != my_id
-                {
-                    break;
-                }
-                let buf_size = lock_or_log!(wasapi.lock())
-                    .as_ref()
-                    .map_or(0, |p| p.get_buffer_size());
-                if buf_size == 0 {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            if generation.load(Ordering::SeqCst) == my_generation
-                && thread_id_ref.load(Ordering::SeqCst) == my_id
-            {
-                if let Some(ref p) = *lock_or_log!(wasapi.lock()) {
-                    let _ = p.stop();
-                }
-                let _ = emit_track_ended(&app);
-            }
-            break;
-        }
-        // 让出 CPU 给其他线程 (主要给消费线程),避免 100% 占用
-        // 但用更短的时间,因为已经被 condvar 同步过
-        std::thread::yield_now();
-    }
-}
-
-/// 5.1/7.1环绕声到立体声的专业混音
-/// 使用ITU-R BS.775-1标准的下混系数
-#[cfg(windows)]
-fn downmix_surround_to_stereo(samples: &[f32], src_ch: usize, frame: usize) -> (f32, f32) {
-    let start = frame * src_ch;
-
-    let fl = samples[start];
-    let fr = samples[start + 1];
-    let fc = if src_ch > 2 { samples[start + 2] } else { 0.0 };
-    let _lfe = if src_ch > 3 { samples[start + 3] } else { 0.0 };
-
-    const CENTER_MIX: f32 = 0.707;
-    const SURROUND_MIX: f32 = 0.707;
-    const BACK_MIX: f32 = 0.5;
-
-    let (mut left, mut right) = (fl, fr);
-
-    left += fc * CENTER_MIX;
-    right += fc * CENTER_MIX;
-
-    match src_ch {
-        6 => {
-            let sl = samples[start + 4];
-            let sr = samples[start + 5];
-            left += sl * SURROUND_MIX;
-            right += sr * SURROUND_MIX;
-        }
-        8 => {
-            let bl = samples[start + 4];
-            let br = samples[start + 5];
-            let sl = samples[start + 6];
-            let sr = samples[start + 7];
-            left += sl * SURROUND_MIX + bl * BACK_MIX;
-            right += sr * SURROUND_MIX + br * BACK_MIX;
-        }
-        _ => {}
-    }
-
-    let normalize = match src_ch {
-        6 => 0.707,
-        8 => 0.667,
-        _ => 0.8,
-    };
-
-    (
-        (left * normalize).clamp(-1.0, 1.0),
-        (right * normalize).clamp(-1.0, 1.0),
-    )
-}
-
-/// 通道转换(in-place 版本):写入预分配缓冲区,避免每帧堆分配。
-/// out 会被 clear 并填充结果。
-#[cfg(windows)]
-fn convert_channels_into(samples: &[f32], src_ch: u16, target_ch: u16, out: &mut Vec<f32>) {
-    out.clear();
-    if src_ch == target_ch {
-        out.extend_from_slice(samples);
-        return;
-    }
-    let (src, tgt) = (src_ch as usize, target_ch as usize);
-    let frames = samples.len() / src;
-    out.reserve(frames * tgt);
-
-    for f in 0..frames {
-        let start = f * src;
-        match (src, tgt) {
-            (1, 2) => {
-                let s = samples[start];
-                out.push(s);
-                out.push(s);
-            }
-            (2, 1) => {
-                out.push(f32::midpoint(samples[start], samples[start + 1]));
-            }
-            (6 | 8, 2) => {
-                // 5.1/7.1到立体声的专业混音
-                let (left, right) = downmix_surround_to_stereo(samples, src, f);
-                out.push(left);
-                out.push(right);
-            }
-            _ => {
-                // 其他情况:简单截取或填充
-                for ch in 0..tgt {
-                    out.push(if ch < src {
-                        samples[start + ch]
-                    } else {
-                        samples[start]
-                    });
-                }
-            }
-        }
-    }
-}
-
 /// Seek共享模式
 pub fn seek_track_shared(
     app: &AppHandle,
@@ -1331,7 +781,7 @@ pub fn seek_track_shared(
         )
         .with_start_position(time)
         .with_eq_settings(eq_settings)
-        .fade_in(Duration::from_millis(50)), // seek时使用较短的淡入
+        .fade_in(Duration::from_millis(FADE_IN_ON_SEEK_MS)), // seek时使用较短的淡入
     );
 
     // 手动重采样到 mixer 采样率（同 play_track_shared 的修复）
@@ -1367,16 +817,16 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, AppError> {
         .output
         .target_volume
         .try_lock()
-        .map(|g| *g)
-        .map_err(|_| "Failed to acquire target volume lock".to_string())?;
+        .lock_or_err("target volume")
+        .map(|g| *g)?;
 
     let exclusive_mode = state
         .player
         .output
         .exclusive_mode
         .try_lock()
-        .map(|g| *g)
-        .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
+        .lock_or_err("exclusive mode")
+        .map(|g| *g)?;
 
     let is_playing = if exclusive_mode {
         #[cfg(windows)]
@@ -1386,7 +836,7 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, AppError> {
                 .output
                 .wasapi_player
                 .try_lock()
-                .map_err(|_| "Failed to acquire WASAPI player lock".to_string())?;
+                .lock_or_err("WASAPI player")?;
             guard
                 .as_ref()
                 // Stopping/Pausing 期间音频仍在淡出(可听见),视为正在播放
@@ -1405,12 +855,7 @@ pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, AppError> {
             ));
         }
     } else {
-        let player = state
-            .player
-            .output
-            .sink
-            .try_lock()
-            .map_err(|_| "Failed to acquire player lock".to_string())?;
+        let player = state.player.output.sink.try_lock().lock_or_err("player")?;
         !player.is_paused() && !player.empty()
     };
 
@@ -1424,8 +869,8 @@ pub fn check_track_finished(state: &State<AppState>) -> Result<bool, AppError> {
         .output
         .exclusive_mode
         .try_lock()
-        .map(|g| *g)
-        .map_err(|_| "Failed to acquire exclusive mode lock".to_string())?;
+        .lock_or_err("exclusive mode")
+        .map(|g| *g)?;
 
     if exclusive_mode {
         #[cfg(windows)]
@@ -1435,7 +880,7 @@ pub fn check_track_finished(state: &State<AppState>) -> Result<bool, AppError> {
                 .output
                 .wasapi_player
                 .try_lock()
-                .map_err(|_| "Failed to acquire WASAPI player lock".to_string())?;
+                .lock_or_err("WASAPI player")?;
             let wasapi = guard
                 .as_ref()
                 .ok_or_else(|| "WASAPI player not initialized".to_string())?;
@@ -1448,12 +893,7 @@ pub fn check_track_finished(state: &State<AppState>) -> Result<bool, AppError> {
             ))
         }
     } else {
-        let player = state
-            .player
-            .output
-            .sink
-            .try_lock()
-            .map_err(|_| "Failed to acquire player lock".to_string())?;
+        let player = state.player.output.sink.try_lock().lock_or_err("player")?;
         Ok(player.empty() && !player.is_paused())
     }
 }

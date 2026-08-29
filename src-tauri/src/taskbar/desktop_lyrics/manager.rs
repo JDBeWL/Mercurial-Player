@@ -1,5 +1,6 @@
 #![allow(unsafe_code)]
 
+use crate::error::AppError;
 use std::sync::{Arc, Mutex};
 
 use windows::Win32::Foundation::HWND;
@@ -40,7 +41,7 @@ impl DesktopLyricsManager {
         Self { initialized: false }
     }
 
-    pub fn initialize(&mut self, app_handle: tauri::AppHandle) -> Result<(), String> {
+    pub fn initialize(&mut self, app_handle: tauri::AppHandle) -> Result<(), AppError> {
         if self.initialized {
             return Ok(());
         }
@@ -107,7 +108,7 @@ impl DesktopLyricsManager {
         words: Vec<DesktopLyricWord>,
         current_time: f32,
         is_playing: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), AppError> {
         let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
         let progress = progress.clamp(0.0, 1.0);
         let current_time = current_time.max(0.0);
@@ -155,7 +156,7 @@ impl DesktopLyricsManager {
         Ok(())
     }
 
-    pub fn show(&self) -> Result<(), String> {
+    pub fn show(&self) -> Result<(), AppError> {
         let hwnd = get_hwnd();
         if hwnd != 0 {
             // SAFETY: hwnd 经 LYRICS_HWND 校验非 0，由消息循环线程创建并有效
@@ -175,7 +176,7 @@ impl DesktopLyricsManager {
         Ok(())
     }
 
-    pub fn hide(&self) -> Result<(), String> {
+    pub fn hide(&self) -> Result<(), AppError> {
         let hwnd = get_hwnd();
         if hwnd != 0 {
             // SAFETY: 同 show()，hwnd 经校验有效
@@ -186,7 +187,7 @@ impl DesktopLyricsManager {
         Ok(())
     }
 
-    pub fn set_locked(&self, locked: bool) -> Result<(), String> {
+    pub fn set_locked(&self, locked: bool) -> Result<(), AppError> {
         let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
         {
             let mut guard = state.lock().map_err(|e| format!("Lock error: {e}"))?;
@@ -213,7 +214,7 @@ impl DesktopLyricsManager {
         Ok(())
     }
 
-    pub fn set_font_size(&self, size: i32) -> Result<(), String> {
+    pub fn set_font_size(&self, size: i32) -> Result<(), AppError> {
         let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
         {
             let mut guard = state.lock().map_err(|e| format!("Lock error: {e}"))?;
@@ -237,7 +238,7 @@ impl DesktopLyricsManager {
         &self,
         font_family: &str,
         translation_font_family: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), AppError> {
         let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
         {
             let mut guard = state.lock().map_err(|e| format!("Lock error: {e}"))?;
@@ -250,7 +251,7 @@ impl DesktopLyricsManager {
         Ok(())
     }
 
-    pub fn set_color_preset(&self, preset_name: &str) -> Result<(), String> {
+    pub fn set_color_preset(&self, preset_name: &str) -> Result<(), AppError> {
         let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
         {
             let mut guard = state.lock().map_err(|e| format!("Lock error: {e}"))?;
