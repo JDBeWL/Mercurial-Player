@@ -78,11 +78,8 @@ export function useErrorNotification() {
    * title 可选，提供时以「title: message」形式合并为单行文案。
    * 成功提示默认 3 秒自动关闭，比错误通知更短暂。
    */
-  const showSuccess = (
-    message: string,
-    title?: string,
-    duration: number = 3000,
-  ): number => showError(title ? `${title}: ${message}` : message, 'success', duration)
+  const showSuccess = (message: string, title?: string, duration: number = 3000): number =>
+    showError(title ? `${title}: ${message}` : message, 'success', duration)
 
   /**
    * 移除错误通知

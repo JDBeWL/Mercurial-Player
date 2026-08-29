@@ -88,11 +88,7 @@ export function useLyricsScroll(deps: {
     })
   }
 
-  const scrollToActiveLyric = (
-    immediate = false,
-    isUserClick = false,
-    targetIndex = -1,
-  ): void => {
+  const scrollToActiveLyric = (immediate = false, isUserClick = false, targetIndex = -1): void => {
     if (!containerRef.value) return
 
     const idx = targetIndex !== -1 ? targetIndex : activeIndex.value

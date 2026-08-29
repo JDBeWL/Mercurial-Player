@@ -3,6 +3,7 @@
 //! 实现 10 段参数均衡器，支持实时调节。
 
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use std::f32::consts::PI;
 use std::sync::{Arc, RwLock};
 
@@ -129,23 +130,102 @@ impl Default for BiquadCoefficients {
 }
 
 impl BiquadCoefficients {
+    /// 根据频段序号设计该 band 的滤波器:首尾用 shelf,中间用 peaking。
+    ///
+    /// 两端用 shelf 是因为用户对 31Hz/16kHz 的直觉是"低音/高音整体多一点",
+    /// peaking 的钟形响应只在中心隆起、两端回落,容易诱导用户过量提升。
+    #[must_use]
+    pub fn for_band(sample_rate: f32, band: usize, gain_db: f32) -> Self {
+        let freq = EQ_FREQUENCIES[band];
+        if band == 0 {
+            Self::low_shelf(sample_rate, freq, gain_db)
+        } else if band == EQ_BAND_COUNT - 1 {
+            Self::high_shelf(sample_rate, freq, gain_db)
+        } else {
+            Self::peaking_eq(sample_rate, freq, gain_db, EQ_Q_VALUES[band])
+        }
+    }
+
+    /// RBJ peaking EQ。系数用 f64 计算后转 f32 存储以保留精度
+    /// (31Hz@44.1kHz 的归一化频率极低,f32 直接计算会有可观的系数量化误差)。
     #[must_use]
     pub fn peaking_eq(sample_rate: f32, frequency: f32, gain_db: f32, q: f32) -> Self {
         if gain_db.abs() < 0.001 {
             return Self::default();
         }
-        let a = 10.0_f32.powf(gain_db / 40.0);
-        let omega = 2.0 * PI * frequency / sample_rate;
-        let (sin_omega, cos_omega) = (omega.sin(), omega.cos());
-        let alpha = sin_omega / (2.0 * q);
-        let (b0, b1, b2) = (1.0 + alpha * a, -2.0 * cos_omega, 1.0 - alpha * a);
-        let (a0, a1, a2) = (1.0 + alpha / a, -2.0 * cos_omega, 1.0 - alpha / a);
+        let sr = f64::from(sample_rate);
+        let f0 = f64::from(frequency);
+        let a = 10.0_f64.powf(f64::from(gain_db) / 40.0);
+        let omega = std::f64::consts::TAU * f0 / sr;
+        let (sin_omega, cos_omega) = omega.sin_cos();
+        let alpha = sin_omega / (2.0 * f64::from(q));
+        let b0 = 1.0 + alpha * a;
+        let b2 = 1.0 - alpha * a;
+        let a0 = 1.0 + alpha / a;
+        let a2 = 1.0 - alpha / a;
         Self {
-            b0: b0 / a0,
-            b1: b1 / a0,
-            b2: b2 / a0,
-            a1: a1 / a0,
-            a2: a2 / a0,
+            b0: (b0 / a0) as f32,
+            b1: (-2.0 * cos_omega / a0) as f32,
+            b2: (b2 / a0) as f32,
+            a1: (-2.0 * cos_omega / a0) as f32,
+            a2: (a2 / a0) as f32,
+        }
+    }
+
+    /// RBJ low shelf(Q = 1/√2,等价于 shelf slope S = 1 的 Butterworth 特性)。
+    #[must_use]
+    pub fn low_shelf(sample_rate: f32, frequency: f32, gain_db: f32) -> Self {
+        if gain_db.abs() < 0.001 {
+            return Self::default();
+        }
+        Self::shelf(sample_rate, frequency, gain_db, false)
+    }
+
+    /// RBJ high shelf(参数同 [`BiquadCoefficients::low_shelf`])。
+    #[must_use]
+    pub fn high_shelf(sample_rate: f32, frequency: f32, gain_db: f32) -> Self {
+        if gain_db.abs() < 0.001 {
+            return Self::default();
+        }
+        Self::shelf(sample_rate, frequency, gain_db, true)
+    }
+
+    fn shelf(sample_rate: f32, frequency: f32, gain_db: f32, high: bool) -> Self {
+        let sr = f64::from(sample_rate);
+        let f0 = f64::from(frequency);
+        let a = 10.0_f64.powf(f64::from(gain_db) / 40.0);
+        let omega = std::f64::consts::TAU * f0 / sr;
+        let (sin_omega, cos_omega) = omega.sin_cos();
+        // Q = 1/√2 → alpha = sin/2·√2,即 S = 1
+        let alpha = sin_omega / std::f64::consts::SQRT_2;
+        let term = 2.0 * a.sqrt() * alpha;
+        let (a_plus, a_minus) = (a + 1.0, a - 1.0);
+
+        let (b0, b1, b2, a0, a1, a2) = if high {
+            (
+                a * (a_plus + a_minus * cos_omega + term),
+                -2.0 * a * (a_minus + a_plus * cos_omega),
+                a * (a_plus + a_minus * cos_omega - term),
+                a_plus - a_minus * cos_omega + term,
+                2.0 * (a_minus - a_plus * cos_omega),
+                a_plus - a_minus * cos_omega - term,
+            )
+        } else {
+            (
+                a * (a_plus - a_minus * cos_omega + term),
+                2.0 * a * (a_minus - a_plus * cos_omega),
+                a * (a_plus - a_minus * cos_omega - term),
+                a_plus + a_minus * cos_omega + term,
+                -2.0 * (a_minus + a_plus * cos_omega),
+                a_plus + a_minus * cos_omega - term,
+            )
+        };
+        Self {
+            b0: (b0 / a0) as f32,
+            b1: (b1 / a0) as f32,
+            b2: (b2 / a0) as f32,
+            a1: (a1 / a0) as f32,
+            a2: (a2 / a0) as f32,
         }
     }
 }
@@ -193,6 +273,18 @@ impl Default for EqSettings {
     }
 }
 
+impl EqSettings {
+    /// 有效 preamp(dB) = 用户 preamp - 最大提升量。
+    ///
+    /// 均衡器提升某频段后,该频段的峰值可能超过 0dBFS 触发 soft clip 全曲失真。
+    /// 自动把整体电平拉低最大提升量即可保证峰值不超(削减 band 只会降低电平,
+    /// 不需要补偿)。与专业均衡器(Equalizer APO / VLC auto gain)行为一致。
+    #[must_use]
+    pub fn effective_preamp_db(&self) -> f32 {
+        self.preamp - self.gains.iter().copied().fold(0.0_f32, f32::max)
+    }
+}
+
 pub struct Equalizer {
     settings: Arc<RwLock<EqSettings>>,
     coefficients: Vec<BiquadCoefficients>,
@@ -222,13 +314,8 @@ impl Equalizer {
 
     pub fn update_coefficients(&mut self) {
         let settings = lock_or_log!(self.settings.read());
-        for (i, &freq) in EQ_FREQUENCIES.iter().enumerate() {
-            self.coefficients[i] = BiquadCoefficients::peaking_eq(
-                self.sample_rate,
-                freq,
-                settings.gains[i],
-                EQ_Q_VALUES[i],
-            );
+        for (i, &gain) in settings.gains.iter().enumerate() {
+            self.coefficients[i] = BiquadCoefficients::for_band(self.sample_rate, i, gain);
         }
     }
 
@@ -237,7 +324,7 @@ impl Equalizer {
         if !settings.enabled {
             return input;
         }
-        let preamp_gain = 10.0_f32.powf(settings.preamp / 20.0);
+        let preamp_gain = 10.0_f32.powf(settings.effective_preamp_db() / 20.0);
         let mut sample = input * preamp_gain;
         drop(settings);
         for (band, coeffs) in self.coefficients.iter().enumerate() {
@@ -251,7 +338,7 @@ impl Equalizer {
         if !settings.enabled {
             return;
         }
-        let preamp_gain = 10.0_f32.powf(settings.preamp / 20.0);
+        let preamp_gain = 10.0_f32.powf(settings.effective_preamp_db() / 20.0);
         drop(settings);
         for (i, sample) in buffer.iter_mut().enumerate() {
             let channel = i % self.channels;
@@ -479,7 +566,6 @@ mod tests {
         // 提升 1 kHz 频段 (索引 5) +6 dB
         eq.set_band_gain(5, 6.0);
         eq.set_enabled(true);
-
         let sample_rate = 48000.0_f32;
         let freq = 1000.0_f32;
         let mut input_energy = 0.0_f64;
@@ -494,6 +580,104 @@ mod tests {
         assert!(
             (output_energy - input_energy).abs() > 1e-4,
             "enabled EQ should change signal energy: in={input_energy}, out={output_energy}"
+        );
+    }
+
+    #[test]
+    fn test_effective_preamp_compensates_max_boost() {
+        let mut settings = EqSettings::default();
+        assert!(
+            approx_eq(settings.effective_preamp_db(), 0.0),
+            "flat EQ needs no compensation"
+        );
+        settings.gains[5] = 4.0;
+        settings.gains[2] = 2.0;
+        settings.preamp = -1.0;
+        assert!(
+            approx_eq(settings.effective_preamp_db(), -5.0),
+            "effective preamp should subtract the max boost (4dB), got {}",
+            settings.effective_preamp_db()
+        );
+        // 纯削减不需要补偿
+        settings.gains[5] = 0.0;
+        settings.gains[2] = -3.0;
+        assert!(
+            approx_eq(settings.effective_preamp_db(), -1.0),
+            "cut-only EQ should not be compensated"
+        );
+    }
+
+    /// 稳态正弦幅度(丢弃前 warmup 个采样,取峰值)
+    fn steady_state_amplitude(
+        eq: &mut Equalizer,
+        freq: f32,
+        amplitude: f32,
+        channel: usize,
+    ) -> f32 {
+        let sample_rate = 48000.0_f32;
+        let warmup = 4800;
+        let mut peak = 0.0_f32;
+        for n in 0..warmup * 2 {
+            let t = n as f32 / sample_rate;
+            let x = (2.0 * PI * freq * t).sin() * amplitude;
+            let y = eq.process_sample(x, channel);
+            if n >= warmup {
+                peak = peak.max(y.abs());
+            }
+        }
+        peak
+    }
+
+    #[test]
+    fn test_low_shelf_boosts_bass_region() {
+        let mut eq = Equalizer::new(48000, 2);
+        eq.set_band_gain(0, 6.0); // 31Hz low shelf
+        // 设 preamp = 最大提升量,抵消自动增益补偿,以便单独验证滤波器响应
+        eq.set_preamp(6.0);
+        eq.set_enabled(true);
+        // 8Hz 位于 shelf 通带深处,应获得接近 +6dB (×2) 的增益
+        let boosted = steady_state_amplitude(&mut eq, 8.0, 0.25, 0);
+        assert!(
+            (boosted - 0.5).abs() < 0.06,
+            "8Hz should be boosted ~+6dB by 31Hz low shelf, got peak {boosted}"
+        );
+        // 1kHz 应基本不受影响(shelf 拐点以上的阻带)
+        let untouched = steady_state_amplitude(&mut eq, 1000.0, 0.25, 0);
+        assert!(
+            (untouched - 0.25).abs() < 0.03,
+            "1kHz should be nearly unaffected by 31Hz low shelf, got peak {untouched}"
+        );
+    }
+
+    #[test]
+    fn test_high_shelf_boosts_treble_region() {
+        let mut eq = Equalizer::new(48000, 2);
+        eq.set_band_gain(9, 6.0); // 16kHz high shelf
+        eq.set_preamp(6.0);
+        eq.set_enabled(true);
+        // 22kHz 位于 shelf 通带深处(接近但不越过 Nyquist 24kHz)
+        let boosted = steady_state_amplitude(&mut eq, 22000.0, 0.25, 0);
+        assert!(
+            (boosted - 0.5).abs() < 0.06,
+            "22kHz should be boosted ~+6dB by 16kHz high shelf, got peak {boosted}"
+        );
+        let untouched = steady_state_amplitude(&mut eq, 500.0, 0.25, 0);
+        assert!(
+            (untouched - 0.25).abs() < 0.03,
+            "500Hz should be nearly unaffected by 16kHz high shelf, got peak {untouched}"
+        );
+    }
+
+    #[test]
+    fn test_auto_preamp_prevents_clipping_on_boost() {
+        // +8dB boost + 满幅正弦:自动补偿后输出峰值不应超过 soft clip 阈值
+        let mut eq = Equalizer::new(48000, 2);
+        eq.set_band_gain(5, 8.0);
+        eq.set_enabled(true);
+        let peak = steady_state_amplitude(&mut eq, 1000.0, 0.95, 0);
+        assert!(
+            peak <= 0.96,
+            "auto preamp should keep boosted peak <=0dBFS, got {peak}"
         );
     }
 

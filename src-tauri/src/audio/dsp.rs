@@ -44,27 +44,6 @@ pub(crate) fn soft_clip_fast(x: f32) -> f32 {
     sign * SOFT_CLIP_TABLE[index]
 }
 
-/// Preamp增益查找表（-8dB到+8dB，精度0.1dB）
-const PREAMP_TABLE_SIZE: usize = 161;
-
-static PREAMP_TABLE: std::sync::LazyLock<[f32; PREAMP_TABLE_SIZE]> =
-    std::sync::LazyLock::new(|| {
-        let mut table = [0.0f32; PREAMP_TABLE_SIZE];
-        for (i, item) in table.iter_mut().enumerate() {
-            let db = (i as f32 - 80.0) / 10.0; // -8.0 到 +8.0 dB
-            *item = 10.0_f32.powf(db / 20.0);
-        }
-        table
-    });
-
-/// 快速dB到线性增益转换
-#[inline(always)]
-pub(crate) fn db_to_linear_fast(db: f32) -> f32 {
-    let clamped = db.clamp(-8.0, 8.0);
-    let index = ((clamped + 8.0) * 10.0) as usize;
-    PREAMP_TABLE[index.min(PREAMP_TABLE_SIZE - 1)]
-}
-
 /// 预计算 Hann 窗口(避免每次 FFT 都堆分配)
 /// 公式: hann[i] = 0.5 - 0.5 * cos(2π * i / N)
 pub(crate) fn precompute_hann_window(size: usize) -> Vec<f32> {

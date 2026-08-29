@@ -616,8 +616,6 @@ export const usePlayerStore = defineStore('player', {
 
     // --- 进度控制 ---
 
-
-
     // --- 播放结束 ---
 
     async _onEnded(): Promise<void> {

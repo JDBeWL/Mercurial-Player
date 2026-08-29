@@ -405,8 +405,11 @@ const handleCoverKeydown = (e: KeyboardEvent): void => {
 }
 
 // ===== 沉浸式模式：控制栏自动隐藏（状态机实现见 composables/useImmersiveAutoHide） =====
-const { immersiveControlsVisible, markImmersiveActivity, cleanup: cleanupImmersiveAutoHide } =
-  useImmersiveAutoHide(immersiveCover)
+const {
+  immersiveControlsVisible,
+  markImmersiveActivity,
+  cleanup: cleanupImmersiveAutoHide,
+} = useImmersiveAutoHide(immersiveCover)
 
 // 打开设置时退出沉浸模式（设置面板为不透明界面，顶栏需恢复底色），关闭时恢复
 const wasImmersiveBeforeSettings = ref(false)

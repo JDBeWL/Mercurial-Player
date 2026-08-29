@@ -19,9 +19,7 @@ export function deepEqual(obj1: unknown, obj2: unknown): boolean {
   if (keys1.length !== keys2.length) return false
 
   for (const key of keys1) {
-    if (
-      !deepEqual((obj1 as Record<string, unknown>)[key], (obj2 as Record<string, unknown>)[key])
-    )
+    if (!deepEqual((obj1 as Record<string, unknown>)[key], (obj2 as Record<string, unknown>)[key]))
       return false
   }
   return true

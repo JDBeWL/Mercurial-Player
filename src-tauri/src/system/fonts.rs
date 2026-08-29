@@ -543,7 +543,7 @@ fn get_macos_fonts() -> Result<Vec<String>, AppError> {
         .map_err(|e| format!("Failed to execute system_profiler: {e}"))?;
 
     if !output.status.success() {
-        return Err("system_profiler command failed".to_string());
+        return Err(AppError::msg("system_profiler command failed"));
     }
 
     let _json_str = String::from_utf8_lossy(&output.stdout);
@@ -576,7 +576,7 @@ fn get_linux_fonts() -> Result<Vec<String>, AppError> {
         .map_err(|e| format!("Failed to execute fc-list: {e}"))?;
 
     if !output.status.success() {
-        return Err("fc-list command failed".to_string());
+        return Err(AppError::msg("fc-list command failed"));
     }
 
     let output_str = String::from_utf8_lossy(&output.stdout);

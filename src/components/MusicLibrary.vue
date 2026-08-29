@@ -195,7 +195,6 @@ import { useErrorNotification } from '../composables/useErrorNotification'
 import { useLibrarySearch, type SearchResult } from '../composables/useLibrarySearch'
 import type { Track, Playlist, LibraryStats } from '../types'
 
-
 // 增强播放列表类型（带 UI 辅助字段）
 interface EnhancedPlaylist extends Playlist {
   path?: string

@@ -9,7 +9,7 @@
 #[cfg(windows)]
 use super::decode_push::decode_and_push_to_wasapi;
 use super::decoder::{LockFreeSymphoniaSource, SymphoniaDecoder};
-use super::dsp::{db_to_linear_fast, precompute_hann_window, soft_clip_fast};
+use super::dsp::{precompute_hann_window, soft_clip_fast};
 use crate::error::AppError;
 
 use super::{FADE_IN_MS, FADE_IN_ON_SEEK_MS, LockOrErr};
@@ -143,8 +143,9 @@ impl EqProcessor {
     /// 更新缓存的设置和滤波器系数
     pub(super) fn update_settings(&mut self, settings: &EqSettings) {
         self.cached_enabled = settings.enabled;
-        // 使用查找表获取preamp乘数
-        self.cached_preamp_multiplier = db_to_linear_fast(settings.preamp);
+        // 自动增益补偿: preamp 减去最大提升量,保证提升 band 后峰值不超 0dBFS
+        // (preamp 每次设置变更只计算一次,无需查表)
+        self.cached_preamp_multiplier = 10.0_f32.powf(settings.effective_preamp_db() / 20.0);
 
         if settings.enabled {
             self.update_coefficients(settings);
@@ -152,14 +153,9 @@ impl EqProcessor {
     }
 
     fn update_coefficients(&mut self, settings: &EqSettings) {
-        use crate::equalizer::{BiquadCoefficients, EQ_FREQUENCIES, EQ_Q_VALUES};
-        for (i, &freq) in EQ_FREQUENCIES.iter().enumerate() {
-            self.coefficients[i] = BiquadCoefficients::peaking_eq(
-                self.sample_rate,
-                freq,
-                settings.gains[i],
-                EQ_Q_VALUES[i],
-            );
+        use crate::equalizer::BiquadCoefficients;
+        for (i, &gain) in settings.gains.iter().enumerate() {
+            self.coefficients[i] = BiquadCoefficients::for_band(self.sample_rate, i, gain);
         }
     }
 
