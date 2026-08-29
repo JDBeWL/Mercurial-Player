@@ -22,7 +22,7 @@ use mercurial_player::{Placeholder, audio::DeviceMonitor};
 #[cfg(windows)]
 pub type PlatformPlayer = WasapiExclusivePlayback;
 #[cfg(not(windows))]
-pub(crate) type PlatformPlayer = Placeholder;
+pub type PlatformPlayer = Placeholder;
 
 /// 启动期创建的音频输出三件套(sink 由流派生,流需保活)
 pub struct AudioOutput {
@@ -45,6 +45,8 @@ pub fn build_app_state(
         wasapi_player,
     } = output;
 
+    // wasapi_player 在非 Windows 平台恒为 None(两个构造函数都不产生独占播放器),
+    // 因此直接传值即可: is_some() 在 Linux 上为 false,与旧的条件编译分支等价
     AppState {
         player: PlayerState {
             output: AudioOutputState {
@@ -53,27 +55,9 @@ pub fn build_app_state(
                 target_volume: Arc::new(Mutex::new(1.0)),
                 current_device_name: Arc::new(Mutex::new(device_name.clone())),
                 exclusive_mode: Arc::new(Mutex::new(
-                    exclusive_mode_enabled && {
-                        #[cfg(windows)]
-                        {
-                            wasapi_player.is_some()
-                        }
-                        #[cfg(not(windows))]
-                        {
-                            false
-                        }
-                    },
+                    exclusive_mode_enabled && wasapi_player.is_some(),
                 )),
-                wasapi_player: {
-                    #[cfg(windows)]
-                    {
-                        Arc::new(Mutex::new(wasapi_player))
-                    }
-                    #[cfg(not(windows))]
-                    {
-                        Arc::new(Mutex::new(None))
-                    }
-                },
+                wasapi_player: Arc::new(Mutex::new(wasapi_player)),
             },
             track: TrackState {
                 current_source: Arc::new(Mutex::new(None)),

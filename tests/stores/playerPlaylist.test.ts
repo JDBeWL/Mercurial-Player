@@ -16,7 +16,7 @@ vi.mock('@/stores/shuffle', () => ({
   })),
 }))
 
-const track = (path: string): Track => ({ path, name: path } as unknown as Track)
+const track = (path: string): Track => ({ path, name: path }) as unknown as Track
 
 /** 被测函数接收的 store 参数类型(完整 Pinia PlayerStore,测试只需结构子集) */
 type PlaylistStoreParam = Parameters<typeof removeTrackFromPlaylist>[0]

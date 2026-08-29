@@ -9,9 +9,6 @@ use mercurial_player::audio::WasapiExclusivePlayback;
 #[cfg(windows)]
 use mercurial_player::taskbar;
 
-#[cfg(not(windows))]
-use mercurial_player::Placeholder;
-
 use rodio::stream::DeviceSinkBuilder;
 
 use crate::app_state::{AudioOutput, PlatformPlayer};
@@ -163,7 +160,7 @@ pub fn create_exclusive_mode_player(device_name: &str) -> Result<AudioOutput, Ap
 
 /// 创建独占模式播放器（非Windows平台回退到共享模式）
 #[cfg(not(windows))]
-pub(crate) fn create_exclusive_mode_player(_device_name: &str) -> Result<AudioOutput, AppError> {
+pub fn create_exclusive_mode_player(_device_name: &str) -> Result<AudioOutput, AppError> {
     log::warn!("Exclusive mode is only supported on Windows, falling back to shared mode");
     let mixer_sink = DeviceSinkBuilder::from_default_device()
         .map_err(|e| format!("Failed to create default device sink builder: {e}"))?
