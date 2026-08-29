@@ -23,7 +23,10 @@ use spectrum_analyzer::scaling::divide_by_N_sqrt;
 use spectrum_analyzer::{FrequencyLimit, samples_fft_to_spectrum};
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+// AtomicBool 仅在下方 #[cfg(windows)] 的 WASAPI 独占模式代码中使用
+#[cfg(windows)]
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
