@@ -3,8 +3,8 @@
 //! 包含系统信息获取和窗口管理功能。
 use crate::error::AppError;
 
-use crate::security::is_simple_filename;
 use crate::AppState;
+use crate::security::is_simple_filename;
 use std::collections::HashMap;
 use tauri::{AppHandle, LogicalSize, Manager, Size, State, command};
 
@@ -23,8 +23,8 @@ pub fn resolve_data_file(file: String) -> Result<String, AppError> {
     if !is_simple_filename(&file) {
         return Err(AppError::msg("非法的数据文件名"));
     }
-    let exe_path =
-        std::env::current_exe().map_err(|e| AppError::msg(format!("无法获取可执行文件路径: {e}")))?;
+    let exe_path = std::env::current_exe()
+        .map_err(|e| AppError::msg(format!("无法获取可执行文件路径: {e}")))?;
     let exe_dir = exe_path
         .parent()
         .ok_or_else(|| AppError::msg("无法获取可执行文件目录"))?;

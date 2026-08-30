@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GetWindowLongPtrW, HWND_TOPMOST, SET_WINDOW_POS_FLAGS, SW_HIDE,
-    SW_SHOWNOACTIVATE, SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_TRANSPARENT,
+    GWL_EXSTYLE, GetWindowLongPtrW, HWND_TOPMOST, SET_WINDOW_POS_FLAGS, SW_HIDE, SW_SHOWNOACTIVATE,
+    SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_TRANSPARENT,
 };
 
 use super::window::{get_hwnd, post_update, resize_window_for_font, run_message_loop};
@@ -271,5 +271,4 @@ impl DesktopLyricsManager {
         post_update();
         Ok(())
     }
-
 }

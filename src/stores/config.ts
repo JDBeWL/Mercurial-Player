@@ -257,16 +257,13 @@ export const useConfigStore = defineStore('config', {
       }
 
       // 主存储：后端 ConfigManager 写 data/config.json(原子写:先 .tmp 再 rename)
-      this._savePromise = handlePromise(
-        invoke('save_config', { config: configToSave }),
-        {
-          type: ErrorType.CONFIG_SAVE_ERROR,
-          severity: ErrorSeverity.LOW,
-          context: { action: 'saveConfig' },
-          showToUser: false,
-          throw: false,
-        },
-      )
+      this._savePromise = handlePromise(invoke('save_config', { config: configToSave }), {
+        type: ErrorType.CONFIG_SAVE_ERROR,
+        severity: ErrorSeverity.LOW,
+        context: { action: 'saveConfig' },
+        showToUser: false,
+        throw: false,
+      })
 
       await this._savePromise
       this._savePromise = null

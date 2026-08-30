@@ -577,4 +577,3 @@ select.md3-select:hover {
 select.md3-select:focus {
   --dropdown-icon-color: var(--md-sys-color-primary);
 }
-

@@ -35,10 +35,7 @@ const PLAY_TRACK_TIMEOUT_MS = 5000
 /// 播放结束自动跳到下一首的延迟(毫秒),给 UI 留出状态刷新窗口
 const AUTO_NEXT_TRACK_DELAY_MS = 100
 
-import {
-  addTrackNextInPlaylist,
-  removeTrackFromPlaylist,
-} from './playerPlaylist'
+import { addTrackNextInPlaylist, removeTrackFromPlaylist } from './playerPlaylist'
 import {
   cachePlaylistMetadata,
   loadPlaylistCovers,

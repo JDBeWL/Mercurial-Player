@@ -29,7 +29,8 @@ static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 /// 主程序同级 logs/ 目录(与 plugins/、screenshots/ 的解析方式一致)
 fn log_dir() -> Result<PathBuf, AppError> {
-    let exe_path = std::env::current_exe().map_err(|e| AppError::msg(format!("无法获取可执行文件路径: {e}")))?;
+    let exe_path = std::env::current_exe()
+        .map_err(|e| AppError::msg(format!("无法获取可执行文件路径: {e}")))?;
     let exe_dir = exe_path.parent().ok_or("无法获取可执行文件目录")?;
     Ok(exe_dir.join("logs"))
 }
@@ -44,7 +45,10 @@ pub fn init_log_rotation() {
         }
     };
     if let Err(e) = std::fs::create_dir_all(&log_dir) {
-        log::warn!("Failed to create log dir {}, file logging disabled: {e}", log_dir.display());
+        log::warn!(
+            "Failed to create log dir {}, file logging disabled: {e}",
+            log_dir.display()
+        );
         return;
     }
 
@@ -84,7 +88,10 @@ pub struct FrontendLogEntry {
 impl FrontendLogEntry {
     fn format_line(&self) -> String {
         let date = self.date.as_deref().unwrap_or("----/--/--");
-        let mut line = format!("[{date} {}] [{}] {}", self.timestamp, self.level, self.message);
+        let mut line = format!(
+            "[{date} {}] [{}] {}",
+            self.timestamp, self.level, self.message
+        );
         if let Some(args) = &self.args {
             for arg in args {
                 line.push(' ');

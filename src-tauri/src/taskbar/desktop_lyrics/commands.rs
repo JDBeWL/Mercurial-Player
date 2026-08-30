@@ -95,4 +95,3 @@ pub fn set_desktop_lyrics_color_preset(preset: String) -> Result<(), AppError> {
     let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
     guard.set_color_preset(&preset)
 }
-

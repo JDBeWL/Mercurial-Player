@@ -51,7 +51,11 @@ pub fn init(app: &tauri::App) {
             }
             match std::fs::copy(&src, &dst) {
                 Ok(_) => {
-                    log::info!("Migrated {name} from {} to {}", src.display(), dst.display());
+                    log::info!(
+                        "Migrated {name} from {} to {}",
+                        src.display(),
+                        dst.display()
+                    );
                     true
                 }
                 Err(e) => {
