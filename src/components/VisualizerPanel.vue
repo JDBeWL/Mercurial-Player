@@ -46,7 +46,7 @@
   </div>
 </template>
 
-<script>
+<script lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { usePlayerStore } from '@/stores/player'
 import { useLyrics } from '@/composables/useLyrics'
@@ -55,6 +55,7 @@ import { useLyricsTypography } from '@/composables/useLyricsTypography'
 import { listen } from '@tauri-apps/api/event'
 import logger from '@/utils/logger'
 import { detectLyricLanguage } from '@/utils/languageDetect'
+import type { KaraokeWord } from '@/types'
 
 export default {
   name: 'VisualizerPanel',
@@ -62,21 +63,21 @@ export default {
     const playerStore = usePlayerStore()
     const { lyrics, activeIndex } = useLyrics()
 
-    const canvasRef = ref(null)
-    const visualizerContainer = ref(null)
-    let animationId = null
+    const canvasRef = ref<HTMLCanvasElement | null>(null)
+    const visualizerContainer = ref<HTMLElement | null>(null)
+    let animationId: number | null = null
     let audioData = new Float32Array(128)
     let smoothedAudioData = new Float32Array(128)
-    let spectrumListener = null
+    let spectrumListener: (() => void) | null = null
     let isAnimating = false
 
-    let pendingSpectrumData = null
+    let pendingSpectrumData: Float32Array | null = null
 
     const SPECTRUM_SIZE = 128
 
-    let cachedGradient = null
+    let cachedGradient: CanvasGradient | null = null
     let lastCanvasHeight = 0
-    let lastPrimaryColor = null
+    let lastPrimaryColor: string | null = null
 
     const getPrimaryColor = () => {
       return (
@@ -86,7 +87,7 @@ export default {
       )
     }
 
-    const getOrCreateGradient = (ctx, height) => {
+    const getOrCreateGradient = (ctx: CanvasRenderingContext2D, height: number) => {
       const primaryColor = getPrimaryColor()
       if (!cachedGradient || lastCanvasHeight !== height || lastPrimaryColor !== primaryColor) {
         cachedGradient = ctx.createLinearGradient(0, height, 0, 0)
@@ -98,7 +99,11 @@ export default {
       return cachedGradient
     }
 
-    const smoothDataInPlace = (currentData, targetData, smoothingFactor = 0.85) => {
+    const smoothDataInPlace = (
+      currentData: Float32Array,
+      targetData: Float32Array,
+      smoothingFactor = 0.85,
+    ): void => {
       for (let i = 0; i < SPECTRUM_SIZE; i++) {
         const current = currentData[i] || 0
         const target = targetData[i] || 0
@@ -137,12 +142,12 @@ export default {
       },
     )
 
-    const karaokeStyleCache = new Map()
+    const karaokeStyleCache = new Map<string, Record<string, string>>()
     const activeColor = 'var(--md-sys-color-primary)'
     const inactiveColor =
       'color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1))'
 
-    const getKaraokeStyle = (word) => {
+    const getKaraokeStyle = (word: KaraokeWord) => {
       const offset = playerStore.lyricsOffset || 0
       const t = visualTime.value - offset
 
@@ -169,7 +174,9 @@ export default {
 
       if (karaokeStyleCache.size > 500) {
         const firstKey = karaokeStyleCache.keys().next().value
-        karaokeStyleCache.delete(firstKey)
+        if (firstKey !== undefined) {
+          karaokeStyleCache.delete(firstKey)
+        }
       }
       karaokeStyleCache.set(cacheKey, cached)
       return cached
@@ -181,6 +188,7 @@ export default {
 
       const canvas = canvasRef.value
       const ctx = canvas.getContext('2d')
+      if (!ctx) return
       const width = canvas.width
       const height = canvas.height
 
@@ -217,7 +225,7 @@ export default {
     }
 
     // --- 可视化绘制 ---
-    const drawVisualizer = (timestamp) => {
+    const drawVisualizer = (timestamp: number): void => {
       if (!canvasRef.value || !visualizerContainer.value) return
 
       if (!playerStore.isPlaying) {
@@ -236,6 +244,7 @@ export default {
 
       const canvas = canvasRef.value
       const ctx = canvas.getContext('2d')
+      if (!ctx) return
       const width = canvas.width
       const height = canvas.height
 
@@ -337,7 +346,7 @@ export default {
       // 监听频谱更新事件（后端以60fps发送）
       // 数据先缓存，由requestAnimationFrame按屏幕刷新率消费
       try {
-        spectrumListener = await listen('spectrum-update', (event) => {
+        spectrumListener = await listen<{ data: Float32Array }>('spectrum-update', (event) => {
           if (event.payload && event.payload.data) {
             pendingSpectrumData = event.payload.data
           }

@@ -33,11 +33,14 @@ export function removeTrackFromPlaylist(store: PlayerStore, path: string): void 
       invoke('pause_track').catch((err) => logger.warn('pause before remove:', err))
     }
 
-    store.playTrack(store.playlist[nextIndex]).then(() => {
-      if (!wasPlaying) {
-        store.pause()
-      }
-    })
+    store
+      .playTrack(store.playlist[nextIndex])
+      .then(() => {
+        if (!wasPlaying) {
+          store.pause()
+        }
+      })
+      .catch((err) => logger.warn('play after remove failed:', err))
   } else {
     // 如果删除的不是当前播放的歌曲，但删除了当前歌曲前面的歌曲，
     // 我们不需要更新 currentTrack，但需要处理 vue 响应式带来的潜在问题
@@ -89,25 +92,4 @@ export function addTrackNextInPlaylist(store: PlayerStore, track: Track): void {
     store.playlist.splice(currentIndex + 1, 0, track)
     logger.info('Added new track to next position:', track.path)
   }
-}
-
-export function addTracksNextInPlaylist(store: PlayerStore, tracks: Track[]): void {
-  if (!tracks || tracks.length === 0) return
-
-  const currentIndex = store.currentTrackIndex
-
-  // 如果没有当前曲目或播放列表为空，直接添加到开头
-  if (currentIndex === -1 || store.playlist.length === 0) {
-    store.playlist.unshift(...tracks)
-    logger.info(`Added ${tracks.length} tracks to beginning of playlist`)
-    return
-  }
-
-  // 过滤掉已存在的曲目并记录它们的位置
-  const existingPaths = new Set(store.playlist.map((t) => t.path))
-  const newTracks = tracks.filter((t) => !existingPaths.has(t.path))
-
-  // 插入到当前曲目后面
-  store.playlist.splice(currentIndex + 1, 0, ...newTracks)
-  logger.info(`Added ${newTracks.length} new tracks to next position`)
 }

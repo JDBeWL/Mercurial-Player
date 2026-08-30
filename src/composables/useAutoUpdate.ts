@@ -54,18 +54,6 @@ const extractErrorMessage = (err: unknown): string =>
       : ((err as { message?: string })?.message ?? JSON.stringify(err))
 
 /**
- * 获取当前应用版本
- */
-const getCurrentVersion = async (): Promise<string> => {
-  try {
-    return await invoke('get_app_version')
-  } catch (err) {
-    logger.error('Failed to get app version:', err)
-    throw err
-  }
-}
-
-/**
  * 检查更新（后端读取 tauri.conf.json 中的 endpoints 配置）
  */
 const checkForUpdates = async () => {
@@ -209,6 +197,5 @@ export function useAutoUpdate() {
     downloadAndInstall,
     runInstaller,
     resetUpdateState,
-    getCurrentVersion,
   }
 }

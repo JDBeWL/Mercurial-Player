@@ -66,11 +66,12 @@ export default [
       'no-undef': 'off',
       // Vue: 允许单词组件名（如 Settings、PlayerControls）
       'vue/multi-word-component-names': 'off',
-      // TS: any 仅警告（Tauri API 返回值等场景需要），测试文件中完全允许
-      '@typescript-eslint/no-explicit-any': 'warn',
-      // TS: 未使用变量仅警告，允许以 _ 前缀显式忽略
+      // TS: any 禁止（当前代码库已无 any;Tauri API 返回值应显式声明类型）,
+      // 测试文件中完全允许 (见上方 overrides)
+      '@typescript-eslint/no-explicit-any': 'error',
+      // TS: 未使用变量禁止,允许以 _ 前缀显式忽略
       '@typescript-eslint/no-unused-vars': [
-        'warn',
+        'error',
         {
           argsIgnorePattern: '^_',
           varsIgnorePattern: '^_',
@@ -79,8 +80,8 @@ export default [
       ],
       // TS: 禁止 @ts-ignore（应使用 @ts-expect-error 带原因），阻断 CI
       '@typescript-eslint/ban-ts-comment': 'error',
-      // TS: Function 类型仅警告
-      '@typescript-eslint/no-unsafe-function-type': 'warn',
+      // TS: Function 类型禁止 (当前代码库已无违规)
+      '@typescript-eslint/no-unsafe-function-type': 'error',
       // 允许 console（项目使用 logger，但开发调试时偶尔需要 console）
       'no-console': 'off',
       // ESLint 10 新规则，对现有代码库过于严格，暂时关闭

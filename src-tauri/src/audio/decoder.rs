@@ -7,8 +7,8 @@ use crossbeam_channel::{Receiver, bounded};
 use rodio::Source;
 use std::fs::File;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use symphonia::core::audio::GenericAudioBufferRef;
@@ -246,85 +246,6 @@ impl Source for LockFreeSymphoniaSource {
 impl Drop for LockFreeSymphoniaSource {
     fn drop(&mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
-    }
-}
-
-pub struct SymphoniaSource {
-    decoder: Arc<Mutex<SymphoniaDecoder>>,
-    chunk_buffer: Vec<f32>,
-    chunk_pos: usize,
-    cached_channels: u16,
-    cached_sample_rate: u32,
-    cached_total_duration: Option<Duration>,
-}
-
-impl SymphoniaSource {
-    #[must_use]
-    pub fn new(decoder: SymphoniaDecoder) -> Self {
-        let (channels, sample_rate, total_duration) = (
-            decoder.target_channels(),
-            decoder.sample_rate(),
-            decoder.total_duration(),
-        );
-        Self {
-            decoder: Arc::new(Mutex::new(decoder)),
-            chunk_buffer: Vec::with_capacity(16384),
-            chunk_pos: 0,
-            cached_channels: channels,
-            cached_sample_rate: sample_rate,
-            cached_total_duration: total_duration,
-        }
-    }
-}
-
-impl Iterator for SymphoniaSource {
-    type Item = f32;
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.chunk_pos < self.chunk_buffer.len() {
-            let s = self.chunk_buffer[self.chunk_pos];
-            self.chunk_pos += 1;
-            return Some(s);
-        }
-        self.chunk_buffer.clear();
-        self.chunk_pos = 0;
-        {
-            // 锁中毒时通过 lock_or_log 恢复（取回内部数据），避免级联 panic
-            let mut dec = match self.decoder.try_lock() {
-                Ok(guard) => guard,
-                Err(_) => crate::lock_or_log!(self.decoder.lock()),
-            };
-            for _ in 0..8192 {
-                if let Some(s) = dec.next() {
-                    self.chunk_buffer.push(s);
-                } else {
-                    break;
-                }
-            }
-        }
-        if self.chunk_pos < self.chunk_buffer.len() {
-            let s = self.chunk_buffer[self.chunk_pos];
-            self.chunk_pos += 1;
-            Some(s)
-        } else {
-            None
-        }
-    }
-}
-
-impl Source for SymphoniaSource {
-    fn current_span_len(&self) -> Option<usize> {
-        None
-    }
-    fn channels(&self) -> std::num::NonZero<u16> {
-        std::num::NonZero::new(self.cached_channels).unwrap_or(std::num::NonZero::new(2).unwrap())
-    }
-    fn sample_rate(&self) -> std::num::NonZero<u32> {
-        std::num::NonZero::new(self.cached_sample_rate)
-            .unwrap_or(std::num::NonZero::new(48000).unwrap())
-    }
-    fn total_duration(&self) -> Option<Duration> {
-        self.cached_total_duration
     }
 }
 

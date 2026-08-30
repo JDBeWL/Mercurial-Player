@@ -534,35 +534,10 @@ fn get_windows_fonts() -> Result<Vec<String>, AppError> {
 
 #[cfg(target_os = "macos")]
 fn get_macos_fonts() -> Result<Vec<String>, AppError> {
-    use std::process::Command;
-
-    // 使用 system_profiler 获取字体列表
-    let output = Command::new("system_profiler")
-        .args(["SPFontsDataType", "-json"])
-        .output()
-        .map_err(|e| format!("Failed to execute system_profiler: {e}"))?;
-
-    if !output.status.success() {
-        return Err(AppError::msg("system_profiler command failed"));
-    }
-
-    let _json_str = String::from_utf8_lossy(&output.stdout);
-
-    // 简单解析 JSON（实际项目中应使用 serde_json）
-    let mut fonts = HashSet::new();
-
-    // 这里需要根据实际的 JSON 结构解析
-    // 暂时返回一些常见的 macOS 字体
-    fonts.insert("SF Pro".to_string());
-    fonts.insert("Helvetica Neue".to_string());
-    fonts.insert("Arial".to_string());
-    fonts.insert("Times New Roman".to_string());
-    fonts.insert("Courier New".to_string());
-
-    let mut font_list: Vec<String> = fonts.into_iter().collect();
-    font_list.sort();
-
-    Ok(font_list)
+    // macOS 字体枚举尚未实现:返回伪造的字体名会误导用户,这里显式报错而非静默降级
+    Err(AppError::msg(
+        "macOS font enumeration is not implemented yet",
+    ))
 }
 
 #[cfg(target_os = "linux")]

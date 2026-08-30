@@ -15,10 +15,7 @@
         <span class="material-symbols-rounded">equalizer</span>
         <span class="toggle-label">{{ $t('config.enableEq') }}</span>
       </div>
-      <div class="switch" :class="{ active: enabled }">
-        <div class="switch-track"></div>
-        <div class="switch-handle"></div>
-      </div>
+      <SettingSwitch :model-value="enabled" />
     </div>
 
     <!-- 预设选择 -->
@@ -67,7 +64,7 @@
           <div
             :ref="(el) => (bandSliders[index] = el as HTMLElement)"
             class="slider vertical"
-            :class="{ disabled: !enabled, dragging: bandDragging === index }"
+            :class="{ disabled: !enabled, dragging: bandDragging && activeBandIndex === index }"
             @mousedown="(e) => startBandDrag(e, index)"
             @click="(e) => handleBandClick(e, index)"
           >
@@ -83,9 +80,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import logger from '../../utils/logger'
+import SettingSwitch from './SettingSwitch.vue'
+import { useDragValue } from '../../composables/useDragValue'
 import {
   applyEqPreset,
   getEqBands,
@@ -113,9 +112,7 @@ const preampSlider = ref<HTMLElement | null>(null)
 // 使用 unknown[] 存储以兼容该联合类型,读取时断言为 HTMLElement
 const bandSliders = ref<unknown[]>([])
 
-// 拖拽状态
-const preampDragging = ref<boolean>(false)
-const bandDragging = ref<number>(-1)
+// 拖拽状态由 useDragValue 管理 (preampDragging / bandDragging)
 
 // 增益范围
 const MIN_GAIN = -8
@@ -182,30 +179,37 @@ const toggleEnabled = async (): Promise<void> => {
   }
 }
 
-// 前置增益滑块处理
+// 前置增益滑块处理 (拖拽骨架由 useDragValue 提供)
+const updatePreampFromPercent = (percent: number): void => {
+  const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN)
+  const roundedValue = Math.round(newValue * 2) / 2 // 四舍五入到 0.5
+
+  // 值未跨过 0.5dB 刻度时不做任何事
+  if (preamp.value === roundedValue) return
+  preamp.value = roundedValue
+  void sendPreamp(roundedValue)
+}
+
+const preampDrag = useDragValue({
+  getPercent: (event) => {
+    if (!preampSlider.value) return 0
+    const rect = preampSlider.value.getBoundingClientRect()
+    return Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+  },
+  onStart: (percent) => {
+    if (!enabled.value) {
+      return false
+    }
+    updatePreampFromPercent(percent)
+    return undefined
+  },
+  onMove: updatePreampFromPercent,
+})
+const { isDragging: preampDragging, startDrag: startPreampDrag } = preampDrag
+
 const handlePreampClick = (e: MouseEvent): void => {
-  if (!enabled.value || !preampSlider.value) return
-  void updatePreampFromEvent(e)
-}
-
-const startPreampDrag = (e: MouseEvent): void => {
   if (!enabled.value) return
-  preampDragging.value = true
-  void updatePreampFromEvent(e)
-
-  document.addEventListener('mousemove', onPreampDrag)
-  document.addEventListener('mouseup', stopPreampDrag)
-}
-
-const onPreampDrag = (e: MouseEvent): void => {
-  if (!preampDragging.value) return
-  void updatePreampFromEvent(e)
-}
-
-const stopPreampDrag = (): void => {
-  preampDragging.value = false
-  document.removeEventListener('mousemove', onPreampDrag)
-  document.removeEventListener('mouseup', stopPreampDrag)
+  updatePreampFromPercent(preampDrag.getPercent(e))
 }
 
 // ===== IPC 抑制：拖拽中 mousemove 可达 60-125Hz =====
@@ -235,45 +239,51 @@ const sendPreamp = async (value: number): Promise<void> => {
   }
 }
 
-const updatePreampFromEvent = (e: MouseEvent): void => {
-  if (!preampSlider.value) return
-
-  const rect = preampSlider.value.getBoundingClientRect()
-  const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+// 频段滑块处理 (共享一个拖拽控制器,用 activeBandIndex 标识当前频段)
+const updateBandFromPercent = (index: number, percent: number): void => {
   const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN)
-  const roundedValue = Math.round(newValue * 2) / 2 // 四舍五入到 0.5
+  const roundedValue = Math.round(newValue * 2) / 2
 
   // 值未跨过 0.5dB 刻度时不做任何事
-  if (preamp.value === roundedValue) return
-  preamp.value = roundedValue
-  void sendPreamp(roundedValue)
+  if (gains.value[index] === roundedValue) return
+  gains.value[index] = roundedValue
+  currentPreset.value = ''
+  void sendBandGain(index, roundedValue)
 }
 
-// 频段滑块处理
+const activeBandIndex = ref<number>(-1)
+
+const bandDrag = useDragValue({
+  getPercent: (event) => {
+    const slider = bandSliders.value[activeBandIndex.value] as HTMLElement | null
+    if (!slider) return 0
+    const rect = slider.getBoundingClientRect()
+    // 垂直滑块：从底部计算
+    return Math.max(0, Math.min(1, (rect.bottom - event.clientY) / rect.height))
+  },
+  onStart: (percent) => {
+    if (!enabled.value || activeBandIndex.value === -1) {
+      return false
+    }
+    updateBandFromPercent(activeBandIndex.value, percent)
+    return undefined
+  },
+  onMove: (percent) => {
+    if (activeBandIndex.value === -1) return
+    updateBandFromPercent(activeBandIndex.value, percent)
+  },
+})
+const { isDragging: bandDragging, startDrag: bandStartDrag } = bandDrag
+
 const handleBandClick = (e: MouseEvent, index: number): void => {
   if (!enabled.value) return
-  updateBandFromEvent(e, index)
+  activeBandIndex.value = index
+  updateBandFromPercent(index, bandDrag.getPercent(e))
 }
 
 const startBandDrag = (e: MouseEvent, index: number): void => {
-  if (!enabled.value) return
-  bandDragging.value = index
-  updateBandFromEvent(e, index)
-
-  document.addEventListener('mousemove', onBandDrag)
-  document.addEventListener('mouseup', stopBandDrag)
-}
-
-// 使用稳定具名函数而非闭包,保证卸载时能按引用移除监听器
-const onBandDrag = (ev: MouseEvent): void => {
-  if (bandDragging.value === -1) return
-  updateBandFromEvent(ev, bandDragging.value)
-}
-
-const stopBandDrag = (): void => {
-  bandDragging.value = -1
-  document.removeEventListener('mousemove', onBandDrag)
-  document.removeEventListener('mouseup', stopBandDrag)
+  activeBandIndex.value = index
+  bandStartDrag(e)
 }
 
 interface BandSendState {
@@ -305,23 +315,6 @@ const sendBandGain = async (index: number, value: number): Promise<void> => {
   }
 }
 
-const updateBandFromEvent = (e: MouseEvent, index: number): void => {
-  const slider = bandSliders.value[index] as HTMLElement | null
-  if (!slider) return
-
-  const rect = slider.getBoundingClientRect()
-  // 垂直滑块：从底部计算
-  const percent = Math.max(0, Math.min(1, (rect.bottom - e.clientY) / rect.height))
-  const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN)
-  const roundedValue = Math.round(newValue * 2) / 2
-
-  // 值未跨过 0.5dB 刻度时不做任何事
-  if (gains.value[index] === roundedValue) return
-  gains.value[index] = roundedValue
-  currentPreset.value = ''
-  void sendBandGain(index, roundedValue)
-}
-
 // 应用预设
 const applyPreset = async (preset: EqPreset): Promise<void> => {
   try {
@@ -345,14 +338,6 @@ const resetEq = async (): Promise<void> => {
 
 onMounted(() => {
   void loadSettings()
-})
-
-onUnmounted(() => {
-  // 清理可能残留的事件监听器
-  document.removeEventListener('mousemove', onPreampDrag)
-  document.removeEventListener('mouseup', stopPreampDrag)
-  document.removeEventListener('mousemove', onBandDrag)
-  document.removeEventListener('mouseup', stopBandDrag)
 })
 </script>
 
@@ -430,51 +415,6 @@ onUnmounted(() => {
   font-size: 16px;
   font-weight: 500;
   color: var(--md-sys-color-on-surface);
-}
-
-/* MD3 Switch */
-.switch {
-  position: relative;
-  width: 52px;
-  height: 28px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.switch-track {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--md-sys-color-surface-container-highest);
-  border: 2px solid var(--md-sys-color-outline);
-  border-radius: 14px;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-track {
-  background-color: var(--md-sys-color-primary);
-  border-color: var(--md-sys-color-primary);
-}
-
-.switch-handle {
-  position: absolute;
-  top: 50%;
-  left: 6px;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  background-color: var(--md-sys-color-outline);
-  border-radius: 50%;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-handle {
-  left: 28px;
-  width: 18px;
-  height: 18px;
-  background-color: var(--md-sys-color-on-primary);
 }
 
 /* 预设部分 */

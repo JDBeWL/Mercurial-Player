@@ -127,6 +127,7 @@ pub fn pause_track(state: State<AppState>) -> Result<(), AppError> {
             } else {
                 return Err("WASAPI player not initialized".to_string().into());
             }
+            drop(guard);
             return Ok(());
         }
         #[cfg(not(windows))]
@@ -189,6 +190,7 @@ pub fn resume_track(state: State<AppState>) -> Result<(), AppError> {
             } else {
                 return Err("WASAPI player not initialized".to_string().into());
             }
+            drop(guard);
             return Ok(());
         }
         #[cfg(not(windows))]
@@ -229,6 +231,7 @@ pub fn resume_track(state: State<AppState>) -> Result<(), AppError> {
             .lock_or_err("target volume")?;
         player.set_volume(target_vol);
         player.play();
+        drop(player);
     }
 
     Ok(())
@@ -275,6 +278,7 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), AppError> {
             } else {
                 return Err("WASAPI player not initialized".to_string().into());
             }
+            drop(guard);
             return Ok(());
         }
         #[cfg(not(windows))]
@@ -286,6 +290,7 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), AppError> {
     }
     let player = state.player.output.sink.lock().lock_or_err("player")?;
     player.set_volume(volume);
+    drop(player);
 
     Ok(())
 }
@@ -376,10 +381,11 @@ async fn switch_to_wasapi_exclusive(
     // 1. 停止并清理旧的 cpal sink,同时记录当前播放路径
     // 用 lock() 阻塞等待:播放期间解码线程会周期性持有这些锁
     let current_path = {
-        let old_player = state.player.output.sink.lock().lock_or_err("player")?;
-        old_player.stop();
-        old_player.clear();
-
+        {
+            let old_player = state.player.output.sink.lock().lock_or_err("player")?;
+            old_player.stop();
+            old_player.clear();
+        } // 先释放 sink 锁,再取 current_path,避免嵌套持锁
         state
             .player
             .track
@@ -493,10 +499,14 @@ fn switch_to_shared_mode(
     // 1. 先记录当前播放状态和路径 (在停止旧播放器前)
     // 用 lock() 阻塞等待:播放期间解码线程会周期性持有这些锁,try_lock 会失败
     let (is_playing, volume, current_path) = {
-        let old_player = state.player.output.sink.lock().lock_or_err("player")?;
-        let playing = !old_player.is_paused();
-        let vol = old_player.volume();
-        old_player.stop();
+        let (playing, vol) = {
+            let old_player = state.player.output.sink.lock().lock_or_err("player")?;
+            let playing = !old_player.is_paused();
+            let vol = old_player.volume();
+            old_player.stop();
+            drop(old_player);
+            (playing, vol)
+        }; // 先释放 sink 锁,再取 current_path,避免嵌套持锁
         let current_path = state
             .player
             .track

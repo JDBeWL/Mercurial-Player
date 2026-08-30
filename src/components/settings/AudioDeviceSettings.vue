@@ -56,16 +56,13 @@
           </div>
         </div>
         <div class="option-control">
-          <div
-            class="switch"
-            :class="{
-              active: useExclusiveMode,
-              disabled:
-                !isWindowsPlatform || (currentDevice && !currentDevice.supportsExclusiveMode),
-            }"
-          >
-            <div class="switch-handle"></div>
-          </div>
+          <!-- 不绑定 update 事件: 点击冒泡给上方整行,走 toggleExclusiveMode 命令;
+               设备不支持时仅视觉变暗 (class),平台不支持时才真正禁用 -->
+          <SettingSwitch
+            :model-value="useExclusiveMode"
+            :disabled="!isWindowsPlatform"
+            :class="{ disabled: currentDevice != null && !currentDevice.supportsExclusiveMode }"
+          />
         </div>
       </div>
 
@@ -100,9 +97,7 @@
           </div>
         </div>
         <div class="option-control">
-          <div class="switch" :class="{ active: fadeEnabled }">
-            <div class="switch-handle"></div>
-          </div>
+          <SettingSwitch :model-value="fadeEnabled" />
         </div>
       </div>
     </div>
@@ -155,6 +150,7 @@ import { usePlayerStore } from '../../stores/player'
 import { useConfigStore } from '../../stores/config'
 import logger from '../../utils/logger'
 import { getErrorMessage } from '../../utils/errorMessages'
+import SettingSwitch from './SettingSwitch.vue'
 
 const playerStore = usePlayerStore()
 const configStore = useConfigStore()
@@ -510,56 +506,10 @@ watch(useExclusiveMode, (newValue: boolean) => {
   color: var(--md-sys-color-on-surface-variant);
 }
 
-/* MD3 Switch */
-.option-control .switch {
-  position: relative;
-  width: 52px;
-  height: 28px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.option-control .switch::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--md-sys-color-surface-container-highest);
-  border: 2px solid var(--md-sys-color-outline);
-  border-radius: 14px;
-  transition: all 0.2s ease;
-  box-sizing: border-box;
-}
-
-.option-control .switch.active::before {
-  background-color: var(--md-sys-color-primary);
-  border-color: var(--md-sys-color-primary);
-}
-
+/* 开关视觉由 SettingSwitch 组件提供;此处仅保留设备不支持时的变暗态 */
 .option-control .switch.disabled {
   opacity: 0.38;
   cursor: not-allowed;
-}
-
-.option-control .switch-handle {
-  position: absolute;
-  top: 50%;
-  left: 6px;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  background-color: var(--md-sys-color-outline);
-  border-radius: 50%;
-  transition: all 0.2s ease;
-}
-
-.option-control .switch.active .switch-handle {
-  left: 28px;
-  width: 18px;
-  height: 18px;
-  background-color: var(--md-sys-color-on-primary);
 }
 
 .device-status {

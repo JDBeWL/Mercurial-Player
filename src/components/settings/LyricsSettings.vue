@@ -12,14 +12,10 @@
           <span class="setting-label">{{ $t('config.enableOnlineFetch') }}</span>
           <span class="setting-description">{{ $t('config.enableOnlineFetchDesc') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.lyrics?.enableOnlineFetch }"
-          @click="toggleSetting('enableOnlineFetch')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.lyrics?.enableOnlineFetch"
+          @update:model-value="toggleSetting('enableOnlineFetch')"
+        />
       </div>
 
       <div class="setting-item">
@@ -27,14 +23,10 @@
           <span class="setting-label">{{ $t('config.autoSaveOnlineLyrics') }}</span>
           <span class="setting-description">{{ $t('config.autoSaveOnlineLyricsDesc') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.lyrics?.autoSaveOnlineLyrics }"
-          @click="toggleSetting('autoSaveOnlineLyrics')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.lyrics?.autoSaveOnlineLyrics"
+          @update:model-value="toggleSetting('autoSaveOnlineLyrics')"
+        />
       </div>
 
       <div class="setting-item">
@@ -42,14 +34,10 @@
           <span class="setting-label">{{ $t('config.preferTranslation') }}</span>
           <span class="setting-description">{{ $t('config.preferTranslationDesc') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.lyrics?.preferTranslation }"
-          @click="toggleSetting('preferTranslation')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.lyrics?.preferTranslation"
+          @update:model-value="toggleSetting('preferTranslation')"
+        />
       </div>
     </div>
 
@@ -61,14 +49,10 @@
           <span class="setting-label">{{ $t('config.showNoLyricsHint') }}</span>
           <span class="setting-description">{{ $t('config.showNoLyricsHintDesc') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.lyrics?.showNoLyricsHint !== false }"
-          @click="toggleSetting('showNoLyricsHint')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.lyrics?.showNoLyricsHint !== false"
+          @update:model-value="toggleSetting('showNoLyricsHint')"
+        />
       </div>
 
       <div class="setting-item">
@@ -76,14 +60,10 @@
           <span class="setting-label">{{ $t('config.showFetchLyricsButton') }}</span>
           <span class="setting-description">{{ $t('config.showFetchLyricsButtonDesc') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.lyrics?.showFetchLyricsButton !== false }"
-          @click="toggleSetting('showFetchLyricsButton')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.lyrics?.showFetchLyricsButton !== false"
+          @update:model-value="toggleSetting('showFetchLyricsButton')"
+        />
       </div>
 
       <div class="setting-item select">
@@ -141,14 +121,10 @@
           <span class="setting-label">{{ $t('config.enableDesktopLyrics') }}</span>
           <span class="setting-description">{{ $t('config.enableDesktopLyricsDesc') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: desktopLyricsConfig.enabled }"
-          @click="toggleDesktopLyrics"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="desktopLyricsConfig.enabled"
+          @update:model-value="toggleDesktopLyrics"
+        />
       </div>
 
       <template v-if="desktopLyricsConfig.enabled">
@@ -157,14 +133,10 @@
             <span class="setting-label">{{ $t('config.lockDesktopLyrics') }}</span>
             <span class="setting-description">{{ $t('config.lockDesktopLyricsDesc') }}</span>
           </div>
-          <div
-            class="switch"
-            :class="{ active: desktopLyricsConfig.locked }"
-            @click="toggleDesktopLyricsLock"
-          >
-            <div class="switch-track"></div>
-            <div class="switch-handle"></div>
-          </div>
+          <SettingSwitch
+            :model-value="desktopLyricsConfig.locked"
+            @update:model-value="toggleDesktopLyricsLock"
+          />
         </div>
 
         <div class="setting-item">
@@ -298,14 +270,10 @@
           <span class="setting-label">{{ $t('config.limitFpsToScreenRate') }}</span>
           <span class="setting-description">{{ $t('config.limitFpsToScreenRateDesc') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: visualizerConfig.enableVerticalSync }"
-          @click="toggleFpsLimit"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="visualizerConfig.enableVerticalSync"
+          @update:model-value="toggleFpsLimit"
+        />
       </div>
     </div>
   </div>
@@ -326,6 +294,7 @@ import {
   loadExternalFonts,
 } from '../../utils/bundledFonts'
 import MD3Select from '../MD3Select.vue'
+import SettingSwitch from './SettingSwitch.vue'
 import type { LyricsConfig, DesktopLyricsConfig, VisualizerConfig } from '@/types'
 
 // 歌词默认配置：store 缺省时初始化与字段补全共用（与 config store 中的默认值保持一致）
@@ -706,50 +675,6 @@ onMounted(() => {
   margin-top: 4px;
 }
 
-.switch {
-  position: relative;
-  width: 52px;
-  height: 28px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.switch-track {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--md-sys-color-surface-container-highest);
-  border: 2px solid var(--md-sys-color-outline);
-  border-radius: 14px;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-track {
-  background-color: var(--md-sys-color-primary);
-  border-color: var(--md-sys-color-primary);
-}
-
-.switch-handle {
-  position: absolute;
-  top: 50%;
-  left: 6px;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  background-color: var(--md-sys-color-outline);
-  border-radius: 50%;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-handle {
-  left: 28px;
-  width: 18px;
-  height: 18px;
-  background-color: var(--md-sys-color-on-primary);
-}
-
 .setting-item.info-item {
   flex-direction: column;
   align-items: flex-start;
@@ -767,33 +692,6 @@ onMounted(() => {
   font-size: 16px;
   font-weight: 500;
   color: var(--md-sys-color-primary);
-}
-
-.filled-tonal-button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 24px;
-  background-color: var(--md-sys-color-secondary-container);
-  color: var(--md-sys-color-on-secondary-container);
-  border: none;
-  border-radius: 20px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  transition: all 0.2s ease;
-}
-
-.filled-tonal-button:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--md-sys-color-on-surface) 8%,
-    var(--md-sys-color-secondary-container)
-  );
-}
-
-.filled-tonal-button .material-symbols-rounded {
-  font-size: 20px;
 }
 
 .font-size-control {

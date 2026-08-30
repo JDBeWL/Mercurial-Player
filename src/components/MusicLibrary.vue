@@ -144,17 +144,6 @@
             </div>
           </div>
         </div>
-
-        <!-- 目录结构 -->
-        <!-- <div class="library-directories" v-if="directoryStats.totalDirectories > 0">
-          <h3 class="section-title">
-            {{ $t('library.directories') }}
-            <span class="stats">
-              {{ directoryStats.totalDirectories }} {{ $t('library.directories') }}, 
-              {{ directoryStats.totalAudioFiles }} {{ $t('library.songs') }}
-            </span>
-          </h3>
-        </div> -->
       </div>
 
       <!-- 空状态 -->
@@ -206,7 +195,7 @@ interface EnhancedPlaylist extends Playlist {
 const emit = defineEmits<{
   close: []
 }>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 // 判断是否为"全部歌曲"播放列表：新生成的列表带标记；旧缓存仅有名称（历史中文名或当前语言名）
 const isAllSongs = (p: Playlist): boolean =>
@@ -254,9 +243,12 @@ const lastPlaylistsHash = ref<string>('')
 const lastSortOrder = ref<string>('')
 
 // 计算播放列表的哈希值用于检测变化
+// 计算结果内嵌了 i18n 文案 (playlist.allSongs / library.tracksUnit),
+// 因此哈希也要包含这些文案,保证切换语言后能触发重算
 const getPlaylistsHash = (): string => {
   if (!playlists.value.length) return ''
-  return playlists.value.map((p) => `${p.name}:${p.files?.length || 0}`).join('|')
+  const i18nKeys = `${t('playlist.allSongs')}|${t('library.tracksUnit')}`
+  return i18nKeys + '|' + playlists.value.map((p) => `${p.name}:${p.files?.length || 0}`).join('|')
 }
 
 // 实际的计算逻辑
@@ -342,7 +334,7 @@ const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
 
 // 监听播放列表和排序变化，只在必要时重新计算
 watch(
-  [playlists, () => configStore.playlist.sortOrder],
+  [playlists, () => configStore.playlist.sortOrder, locale],
   () => {
     const currentHash = getPlaylistsHash()
     const currentSortOrder = configStore.playlist.sortOrder
@@ -646,14 +638,7 @@ const addFileNext = (file: SearchResult): void => {
   gap: 12px;
 }
 
-.stats {
-  font-size: 14px;
-  font-weight: 400;
-  color: var(--md-sys-color-on-surface-variant);
-}
-
 .library-playlists,
-.library-directories,
 .search-results {
   margin-bottom: 24px;
 }

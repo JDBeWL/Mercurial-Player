@@ -22,6 +22,8 @@ let updateIntervalId: number | null = null
 
 const stopFns: Array<() => void> = []
 const unlistenFns: Array<() => void> = []
+// listen() 是异步注册:若卸载先于 Promise resolve,直接调用 unlisten 而不是 push 进数组
+let listenersDisposed = false
 
 // 引用计数:跟踪当前有多少组件正在使用本 composable。
 // 只有最后一个组件卸载时 (refCount 归零) 才真正清理全局监听器/watcher,
@@ -300,16 +302,31 @@ export function useDesktopLyrics() {
 
   if (!isInitialized) {
     isInitialized = true
+    listenersDisposed = false
 
-    listen('desktop-lyrics-closed', () => {
-      logger.info('Desktop lyrics closed from window button')
-      configStore.setDesktopLyricsConfig({ enabled: false })
-    }).then((unlisten) => unlistenFns.push(unlisten))
+    const registerListener = (promise: Promise<() => void>) => {
+      promise.then((unlisten) => {
+        if (listenersDisposed) {
+          unlisten()
+        } else {
+          unlistenFns.push(unlisten)
+        }
+      })
+    }
 
-    listen<boolean>('desktop-lyrics-lock-changed', (event) => {
-      logger.info('Desktop lyrics lock changed:', event.payload)
-      configStore.setDesktopLyricsConfig({ locked: event.payload })
-    }).then((unlisten) => unlistenFns.push(unlisten))
+    registerListener(
+      listen('desktop-lyrics-closed', () => {
+        logger.info('Desktop lyrics closed from window button')
+        configStore.setDesktopLyricsConfig({ enabled: false })
+      }),
+    )
+
+    registerListener(
+      listen<boolean>('desktop-lyrics-lock-changed', (event) => {
+        logger.info('Desktop lyrics lock changed:', event.payload)
+        configStore.setDesktopLyricsConfig({ locked: event.payload })
+      }),
+    )
 
     const stopWatchLyricIndex = watch(
       () => playerStore.currentLyricIndex,
@@ -416,7 +433,8 @@ export function useDesktopLyrics() {
     // 停止所有 watcher
     stopFns.forEach((fn) => fn())
     stopFns.length = 0
-    // 取消所有 Tauri 事件监听
+    // 取消所有 Tauri 事件监听 (此后才 resolve 的异步注册会立即自清理)
+    listenersDisposed = true
     unlistenFns.forEach((fn) => fn())
     unlistenFns.length = 0
     // 重置初始化标记,允许下次调用重新建立监听器/watcher

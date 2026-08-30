@@ -81,15 +81,7 @@ describe('useMusicLibraryStore', () => {
       expect(store.playlists).toEqual([])
       expect(store.currentPlaylist).toBeNull()
       expect(store.isLoading).toBe(false)
-      expect(store.isBackgroundRefreshing).toBe(false)
-      expect(store.loadingProgress).toBe(0)
       expect(store.error).toBeNull()
-      expect(store.stats).toEqual({
-        totalDirectories: 0,
-        totalAudioFiles: 0,
-        totalPlaylists: 0,
-        maxDepth: 0,
-      })
       expect(store._sortedPlaylists).toBeInstanceOf(Set)
       expect(store._sortedPlaylists.size).toBe(0)
       expect(store._loadedFromCache).toBe(false)
@@ -464,29 +456,12 @@ describe('useMusicLibraryStore', () => {
       store.playlists = [makePlaylist('test', [makeTrack('/a.mp3')])]
       store._sortedPlaylists.add('test')
       store._loadedFromCache = true
-      store.isBackgroundRefreshing = true
-      store.loadingProgress = 50
-      store.stats = {
-        totalDirectories: 5,
-        totalAudioFiles: 100,
-        totalPlaylists: 5,
-        maxDepth: 3,
-      }
-
       store.reset()
 
       expect(store.currentPlaylist).toBeNull()
       expect(store.playlists).toEqual([])
       expect(store._sortedPlaylists.size).toBe(0)
       expect(store._loadedFromCache).toBe(false)
-      expect(store.isBackgroundRefreshing).toBe(false)
-      expect(store.loadingProgress).toBe(0)
-      expect(store.stats).toEqual({
-        totalDirectories: 0,
-        totalAudioFiles: 0,
-        totalPlaylists: 0,
-        maxDepth: 0,
-      })
     })
   })
 })

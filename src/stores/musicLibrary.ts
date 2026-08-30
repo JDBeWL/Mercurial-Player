@@ -5,7 +5,7 @@ import { resolveDataFile } from '../services/appService'
 import { useConfigStore } from './config'
 import { usePlayerStore } from './player'
 import logger from '../utils/logger'
-import type { Track, Playlist, LibraryStats } from '@/types'
+import type { Track, Playlist } from '@/types'
 
 // plugin-store 实例（懒加载单例）
 let _libraryStoreInstance: Store | null = null
@@ -38,12 +38,7 @@ interface MusicLibraryState {
   playlists: Playlist[]
   currentPlaylist: Playlist | null
   isLoading: boolean
-  /** 是否正在后台刷新（区别于首次加载的阻塞加载） */
-  isBackgroundRefreshing: boolean
-  /** 加载进度（0-100） */
-  loadingProgress: number
   error: string | null
-  stats: LibraryStats
   /** 记录已排序的播放列表名称，用于惰性排序 */
   _sortedPlaylists: Set<string>
   /** 是否已从缓存加载 */
@@ -61,17 +56,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
 
     // 加载状态
     isLoading: false,
-    isBackgroundRefreshing: false,
-    loadingProgress: 0,
     error: null,
-
-    // 统计信息
-    stats: {
-      totalDirectories: 0,
-      totalAudioFiles: 0,
-      totalPlaylists: 0,
-      maxDepth: 0,
-    },
 
     // 惰性排序追踪
     _sortedPlaylists: new Set<string>(),
@@ -334,13 +319,6 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
     },
 
     /**
-     * 刷新播放列表
-     */
-    async refreshPlaylist(): Promise<void> {
-      await this.refreshMusicFolders()
-    },
-
-    /**
      * 重置播放列表状态
      */
     reset(): void {
@@ -348,14 +326,6 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       this.playlists = []
       this._sortedPlaylists = new Set<string>()
       this._loadedFromCache = false
-      this.isBackgroundRefreshing = false
-      this.loadingProgress = 0
-      this.stats = {
-        totalDirectories: 0,
-        totalAudioFiles: 0,
-        totalPlaylists: 0,
-        maxDepth: 0,
-      }
     },
   },
 })

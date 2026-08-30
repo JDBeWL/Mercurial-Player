@@ -28,13 +28,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onUnmounted, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { usePlayerStore } from '../stores/player'
+import { useDragValue } from '../composables/useDragValue'
 import { formatTime } from '../utils/format'
 
 const playerStore = usePlayerStore()
 const progressBarWrapper = ref<HTMLElement | null>(null)
-const isDragging = ref(false)
 const isHovering = ref(false)
 const dragPercent = ref(0)
 const pendingSeek = ref(false) // 标记是否有待完成的 seek 操作
@@ -74,35 +74,30 @@ watch(
   },
 )
 
-const updateDragPosition = (event: MouseEvent) => {
-  if (!progressBarWrapper.value) return
-  const rect = progressBarWrapper.value.getBoundingClientRect()
-  const percent = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100))
-  dragPercent.value = percent
+const updateDragPosition = (percent: number) => {
+  dragPercent.value = Math.max(0, Math.min(100, percent * 100))
 }
 
-const handleMouseDown = (event: MouseEvent) => {
-  if (playerStore.duration === 0) return
-  isDragging.value = true
-  pendingSeek.value = false // 重置
-  updateDragPosition(event)
-
-  document.addEventListener('mousemove', handleMouseMove)
-  document.addEventListener('mouseup', handleMouseUp)
-}
-
-const handleMouseMove = (event: MouseEvent) => {
-  if (isDragging.value) {
-    updateDragPosition(event)
-  }
-}
-
-const handleMouseUp = () => {
-  if (isDragging.value) {
-    isDragging.value = false
-
+// 拖拽骨架 (document 级监听/清理) 由 useDragValue 提供
+const { isDragging, startDrag: handleMouseDown } = useDragValue({
+  getPercent: (event) => {
+    if (!progressBarWrapper.value) return 0
+    const rect = progressBarWrapper.value.getBoundingClientRect()
+    return Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+  },
+  onStart: (percent) => {
+    if (playerStore.duration === 0) {
+      return false
+    }
+    pendingSeek.value = false // 重置
+    updateDragPosition(percent) // 按下即跳转到点击位置
+    return undefined
+  },
+  onMove: updateDragPosition,
+  onEnd: (percent) => {
     // 应用新的播放位置
     if (playerStore.duration > 0) {
+      updateDragPosition(percent)
       const newTime = (dragPercent.value / 100) * playerStore.duration
       // 标记等待 seek 完成，保持显示位置
       pendingSeek.value = true
@@ -113,10 +108,8 @@ const handleMouseUp = () => {
         pendingSeek.value = false
       }, 1000)
     }
-  }
-  document.removeEventListener('mousemove', handleMouseMove)
-  document.removeEventListener('mouseup', handleMouseUp)
-}
+  },
+})
 
 const handleMouseMoveHover = (event: MouseEvent) => {
   if (!progressBarWrapper.value || isDragging.value) return
@@ -130,11 +123,6 @@ const handleMouseLeave = () => {
     isHovering.value = false
   }
 }
-
-onUnmounted(() => {
-  document.removeEventListener('mousemove', handleMouseMove)
-  document.removeEventListener('mouseup', handleMouseUp)
-})
 </script>
 
 <style scoped>

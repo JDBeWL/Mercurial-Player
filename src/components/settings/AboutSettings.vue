@@ -146,14 +146,10 @@
           <span class="setting-label">{{ $t('config.developerMode') }}</span>
           <div class="setting-desc">{{ $t('config.developerModeDesc') }}</div>
         </div>
-        <div
-          class="switch"
-          :class="{ active: developerMode }"
-          @click="setDeveloperMode(!developerMode)"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="developerMode"
+          @update:model-value="setDeveloperMode(!developerMode)"
+        />
       </div>
     </div>
   </div>
@@ -165,6 +161,7 @@ import { ref, onMounted, computed } from 'vue'
 import { getVersion } from '@tauri-apps/api/app'
 import { useI18n } from 'vue-i18n'
 import UpdateDialog from '@/components/UpdateDialog.vue'
+import SettingSwitch from './SettingSwitch.vue'
 import { useAutoUpdate } from '@/composables/useAutoUpdate'
 import { useDeveloperMode } from '@/composables/useDeveloperMode'
 import { openExternalUrl as openExternalUrlCommand } from '../../services/appService'
@@ -765,49 +762,5 @@ onMounted(() => {
   font-size: 12px;
   color: var(--md-sys-color-on-surface-variant);
   margin-top: 2px;
-}
-
-.switch {
-  position: relative;
-  width: 52px;
-  height: 28px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.switch-track {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--md-sys-color-surface-container);
-  border: 2px solid var(--md-sys-color-outline);
-  border-radius: 14px;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-track {
-  background-color: var(--md-sys-color-primary);
-  border-color: var(--md-sys-color-primary);
-}
-
-.switch-handle {
-  position: absolute;
-  top: 50%;
-  left: 6px;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  background-color: var(--md-sys-color-outline);
-  border-radius: 50%;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-handle {
-  left: 28px;
-  width: 18px;
-  height: 18px;
-  background-color: var(--md-sys-color-on-primary);
 }
 </style>

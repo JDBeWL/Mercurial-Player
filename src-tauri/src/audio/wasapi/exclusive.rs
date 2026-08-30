@@ -350,22 +350,6 @@ impl WasapiExclusivePlayback {
         Ok(())
     }
 
-    /// 等待缓冲区水位低于 max_samples。
-    /// 返回 true 表示有空间可以 push,false 表示超时或被唤醒时仍满。
-    /// WASAPI 消费线程每次消费后会 notify_one,因此生产者会被及时唤醒。
-    pub fn wait_for_buffer_space(&self, max_samples: usize, timeout: Duration) -> bool {
-        let (buffer, cvar) = &*self.sample_buffer;
-        let guard = lock_or_log!(buffer.lock());
-        if guard.len() < max_samples {
-            return true;
-        }
-        // 已满时等待,直到条件为 false (有空间) 或超时
-        let (guard, _) = cvar
-            .wait_timeout_while(guard, timeout, |buf| buf.len() >= max_samples)
-            .unwrap_or_else(|e| e.into_inner());
-        guard.len() < max_samples
-    }
-
     pub fn clear_buffer(&self) -> Result<(), AppError> {
         let (buffer, _) = &*self.sample_buffer;
         lock_or_log!(buffer.lock()).clear();
@@ -754,6 +738,7 @@ fn process_audio_output(
                             // 音量乘法放到锁外做以缩短锁持有时间
                             reusable_samples.push(sample);
                         }
+                        drop(buf);
                     }
 
                     // 释放锁后做音量乘法(无锁争用)

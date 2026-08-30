@@ -32,8 +32,6 @@ const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
 pub(super) fn decode_and_push_to_wasapi(
     mut source: LockFreeSymphoniaSource,
     wasapi: Arc<Mutex<Option<super::wasapi::WasapiExclusivePlayback>>>,
-    _waveform: Arc<Mutex<Vec<f32>>>,
-    _spectrum: Arc<Mutex<Vec<f32>>>,
     app: AppHandle,
     generation: Arc<AtomicU64>,
     thread_id_ref: Arc<AtomicU64>,
@@ -284,7 +282,11 @@ pub(super) fn decode_and_push_to_wasapi(
         };
 
         if !final_out.is_empty() {
-            // 等待缓冲区有空间 (Condvar 等待,被 WASAPI 消费线程唤醒)
+            // 等待缓冲区有空间。
+            // 注意:不能在持有 wasapi 外层锁的状态下进入 Condvar 等待,
+            // 否则 pause_track/set_volume 等命令会被阻塞最长一个超时周期;
+            // 这里改为"快速查水位 -> 不持锁短暂 sleep -> 重查"。
+            // 缓冲区容量约 2 秒 (远大于 21ms 的处理块),轮询延迟不构成欠载风险。
             // 缓冲区容量约为 target_sr * target_ch * 4 秒,保持在 2 秒以下
             let max_buffer = target_sr as usize * target_ch as usize * 2;
             loop {
@@ -293,13 +295,13 @@ pub(super) fn decode_and_push_to_wasapi(
                 {
                     break;
                 }
-                // 用 condvar 等待 50ms 超时,期间 WASAPI 消费端 notify 会唤醒本线程
                 let has_space = lock_or_log!(wasapi.lock())
                     .as_ref()
-                    .is_none_or(|p| p.wait_for_buffer_space(max_buffer, Duration::from_millis(50)));
+                    .is_none_or(|p| p.get_buffer_size() < max_buffer);
                 if has_space {
                     break;
                 }
+                std::thread::sleep(Duration::from_millis(10));
                 // 等待时继续发送播放位置
                 emit_position(&mut last_position_emit_time);
             }

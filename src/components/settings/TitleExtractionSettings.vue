@@ -9,42 +9,30 @@
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.preferMetadata') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.titleExtraction.preferMetadata }"
-          @click="toggleSetting('preferMetadata')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.titleExtraction.preferMetadata"
+          @update:model-value="toggleSetting('preferMetadata')"
+        />
       </div>
 
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.hideFileExtension') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.titleExtraction.hideFileExtension }"
-          @click="toggleSetting('hideFileExtension')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.titleExtraction.hideFileExtension"
+          @update:model-value="toggleSetting('hideFileExtension')"
+        />
       </div>
 
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.parseArtistTitle') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.titleExtraction.parseArtistTitle }"
-          @click="toggleSetting('parseArtistTitle')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.titleExtraction.parseArtistTitle"
+          @update:model-value="toggleSetting('parseArtistTitle')"
+        />
       </div>
 
       <div class="setting-item select">
@@ -61,12 +49,13 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 import { useConfigStore } from '../../stores/config'
 import { useTrackInfo } from '../../composables/useTrackInfo'
 import logger from '../../utils/logger'
 import MD3Select from '../MD3Select.vue'
+import SettingSwitch from './SettingSwitch.vue'
 
 const configStore = useConfigStore()
 const { clearAllCache } = useTrackInfo()
@@ -75,7 +64,7 @@ const separatorOptions = computed(() =>
   configStore.validSeparators.map((sep) => ({ value: sep, label: sep })),
 )
 
-const saveConfig = async () => {
+const saveConfig = async (): Promise<void> => {
   try {
     await configStore.saveConfigNow()
   } catch (error) {
@@ -83,7 +72,9 @@ const saveConfig = async () => {
   }
 }
 
-const toggleSetting = async (key) => {
+const toggleSetting = async (
+  key: 'preferMetadata' | 'hideFileExtension' | 'parseArtistTitle',
+): Promise<void> => {
   configStore.titleExtraction[key] = !configStore.titleExtraction[key]
   // 标题提取设置变化后清除 useTrackInfo 缓存,让当前播放歌曲重新处理
   clearAllCache()
@@ -136,49 +127,5 @@ const toggleSetting = async (key) => {
 .setting-label {
   font-size: 16px;
   color: var(--md-sys-color-on-surface);
-}
-
-.switch {
-  position: relative;
-  width: 52px;
-  height: 28px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.switch-track {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--md-sys-color-surface-container-highest);
-  border: 2px solid var(--md-sys-color-outline);
-  border-radius: 14px;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-track {
-  background-color: var(--md-sys-color-primary);
-  border-color: var(--md-sys-color-primary);
-}
-
-.switch-handle {
-  position: absolute;
-  top: 50%;
-  left: 6px;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  background-color: var(--md-sys-color-outline);
-  border-radius: 50%;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-handle {
-  left: 28px;
-  width: 18px;
-  height: 18px;
-  background-color: var(--md-sys-color-on-primary);
 }
 </style>

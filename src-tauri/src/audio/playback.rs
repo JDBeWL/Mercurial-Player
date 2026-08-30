@@ -487,7 +487,6 @@ pub fn play_track_shared(
         player_lock.set_volume(vol);
     }
     *lock_or_log!(player.track.current_path.lock()) = Some(path.to_string());
-    *lock_or_log!(player.track.current_source.lock()) = None;
     let (spectrum, eq_settings, target_fps) = (
         Arc::clone(&player.visualization.spectrum_data),
         state.equalizer.get_settings_handle(),
@@ -561,6 +560,7 @@ pub fn play_track_shared(
     let player_lock = lock_or_log!(player.output.sink.lock());
     player_lock.append(resampled);
     player_lock.play();
+    drop(player_lock);
     Ok(())
 }
 
@@ -611,7 +611,9 @@ pub async fn play_track_exclusive(
     let (target_sr, target_ch) = {
         let g = lock_or_log!(player.output.wasapi_player.lock());
         let wasapi = g.as_ref().ok_or("WASAPI player not initialized")?;
-        (wasapi.get_sample_rate(), wasapi.get_channels())
+        let sr_ch = (wasapi.get_sample_rate(), wasapi.get_channels());
+        drop(g);
+        sr_ch
     };
     if position.is_none() {
         *lock_or_log!(player.track.current_path.lock()) = Some(path.to_string());
@@ -631,10 +633,8 @@ pub async fn play_track_exclusive(
 
     let source = LockFreeSymphoniaSource::new(decoder);
     let start_pos = position.unwrap_or(0.0);
-    let (wasapi_clone, waveform, spectrum, generation, thread_id, eq_settings) = (
+    let (wasapi_clone, generation, thread_id, eq_settings) = (
         Arc::clone(&player.output.wasapi_player),
-        Arc::clone(&player.visualization.waveform_data),
-        Arc::clone(&player.visualization.spectrum_data),
         Arc::clone(&player.decode.generation),
         Arc::clone(&player.decode.id),
         state.equalizer.get_settings_handle(),
@@ -649,8 +649,6 @@ pub async fn play_track_exclusive(
             decode_and_push_to_wasapi(
                 source,
                 wasapi_clone,
-                waveform,
-                spectrum,
                 app_clone,
                 generation,
                 thread_id,
@@ -762,9 +760,11 @@ pub fn seek_track_shared(
         // 直接停止，不做阻塞的淡出
         sink.stop();
         sink.set_volume(*lock_or_log!(player.output.target_volume.lock()));
+        drop(sink);
     }
     let sink = lock_or_log!(player.output.sink.lock());
     sink.append(resampled);
     sink.play();
+    drop(sink);
     Ok(())
 }

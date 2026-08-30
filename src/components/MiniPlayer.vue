@@ -85,14 +85,13 @@
       </div>
     </div>
 
-    <!-- 底部进度条 -->
+    <!-- 底部进度条 (拖拽由 useDragValue 的 document 级监听驱动,鼠标移出不会中断) -->
     <div
+      ref="progressContainer"
       class="progress-bar-container"
+      :class="{ dragging: isDragging }"
       data-tauri-drag-region="false"
       @mousedown="startSeeking"
-      @mousemove="handleSeekMove"
-      @mouseup="endSeeking"
-      @mouseleave="endSeeking"
     >
       <div class="progress-fill" :style="{ width: progressPercentage + '%' }"></div>
       <!-- 时间预览提示 -->
@@ -104,11 +103,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePlayerStore } from '../stores/player'
 import { useConfigStore } from '../stores/config'
 import { useTrackInfo } from '../composables/useTrackInfo'
+import { useDragValue } from '../composables/useDragValue'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { formatTime } from '../utils/format'
 
@@ -122,9 +122,58 @@ const { getTrackTitle, getTrackArtist, watchTrack } = useTrackInfo()
 // 监听当前音轨变化
 watchTrack(() => currentTrack.value)
 
-// 拖拽进度条相关状态
-const isDragging = ref<boolean>(false)
+// 拖拽进度条: document 级监听骨架由 useDragValue 提供,
+// 拖拽中只更新预览位置,松手时才应用 seek
+const progressContainer = ref<HTMLElement | null>(null)
 const dragPercentage = ref<number>(0)
+// seek 目标时间: 松手后先显示落点,等 currentTime 追上再恢复跟随播放,
+// 避免后端尚未推回新位置时进度条闪回旧值
+const pendingSeekTime = ref<number | null>(null)
+let pendingSeekTimeoutId: ReturnType<typeof setTimeout> | null = null
+
+const clearPendingSeek = (): void => {
+  pendingSeekTime.value = null
+  if (pendingSeekTimeoutId) {
+    clearTimeout(pendingSeekTimeoutId)
+    pendingSeekTimeoutId = null
+  }
+}
+
+watch(
+  () => currentTime.value,
+  (t) => {
+    if (pendingSeekTime.value != null && Math.abs(t - pendingSeekTime.value) < 0.5) {
+      clearPendingSeek()
+    }
+  },
+)
+
+const { isDragging, startDrag: startSeeking } = useDragValue({
+  getPercent: (event) => {
+    if (!progressContainer.value) return 0
+    const rect = progressContainer.value.getBoundingClientRect()
+    const x = Math.max(0, Math.min(event.clientX - rect.left, rect.width))
+    return x / rect.width
+  },
+  onStart: (percent) => {
+    clearPendingSeek()
+    dragPercentage.value = percent * 100
+  },
+  onMove: (percent) => {
+    dragPercentage.value = percent * 100
+  },
+  onEnd: (percent) => {
+    dragPercentage.value = 0 // 重置拖拽位置，避免下次拖拽开始时闪现旧位置
+    // 应用新的播放位置
+    if (duration.value) {
+      const target = percent * duration.value
+      pendingSeekTime.value = target
+      // 超时保护: seek 被拒/无响应时 1 秒后恢复跟随播放位置
+      pendingSeekTimeoutId = setTimeout(clearPendingSeek, 1000)
+      playerStore.seek(target)
+    }
+  },
+})
 
 // 计算属性
 const currentTrackCover = computed<string>(() => {
@@ -137,6 +186,10 @@ const currentTrackCover = computed<string>(() => {
 
 const progressPercentage = computed<number>(() => {
   if (isDragging.value) return dragPercentage.value
+  // 松手后到 currentTime 追上前,停在落点位置
+  if (pendingSeekTime.value != null && duration.value) {
+    return (pendingSeekTime.value / duration.value) * 100
+  }
   if (!duration.value) return 0
   return (currentTime.value / duration.value) * 100
 })
@@ -150,37 +203,6 @@ const previewTime = computed<number>(() => {
 // 方法
 const exitMiniMode = (): void => {
   configStore.toggleMiniMode()
-}
-
-const startSeeking = (e: MouseEvent): void => {
-  isDragging.value = true
-  updateDragPosition(e)
-}
-
-const handleSeekMove = (e: MouseEvent): void => {
-  if (isDragging.value) {
-    updateDragPosition(e)
-  }
-}
-
-const endSeeking = (e: MouseEvent): void => {
-  if (isDragging.value) {
-    isDragging.value = false
-    dragPercentage.value = 0 // 重置拖拽位置，避免下次拖拽开始时闪现旧位置
-    // 应用新的播放位置
-    if (duration.value) {
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-      const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width))
-      const percentage = x / rect.width
-      playerStore.seek(percentage * duration.value)
-    }
-  }
-}
-
-const updateDragPosition = (e: MouseEvent): void => {
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width))
-  dragPercentage.value = (x / rect.width) * 100
 }
 </script>
 
@@ -405,6 +427,11 @@ const updateDragPosition = (e: MouseEvent): void => {
   height: 100%;
   background-color: var(--md-sys-color-primary);
   transition: width 0.1s linear;
+}
+
+/* 拖拽中禁用过渡,填充条即时跟随鼠标 (0.1s 缓动会造成明显不跟手) */
+.progress-bar-container.dragging .progress-fill {
+  transition: none;
 }
 
 /* 时间预览提示 */

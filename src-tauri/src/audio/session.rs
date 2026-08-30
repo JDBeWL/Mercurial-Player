@@ -297,6 +297,7 @@ fn pause_playback(state: &State<AppState>) -> Result<(), AppError> {
             } else {
                 return Err("WASAPI player not initialized".to_string().into());
             }
+            drop(guard);
             return Ok(());
         }
         #[cfg(not(windows))]
@@ -314,6 +315,7 @@ fn pause_playback(state: &State<AppState>) -> Result<(), AppError> {
         .lock()
         .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
     player.pause();
+    drop(player);
     Ok(())
 }
 

@@ -17,7 +17,6 @@ macro_rules! lock_or_log {
         }
     };
 }
-pub(crate) use lock_or_log;
 
 pub mod audio;
 pub mod config;
@@ -32,14 +31,12 @@ pub mod updater;
 #[cfg(windows)]
 pub mod taskbar;
 
-use audio::SymphoniaSource;
-
 #[cfg(windows)]
 use audio::WasapiExclusivePlayback;
 
 use audio::DeviceMonitor;
 use config::ConfigManager;
-use equalizer::{Equalizer, GlobalEqualizer};
+use equalizer::GlobalEqualizer;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
@@ -113,8 +110,6 @@ pub struct AudioOutputState {
 
 /// 当前播放曲目状态
 pub struct TrackState {
-    /// 当前音频源
-    pub current_source: Arc<Mutex<Option<SymphoniaSource>>>,
     /// 当前播放文件路径
     pub current_path: Arc<Mutex<Option<String>>>,
 }
@@ -123,8 +118,6 @@ pub struct TrackState {
 ///
 /// 波形/频谱数据 + FFT 计算参数
 pub struct VisualizationState {
-    /// 波形数据（用于可视化）
-    pub waveform_data: Arc<Mutex<Vec<f32>>>,
     /// 频谱数据（用于可视化）
     pub spectrum_data: Arc<Mutex<Vec<f32>>>,
     /// 目标刷新率（用于可视化FFT计算，默认60fps）
@@ -162,8 +155,6 @@ pub struct PlayerState {
     pub visualization: VisualizationState,
     /// 解码线程管理
     pub decode: DecodeThreadState,
-    /// EQ 均衡器
-    pub equalizer: Arc<Mutex<Equalizer>>,
     /// 设备监听器
     pub device_monitor: Arc<Mutex<DeviceMonitor>>,
     /// 淡入淡出控制

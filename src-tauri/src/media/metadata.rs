@@ -272,6 +272,7 @@ pub fn set_cover_cache_path(path: Option<String>) -> Result<(), AppError> {
 
     let mut cache_path = lock_or_log!(CUSTOM_CACHE_PATH.write());
     *cache_path = path;
+    drop(cache_path);
     Ok(())
 }
 

@@ -134,10 +134,14 @@ pub async fn updater_check(
         *update_guard = Some(update);
         // 版本信息已变化，丢弃旧的下载文件
         clear_pending_path(&mut path_guard);
+        drop(update_guard);
+        drop(path_guard);
         Ok(Some(info))
     } else {
         *update_guard = None;
         clear_pending_path(&mut path_guard);
+        drop(update_guard);
+        drop(path_guard);
         Ok(None)
     }
 }
@@ -225,6 +229,7 @@ pub async fn updater_download(
     let mut path_guard = lock_or_log!(pending.path.lock());
     clear_pending_path(&mut path_guard);
     *path_guard = Some(temp_path);
+    drop(path_guard);
     Ok(())
 }
 

@@ -20,8 +20,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
-    "allowJs": true,
-    "checkJs": false,
     "ignoreDeprecations": "6.0",
 
     /* Path aliases */

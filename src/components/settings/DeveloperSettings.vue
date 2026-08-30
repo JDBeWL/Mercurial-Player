@@ -13,14 +13,10 @@
           <span class="setting-label">{{ $t('config.glassEffect') }}</span>
           <div class="setting-desc">{{ $t('config.glassEffectDesc') }}</div>
         </div>
-        <div
-          class="switch"
-          :class="{ active: themeStore.enableGlassEffect }"
-          @click="toggleGlassEffect"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="themeStore.enableGlassEffect"
+          @update:model-value="toggleGlassEffect"
+        />
       </div>
 
       <div class="setting-item">
@@ -28,14 +24,10 @@
           <span class="setting-label">{{ $t('config.gradients') }}</span>
           <div class="setting-desc">{{ $t('config.gradientsDesc') }}</div>
         </div>
-        <div
-          class="switch"
-          :class="{ active: themeStore.enableGradients }"
-          @click="toggleGradients"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="themeStore.enableGradients"
+          @update:model-value="toggleGradients"
+        />
       </div>
 
       <div class="setting-item select">
@@ -107,6 +99,7 @@ import { useThemeStore } from '../../stores/theme'
 import { useConfigStore } from '../../stores/config'
 import logger, { LogLevel } from '../../utils/logger'
 import MD3Select from '../MD3Select.vue'
+import SettingSwitch from './SettingSwitch.vue'
 import {
   clearLastSession as clearLastSessionCommand,
   flushMetadataCache as flushMetadataCacheCommand,
@@ -282,50 +275,6 @@ onMounted(() => {
   font-size: 12px;
   color: var(--md-sys-color-on-surface-variant);
   margin-top: 2px;
-}
-
-.switch {
-  position: relative;
-  width: 52px;
-  height: 28px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.switch-track {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--md-sys-color-surface-container);
-  border: 2px solid var(--md-sys-color-outline);
-  border-radius: 14px;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-track {
-  background-color: var(--md-sys-color-primary);
-  border-color: var(--md-sys-color-primary);
-}
-
-.switch-handle {
-  position: absolute;
-  top: 50%;
-  left: 6px;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  background-color: var(--md-sys-color-outline);
-  border-radius: 50%;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-handle {
-  left: 28px;
-  width: 18px;
-  height: 18px;
-  background-color: var(--md-sys-color-on-primary);
 }
 
 .info-card {

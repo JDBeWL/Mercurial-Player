@@ -12,9 +12,9 @@ pub mod commands;
 // 都必须按此顺序,且尽量缩小临界区、避免在持锁期间执行 IPC/文件 IO:
 //
 //   sink → output_stream → target_volume → exclusive_mode → wasapi_player
-//        → current_device_name → current_path → current_source
+//        → current_device_name → current_path
 //
-// 可视化数据(waveform_data/spectrum_data)与 device_monitor/equalizer 相互独立,
+// 可视化数据(spectrum_data)与 device_monitor/equalizer 相互独立,
 // 不与上述锁同栈嵌套。
 //
 // 两个既有约定:
@@ -46,7 +46,7 @@ pub mod session;
 pub mod wasapi;
 
 // 重新导出常用类型
-pub use decoder::{LockFreeSymphoniaSource, SymphoniaDecoder, SymphoniaSource};
+pub use decoder::{LockFreeSymphoniaSource, SymphoniaDecoder};
 pub use device::AudioDeviceInfo;
 pub use device_monitor::{DeviceChangeEvent, DeviceMonitor};
 pub use playback::VisualizationSource;

@@ -14,7 +14,12 @@
 
     <Transition name="volume-fade">
       <div v-show="showVolume" class="volume-slider-popup">
-        <div ref="volumeSlider" class="slider vertical" :class="{ dragging: isDragging }">
+        <div
+          ref="volumeSlider"
+          class="slider vertical"
+          :class="{ dragging: isDragging }"
+          @mousedown="startDrag"
+        >
           <div class="slider-track"></div>
           <div class="slider-fill" :style="{ height: `${playerStore.volume * 100}%` }"></div>
           <div class="slider-thumb" :style="{ bottom: `${playerStore.volume * 100}%` }"></div>
@@ -26,64 +31,33 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref } from 'vue'
 import { usePlayerStore } from '../stores/player'
+import { useDragValue } from '../composables/useDragValue'
 
 const playerStore = usePlayerStore()
 const volumeSlider = ref<HTMLElement | null>(null)
-const isDragging = ref(false)
 const showVolume = ref(false)
 
-// 保存事件处理函数引用，以便正确清理
-let sliderMousedownHandler: ((event: MouseEvent) => void) | null = null
-
-const handleVolumeChange = (event: MouseEvent) => {
-  if (!volumeSlider.value) return
-
-  const rect = volumeSlider.value.getBoundingClientRect()
-  // 对于垂直滑块，我们需要从底部计算位置
-  const percent = Math.max(0, Math.min(1, (rect.bottom - event.clientY) / rect.height))
-  playerStore.setVolume(percent)
-}
-
-const startDrag = (event: MouseEvent) => {
-  // 如果点击的是滑柄本身，不立即更新音量值，避免跳动
-  const isThumb = (event.target as HTMLElement)?.classList?.contains('slider-thumb')
-
-  isDragging.value = true
-
-  if (!isThumb) {
-    // 点击轨道时，立即跳转到点击位置
-    handleVolumeChange(event)
-  }
-
-  // 添加全局事件监听器
-  document.addEventListener('mousemove', handleDrag)
-  document.addEventListener('mouseup', stopDrag)
-
-  // 防止文本选择
-  event.preventDefault()
-}
-
-const handleDrag = (event: MouseEvent) => {
-  if (isDragging.value) {
-    handleVolumeChange(event)
-  }
-}
-
-const stopDrag = () => {
-  isDragging.value = false
-
-  // 移除全局事件监听器
-  document.removeEventListener('mousemove', handleDrag)
-  document.removeEventListener('mouseup', stopDrag)
-}
-
-onMounted(() => {
-  if (volumeSlider.value) {
-    sliderMousedownHandler = startDrag
-    volumeSlider.value.addEventListener('mousedown', sliderMousedownHandler)
-  }
+// 垂直滑块: 从底部计算百分比;拖拽骨架 (document 级监听/清理) 由 useDragValue 提供
+const { isDragging, startDrag } = useDragValue({
+  getPercent: (event) => {
+    if (!volumeSlider.value) return 0
+    const rect = volumeSlider.value.getBoundingClientRect()
+    return Math.max(0, Math.min(1, (rect.bottom - event.clientY) / rect.height))
+  },
+  onStart: (percent, event) => {
+    // 如果点击的是滑柄本身，不立即更新音量值，避免跳动
+    const isThumb = (event.target as HTMLElement)?.classList?.contains('slider-thumb')
+    if (!isThumb) {
+      playerStore.setVolume(percent)
+    }
+    // 防止文本选择
+    event.preventDefault()
+  },
+  onMove: (percent) => {
+    playerStore.setVolume(percent)
+  },
 })
 
 // 音量图标相关函数
@@ -102,17 +76,6 @@ const getVolumeIcon = () => {
     return 'volume_up'
   }
 }
-
-onUnmounted(() => {
-  // 清理全局事件监听器
-  document.removeEventListener('mousemove', handleDrag)
-  document.removeEventListener('mouseup', stopDrag)
-
-  // 清理音量滑块的事件监听器
-  if (volumeSlider.value && sliderMousedownHandler) {
-    volumeSlider.value.removeEventListener('mousedown', sliderMousedownHandler)
-  }
-})
 </script>
 
 <style scoped>

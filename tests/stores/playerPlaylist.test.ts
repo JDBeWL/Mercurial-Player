@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Track } from '@/types'
-import {
-  addTrackNextInPlaylist,
-  addTracksNextInPlaylist,
-  removeTrackFromPlaylist,
-} from '@/stores/playerPlaylist'
+import { addTrackNextInPlaylist, removeTrackFromPlaylist } from '@/stores/playerPlaylist'
 import { adjustShuffleAfterRemove } from '@/stores/shuffle'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn().mockResolvedValue(undefined) }))
@@ -100,27 +96,6 @@ describe('addTrackNextInPlaylist', () => {
   it('ignores falsy track', () => {
     const store = makeStore([track('a')], 0)
     addTrackNextInPlaylist(store, undefined as unknown as Track)
-    expect(store.playlist).toHaveLength(1)
-  })
-})
-
-describe('addTracksNextInPlaylist', () => {
-  it('unshifts all tracks when playlist is empty', () => {
-    const store = makeStore([], -1)
-    addTracksNextInPlaylist(store, [track('x'), track('y')])
-    expect(store.playlist.map((t) => t.path)).toEqual(['x', 'y'])
-  })
-
-  it('filters existing tracks and inserts the rest after current', () => {
-    const store = makeStore([track('a'), track('b')], 0)
-    addTracksNextInPlaylist(store, [track('b'), track('c'), track('d')])
-    expect(store.playlist.map((t) => t.path)).toEqual(['a', 'c', 'd', 'b'])
-  })
-
-  it('ignores empty or falsy input', () => {
-    const store = makeStore([track('a')], 0)
-    addTracksNextInPlaylist(store, [])
-    addTracksNextInPlaylist(store, undefined as unknown as Track[])
     expect(store.playlist).toHaveLength(1)
   })
 })

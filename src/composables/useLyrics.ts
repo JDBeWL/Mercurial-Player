@@ -25,8 +25,9 @@ const sharedActiveIndex = ref(-1)
 const sharedLyricsSource: Ref<'local' | 'online'> = ref('local')
 const sharedOnlineLyricsError = ref<string | null>(null)
 
-// 模块级别的 AbortController,用于取消正在进行的网络请求
-let sharedAbortController: AbortController | null = null
+// 在线歌词请求经由 Tauri invoke 后端代理,前端的 AbortSignal 无法取消后端 HTTP 请求;
+// 过期结果的丢弃由 loadSequence 守卫负责(旧请求的结果不会被采用)。
+let loadSequence = 0
 
 // 模块级别的初始化标记
 let isInitialized = false
@@ -44,8 +45,6 @@ let _configStore: ReturnType<typeof useConfigStore> | null = null
 async function fetchOnlineLyrics(track: Track | null): Promise<string | null> {
   if (!track || !_configStore) return null
   try {
-    // 创建新的 AbortController
-    sharedAbortController = new AbortController()
     const title = track.title || track.name || FileUtils.getFileNameWithoutExtension(track.path)
     const artist = track.artist || ''
     const duration = track.duration ? track.duration * 1000 : 0
@@ -64,9 +63,6 @@ async function fetchOnlineLyrics(track: Track | null): Promise<string | null> {
     logger.error('Failed to fetch online lyrics:', error)
     sharedOnlineLyricsError.value = (error as Error).message
     return null
-  } finally {
-    // 重置 AbortController
-    sharedAbortController = null
   }
 }
 
@@ -93,6 +89,8 @@ async function saveLyricsToLocal(trackPath: string, lrcContent: string): Promise
  */
 async function loadLyrics(trackPath: string | undefined): Promise<void> {
   if (!_playerStore || !_configStore) return
+  // 序号守卫: 快速切歌时并发请求,只有最新一次的结果允许写入共享状态
+  const seq = ++loadSequence
   if (!trackPath) {
     sharedLyrics.value = []
     _playerStore.lyrics = null
@@ -119,12 +117,14 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
   sharedOnlineLyricsError.value = null
   try {
     const lyricsPath = await FileUtils.findLyricsFile(trackPath)
+    if (seq !== loadSequence) return
     if (lyricsPath) {
       const content = await FileUtils.readFile(lyricsPath)
       const ext = FileUtils.getFileExtension(lyricsPath) as 'lrc' | 'ass' | 'srt'
       // 使用统一的异步解析器
       // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
       const parsed = markRaw(await LyricsParser.parseAsync(content, ext))
+      if (seq !== loadSequence) return
       sharedLyrics.value = parsed
       _playerStore.lyrics = parsed
       sharedLyricsSource.value = 'local'
@@ -132,9 +132,11 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
       logger.debug('No local lyrics found, trying online fetch...')
       const track = _playerStore.currentTrack
       const onlineLrc = await fetchOnlineLyrics(track)
+      if (seq !== loadSequence) return
       if (onlineLrc) {
         // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
         const parsed = markRaw(await LyricsParser.parseAsync(onlineLrc, 'lrc'))
+        if (seq !== loadSequence) return
         sharedLyrics.value = parsed
         _playerStore.lyrics = parsed
         sharedLyricsSource.value = 'online'
@@ -148,7 +150,7 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
 
         if (_configStore.lyrics?.autoSaveOnlineLyrics) {
           const saved = await saveLyricsToLocal(trackPath, onlineLrc)
-          if (saved) {
+          if (saved && seq === loadSequence) {
             sharedLyricsSource.value = 'local'
             // 保存成功后从缓存中移除，下次会从本地加载
             onlineLyricsCache.delete(trackPath)
@@ -158,9 +160,14 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
     }
   } catch (e) {
     logger.error('Error loading lyrics:', e)
-    sharedOnlineLyricsError.value = (e as Error).message
+    if (seq === loadSequence) {
+      sharedOnlineLyricsError.value = (e as Error).message
+    }
   } finally {
-    sharedLoading.value = false
+    // 只有最新一次请求有权结束 loading 状态,避免旧请求过早关闭新请求的 loading
+    if (seq === loadSequence) {
+      sharedLoading.value = false
+    }
   }
 }
 
@@ -275,10 +282,8 @@ export function useLyrics() {
   // 注意:不要在单个组件 onUnmounted 中调用 cleanup,
   // 否则会停掉其他调用方共享的 watcher 导致丢失更新。
   const cleanup = (): void => {
-    if (sharedAbortController) {
-      sharedAbortController.abort()
-      sharedAbortController = null
-    }
+    // 作废所有进行中的 loadLyrics 请求 (过期结果由序号守卫丢弃)
+    loadSequence++
     // 停止所有共享 watcher,避免 HMR 重建 store 后旧 watcher 仍引用旧 store
     sharedWatchStopFns.forEach((fn) => fn())
     sharedWatchStopFns.length = 0

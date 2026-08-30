@@ -191,6 +191,6 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
       options.stopWatchTrack()
     }
     // 清理播放器资源
-    playerStore.cleanup()
+    await playerStore.cleanup()
   })
 }

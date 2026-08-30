@@ -12,28 +12,20 @@
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.startupLoadLastConfig') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.general.startupLoadLastConfig }"
-          @click="toggleSetting('startupLoadLastConfig')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.general.startupLoadLastConfig"
+          @update:model-value="toggleSetting('startupLoadLastConfig')"
+        />
       </div>
 
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.autoSaveConfig') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.general.autoSaveConfig }"
-          @click="toggleSetting('autoSaveConfig')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.general.autoSaveConfig"
+          @update:model-value="toggleSetting('autoSaveConfig')"
+        />
       </div>
     </div>
 
@@ -45,14 +37,10 @@
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.enableSubdirectoryScan') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.directoryScan.enableSubdirectoryScan }"
-          @click="toggleDirectoryScan('enableSubdirectoryScan')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.directoryScan.enableSubdirectoryScan"
+          @update:model-value="toggleDirectoryScan('enableSubdirectoryScan')"
+        />
       </div>
 
       <div v-if="configStore.directoryScan.enableSubdirectoryScan" class="setting-item">
@@ -82,14 +70,10 @@
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.ignoreHiddenFolders') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.directoryScan.ignoreHiddenFolders }"
-          @click="toggleDirectoryScan('ignoreHiddenFolders')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.directoryScan.ignoreHiddenFolders"
+          @update:model-value="toggleDirectoryScan('ignoreHiddenFolders')"
+        />
       </div>
     </div>
 
@@ -100,28 +84,20 @@
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.showAudioInfo') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.general.showAudioInfo }"
-          @click="toggleSetting('showAudioInfo')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.general.showAudioInfo"
+          @update:model-value="toggleSetting('showAudioInfo')"
+        />
       </div>
 
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.showQueueInfo') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.general.showQueueInfo }"
-          @click="toggleSetting('showQueueInfo')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.general.showQueueInfo ?? false"
+          @update:model-value="toggleSetting('showQueueInfo')"
+        />
       </div>
 
       <div class="setting-item select">
@@ -141,14 +117,10 @@
           <span class="setting-label">{{ $t('config.immersiveAutoTheme') }}</span>
           <div class="setting-desc">{{ $t('config.immersiveAutoThemeDesc') }}</div>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.general.immersiveAutoTheme ?? true }"
-          @click="toggleSetting('immersiveAutoTheme')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.general.immersiveAutoTheme ?? true"
+          @update:model-value="toggleSetting('immersiveAutoTheme')"
+        />
       </div>
 
       <div class="setting-item">
@@ -156,14 +128,10 @@
           <span class="setting-label">{{ $t('config.enableAutoUpdate') }}</span>
           <div class="setting-desc">{{ $t('config.enableAutoUpdateDesc') }}</div>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.general.enableAutoUpdate }"
-          @click="toggleSetting('enableAutoUpdate')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.general.enableAutoUpdate ?? false"
+          @update:model-value="toggleSetting('enableAutoUpdate')"
+        />
       </div>
 
       <div class="setting-item select">
@@ -278,6 +246,7 @@ import { formatKbMb } from '../../utils/format'
 import { saveConfigSafely } from '../../utils/errorMessages'
 import { useSliderFill } from '../../composables/useSliderFill'
 import MD3Select from '../MD3Select.vue'
+import SettingSwitch from './SettingSwitch.vue'
 import { useI18n } from 'vue-i18n'
 import {
   cleanCoverCache,
@@ -588,50 +557,6 @@ onMounted(() => {
 .setting-label {
   font-size: 16px;
   color: var(--md-sys-color-on-surface);
-}
-
-.switch {
-  position: relative;
-  width: 52px;
-  height: 28px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.switch-track {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--md-sys-color-surface-container);
-  border: 2px solid var(--md-sys-color-outline);
-  border-radius: 14px;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-track {
-  background-color: var(--md-sys-color-primary);
-  border-color: var(--md-sys-color-primary);
-}
-
-.switch-handle {
-  position: absolute;
-  top: 50%;
-  left: 6px;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  background-color: var(--md-sys-color-outline);
-  border-radius: 50%;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-handle {
-  left: 28px;
-  width: 18px;
-  height: 18px;
-  background-color: var(--md-sys-color-on-primary);
 }
 
 /* 设置描述文字 */

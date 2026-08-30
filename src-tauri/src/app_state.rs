@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use mercurial_player::config::ConfigManager;
-use mercurial_player::equalizer::{Equalizer, GlobalEqualizer};
+use mercurial_player::equalizer::GlobalEqualizer;
 use mercurial_player::{
     AppState, AudioOutputState, DecodeThreadState, FadeControl, PlayerState, TrackState,
     VisualizationState,
@@ -60,11 +60,9 @@ pub fn build_app_state(
                 wasapi_player: Arc::new(Mutex::new(wasapi_player)),
             },
             track: TrackState {
-                current_source: Arc::new(Mutex::new(None)),
                 current_path: Arc::new(Mutex::new(None)),
             },
             visualization: VisualizationState {
-                waveform_data: Arc::new(Mutex::new(Vec::with_capacity(1024))),
                 spectrum_data: Arc::new(Mutex::new(vec![0.0; 128])),
                 target_fps: Arc::new(AtomicU64::new(60)), // 默认60fps
             },
@@ -72,7 +70,6 @@ pub fn build_app_state(
                 generation: Arc::new(AtomicU64::new(0)),
                 id: Arc::new(AtomicU64::new(0)),
             },
-            equalizer: Arc::new(Mutex::new(Equalizer::new(48000, 2))),
             device_monitor: Arc::new(Mutex::new(DeviceMonitor::new(device_name))),
             fade: FadeControl {
                 generation: Arc::new(AtomicU32::new(0)),

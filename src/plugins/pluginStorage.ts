@@ -39,12 +39,10 @@ export function createPluginStorage(pluginId: string): PluginPersistentStorage {
   const storage = reactive(savedData)
   const maxStorageSize = 1024 * 1024
   let saveTimeout: ReturnType<typeof setTimeout> | null = null
-  let isSaving = false
+  // 保存串行化队列: 保证写入按顺序执行,flush 可保证追加一次保存
+  let saveQueue: Promise<void> = Promise.resolve()
 
-  const safeSave = async (target: Record<string, unknown>) => {
-    if (isSaving) return // 防止并发保存
-    isSaving = true
-
+  const doSave = async (target: Record<string, unknown>) => {
     try {
       const json = JSON.stringify(target)
       if (json.length > maxStorageSize) {
@@ -76,14 +74,21 @@ export function createPluginStorage(pluginId: string): PluginPersistentStorage {
       } else {
         logger.warn(`保存插件 ${pluginId} 存储失败:`, e)
       }
-    } finally {
-      isSaving = false
     }
+  }
+
+  const enqueueSave = (target: Record<string, unknown>): Promise<void> => {
+    // 吞掉错误: doSave 内部已处理,避免队列因单次失败而断裂
+    saveQueue = saveQueue.then(
+      () => doSave(target),
+      () => doSave(target),
+    )
+    return saveQueue
   }
 
   const debouncedSave = (target: Record<string, unknown>) => {
     if (saveTimeout) clearTimeout(saveTimeout)
-    saveTimeout = setTimeout(() => safeSave(target), 300) // 减少延迟
+    saveTimeout = setTimeout(() => void enqueueSave(target), 300) // 减少延迟
   }
 
   const persistentStorage = new Proxy(storage, {
@@ -105,7 +110,7 @@ export function createPluginStorage(pluginId: string): PluginPersistentStorage {
       clearTimeout(saveTimeout)
       saveTimeout = null
     }
-    return safeSave(storage)
+    return enqueueSave(storage)
   }
 
   // 添加清理方法（用于插件卸载时）

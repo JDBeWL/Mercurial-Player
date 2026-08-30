@@ -77,6 +77,8 @@ interface PlayerState {
   _playRequestId: number
   _activePlayRequestId: number
   _lyricsRequestId: number
+  /** 最近一次 loadLyrics 请求的 id,用于过期结果守卫 */
+  _activeLyricsRequestId: number
   _isSwitchingDevice: boolean
   _lastDeviceSwitchTarget: string | null
   /** 用于取消正在进行的 _cachePlaylistMetadata 任务 */
@@ -152,6 +154,7 @@ export const usePlayerStore = defineStore('player', {
     _playRequestId: 0,
     _activePlayRequestId: 0,
     _lyricsRequestId: 0,
+    _activeLyricsRequestId: 0,
     _isSwitchingDevice: false,
     _lastDeviceSwitchTarget: null,
     _cacheAbortController: null,
@@ -167,8 +170,9 @@ export const usePlayerStore = defineStore('player', {
 
   getters: {
     currentTrackIndex: (state): number => {
-      if (!state.currentTrack || state.playlist.length === 0) return -1
-      return state.playlist.findIndex((track) => track.path === state.currentTrack!.path)
+      const current = state.currentTrack
+      if (!current || state.playlist.length === 0) return -1
+      return state.playlist.findIndex((track) => track.path === current.path)
     },
     hasNextTrack: (state): boolean => {
       // 手动切换应总是允许,与循环模式无关;自动结束行为由 _onEnded 处理
@@ -959,16 +963,16 @@ export const usePlayerStore = defineStore('player', {
     },
 
     async loadLyrics(trackPath: string, requestId?: number): Promise<void> {
+      // requestId 由 playTrack 传入 (与播放序列对齐);独立调用则使用歌词自己的计数器。
+      // 守卫统一比对 _activeLyricsRequestId (最近一次请求),两类调用方都能正确过期。
       const lyricsRequestId = requestId ?? ++this._lyricsRequestId
-      if (requestId == null) {
-        this._lyricsRequestId = lyricsRequestId
-      }
+      this._activeLyricsRequestId = lyricsRequestId
 
       try {
         const lyricsPath = await FileUtils.findLyricsFile(trackPath)
         if (
           this._isDestroyed ||
-          this._activePlayRequestId !== lyricsRequestId ||
+          this._activeLyricsRequestId !== lyricsRequestId ||
           this.currentTrack?.path !== trackPath
         ) {
           return
@@ -981,7 +985,7 @@ export const usePlayerStore = defineStore('player', {
 
           if (
             this._isDestroyed ||
-            this._activePlayRequestId !== lyricsRequestId ||
+            this._activeLyricsRequestId !== lyricsRequestId ||
             this.currentTrack?.path !== trackPath
           ) {
             return
@@ -997,7 +1001,7 @@ export const usePlayerStore = defineStore('player', {
         logger.debug('No lyrics found or failed to load:', error)
         if (
           this.currentTrack?.path === trackPath &&
-          this._activePlayRequestId === lyricsRequestId
+          this._activeLyricsRequestId === lyricsRequestId
         ) {
           this.lyrics = null
         }
@@ -1020,6 +1024,7 @@ export const usePlayerStore = defineStore('player', {
       this._isLoading = false
       this._activePlayRequestId = ++this._playRequestId
       this._lyricsRequestId = this._activePlayRequestId
+      this._activeLyricsRequestId = this._activePlayRequestId
       this._isSwitchingDevice = false
       this._lastDeviceSwitchTarget = null
 
@@ -1027,60 +1032,40 @@ export const usePlayerStore = defineStore('player', {
       this._cacheManager?.destroy()
       this._cacheManager = null
 
-      if (this._trackEndedUnlisten) {
-        this._trackEndedUnlisten()
-        this._trackEndedUnlisten = null
+      // 统一清理所有 Tauri 事件监听 (各 unlisten 字段在注册后仍保留字段本身,便于判空)
+      const unlistenFns = [
+        this._trackEndedUnlisten,
+        this._positionUnlisten,
+        this._taskbarPreviousUnlisten,
+        this._taskbarPlayPauseUnlisten,
+        this._taskbarNextUnlisten,
+        this._deviceRemovedUnlisten,
+        this._deviceSwitchRequiredUnlisten,
+        this._noDeviceAvailableUnlisten,
+        this._deviceDefaultChangedUnlisten,
+      ]
+      for (const unlisten of unlistenFns) {
+        unlisten?.()
       }
-
-      if (this._positionUnlisten) {
-        this._positionUnlisten()
-        this._positionUnlisten = null
-      }
-
-      // 清理任务栏事件监听
-      if (this._taskbarPreviousUnlisten) {
-        this._taskbarPreviousUnlisten()
-        this._taskbarPreviousUnlisten = null
-      }
-      if (this._taskbarPlayPauseUnlisten) {
-        this._taskbarPlayPauseUnlisten()
-        this._taskbarPlayPauseUnlisten = null
-      }
-      if (this._taskbarNextUnlisten) {
-        this._taskbarNextUnlisten()
-        this._taskbarNextUnlisten = null
-      }
-
-      // 清理设备事件监听
-      if (this._deviceRemovedUnlisten) {
-        this._deviceRemovedUnlisten()
-        this._deviceRemovedUnlisten = null
-      }
-      if (this._deviceSwitchRequiredUnlisten) {
-        this._deviceSwitchRequiredUnlisten()
-        this._deviceSwitchRequiredUnlisten = null
-      }
-      if (this._noDeviceAvailableUnlisten) {
-        this._noDeviceAvailableUnlisten()
-        this._noDeviceAvailableUnlisten = null
-      }
-      if (this._deviceDefaultChangedUnlisten) {
-        this._deviceDefaultChangedUnlisten()
-        this._deviceDefaultChangedUnlisten = null
-      }
+      this._trackEndedUnlisten = null
+      this._positionUnlisten = null
+      this._taskbarPreviousUnlisten = null
+      this._taskbarPlayPauseUnlisten = null
+      this._taskbarNextUnlisten = null
+      this._deviceRemovedUnlisten = null
+      this._deviceSwitchRequiredUnlisten = null
+      this._noDeviceAvailableUnlisten = null
+      this._deviceDefaultChangedUnlisten = null
 
       // 注销全局媒体键快捷方式
       await unregisterGlobalShortcuts()
 
-      try {
-        invoke('pause_track').catch((err) => logger.warn('pause during cleanup:', err))
-        // 设置任务栏为停止状态
-        invoke('set_taskbar_stopped').catch((e) =>
-          errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false }),
-        )
-      } catch {
-        // 忽略错误
-      }
+      // invoke 返回 Promise,同步抛错仅发生在极端序列化场景,.catch 已覆盖常规错误
+      invoke('pause_track').catch((err) => logger.warn('pause during cleanup:', err))
+      // 设置任务栏为停止状态
+      invoke('set_taskbar_stopped').catch((e) =>
+        errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false }),
+      )
 
       if (this._cacheAbortController) {
         this._cacheAbortController.abort()

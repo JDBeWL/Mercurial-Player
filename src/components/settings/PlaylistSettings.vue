@@ -9,28 +9,20 @@
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.generateAllSongsPlaylist') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.playlist.generateAllSongsPlaylist }"
-          @click="toggleSetting('generateAllSongsPlaylist')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.playlist.generateAllSongsPlaylist"
+          @update:model-value="toggleSetting('generateAllSongsPlaylist')"
+        />
       </div>
 
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.folderBasedPlaylists') }}</span>
         </div>
-        <div
-          class="switch"
-          :class="{ active: configStore.playlist.folderBasedPlaylists }"
-          @click="toggleSetting('folderBasedPlaylists')"
-        >
-          <div class="switch-track"></div>
-          <div class="switch-handle"></div>
-        </div>
+        <SettingSwitch
+          :model-value="configStore.playlist.folderBasedPlaylists"
+          @update:model-value="toggleSetting('folderBasedPlaylists')"
+        />
       </div>
 
       <div class="setting-item select">
@@ -64,6 +56,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConfigStore } from '../../stores/config'
+import SettingSwitch from './SettingSwitch.vue'
 import logger from '../../utils/logger'
 import MD3Select from '../MD3Select.vue'
 
@@ -136,50 +129,6 @@ const toggleSetting = async (
 .setting-label {
   font-size: 16px;
   color: var(--md-sys-color-on-surface);
-}
-
-.switch {
-  position: relative;
-  width: 52px;
-  height: 28px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.switch-track {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--md-sys-color-surface-container-highest);
-  border: 2px solid var(--md-sys-color-outline);
-  border-radius: 14px;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-track {
-  background-color: var(--md-sys-color-primary);
-  border-color: var(--md-sys-color-primary);
-}
-
-.switch-handle {
-  position: absolute;
-  top: 50%;
-  left: 6px;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  background-color: var(--md-sys-color-outline);
-  border-radius: 50%;
-  transition: all 0.2s ease;
-}
-
-.switch.active .switch-handle {
-  left: 28px;
-  width: 18px;
-  height: 18px;
-  background-color: var(--md-sys-color-on-primary);
 }
 
 .md3-input {
