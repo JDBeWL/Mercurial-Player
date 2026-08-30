@@ -46,24 +46,6 @@ pub fn set_eq_enabled(state: State<AppState>, enabled: bool) -> Result<(), AppEr
 }
 
 #[command]
-pub fn set_eq_gains(state: State<AppState>, gains: Vec<f32>) -> Result<(), AppError> {
-    if gains.len() != EQ_BAND_COUNT {
-        return Err(AppError::msg(format!(
-            "Expected {EQ_BAND_COUNT} gains, got {}",
-            gains.len()
-        )));
-    }
-
-    let mut gains_array = [0.0f32; EQ_BAND_COUNT];
-    for (i, &gain) in gains.iter().enumerate() {
-        gains_array[i] = gain.clamp(-8.0, 8.0);
-    }
-
-    state.equalizer.set_gains(gains_array);
-    Ok(())
-}
-
-#[command]
 pub fn set_eq_band_gain(state: State<AppState>, band: usize, gain: f32) -> Result<(), AppError> {
     if band >= EQ_BAND_COUNT {
         return Err(AppError::msg(format!("Invalid band index: {band}")));

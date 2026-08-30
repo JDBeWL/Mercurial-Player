@@ -212,7 +212,6 @@ fn monitor_device_changes(
 // ============================================================================
 
 /// 获取所有设备名称
-#[allow(dead_code)]
 fn get_device_names(host: &cpal::Host) -> Vec<String> {
     host.output_devices()
         .ok()

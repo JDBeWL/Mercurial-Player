@@ -25,6 +25,9 @@ const LEVEL_NAMES: Record<LogLevel, string> = {
   [LogLevel.NONE]: 'NONE',
 }
 
+// 日志等级持久化 key(开发者选项中设置,跨启动生效)
+const LOG_LEVEL_STORAGE_KEY = 'mercurial-player.log-level'
+
 // 日志级别颜色映射（用于控制台输出）
 const LEVEL_COLORS: Record<LogLevel, string> = {
   [LogLevel.DEBUG]: '#888',
@@ -43,6 +46,8 @@ class Logger {
   private minLevel: LogLevel
   private enableConsole: boolean
   private enableFile: boolean
+  /** 落盘失败是否已告警过(只告警一次,避免循环刷屏) */
+  private fileWriteWarned: boolean
   private logHistory: LogData[]
   private maxHistorySize: number
 
@@ -51,14 +56,16 @@ class Logger {
     this.isDev = import.meta.env.DEV
     this.isDebug = import.meta.env.MODE === 'development' || import.meta.env.DEBUG === 'true'
 
-    // 根据环境设置默认日志级别
-    this.minLevel = this.isDev || this.isDebug ? LogLevel.DEBUG : LogLevel.INFO
+    // 根据环境设置默认日志级别(开发者选项持久化的等级优先)
+    this.minLevel = this.resolveInitialLevel()
 
     // 是否启用控制台输出
     this.enableConsole = true
 
-    // 是否启用文件输出（通过Tauri后端）
-    this.enableFile = false
+    // 是否启用文件输出（通过Tauri后端写入日志目录,
+    // 每次启动轮转:上一次运行的 mercurial-player.log → mercurial-player-prev.log）
+    this.enableFile = true
+    this.fileWriteWarned = false
 
     // 日志历史（用于调试）
     this.logHistory = []
@@ -66,10 +73,38 @@ class Logger {
   }
 
   /**
-   * 设置最小日志级别
+   * 解析初始日志级别:优先读取开发者选项中持久化的等级,否则按环境默认
+   */
+  private resolveInitialLevel(): LogLevel {
+    try {
+      const saved = localStorage.getItem(LOG_LEVEL_STORAGE_KEY)
+      const parsed = saved === null ? NaN : Number(saved)
+      if (Object.values(LogLevel).includes(parsed as LogLevel)) {
+        return parsed as LogLevel
+      }
+    } catch {
+      // localStorage 不可用(如非浏览器环境)时忽略,回落默认值
+    }
+    return this.isDev || this.isDebug ? LogLevel.DEBUG : LogLevel.INFO
+  }
+
+  /**
+   * 设置最小日志级别(持久化到 localStorage,跨启动生效)
    */
   setMinLevel(level: LogLevel): void {
     this.minLevel = level
+    try {
+      localStorage.setItem(LOG_LEVEL_STORAGE_KEY, String(level))
+    } catch {
+      // 持久化失败不影响本次会话的级别生效
+    }
+  }
+
+  /**
+   * 获取当前最小日志级别
+   */
+  getMinLevel(): LogLevel {
+    return this.minLevel
   }
 
   /**
@@ -99,6 +134,17 @@ class Logger {
   }
 
   /**
+   * 格式化日期（写入日志文件时用于跨天区分,控制台输出不展示）
+   */
+  private formatDate(): string {
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  /**
    * 格式化日志消息
    */
   private formatLog(level: LogLevel, message: string, args: unknown[] = []): LogData {
@@ -109,6 +155,7 @@ class Logger {
       timestamp,
       level: levelName,
       levelValue: level,
+      date: this.formatDate(),
       message,
       args: args.length > 0 ? args : undefined,
       stack:
@@ -158,9 +205,13 @@ class Logger {
       // 动态导入以避免在非Tauri环境中出错
       const { invoke } = await import('@tauri-apps/api/core')
       await invoke('write_log', { logData })
-    } catch {
-      // 如果后端不支持日志写入，静默失败
-      // 避免在日志系统中产生循环错误
+      this.fileWriteWarned = false
+    } catch (error) {
+      // 落盘失败只告警一次(如参数不匹配、磁盘不可写),避免日志系统循环报错刷屏
+      if (!this.fileWriteWarned) {
+        this.fileWriteWarned = true
+        console.warn('[logger] 日志落盘失败,后续同类错误不再提示:', error)
+      }
     }
   }
 

@@ -7,8 +7,3 @@ pub mod filesystem;
 pub mod http_client;
 pub mod metadata;
 pub mod netease;
-pub mod tantivy_index;
-
-// 重新导出常用类型
-pub use filesystem::{AUDIO_EXTENSIONS, get_audio_files_from_dir, read_dir};
-pub use metadata::{Playlist, TrackMetadata};

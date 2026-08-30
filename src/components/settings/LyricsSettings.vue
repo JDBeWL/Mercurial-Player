@@ -301,7 +301,7 @@
         <div
           class="switch"
           :class="{ active: visualizerConfig.enableVerticalSync }"
-          @click="toggleVerticalSync"
+          @click="toggleFpsLimit"
         >
           <div class="switch-track"></div>
           <div class="switch-handle"></div>
@@ -463,7 +463,7 @@ const handleFpsChange = async (): Promise<void> => {
 }
 
 // 切换"限制到屏幕刷新率"
-const toggleVerticalSync = async (): Promise<void> => {
+const toggleFpsLimit = async (): Promise<void> => {
   visualizerConfig.value.enableVerticalSync = !visualizerConfig.value.enableVerticalSync
   try {
     await applyTargetFps()

@@ -4,7 +4,7 @@ import i18n from '@/i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { type UnlistenFn } from '@tauri-apps/api/event'
 import FileUtils from '../utils/fileUtils'
-import LyricsParser from '../utils/lyricsParser'
+import { LyricsParser } from '../utils/lyricsParser'
 import logger from '../utils/logger'
 import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
 import { classifyAudioInvokeError } from '../utils/audioErrorClassifier'
@@ -37,7 +37,6 @@ const AUTO_NEXT_TRACK_DELAY_MS = 100
 
 import {
   addTrackNextInPlaylist,
-  addTracksNextInPlaylist,
   removeTrackFromPlaylist,
 } from './playerPlaylist'
 import {
@@ -64,7 +63,6 @@ interface PlayerState {
   lyricsOffset: number
   audioInfo: AudioInfo
   _isLoading: boolean
-  lastTrackIndex: number
   /** 缓存管理器 (文件存在性 + 元数据 LRU 缓存),markRaw 避免深度代理 class 实例 */
   _cacheManager: PlayerCacheManager | null
   _isDestroyed: boolean
@@ -133,7 +131,6 @@ export const usePlayerStore = defineStore('player', {
 
     // 加载状态
     _isLoading: false,
-    lastTrackIndex: -1,
 
     // 缓存管理器
     _cacheManager: null,
@@ -462,7 +459,6 @@ export const usePlayerStore = defineStore('player', {
         coverPath: track.coverPath, // 保留原始的 coverPath
       }
 
-      this.lastTrackIndex = this.currentTrackIndex
       this.currentTrack = resolvedTrack
 
       // shuffle 模式下,用户手动切曲时同步 _shufflePosition 到新曲目在 _shuffleOrder 中的位置
@@ -907,13 +903,6 @@ export const usePlayerStore = defineStore('player', {
      */
     addTrackNext(track: Track): void {
       addTrackNextInPlaylist(this, track)
-    },
-
-    /**
-     * 将多个曲目添加到当前播放列表的下一首位置
-     */
-    addTracksNext(tracks: Track[]): void {
-      addTracksNextInPlaylist(this, tracks)
     },
 
     // --- 数据加载 ---

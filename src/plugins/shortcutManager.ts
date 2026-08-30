@@ -119,4 +119,3 @@ class ShortcutManager {
 }
 
 export const shortcutManager = new ShortcutManager()
-export default shortcutManager

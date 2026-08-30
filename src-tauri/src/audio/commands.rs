@@ -4,10 +4,7 @@
 use crate::error::AppError;
 
 use super::device::{AudioDeviceInfo, get_all_audio_devices};
-use super::playback::{
-    PlaybackStatus, check_track_finished, get_status, play_track_exclusive, play_track_shared,
-    seek_track_shared,
-};
+use super::playback::{play_track_exclusive, play_track_shared, seek_track_shared};
 
 #[cfg(windows)]
 use super::wasapi::WasapiExclusivePlayback;
@@ -76,24 +73,6 @@ fn spawn_shared_fade(
 // ============================================================================
 // 播放控制命令
 // ============================================================================
-
-#[command]
-pub fn get_waveform_data(state: State<AppState>) -> Result<Vec<f32>, AppError> {
-    // 使用 try_lock 避免阻塞主线程
-    match state.player.visualization.waveform_data.try_lock() {
-        Ok(data) => Ok(data.clone()),
-        Err(_) => Ok(Vec::new()), // 锁被占用时返回空数据，避免阻塞
-    }
-}
-
-#[command]
-pub fn get_spectrum_data(state: State<AppState>) -> Result<Vec<f32>, AppError> {
-    // 使用 try_lock 避免阻塞主线程
-    match state.player.visualization.spectrum_data.try_lock() {
-        Ok(data) => Ok(data.clone()),
-        Err(_) => Ok(vec![0.0; 128]), // 锁被占用时返回默认数据，避免阻塞
-    }
-}
 
 #[command]
 pub async fn play_track(
@@ -309,16 +288,6 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), AppError> {
     player.set_volume(volume);
 
     Ok(())
-}
-
-#[command]
-pub fn get_playback_status(state: State<AppState>) -> Result<PlaybackStatus, AppError> {
-    get_status(&state)
-}
-
-#[command]
-pub fn is_track_finished(state: State<AppState>) -> Result<bool, AppError> {
-    check_track_finished(&state)
 }
 
 #[command]
@@ -876,13 +845,15 @@ pub fn clear_last_session(state: State<AppState>) -> Result<(), AppError> {
     super::session::clear_last_session(&state)
 }
 
+/// 目标帧率上限（防止过高频率的 FFT 计算）
+pub const MAX_TARGET_FPS: u32 = 240;
+
 #[command]
 pub fn set_target_fps(state: State<AppState>, fps: u32) -> Result<(), AppError> {
     if fps == 0 {
         return Err("FPS cannot be zero".to_string().into());
     }
-    // 限制最大刷新率为 240fps，防止过高频率
-    let clamped_fps = fps.min(240);
+    let clamped_fps = fps.min(MAX_TARGET_FPS);
     state
         .player
         .visualization

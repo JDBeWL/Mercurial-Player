@@ -181,11 +181,3 @@ pub struct AppState {
     /// 全局均衡器
     pub equalizer: GlobalEqualizer,
 }
-
-// 重新导出常用类型
-#[cfg(windows)]
-pub use audio::PlaybackState;
-pub use audio::{AudioDeviceInfo, PlaybackStatus, SymphoniaDecoder};
-pub use config::AppConfig;
-pub use equalizer::EqSettings;
-pub use media::{Playlist, TrackMetadata};

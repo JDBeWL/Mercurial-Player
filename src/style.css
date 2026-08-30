@@ -128,8 +128,7 @@ body {
 /* Shared Button Styles */
 .filled-button,
 .text-button,
-.icon-button,
-.window-button {
+.icon-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -140,14 +139,8 @@ body {
     color var(--transition-fast) var(--ease-out-expo);
 }
 
-.icon-button,
-.window-button {
+.icon-button {
   display: flex;
-} /* Icon buttons are often flex containers */
-
-/* 标题栏按钮 - 仅在需要禁用拖拽的标题栏按钮上使用 */
-.titlebar-button {
-  -webkit-app-region: no-drag;
 }
 
 /* Filled Button - MD3 Filled Tonal Button 风格 */
@@ -287,50 +280,6 @@ ThemeSelector {
 /* =========================================
    Components: Cards & Lists
    ========================================= */
-.card,
-.card-elevated {
-  border-radius: var(--md-sys-shape-corner-medium);
-  padding: 16px;
-  transition: all var(--transition-normal) var(--ease-out-expo);
-  position: relative;
-  overflow: hidden;
-}
-
-.card {
-  background-color: var(--md-sys-color-surface-container);
-  box-shadow: var(--shadow-soft);
-}
-
-.card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--gradient-surface, none);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.card > * {
-  position: relative;
-  z-index: 1;
-}
-
-.card-elevated {
-  background-color: var(--md-sys-color-surface-container-low);
-  backdrop-filter: blur(var(--glass-blur));
-  box-shadow: var(--glass-shadow);
-  border: var(--glass-border);
-}
-
-.card:hover,
-.card-elevated:hover {
-  box-shadow: var(--shadow-medium);
-  transform: translateY(-2px);
-}
-
 /* List Styles */
 .list {
   background-color: var(--md-sys-color-surface);
@@ -426,44 +375,6 @@ ThemeSelector {
 /* =========================================
    Components: Inputs & Controls
    ========================================= */
-/* Text Field */
-.text-field {
-  position: relative;
-  margin-bottom: 16px;
-}
-.text-field input {
-  background-color: transparent;
-  border: none;
-  border-bottom: 2px solid var(--md-sys-color-outline);
-  border-radius: 0;
-  padding: 8px 0;
-  width: 100%;
-  font-family: var(--app-font-family);
-  font-size: 16px;
-  color: var(--md-sys-color-on-surface);
-  outline: none;
-  transition: border-color var(--transition-normal) var(--ease-in-out);
-}
-.text-field input:focus {
-  border-bottom-color: var(--md-sys-color-primary);
-}
-.text-field label {
-  position: absolute;
-  top: 8px;
-  left: 0;
-  font-family: var(--app-font-family);
-  font-size: 16px;
-  color: var(--md-sys-color-on-surface-variant);
-  pointer-events: none;
-  transition: all var(--transition-normal) var(--ease-out-expo);
-}
-.text-field input:focus + label,
-.text-field input:not(:placeholder-shown) + label {
-  top: -16px;
-  font-size: 12px;
-  color: var(--md-sys-color-primary);
-}
-
 /* Progress Bar - 增强渐变效果 */
 .progress-bar {
   position: relative;
@@ -482,15 +393,6 @@ ThemeSelector {
   border-radius: 2px;
   transition: width 0.707s linear;
 }
-.progress-bar-buffer {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  background-color: var(--primary-alpha-30);
-  border-radius: 2px;
-}
-
 /* Slider - 增强交互效果 */
 .slider {
   position: relative;
@@ -535,39 +437,6 @@ ThemeSelector {
   transform: translateX(-50%) scale(1.2);
 }
 
-/* Tab Bar - 增强指示器效果 */
-.tab-bar {
-  display: flex;
-  background-color: var(--md-sys-color-surface);
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
-}
-.tab {
-  flex: 1;
-  padding: 12px 0;
-  text-align: center;
-  cursor: pointer;
-  position: relative;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--md-sys-color-on-surface-variant);
-  transition: color var(--transition-fast) var(--ease-in-out);
-}
-.tab:hover {
-  color: var(--md-sys-color-on-surface);
-}
-.tab.active {
-  color: var(--md-sys-color-primary);
-}
-.tab-indicator {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  height: 3px;
-  background: var(--gradient-primary, var(--md-sys-color-primary));
-  border-radius: 3px 3px 0 0;
-  transition: all var(--transition-normal) var(--ease-out-expo);
-}
-
 /* =========================================
    Layout: Navigation & Window
    ========================================= */
@@ -602,210 +471,27 @@ ThemeSelector {
   align-items: center;
 }
 
-.app-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--gradient-primary, var(--md-sys-color-primary));
-  color: var(--md-sys-color-on-primary);
-  transition: all var(--transition-normal) var(--ease-out-expo);
-  box-shadow: var(--shadow-soft);
-}
-
-.app-icon:hover {
-  transform: scale(1.05);
-  box-shadow: var(--shadow-medium);
-}
-
-.app-icon .material-symbols-rounded {
-  font-size: 24px;
-}
-
-/* Window Controls - 增强交互效果 */
-.window-controls {
-  display: flex;
-  gap: 4px;
-}
-.window-button {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  background: none;
-  color: var(--md-sys-color-on-surface-variant);
-  transition: all var(--transition-fast) var(--ease-out-expo);
-}
-.window-button:hover {
-  background-color: var(--md-sys-color-surface-variant);
-  transform: scale(1.05);
-}
-.window-button.minimize:hover {
-  background-color: var(--md-sys-color-tertiary-container);
-  color: var(--md-sys-color-on-tertiary-container);
-}
-.window-button.maximize:hover {
-  background-color: var(--md-sys-color-secondary-container);
-  color: var(--md-sys-color-on-secondary-container);
-}
-.window-button.close:hover {
-  background-color: var(--md-sys-color-error-container);
-  color: var(--md-sys-color-on-error-container);
-}
-
-.divider {
-  height: 1px;
-  background-color: var(--md-sys-color-outline-variant);
-  margin: 8px 0;
-}
-
 /* =========================================
    Utilities (Layout, Spacing, Typography)
    ========================================= */
 /* Layout Helpers */
-.flex {
-  display: flex;
-}
-.flex-column {
-  flex-direction: column;
-}
-.flex-center {
-  align-items: center;
-  justify-content: center;
-}
-.flex-between {
-  justify-content: space-between;
-}
 .flex-1 {
   flex: 1;
 }
-.w-full {
-  width: 100%;
-}
-.h-full {
-  height: 100%;
-}
-.position-relative {
-  position: relative;
-}
-.position-absolute {
-  position: absolute;
-}
-.position-fixed {
-  position: fixed;
-}
-.overflow-hidden {
-  overflow: hidden;
-}
-
-/* Spacing Helpers */
-.gap-8 {
-  gap: 8px;
-}
-.gap-16 {
-  gap: 16px;
-}
-.p-8 {
-  padding: 8px;
-}
-.p-16 {
-  padding: 16px;
-}
-.m-8 {
-  margin: 8px;
-}
-.m-16 {
-  margin: 16px;
-}
-.mt-8 {
-  margin-top: 8px;
-}
-.mb-8 {
-  margin-bottom: 8px;
-}
-.ml-8 {
-  margin-left: 8px;
-}
-.mr-8 {
-  margin-right: 8px;
-}
-
-/* Typography & Color Helpers */
-.text-primary {
-  color: var(--md-sys-color-primary);
-}
-.text-on-primary {
-  color: var(--md-sys-color-on-primary);
-}
 .text-secondary {
   color: var(--md-sys-color-on-surface-variant);
-}
-.text-headline {
-  font-size: 24px;
-  font-weight: 400;
 }
 .text-title {
   font-size: 20px;
   font-weight: 500;
 }
-.text-body {
-  font-size: 14px;
-  font-weight: 400;
-}
 .text-caption {
   font-size: 12px;
   font-weight: 400;
 }
-.no-select {
-  user-select: none;
-}
-.cursor-pointer {
-  cursor: pointer;
-}
-
 /* Visual Helpers */
 .rounded {
   border-radius: var(--md-sys-shape-corner-medium);
-}
-.elevated {
-  box-shadow: var(--md-sys-elevation-level1);
-}
-.surface {
-  background-color: var(--md-sys-color-surface);
-}
-.surface-container {
-  background-color: var(--md-sys-color-surface-container);
-}
-.surface-variant {
-  background-color: var(--md-sys-color-surface-variant);
-}
-.outline {
-  border: 1px solid var(--md-sys-color-outline);
-}
-.outline-variant {
-  border: 1px solid var(--md-sys-color-outline-variant);
-}
-.transition {
-  transition: all 0.2s;
-}
-.opacity-0 {
-  opacity: 0;
-}
-.opacity-50 {
-  opacity: 0.5;
-}
-.opacity-100 {
-  opacity: 1;
-}
-.z-10 {
-  z-index: 10;
-}
-.z-100 {
-  z-index: 100;
-}
-.z-1000 {
-  z-index: 1000;
 }
 
 /* =========================================
@@ -820,15 +506,6 @@ ThemeSelector {
   opacity: 0;
 }
 
-.slide-up-enter-active,
-.slide-up-leave-active {
-  transition: transform var(--transition-normal) var(--ease-out-expo);
-}
-.slide-up-enter-from,
-.slide-up-leave-to {
-  transform: translateY(100%);
-}
-
 .slide-right-enter-active,
 .slide-right-leave-active {
   transition: transform var(--transition-normal) var(--ease-out-expo);
@@ -836,30 +513,6 @@ ThemeSelector {
 .slide-right-enter-from,
 .slide-right-leave-to {
   transform: translateX(100%);
-}
-
-/* 缩放动画 */
-.scale-enter-active,
-.scale-leave-active {
-  transition: all var(--transition-normal) var(--ease-out-back);
-}
-.scale-enter-from,
-.scale-leave-to {
-  opacity: 0;
-  transform: scale(0.9);
-}
-
-/* 弹出动画 */
-.pop-enter-active {
-  transition: all var(--transition-normal) var(--ease-out-back);
-}
-.pop-leave-active {
-  transition: all var(--transition-fast) var(--ease-in-out);
-}
-.pop-enter-from,
-.pop-leave-to {
-  opacity: 0;
-  transform: scale(0.95) translateY(-10px);
 }
 
 /* Scrollbar Styles - 增强美观 */
@@ -925,44 +578,3 @@ select.md3-select:focus {
   --dropdown-icon-color: var(--md-sys-color-primary);
 }
 
-/* 玻璃态工具类 */
-.glass {
-  background: rgba(var(--md-sys-color-surface-rgb, 255, 255, 255), var(--glass-opacity));
-  backdrop-filter: blur(var(--glass-blur));
-  border: var(--glass-border);
-  box-shadow: var(--glass-shadow);
-}
-
-/* 渐变背景工具类 */
-.gradient-bg {
-  background: var(--gradient-surface);
-}
-
-.gradient-primary-bg {
-  background: var(--gradient-primary);
-}
-
-/* 增强阴影工具类 */
-.shadow-soft {
-  box-shadow: var(--shadow-soft);
-}
-.shadow-medium {
-  box-shadow: var(--shadow-medium);
-}
-.shadow-strong {
-  box-shadow: var(--shadow-strong);
-}
-
-/* 主色调透明度工具类 */
-.primary-tint-5 {
-  background-color: var(--primary-alpha-5);
-}
-.primary-tint-10 {
-  background-color: var(--primary-alpha-10);
-}
-.primary-tint-20 {
-  background-color: var(--primary-alpha-20);
-}
-.primary-tint-30 {
-  background-color: var(--primary-alpha-30);
-}

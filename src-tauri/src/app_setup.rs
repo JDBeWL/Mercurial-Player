@@ -18,6 +18,52 @@ use mercurial_player::error::AppError;
 pub fn init(app: &tauri::App) {
     use tauri::Manager;
 
+    // 轮转前端日志:上一轮运行的 mercurial-player.log → -prev.log
+    system::logging::init_log_rotation();
+
+    // 一次性迁移:把旧版 Roaming 目录下的 store 文件搬到主程序同级 data/
+    // (目标已存在时跳过,避免用旧数据覆盖新数据)
+    {
+        use tauri::Manager;
+        let migrate = |name: &str| -> bool {
+            let Ok(app_data) = app.path().app_data_dir() else {
+                return false;
+            };
+            let src = app_data.join(name);
+            if !src.exists() {
+                return false;
+            }
+            let dst = match std::env::current_exe() {
+                Ok(p) => match p.parent() {
+                    Some(dir) => dir.join("data").join(name),
+                    None => return false,
+                },
+                Err(_) => return false,
+            };
+            if dst.exists() {
+                return false;
+            }
+            if let Some(parent) = dst.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    log::warn!("Failed to create data dir for {name}: {e}");
+                    return false;
+                }
+            }
+            match std::fs::copy(&src, &dst) {
+                Ok(_) => {
+                    log::info!("Migrated {name} from {} to {}", src.display(), dst.display());
+                    true
+                }
+                Err(e) => {
+                    log::warn!("Failed to migrate {name}: {e}");
+                    false
+                }
+            }
+        };
+        migrate("config.json");
+        migrate("library-cache.json");
+    }
+
     #[cfg(debug_assertions)]
     {
         let window = app.get_webview_window("main").unwrap();

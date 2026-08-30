@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GetWindowLongPtrW, HWND_TOPMOST, IsWindowVisible, SET_WINDOW_POS_FLAGS, SW_HIDE,
+    GWL_EXSTYLE, GetWindowLongPtrW, HWND_TOPMOST, SET_WINDOW_POS_FLAGS, SW_HIDE,
     SW_SHOWNOACTIVATE, SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_TRANSPARENT,
 };
 
@@ -272,13 +272,4 @@ impl DesktopLyricsManager {
         Ok(())
     }
 
-    pub fn is_visible(&self) -> bool {
-        let hwnd = get_hwnd();
-        if hwnd != 0 {
-            // SAFETY: hwnd 经校验有效，IsWindowVisible 仅查询窗口可见性，无副作用
-            unsafe { IsWindowVisible(HWND(hwnd as *mut _)).as_bool() }
-        } else {
-            false
-        }
-    }
 }

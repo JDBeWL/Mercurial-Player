@@ -13,7 +13,6 @@ use super::metadata::{
     get_track_metadata_internal, set_cover_cache_path,
 };
 use super::netease;
-use super::tantivy_index;
 use crate::AppState;
 use tauri::{State, command};
 
@@ -128,39 +127,6 @@ pub fn get_metadata_cache_stats_command() -> (usize, u64) {
 #[command]
 pub fn flush_metadata_cache_command() -> Result<(), AppError> {
     flush_metadata_cache()
-}
-
-/// 搜索音轨
-#[command]
-pub fn search_tracks_command(
-    query: String,
-    limit: Option<usize>,
-) -> Result<Vec<TrackMetadata>, AppError> {
-    tantivy_index::search_tracks(&query, limit.unwrap_or(50))
-}
-
-/// 获取索引文档数量
-#[command]
-pub fn get_index_doc_count_command() -> Result<usize, AppError> {
-    tantivy_index::get_index_doc_count()
-}
-
-/// 重建 Tantivy 索引
-#[command]
-pub fn rebuild_tantivy_index_command() -> Result<(), AppError> {
-    tantivy_index::rebuild_tantivy_index()
-}
-
-/// 清除 Tantivy 索引
-#[command]
-pub fn clear_tantivy_index_command() -> Result<(), AppError> {
-    tantivy_index::clear_tantivy_index()
-}
-
-/// 提交 Tantivy 索引
-#[command]
-pub fn commit_tantivy_index_command() -> Result<(), AppError> {
-    tantivy_index::commit_index()
 }
 
 /// 获取系统临时目录路径

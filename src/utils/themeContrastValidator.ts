@@ -184,10 +184,22 @@ export function validateThemeContrast(_isDark: boolean = false): ValidationResul
 export function setupThemeContrastValidation(): void {
   if (typeof window === 'undefined') return
 
+  // 防抖调度:拖动取色器时 applyTheme 会高频触发(每个 input 事件一次),
+  // 每次都全量验证(18 次 getComputedStyle + 9 组对比计算)会造成取色卡顿;
+  // 验证只是诊断用途,静默期后跑一次即可
+  const VALIDATE_DEBOUNCE_MS = 300
+  let validateTimer: ReturnType<typeof setTimeout> | null = null
+  const scheduleValidation = (): void => {
+    if (validateTimer) clearTimeout(validateTimer)
+    validateTimer = setTimeout(() => {
+      validateTimer = null
+      validateThemeContrast(document.documentElement.getAttribute('data-theme') === 'dark')
+    }, VALIDATE_DEBOUNCE_MS)
+  }
+
   // 监听主题变化
   const observer = new MutationObserver(() => {
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
-    validateThemeContrast(isDark)
+    scheduleValidation()
   })
 
   observer.observe(document.documentElement, {
@@ -195,11 +207,21 @@ export function setupThemeContrastValidation(): void {
     attributeFilter: ['data-theme', 'style'],
   })
 
-  // 初始验证
-  setTimeout(() => {
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
-    validateThemeContrast(isDark)
-  }, 100)
+  // 初始验证:主题颜色由 theme store 异步应用(config 加载完成后才有第一次 applyTheme),
+  // 轮询等待 --md-sys-color-* 变量就绪,避免在颜色未应用时产生一轮
+  // "无法获取颜色值" 的噪音告警;超时后照常验证,保留缺失诊断价值
+  const INIT_POLL_INTERVAL_MS = 100
+  const INIT_MAX_ATTEMPTS = 50 // 最长等待 5s
+  let attempts = 0
+  const initialValidate = (): void => {
+    if (attempts < INIT_MAX_ATTEMPTS && !getColorFromCSSVar('--md-sys-color-primary')) {
+      attempts += 1
+      setTimeout(initialValidate, INIT_POLL_INTERVAL_MS)
+      return
+    }
+    scheduleValidation()
+  }
+  setTimeout(initialValidate, INIT_POLL_INTERVAL_MS)
 }
 
 /**

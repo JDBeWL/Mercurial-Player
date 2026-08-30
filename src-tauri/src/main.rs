@@ -135,12 +135,7 @@ fn main() {
             media::commands::clear_metadata_cache_command,
             media::commands::get_metadata_cache_stats_command,
             media::commands::get_temp_dir_command,
-            // Tantivy 搜索命令
-            media::commands::search_tracks_command,
-            media::commands::get_index_doc_count_command,
-            media::commands::rebuild_tantivy_index_command,
-            media::commands::clear_tantivy_index_command,
-            media::commands::commit_tantivy_index_command,
+            media::commands::flush_metadata_cache_command,
             // 网易云音乐API命令
             media::commands::netease_search_songs,
             media::commands::netease_get_lyrics,
@@ -149,18 +144,12 @@ fn main() {
             audio::commands::pause_track,
             audio::commands::resume_track,
             audio::commands::set_volume,
-            audio::commands::get_playback_status,
             audio::commands::seek_track,
-            audio::commands::is_track_finished,
-            audio::commands::get_waveform_data,
-            audio::commands::get_spectrum_data,
             // 配置命令
-            config::commands::initialize_config_files,
             config::commands::load_config,
             config::commands::save_config,
             config::commands::export_config,
             config::commands::import_config,
-            config::commands::reset_config,
             // 音乐目录命令
             config::commands::add_music_directory,
             config::commands::remove_music_directory,
@@ -193,7 +182,6 @@ fn main() {
             equalizer::commands::get_eq_bands,
             equalizer::commands::get_eq_settings,
             equalizer::commands::set_eq_enabled,
-            equalizer::commands::set_eq_gains,
             equalizer::commands::set_eq_band_gain,
             equalizer::commands::set_eq_preamp,
             equalizer::commands::get_eq_presets,
@@ -205,9 +193,7 @@ fn main() {
             plugins::commands::list_plugins,
             plugins::commands::read_plugin_manifest,
             plugins::commands::read_plugin_main,
-            plugins::commands::install_plugin,
             plugins::commands::uninstall_plugin,
-            plugins::commands::get_plugins_directory,
             plugins::commands::open_plugins_directory,
             plugins::commands::save_screenshot,
             plugins::commands::open_screenshots_directory,
@@ -231,10 +217,12 @@ fn main() {
             taskbar::desktop_lyrics::set_desktop_lyrics_font_family,
             #[cfg(windows)]
             taskbar::desktop_lyrics::set_desktop_lyrics_color_preset,
-            #[cfg(windows)]
-            taskbar::desktop_lyrics::is_desktop_lyrics_visible,
+            // 前端日志落盘
+            system::logging::write_log,
             // 系统版本命令（保留 get_app_version 用于前端显示）
             system::commands::get_app_version,
+            // 便携化数据文件路径（config.json / library-cache.json 存放位置）
+            system::commands::resolve_data_file,
             // 应用更新命令（多线程分片下载）
             updater::updater_check,
             updater::updater_download,

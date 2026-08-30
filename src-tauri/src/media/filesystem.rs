@@ -3,7 +3,6 @@
 //! 提供目录读取、文件检查等功能。
 
 use super::metadata::{Playlist, flush_metadata_cache, get_track_metadata_internal};
-use super::tantivy_index;
 use crate::config::AppConfig;
 use crate::error::AppError;
 use crate::security::{has_allowed_extension, is_sensitive_path};
@@ -109,16 +108,6 @@ pub fn get_all_audio_files_from_dirs(
         log::warn!("批量保存元数据缓存失败: {e}");
     } else {
         log::info!("元数据缓存已批量保存到磁盘");
-    }
-
-    // 将所有音轨添加到 Tantivy 索引
-    let all_tracks: Vec<_> = all_playlists.iter().flat_map(|p| p.files.clone()).collect();
-    if !all_tracks.is_empty() {
-        if let Err(e) = tantivy_index::index_tracks_batch(&all_tracks) {
-            log::warn!("添加到 Tantivy 索引失败: {e}");
-        } else {
-            log::info!("已添加 {} 首歌曲到 Tantivy 索引", all_tracks.len());
-        }
     }
 
     Ok(all_playlists)

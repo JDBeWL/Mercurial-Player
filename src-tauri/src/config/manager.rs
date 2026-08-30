@@ -315,7 +315,7 @@ impl Default for ConfigManager {
 impl ConfigManager {
     #[must_use]
     pub fn new() -> Self {
-        let config_dir = Self::get_app_config_dir().unwrap_or_else(|_| "./config".to_string());
+        let config_dir = Self::get_app_config_dir().unwrap_or_else(|_| "./data".to_string());
         if let Err(e) = std::fs::create_dir_all(&config_dir) {
             log::error!("Failed to create config directory: {e}");
         }
@@ -344,18 +344,87 @@ impl ConfigManager {
             .parent()
             .ok_or("无法获取可执行文件目录")?
             .to_path_buf();
-        let config_path = exe_dir.join("config");
-        Ok(config_path.to_string_lossy().to_string())
+        let data_path = exe_dir.join("data");
+        Ok(data_path.to_string_lossy().to_string())
     }
 
-    fn get_default_config_path(&self) -> String {
-        format!("{}/default.json", self.config_dir)
+    /// 当前配置文件路径(data/config.json,唯一权威配置)
+    fn get_config_path(&self) -> String {
+        format!("{}/config.json", self.config_dir)
     }
 
-    fn get_user_config_path(&self) -> String {
-        format!("{}/user.json", self.config_dir)
+    /// 旧版配置目录(<exe>/config,含 default.json/user.json,已废弃)
+    fn get_legacy_config_dir() -> Option<String> {
+        let exe_path = std::env::current_exe().ok()?;
+        let dir = exe_path.parent()?.join("config");
+        Some(dir.to_string_lossy().to_string())
     }
 
+    /// 从文件读取配置,兼容两种历史格式:
+    /// - 裸 AppConfig JSON(当前格式)
+    /// - 旧版前端 plugin-store 包装格式 {"appConfig": {...}}
+    ///
+    /// 必须显式识别包装格式:serde 默认忽略未知字段,直接反序列化
+    /// 包装文件会得到全默认值,导致用户配置被静默清空。
+    fn read_config_file(file_path: &str) -> Option<AppConfig> {
+        let text = std::fs::read_to_string(file_path).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+        let target = value.get("appConfig").unwrap_or(&value);
+        serde_json::from_value::<AppConfig>(target.clone()).ok()
+    }
+
+    /// 判断文件是否为旧版 plugin-store 包装格式(顶层含 "appConfig" 键)
+    fn is_plugin_store_wrapped(file_path: &str) -> bool {
+        std::fs::read_to_string(file_path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .is_some_and(|value| value.get("appConfig").is_some())
+    }
+
+    /// 删除旧版 config/ 目录(default.json/user.json),目录非空时保留
+    fn remove_legacy_config_dir(dir: Option<String>) {
+        let Some(dir) = dir else { return };
+        let _ = std::fs::remove_file(format!("{dir}/default.json"));
+        let _ = std::fs::remove_file(format!("{dir}/user.json"));
+        if std::fs::remove_dir(&dir).is_ok() {
+            log::info!("已移除旧版配置目录: {dir}");
+        }
+    }
+
+    /// 旧版布局一次性迁移(幂等):
+    /// 1. data/config.json 有效(裸格式):直接复用;若是旧包装格式则重写为裸格式
+    /// 2. 无有效配置:回退旧 <exe>/config/user.json(后端旧权威文件,含 lastSession)
+    /// 3. 均无:清理残留旧目录,后续走 AppConfig::default()
+    ///
+    /// 只有新文件成功落盘后才删除旧目录,避免迁移中断丢失配置。
+    fn migrate_legacy_config(&self) {
+        let config_path = self.get_config_path();
+        let legacy_dir = Self::get_legacy_config_dir();
+
+        if let Some(config) = Self::read_config_file(&config_path) {
+            if Self::is_plugin_store_wrapped(&config_path) {
+                log::info!("检测到旧 plugin-store 包装格式,重写为裸格式: {config_path}");
+                let _ = Self::save_config_to_file(&config, &config_path);
+            }
+            Self::remove_legacy_config_dir(legacy_dir);
+            return;
+        }
+
+        if let Some(dir) = &legacy_dir {
+            let legacy_user = format!("{dir}/user.json");
+            if let Some(config) = Self::read_config_file(&legacy_user) {
+                log::info!("迁移旧配置文件: {legacy_user} -> {config_path}");
+                if Self::save_config_to_file(&config, &config_path).is_ok() {
+                    Self::remove_legacy_config_dir(legacy_dir);
+                }
+                return;
+            }
+        }
+
+        Self::remove_legacy_config_dir(legacy_dir);
+    }
+
+    /// 确保 data 目录存在、清理 .tmp 残留并执行旧版布局迁移
     pub fn initialize_config_files(&self) -> Result<(), AppError> {
         std::fs::create_dir_all(&self.config_dir)
             .map_err(|e| AppError::Config(format!("创建配置目录失败: {e}")))?;
@@ -363,18 +432,7 @@ impl ConfigManager {
         // 清理上次崩溃/断电可能残留的 .tmp 文件，避免需要手动清理
         self.cleanup_temp_files();
 
-        let default_config_path = self.get_default_config_path();
-        let user_config_path = self.get_user_config_path();
-
-        if !Path::new(&default_config_path).exists() {
-            log::info!("创建默认配置文件: {default_config_path}");
-            Self::save_config_to_file(&AppConfig::default(), &default_config_path)?;
-        }
-
-        if !Path::new(&user_config_path).exists() {
-            log::info!("创建用户配置文件: {user_config_path}");
-            Self::save_config_to_file(&AppConfig::default(), &user_config_path)?;
-        }
+        self.migrate_legacy_config();
 
         Ok(())
     }
@@ -404,6 +462,22 @@ impl ConfigManager {
         }
     }
 
+    /// 合并默认外链白名单:确保新增的域名在旧配置文件中也能生效
+    fn with_default_allowed_hosts(mut config: AppConfig) -> AppConfig {
+        let defaults = default_external_url_allowed_hosts();
+        for d in defaults {
+            if !config
+                .general
+                .external_url_allowed_hosts
+                .iter()
+                .any(|h| h.eq_ignore_ascii_case(&d))
+            {
+                config.general.external_url_allowed_hosts.push(d);
+            }
+        }
+        config
+    }
+
     pub fn load_config(&self) -> Result<AppConfig, AppError> {
         // 缓存命中直接返回，避免每个 command 都重复 读盘 + 解析 + read_dir 扫描
         if let Some(cached) = self.cached_config() {
@@ -412,35 +486,16 @@ impl ConfigManager {
 
         self.initialize_config_files()?;
 
-        let user_config_path = self.get_user_config_path();
-        if Path::new(&user_config_path).exists() {
-            if let Ok(mut config) = Self::load_config_from_file(&user_config_path) {
-                // 合并默认白名单:确保新增的域名在旧配置文件中也能生效
-                let defaults = default_external_url_allowed_hosts();
-                for d in defaults {
-                    if !config
-                        .general
-                        .external_url_allowed_hosts
-                        .iter()
-                        .any(|h| h.eq_ignore_ascii_case(&d))
-                    {
-                        config.general.external_url_allowed_hosts.push(d);
-                    }
-                }
-                log::info!("Loaded user configuration from: {user_config_path}");
-                self.store_cache(&config);
-                return Ok(config);
-            }
-        }
-
-        let default_config_path = self.get_default_config_path();
-        if let Ok(config) = Self::load_config_from_file(&default_config_path) {
+        let config_path = self.get_config_path();
+        if let Some(config) = Self::read_config_file(&config_path) {
+            log::info!("Loaded user configuration from: {config_path}");
+            let config = Self::with_default_allowed_hosts(config);
             self.store_cache(&config);
             return Ok(config);
         }
-        log::info!("Creating default configuration");
+
+        log::info!("No valid configuration file, using compiled-in defaults");
         let default_config = AppConfig::default();
-        let _ = self.save_default_config(&default_config);
         self.store_cache(&default_config);
         Ok(default_config)
     }
@@ -453,14 +508,10 @@ impl ConfigManager {
     }
 
     pub fn save_config(&self, config: &AppConfig) -> Result<(), AppError> {
-        Self::save_config_to_file(config, &self.get_user_config_path())?;
+        Self::save_config_to_file(config, &self.get_config_path())?;
         // 写穿：保存成功后同步更新进程内缓存
         self.store_cache(config);
         Ok(())
-    }
-
-    pub fn save_default_config(&self, config: &AppConfig) -> Result<(), AppError> {
-        Self::save_config_to_file(config, &self.get_default_config_path())
     }
 
     fn save_config_to_file(config: &AppConfig, file_path: &str) -> Result<(), AppError> {
@@ -493,33 +544,20 @@ impl ConfigManager {
     }
 
     pub fn import_config(&self, import_path: &str) -> Result<AppConfig, AppError> {
-        let mut config = Self::load_config_from_file(import_path)?;
-
+        let config = Self::load_config_from_file(import_path)?;
         // 合并默认外链白名单，防止导入的配置移除安全域名限制
-        let defaults = default_external_url_allowed_hosts();
-        for d in defaults {
-            if !config
-                .general
-                .external_url_allowed_hosts
-                .iter()
-                .any(|h| h.eq_ignore_ascii_case(&d))
-            {
-                config.general.external_url_allowed_hosts.push(d);
-            }
-        }
-
-        Ok(config)
+        Ok(Self::with_default_allowed_hosts(config))
     }
 
     pub fn reset_config(&self) -> Result<AppConfig, AppError> {
         let default_config = AppConfig::default();
-        let user_config_path = self.get_user_config_path();
-        if Path::new(&user_config_path).exists() {
-            if let Err(e) = std::fs::remove_file(&user_config_path) {
-                log::error!("Failed to remove user config file: {e}");
+        let config_path = self.get_config_path();
+        if Path::new(&config_path).exists() {
+            if let Err(e) = std::fs::remove_file(&config_path) {
+                log::error!("Failed to remove config file: {e}");
             }
         }
-        // user.json 已删除，缓存作废，下次 load_config 重新初始化
+        // config.json 已删除，缓存作废，下次 load_config 重新初始化
         if let Ok(mut guard) = self.cache.write() {
             *guard = None;
         }

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { load, type Store } from '@tauri-apps/plugin-store'
+import { resolveDataFile } from '../services/appService'
 import { useConfigStore } from './config'
 import { usePlayerStore } from './player'
 import logger from '../utils/logger'
@@ -10,7 +11,9 @@ import type { Track, Playlist, LibraryStats } from '@/types'
 let _libraryStoreInstance: Store | null = null
 async function getLibraryStore(): Promise<Store> {
   if (!_libraryStoreInstance) {
-    _libraryStoreInstance = await load('library-cache.json', {
+    // 传绝对路径:plugin-store 遇绝对路径会原样使用,
+    // 借此把 library-cache.json 放到主程序同级 data/ 而非系统 Roaming 目录
+    _libraryStoreInstance = await load(await resolveDataFile('library-cache.json'), {
       defaults: {},
       autoSave: false,
     })

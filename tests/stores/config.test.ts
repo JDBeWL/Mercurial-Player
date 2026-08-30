@@ -1,16 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, beforeEach, expect, vi, afterEach } from 'vitest'
 
-// Mock plugin-store so config store does not try to hit the filesystem.
-vi.mock('@tauri-apps/plugin-store', () => {
-  const mockStore = {
-    get: vi.fn(async () => null),
-    set: vi.fn(async () => undefined),
-    save: vi.fn(async () => undefined),
-  }
-  return { load: vi.fn(async () => mockStore) }
-})
-
 // Mock theme store to avoid pulling @material/material-color-utilities into the test.
 const themeSetPreferenceMock = vi.fn()
 vi.mock('@/stores/theme', () => ({
@@ -507,7 +497,7 @@ describe('useConfigStore', () => {
       expect(invokeMock).not.toHaveBeenCalledWith('save_config', expect.anything())
     })
 
-    it('persists via plugin-store and invokes save_config when there are changes', async () => {
+    it('invokes save_config when there are changes', async () => {
       const store = useConfigStore()
       store._lastSavedConfig = null // force real changes
       store.audio.volume = 0.9

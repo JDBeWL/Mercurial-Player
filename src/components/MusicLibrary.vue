@@ -758,12 +758,6 @@ const addFileNext = (file: SearchResult): void => {
   margin-left: 8px;
 }
 
-.directory-tree {
-  background-color: var(--md-sys-color-surface);
-  border-radius: var(--md-sys-shape-corner-medium);
-  padding: 8px;
-}
-
 /* 空状态 */
 .library-empty {
   height: 100%;

@@ -12,10 +12,9 @@ use super::decoder::{LockFreeSymphoniaSource, SymphoniaDecoder};
 use super::dsp::{precompute_hann_window, soft_clip_fast};
 use crate::error::AppError;
 
-use super::{FADE_IN_MS, FADE_IN_ON_SEEK_MS, LockOrErr};
+use super::{FADE_IN_MS, FADE_IN_ON_SEEK_MS};
 
 #[cfg(windows)]
-use super::wasapi::PlaybackState;
 use crate::AppState;
 use crate::equalizer::{EQ_BAND_COUNT, EqSettings};
 use rodio::Source;
@@ -38,25 +37,6 @@ use tauri::{AppHandle, Emitter, State};
 /// 软削波查找表大小（覆盖0.0到2.0范围，精度0.001）
 /// 批量处理块大小（对齐到SIMD友好的边界）
 const BATCH_SIZE: usize = 64;
-
-#[derive(Debug, serde::Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct PlaybackStatus {
-    pub is_playing: bool,
-    pub position_secs: f32,
-    pub volume: f32,
-}
-
-impl PlaybackStatus {
-    #[must_use]
-    pub const fn new(is_playing: bool, position_secs: f32, volume: f32) -> Self {
-        Self {
-            is_playing,
-            position_secs,
-            volume,
-        }
-    }
-}
 
 /// 频谱更新事件 - 简化结构减少序列化开销
 #[derive(Debug, serde::Serialize, Clone)]
@@ -211,8 +191,6 @@ impl EqProcessor {
 
 pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     input: I,
-    #[allow(dead_code)]
-    waveform_data: Arc<Mutex<Vec<f32>>>,
     spectrum_data: Arc<Mutex<Vec<f32>>>,
     buffer: Vec<f32>,
     prev_spectrum: Vec<f32>,
@@ -257,7 +235,6 @@ const fn calculate_fft_size(sample_rate: u32) -> usize {
 impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
     pub fn new(
         input: I,
-        waveform_data: Arc<Mutex<Vec<f32>>>,
         spectrum_data: Arc<Mutex<Vec<f32>>>,
         app_handle: Option<AppHandle>,
         target_fps: Arc<AtomicU64>,
@@ -266,7 +243,6 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         let fft_size = calculate_fft_size(sr);
         Self {
             input,
-            waveform_data,
             spectrum_data,
             buffer: Vec::with_capacity(fft_size),
             prev_spectrum: vec![0.0; 128],
@@ -402,8 +378,6 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         // 限制FFT计算和发送频率（与目标帧率一致；画面同步由前端 rAF 天然保证）
         let target_fps = self.target_fps.load(Ordering::Relaxed).max(1);
         let fft_interval_ms = 1000 / target_fps;
-
-        // 限制FFT计算和发送频率
         if now - last_fft >= fft_interval_ms {
             self.last_fft_time.store(now, Ordering::Relaxed);
             self.compute_spectrum();
@@ -515,8 +489,7 @@ pub fn play_track_shared(
     }
     *lock_or_log!(player.track.current_path.lock()) = Some(path.to_string());
     *lock_or_log!(player.track.current_source.lock()) = None;
-    let (waveform, spectrum, eq_settings, target_fps) = (
-        Arc::clone(&player.visualization.waveform_data),
+    let (spectrum, eq_settings, target_fps) = (
         Arc::clone(&player.visualization.spectrum_data),
         state.equalizer.get_settings_handle(),
         Arc::clone(&player.visualization.target_fps),
@@ -535,7 +508,6 @@ pub fn play_track_shared(
             Box::new(
                 VisualizationSource::new(
                     LockFreeSymphoniaSource::new(dec),
-                    waveform,
                     spectrum,
                     Some(app.clone()),
                     target_fps,
@@ -551,7 +523,6 @@ pub fn play_track_shared(
             Box::new(
                 VisualizationSource::new(
                     rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?,
-                    waveform,
                     spectrum,
                     Some(app.clone()),
                     target_fps,
@@ -764,7 +735,6 @@ pub fn seek_track_shared(
     let source: Box<dyn Source<Item = f32> + Send> = Box::new(
         VisualizationSource::new(
             LockFreeSymphoniaSource::new(decoder),
-            Arc::clone(&player.visualization.waveform_data),
             Arc::clone(&player.visualization.spectrum_data),
             Some(app.clone()),
             Arc::clone(&player.visualization.target_fps),
@@ -798,92 +768,4 @@ pub fn seek_track_shared(
     sink.append(resampled);
     sink.play();
     Ok(())
-}
-
-/// 获取播放状态
-pub fn get_status(state: &State<AppState>) -> Result<PlaybackStatus, AppError> {
-    let volume = state
-        .player
-        .output
-        .target_volume
-        .try_lock()
-        .lock_or_err("target volume")
-        .map(|g| *g)?;
-
-    let exclusive_mode = state
-        .player
-        .output
-        .exclusive_mode
-        .try_lock()
-        .lock_or_err("exclusive mode")
-        .map(|g| *g)?;
-
-    let is_playing = if exclusive_mode {
-        #[cfg(windows)]
-        {
-            let guard = state
-                .player
-                .output
-                .wasapi_player
-                .try_lock()
-                .lock_or_err("WASAPI player")?;
-            guard
-                .as_ref()
-                // Stopping/Pausing 期间音频仍在淡出(可听见),视为正在播放
-                .map(|wasapi| {
-                    matches!(
-                        wasapi.get_state(),
-                        PlaybackState::Playing | PlaybackState::Stopping | PlaybackState::Pausing
-                    )
-                })
-                .ok_or_else(|| "WASAPI player not initialized".to_string())?
-        }
-        #[cfg(not(windows))]
-        {
-            return Err(AppError::Audio(
-                "Exclusive mode is only supported on Windows".to_string(),
-            ));
-        }
-    } else {
-        let player = state.player.output.sink.try_lock().lock_or_err("player")?;
-        !player.is_paused() && !player.empty()
-    };
-
-    Ok(PlaybackStatus::new(is_playing, 0.0, volume))
-}
-
-/// 检查音轨是否播放完毕
-pub fn check_track_finished(state: &State<AppState>) -> Result<bool, AppError> {
-    let exclusive_mode = state
-        .player
-        .output
-        .exclusive_mode
-        .try_lock()
-        .lock_or_err("exclusive mode")
-        .map(|g| *g)?;
-
-    if exclusive_mode {
-        #[cfg(windows)]
-        {
-            let guard = state
-                .player
-                .output
-                .wasapi_player
-                .try_lock()
-                .lock_or_err("WASAPI player")?;
-            let wasapi = guard
-                .as_ref()
-                .ok_or_else(|| "WASAPI player not initialized".to_string())?;
-            Ok(wasapi.get_state() == PlaybackState::Stopped)
-        }
-        #[cfg(not(windows))]
-        {
-            Err(AppError::Audio(
-                "Exclusive mode is only supported on Windows".to_string(),
-            ))
-        }
-    } else {
-        let player = state.player.output.sink.try_lock().lock_or_err("player")?;
-        Ok(player.empty() && !player.is_paused())
-    }
 }

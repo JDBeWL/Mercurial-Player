@@ -57,12 +57,6 @@ fn is_config_file_path_safe(path: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 初始化配置文件
-#[command]
-pub fn initialize_config_files(state: State<AppState>) -> Result<(), AppError> {
-    state.config_manager.initialize_config_files()
-}
-
 /// 加载配置
 #[command]
 pub fn load_config(state: State<AppState>) -> Result<AppConfig, AppError> {
@@ -70,8 +64,14 @@ pub fn load_config(state: State<AppState>) -> Result<AppConfig, AppError> {
 }
 
 /// 保存配置
+///
+/// `last_session` 由后端 save_last_session / clear_last_session 独立管理,
+/// 前端负载不含该字段;若直接落盘会把已记录的播放会话抹掉,这里沿用现有值。
 #[command]
-pub fn save_config(state: State<AppState>, config: AppConfig) -> Result<(), AppError> {
+pub fn save_config(state: State<AppState>, mut config: AppConfig) -> Result<(), AppError> {
+    if config.last_session.is_none() {
+        config.last_session = state.config_manager.load_config()?.last_session;
+    }
     state.config_manager.save_config(&config)
 }
 
@@ -91,12 +91,6 @@ pub fn export_config(
 pub fn import_config(state: State<AppState>, file_path: String) -> Result<AppConfig, AppError> {
     is_config_file_path_safe(&file_path)?;
     state.config_manager.import_config(&file_path)
-}
-
-/// 重置配置为默认值
-#[command]
-pub fn reset_config(state: State<AppState>) -> Result<AppConfig, AppError> {
-    state.config_manager.reset_config()
 }
 
 /// 添加音乐目录

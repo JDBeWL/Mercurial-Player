@@ -12,6 +12,7 @@
       <EqualizerSettings v-if="activeTab === 'equalizer'" />
       <PlayStatsSettings v-if="activeTab === 'playStats'" />
       <PluginSettings v-if="activeTab === 'plugins'" />
+      <DeveloperSettings v-if="activeTab === 'developer'" />
       <AboutSettings v-if="activeTab === 'about'" />
     </div>
   </div>
@@ -21,6 +22,7 @@
 import { ref, computed, defineAsyncComponent } from 'vue'
 import { useConfigStore } from '../stores/config'
 import { pluginManager } from '../plugins'
+import { useDeveloperMode } from '../composables/useDeveloperMode'
 import { SettingsNav } from './settings'
 import type { SettingsTab } from '@/types'
 
@@ -40,8 +42,10 @@ const EqualizerSettings = defineAsyncComponent(() => import('./settings/Equalize
 const PlayStatsSettings = defineAsyncComponent(() => import('./settings/PlayStatsSettings.vue'))
 const PluginSettings = defineAsyncComponent(() => import('./settings/PluginSettings.vue'))
 const AboutSettings = defineAsyncComponent(() => import('./settings/AboutSettings.vue'))
+const DeveloperSettings = defineAsyncComponent(() => import('./settings/DeveloperSettings.vue'))
 
 const configStore = useConfigStore()
+const { developerMode } = useDeveloperMode()
 const activeTab = ref<string>('folders')
 
 const baseTabs: SettingsTab[] = [
@@ -65,6 +69,11 @@ const visibleTabs = computed<SettingsTab[]>(() => {
   const playCountPlugin = pluginManager.plugins.get('builtin-play-count')
   if (playCountPlugin?.state === 'active') {
     tabs.push({ id: 'playStats', icon: 'bar_chart', label: 'config.playStats' })
+  }
+
+  // 开发者页面(仅开发者模式开启时显示)
+  if (developerMode.value) {
+    tabs.push({ id: 'developer', icon: 'science', label: 'config.developerOptions' })
   }
 
   // 关于页面始终显示在最后

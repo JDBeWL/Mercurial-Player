@@ -360,10 +360,6 @@ const removeTrackByPath = (path: string): void => {
   /* transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); */
 }
 
-/* .playlist-view.slide-out {
-  transform: translateX(100%);
-} */
-
 .playlist-header {
   display: flex;
   align-items: center;

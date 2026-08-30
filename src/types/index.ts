@@ -36,7 +36,7 @@ export interface LyricLine {
   words?: KaraokeWord[]
 }
 
-export interface KaraokeData {
+interface KaraokeData {
   fullText: string
   timings: Array<{ time: number; position: number }>
 }
@@ -60,7 +60,7 @@ export interface Playlist {
 }
 
 export type RepeatMode = 'none' | 'track' | 'list'
-export type SortOrder = 'asc' | 'desc'
+type SortOrder = 'asc' | 'desc'
 
 /* 沉浸式封面背景取色风格 */
 export type ImmersiveColorScheme = 'album' | 'fusion'
@@ -160,7 +160,7 @@ export interface VisualizerConfig {
  * 上次播放会话信息 (用于启动恢复)
  * 文件大小+修改时间用于启动时检测文件是否被替换
  */
-export interface LastSession {
+interface LastSession {
   trackPath: string
   trackTitle: string
   trackArtist: string
@@ -296,6 +296,8 @@ export interface LogData {
   timestamp: string
   level: string
   levelValue: LogLevel
+  /** 本地日期 YYYY-MM-DD,仅日志落盘时用于跨天区分 */
+  date?: string
   message: string
   args?: unknown[]
   stack?: string

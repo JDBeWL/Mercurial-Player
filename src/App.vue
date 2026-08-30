@@ -1121,12 +1121,14 @@ useAppLifecycle({
   margin-right: -16px;
   margin-bottom: -16px;
   padding: 12px 16px 16px;
-  background: rgba(255, 255, 255, 0);
+  /* 底色与模糊强度都跟随主题的玻璃效果开关:
+     开启 = 透明底 + 磨砂;关闭 = 不透明底 + 无模糊 */
+  background: var(--immersive-bar-bg, rgba(255, 255, 255, 0));
   /* -webkit- 前缀必须在前。构建时 CSS 压缩器会把前缀版与标准版
      视为同一属性去重、仅保留最后一条；若标准版在前，产物会只剩 -webkit- 版，
      而 WebView2(Chromium) 只认不带前缀的 backdrop-filter */
-  -webkit-backdrop-filter: blur(10px) saturate(0.5);
-  backdrop-filter: blur(10px) saturate(0.5);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 10px)) saturate(0.5);
+  backdrop-filter: blur(var(--glass-blur, 10px)) saturate(0.5);
   border-top: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.1);
 }

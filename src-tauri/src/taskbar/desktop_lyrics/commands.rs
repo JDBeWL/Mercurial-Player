@@ -96,9 +96,3 @@ pub fn set_desktop_lyrics_color_preset(preset: String) -> Result<(), AppError> {
     guard.set_color_preset(&preset)
 }
 
-#[command]
-pub fn is_desktop_lyrics_visible() -> Result<bool, AppError> {
-    let manager = get_desktop_lyrics_manager();
-    let guard = manager.lock().map_err(|e| format!("Lock error: {e}"))?;
-    Ok(guard.is_visible())
-}

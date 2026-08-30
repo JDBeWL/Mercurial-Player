@@ -8,7 +8,7 @@ export interface EqBandInfo {
 }
 
 // EQ 设置(由后端 get_eq_settings 返回)
-export interface EqSettings {
+interface EqSettings {
   enabled: boolean
   gains: number[]
   preamp: number

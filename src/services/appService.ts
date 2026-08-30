@@ -42,3 +42,23 @@ export function setTargetFps(fps: number): Promise<void> {
 export function openExternalUrl(url: string): Promise<void> {
   return invoke<void>('open_external_url', { url })
 }
+
+/** 解析便携化数据文件完整路径（主程序同级 data/ 下,如 config.json、library-cache.json） */
+export function resolveDataFile(file: string): Promise<string> {
+  return invoke<string>('resolve_data_file', { file })
+}
+
+/** 获取系统基础信息（OS/架构/系统音乐目录等，开发者面板用） */
+export function getSystemInfo(): Promise<Record<string, string>> {
+  return invoke<Record<string, string>>('get_system_info')
+}
+
+/** 清除上次播放会话记录（开发者排障用） */
+export function clearLastSession(): Promise<void> {
+  return invoke<void>('clear_last_session')
+}
+
+/** 立即将内存中的元数据缓存写入磁盘 */
+export function flushMetadataCache(): Promise<void> {
+  return invoke<void>('flush_metadata_cache_command')
+}

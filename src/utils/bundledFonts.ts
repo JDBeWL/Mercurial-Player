@@ -150,7 +150,7 @@ export const bundledFontOptions: { value: string; label: string }[] = [
 
 // ===== 外部字体（软件同级 fonts/ 目录，运行时动态加载） =====
 
-export interface FontOption {
+interface FontOption {
   value: string
   label: string
 }

@@ -41,7 +41,7 @@ export async function setupPositionListener(store: PlayerStore): Promise<Unliste
   }
 }
 
-export interface TaskbarListeners {
+interface TaskbarListeners {
   previous: UnlistenFn | null
   playPause: UnlistenFn | null
   next: UnlistenFn | null
@@ -122,7 +122,7 @@ export async function unregisterGlobalShortcuts(): Promise<void> {
   }
 }
 
-export interface DeviceListeners {
+interface DeviceListeners {
   removed: UnlistenFn | null
   switchRequired: UnlistenFn | null
   noDevice: UnlistenFn | null

@@ -216,4 +216,3 @@ export class NeteaseAPI {
 }
 
 export const neteaseApi = new NeteaseAPI()
-export default neteaseApi

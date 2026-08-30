@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
-import { load, type Store } from '@tauri-apps/plugin-store'
 import { useThemeStore } from './theme'
 import { useMusicLibraryStore } from './musicLibrary'
 import logger from '../utils/logger'
@@ -24,18 +23,6 @@ import type {
   VisualizerConfig,
   AppConfig,
 } from '@/types'
-
-// plugin-store 实例（懒加载单例）
-let _storeInstance: Store | null = null
-async function getStore(): Promise<Store> {
-  if (!_storeInstance) {
-    _storeInstance = await load('config.json', {
-      defaults: {},
-      autoSave: false,
-    })
-  }
-  return _storeInstance
-}
 
 interface ConfigState {
   musicDirectories: string[]
@@ -180,49 +167,20 @@ export const useConfigStore = defineStore('config', {
     async loadConfig(resetUI = true): Promise<void> {
       this._isInitializing = true
 
-      // 优先从 plugin-store 加载配置
+      // 配置统一由后端 ConfigManager 读写 data/config.json(裸 AppConfig 格式),
+      // 旧版布局(config/user.json、plugin-store 包装格式)由后端做一次性迁移
+      const configResult = await handlePromise(invoke<Partial<AppConfig>>('load_config'), {
+        type: ErrorType.CONFIG_LOAD_ERROR,
+        severity: ErrorSeverity.MEDIUM,
+        context: { action: 'loadConfig' },
+        showToUser: false,
+        throw: false,
+      })
       let configData: Partial<AppConfig> | null = null
-      try {
-        const store = await getStore()
-        const storeConfig = await store.get<Partial<AppConfig>>('appConfig')
-        if (storeConfig && typeof storeConfig === 'object' && Object.keys(storeConfig).length > 0) {
-          configData = storeConfig
-          logger.info('Configuration loaded from plugin-store')
-        }
-      } catch (err) {
-        logger.warn('Failed to load from plugin-store, falling back to backend:', err)
-      }
-
-      // 回退到后端 ConfigManager（首次迁移或 store 为空时）
-      if (!configData) {
-        const configResult = await handlePromise(invoke<Partial<AppConfig>>('load_config'), {
-          type: ErrorType.CONFIG_LOAD_ERROR,
-          severity: ErrorSeverity.MEDIUM,
-          context: { action: 'loadConfig' },
-          showToUser: false,
-          throw: false,
-        })
-        if (configResult.success && configResult.data) {
-          configData = configResult.data
-          logger.info('Configuration loaded from backend ConfigManager')
-          // lastSession 仅由后端管理 (避免 plugin-store 副本过期),
-          // 迁移到 plugin-store 时剥离该字段
-          if ('lastSession' in configData) {
-            delete configData.lastSession
-          }
-          // 首次迁移：写入 plugin-store 以便后续直接使用
-          try {
-            const store = await getStore()
-            await store.set('appConfig', configData)
-            await store.save()
-            logger.info('Migrated config to plugin-store')
-          } catch (err) {
-            logger.warn('Failed to migrate config to plugin-store:', err)
-          }
-        }
-      } else {
-        // 从 plugin-store 加载时也剥离 lastSession (历史遗留数据),
-        // 保证该字段只由后端 save_last_session 命令管理
+      if (configResult.success && configResult.data) {
+        configData = configResult.data
+        logger.info('Configuration loaded from backend ConfigManager')
+        // lastSession 仅由后端管理,加载后剥离,避免前端副本过期
         if ('lastSession' in configData) {
           delete configData.lastSession
         }
@@ -298,26 +256,17 @@ export const useConfigStore = defineStore('config', {
         configToSave.lyrics = ensureLyricsConfigDefaults(configToSave.lyrics)
       }
 
-      // 主存储：plugin-store
-      this._savePromise = (async () => {
-        try {
-          const store = await getStore()
-          await store.set('appConfig', configToSave)
-          await store.save()
-          logger.debug('Configuration saved to plugin-store')
-        } catch (err) {
-          logger.warn('Failed to save to plugin-store:', err)
-        }
-
-        // 同步到后端 ConfigManager（确保 Rust 侧的 exclusive_mode 等配置保持一致）
-        await handlePromise(invoke('save_config', { config: configToSave }), {
+      // 主存储：后端 ConfigManager 写 data/config.json(原子写:先 .tmp 再 rename)
+      this._savePromise = handlePromise(
+        invoke('save_config', { config: configToSave }),
+        {
           type: ErrorType.CONFIG_SAVE_ERROR,
           severity: ErrorSeverity.LOW,
-          context: { action: 'saveConfigBackend' },
+          context: { action: 'saveConfig' },
           showToUser: false,
           throw: false,
-        })
-      })()
+        },
+      )
 
       await this._savePromise
       this._savePromise = null

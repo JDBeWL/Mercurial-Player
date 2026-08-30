@@ -2,7 +2,7 @@ import { getScreenRefreshRate, setTargetFps } from '@/services/appService'
 import logger from '@/utils/logger'
 import type { VisualizerConfig } from '@/types'
 
-export interface AppliedFpsResult {
+interface AppliedFpsResult {
   /** 实际应用到后端的帧率 */
   fps: number
   /** 实时查询到的屏幕刷新率；未启用限制或查询失败时为 null */

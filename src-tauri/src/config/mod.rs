@@ -6,7 +6,4 @@ pub mod commands;
 pub mod manager;
 
 // 重新导出常用类型
-pub use manager::{
-    AppConfig, AudioConfig, ConfigManager, DirectoryScanConfig, GeneralConfig, PlaylistConfig,
-    TitleExtractionConfig,
-};
+pub use manager::{AppConfig, ConfigManager};

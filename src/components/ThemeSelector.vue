@@ -59,6 +59,7 @@
               type="color"
               :value="themeStore.primaryColor"
               @input="selectCustomColor"
+              @change="commitCustomColor"
             />
             <input
               type="text"
@@ -156,6 +157,10 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  if (previewRafId !== null) {
+    cancelAnimationFrame(previewRafId)
+    previewRafId = null
+  }
 })
 
 // 应用主题色并按需自动保存配置到 user.json
@@ -174,8 +179,26 @@ const applyColor = async (color: string): Promise<void> => {
 
 const selectColor = (color: string): Promise<void> => applyColor(color)
 
-const selectCustomColor = (event: Event): Promise<void> => {
-  return applyColor((event.target as HTMLInputElement).value)
+// 拖动实时预览:用 rAF 把连续 input 事件合并为每帧一次,且只做不落盘的主题应用
+// 配置持久化在拖动结束；(@change)时由 commitCustomColor 统一完成
+let previewRafId: number | null = null
+let pendingPreviewColor = ''
+
+const selectCustomColor = (event: Event): void => {
+  pendingPreviewColor = (event.target as HTMLInputElement).value
+  if (previewRafId !== null) return
+  previewRafId = requestAnimationFrame(() => {
+    previewRafId = null
+    themeStore.setPrimaryColorLive(pendingPreviewColor)
+  })
+}
+
+const commitCustomColor = (event: Event): void => {
+  if (previewRafId !== null) {
+    cancelAnimationFrame(previewRafId)
+    previewRafId = null
+  }
+  void applyColor((event.target as HTMLInputElement).value)
 }
 
 const onHexInput = (event: Event): Promise<void> | undefined => {

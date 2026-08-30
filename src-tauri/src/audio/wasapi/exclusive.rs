@@ -275,7 +275,6 @@ impl WasapiExclusivePlayback {
 
     /// 带淡出的停止(用于切歌/退出)
     /// 主线程发送命令后立即返回,音频线程内部完成淡出再 stop_stream
-    #[allow(dead_code)]
     pub fn stop_with_fade_out(&self, duration_ms: u32) -> Result<(), AppError> {
         self.command_tx
             .send(AudioCommand::StopWithFadeOut { duration_ms })

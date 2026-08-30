@@ -6,7 +6,7 @@
 import type { PluginAPI, PluginInstance, PluginMainFunction } from './pluginTypes'
 
 // 安全的 console 类型
-export interface SafeConsole {
+interface SafeConsole {
   log: (...args: unknown[]) => void
   info: (...args: unknown[]) => void
   warn: (...args: unknown[]) => void
@@ -76,7 +76,7 @@ export function createSafeConsole(log: PluginAPI['log']): SafeConsole {
 }
 
 // 共享的安全定时器组
-export interface SafeTimers {
+interface SafeTimers {
   setTimeout: (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => number
   clearTimeout: (id: number) => void
   setInterval: (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => number

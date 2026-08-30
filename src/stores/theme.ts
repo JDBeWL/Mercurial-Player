@@ -10,6 +10,19 @@ import {
 import logger from '../utils/logger'
 import { LRUCache } from '@/utils/lruCache'
 import { validateThemeContrast, enforceThemeContrast } from '../utils/themeContrastValidator'
+
+// 对比度验证的防抖调度:验证是诊断用途,拖动取色器时 applyTheme 高频触发,
+// 每次都全量验证(18 次 getComputedStyle + 9 组对比计算)会造成取色卡顿,
+// 静默 VALIDATE_DEBOUNCE_MS 后跑一次即可
+const VALIDATE_DEBOUNCE_MS = 300
+let contrastValidateTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleContrastValidation(isDark: boolean): void {
+  if (contrastValidateTimer) clearTimeout(contrastValidateTimer)
+  contrastValidateTimer = setTimeout(() => {
+    contrastValidateTimer = null
+    validateThemeContrast(isDark)
+  }, VALIDATE_DEBOUNCE_MS)
+}
 import { useConfigStore } from './config'
 import type { TonalVariants, HarmonyColors, ThemePreference } from '@/types'
 
@@ -243,11 +256,23 @@ export const useThemeStore = defineStore('theme', {
      * 注意:本方法与预设主题共用 `themePreference` 字段 —— 写入 hex 颜色字符串
      * 即表示"自定义色"模式,写入预设 id 表示"预设"模式,读取方按是否以 '#' 开头区分。
      */
+    /**
+     * 设置自定义主色并持久化(写入 hex 即表示"自定义色"模式,与预设 id 共用
+     * themePreference 字段,读取方按是否以 '#' 开头区分)
+     */
     async setPrimaryColor(color: string): Promise<void> {
+      this.setPrimaryColorLive(color)
+      await this.saveThemeToConfig()
+    },
+
+    /**
+     * 仅在本次会话生效的主色更新(取色器拖动预览用):
+     * 不写配置文件,持久化由调用方在拖动结束后调用 saveThemeToConfig 完成
+     */
+    setPrimaryColorLive(color: string): void {
       this.primaryColor = color
       this.themePreference = color
       this.applyTheme()
-      await this.saveThemeToConfig()
     },
 
     setThemePreference(preference: ThemePreference): void {
@@ -378,10 +403,8 @@ export const useThemeStore = defineStore('theme', {
       // 强制 WCAG 2.1 AA 合规：验证关键颜色对，主动修复未达标的对比度
       enforceThemeContrast()
 
-      // 异步记录对比度验证结果（用于调试）
-      setTimeout(() => {
-        validateThemeContrast(this.isDarkMode)
-      }, 50)
+      // 异步记录对比度验证结果(用于调试,防抖避免拖动取色时卡顿)
+      scheduleContrastValidation(this.isDarkMode)
     },
 
     async saveThemeToConfig(): Promise<void> {

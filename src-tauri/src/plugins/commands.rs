@@ -3,19 +3,10 @@ use crate::error::AppError;
 
 use super::manager::{self, PluginManifest};
 use crate::security::{has_allowed_extension, is_simple_filename};
-use serde::{Deserialize, Serialize};
 use tauri::command;
 
 /// 允许的截图文件扩展名
 const SCREENSHOT_EXTENSIONS: [&str; 4] = ["png", "jpg", "jpeg", "webp"];
-
-/// 安装结果
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InstallResult {
-    pub success: bool,
-    pub path: Option<String>,
-    pub error: Option<String>,
-}
 
 /// 列出所有插件
 #[command]
@@ -36,34 +27,10 @@ pub fn read_plugin_main(path: &str, main: &str) -> Result<String, AppError> {
     manager::read_main_file(path, main_file)
 }
 
-/// 安装插件
-#[command]
-#[must_use]
-pub fn install_plugin(source: &str) -> InstallResult {
-    match manager::install_plugin_from_path(source) {
-        Ok(plugin_id) => InstallResult {
-            success: true,
-            path: Some(plugin_id),
-            error: None,
-        },
-        Err(e) => InstallResult {
-            success: false,
-            path: None,
-            error: Some(e.into_string()),
-        },
-    }
-}
-
 /// 卸载插件
 #[command]
 pub fn uninstall_plugin(plugin_id: &str) -> Result<(), AppError> {
     manager::uninstall_plugin(plugin_id)
-}
-
-/// 获取插件目录路径
-#[command]
-pub fn get_plugins_directory() -> Result<String, AppError> {
-    manager::get_plugins_dir().map(|p| p.to_string_lossy().to_string())
 }
 
 /// 在文件管理器中打开插件目录

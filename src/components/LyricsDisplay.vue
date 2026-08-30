@@ -499,11 +499,6 @@ export default {
   opacity: 0.6;
 }
 
-.idle-icon {
-  font-size: 64px;
-  margin-bottom: 8px;
-}
-
 .fetch-lyrics-btn {
   display: flex;
   align-items: center;
