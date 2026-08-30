@@ -56,10 +56,10 @@ describe('useMusicLibraryStore', () => {
     mockConfigStore.playlist.sortOrder = 'asc'
     mockPlayerStore.playlist = []
     // 默认 invoke 和 store 方法返回值
-    // get_data_dir 需返回数据目录,store 文件路径拼接(join)依赖它
+    // resolve_data_file 需返回数据文件完整路径,musicLibrary 用它定位 store 文件
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'resolve_data_file') {
-        return Promise.resolve('C:\mock\data\store.json')
+        return Promise.resolve('C:\\mock\\data\\store.json')
       }
       return Promise.resolve(undefined)
     })

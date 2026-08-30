@@ -14,7 +14,6 @@ use crate::error::AppError;
 
 use super::{FADE_IN_MS, FADE_IN_ON_SEEK_MS};
 
-#[cfg(windows)]
 use crate::AppState;
 use crate::equalizer::{EQ_BAND_COUNT, EqSettings};
 use rodio::Source;
