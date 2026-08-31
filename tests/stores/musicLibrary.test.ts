@@ -222,9 +222,9 @@ describe('useMusicLibraryStore', () => {
         makeTrack('/b.mp3', 'B'),
       ])
       store.selectPlaylist(playlist)
-      expect(playlist.files[0].title).toBe('A')
-      expect(playlist.files[1].title).toBe('B')
-      expect(playlist.files[2].title).toBe('C')
+      expect(playlist.files[0]!.title).toBe('A')
+      expect(playlist.files[1]!.title).toBe('B')
+      expect(playlist.files[2]!.title).toBe('C')
       expect(store._sortedPlaylists.has('test')).toBe(true)
     })
 
@@ -237,9 +237,9 @@ describe('useMusicLibraryStore', () => {
         makeTrack('/b.mp3', 'B'),
       ])
       store.selectPlaylist(playlist)
-      expect(playlist.files[0].title).toBe('C')
-      expect(playlist.files[1].title).toBe('B')
-      expect(playlist.files[2].title).toBe('A')
+      expect(playlist.files[0]!.title).toBe('C')
+      expect(playlist.files[1]!.title).toBe('B')
+      expect(playlist.files[2]!.title).toBe('A')
     })
 
     it('重复选择同一播放列表不会重复排序', () => {
@@ -247,12 +247,12 @@ describe('useMusicLibraryStore', () => {
       mockConfigStore.playlist.sortOrder = 'asc'
       const playlist = makePlaylist('test', [makeTrack('/c.mp3', 'C'), makeTrack('/a.mp3', 'A')])
       store.selectPlaylist(playlist)
-      expect(playlist.files[0].title).toBe('A')
+      expect(playlist.files[0]!.title).toBe('A')
       // 手动打乱顺序后再次选择
       playlist.files.reverse()
       store.selectPlaylist(playlist)
       // 不会重新排序，顺序保持打乱后的状态
-      expect(playlist.files[0].title).toBe('C')
+      expect(playlist.files[0]!.title).toBe('C')
     })
 
     it('空文件列表的播放列表直接标记为已排序', () => {
@@ -271,8 +271,8 @@ describe('useMusicLibraryStore', () => {
         { path: '/a.mp3', name: 'Alice' },
       ])
       store.selectPlaylist(playlist)
-      expect(playlist.files[0].name).toBe('Alice')
-      expect(playlist.files[1].name).toBe('Charlie')
+      expect(playlist.files[0]!.name).toBe('Alice')
+      expect(playlist.files[1]!.name).toBe('Charlie')
     })
   })
 
@@ -327,8 +327,8 @@ describe('useMusicLibraryStore', () => {
       const result = await store.loadPlaylistsFromCache()
       expect(result).toBe(true)
       expect(store.playlists).toHaveLength(1)
-      expect(store.playlists[0].name).toBe('playlist1')
-      expect(store.playlists[0].files).toHaveLength(1)
+      expect(store.playlists[0]!.name).toBe('playlist1')
+      expect(store.playlists[0]!.files).toHaveLength(1)
       expect(store._loadedFromCache).toBe(true)
     })
 
@@ -416,10 +416,10 @@ describe('useMusicLibraryStore', () => {
         }),
       )
       // 验证 coverPath 被去除
-      const savedArg = mockStoreSet.mock.calls[0][1] as {
+      const savedArg = mockStoreSet.mock.calls[0]![1] as {
         playlists: Array<{ files: Array<Record<string, unknown>> }>
       }
-      for (const file of savedArg.playlists[0].files) {
+      for (const file of savedArg.playlists[0]!.files) {
         expect(file).not.toHaveProperty('coverPath')
       }
       expect(mockStoreSave).toHaveBeenCalled()

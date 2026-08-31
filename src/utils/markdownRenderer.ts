@@ -127,7 +127,7 @@ export function renderMarkdown(markdown: string): string {
   let i = 0
 
   while (i < lines.length) {
-    const line = lines[i]
+    const line = lines[i]!
     const trimmed = line.trim()
 
     // —— 空行 ——
@@ -140,8 +140,8 @@ export function renderMarkdown(markdown: string): string {
     if (trimmed.startsWith('```')) {
       const codeLines: string[] = []
       i++ // 跳过开始的 ```
-      while (i < lines.length && !lines[i].trim().startsWith('```')) {
-        codeLines.push(escapeHtml(lines[i]))
+      while (i < lines.length && !lines[i]!.trim().startsWith('```')) {
+        codeLines.push(escapeHtml(lines[i]!))
         i++
       }
       i++ // 跳过结束的 ```
@@ -152,8 +152,8 @@ export function renderMarkdown(markdown: string): string {
     // —— 标题 # ——
     const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/)
     if (headingMatch) {
-      const level = headingMatch[1].length
-      const content = renderInline(headingMatch[2])
+      const level = headingMatch[1]!.length
+      const content = renderInline(headingMatch[2]!)
       htmlParts.push(`<h${level}>${content}</h${level}>`)
       i++
       continue
@@ -169,8 +169,8 @@ export function renderMarkdown(markdown: string): string {
     // —— 引用块 > ——
     if (trimmed.startsWith('>')) {
       const quoteLines: string[] = []
-      while (i < lines.length && lines[i].trim().startsWith('>')) {
-        quoteLines.push(lines[i].trim().replace(/^>\s?/, ''))
+      while (i < lines.length && lines[i]!.trim().startsWith('>')) {
+        quoteLines.push(lines[i]!.trim().replace(/^>\s?/, ''))
         i++
       }
       const quoteContent = renderMarkdown(quoteLines.join('\n'))
@@ -179,14 +179,14 @@ export function renderMarkdown(markdown: string): string {
     }
 
     // —— 表格（GFM 风格：| header | ... | 后跟 |---|---| 分隔行）——
-    if (trimmed.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+    if (trimmed.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1]!)) {
       const headerCells = parseTableRow(trimmed)
       i += 2 // 跳过表头和分隔行
 
       // 收集数据行
       const bodyRows: string[][] = []
-      while (i < lines.length && lines[i].trim().includes('|') && lines[i].trim() !== '') {
-        bodyRows.push(parseTableRow(lines[i]))
+      while (i < lines.length && lines[i]!.trim().includes('|') && lines[i]!.trim() !== '') {
+        bodyRows.push(parseTableRow(lines[i]!))
         i++
       }
 
@@ -203,8 +203,8 @@ export function renderMarkdown(markdown: string): string {
     // —— 无序列表 ——
     if (isUnorderedListItem(trimmed)) {
       const items: string[] = []
-      while (i < lines.length && isUnorderedListItem(lines[i].trim())) {
-        items.push(renderInline(getListItemContent(lines[i])))
+      while (i < lines.length && isUnorderedListItem(lines[i]!.trim())) {
+        items.push(renderInline(getListItemContent(lines[i]!)))
         i++
       }
       const itemsHtml = items.map((item) => `<li>${item}</li>`).join('')
@@ -215,8 +215,8 @@ export function renderMarkdown(markdown: string): string {
     // —— 有序列表 ——
     if (isOrderedListItem(trimmed)) {
       const items: string[] = []
-      while (i < lines.length && isOrderedListItem(lines[i].trim())) {
-        items.push(renderInline(getListItemContent(lines[i])))
+      while (i < lines.length && isOrderedListItem(lines[i]!.trim())) {
+        items.push(renderInline(getListItemContent(lines[i]!)))
         i++
       }
       const itemsHtml = items.map((item) => `<li>${item}</li>`).join('')
@@ -228,17 +228,17 @@ export function renderMarkdown(markdown: string): string {
     const paragraphLines: string[] = []
     while (
       i < lines.length &&
-      lines[i].trim() !== '' &&
-      !lines[i].trim().startsWith('#') &&
-      !lines[i].trim().startsWith('```') &&
-      !lines[i].trim().startsWith('>') &&
-      !/^[-*_]{3,}$/.test(lines[i].trim()) &&
-      !isUnorderedListItem(lines[i].trim()) &&
-      !isOrderedListItem(lines[i].trim()) &&
+      lines[i]!.trim() !== '' &&
+      !lines[i]!.trim().startsWith('#') &&
+      !lines[i]!.trim().startsWith('```') &&
+      !lines[i]!.trim().startsWith('>') &&
+      !/^[-*_]{3,}$/.test(lines[i]!.trim()) &&
+      !isUnorderedListItem(lines[i]!.trim()) &&
+      !isOrderedListItem(lines[i]!.trim()) &&
       // 表格起始行：当前行含 | 且下一行是分隔行
-      !(lines[i].trim().includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1]))
+      !(lines[i]!.trim().includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1]!))
     ) {
-      paragraphLines.push(lines[i].trim())
+      paragraphLines.push(lines[i]!.trim())
       i++
     }
     if (paragraphLines.length > 0) {

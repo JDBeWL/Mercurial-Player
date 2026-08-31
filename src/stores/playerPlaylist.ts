@@ -34,7 +34,7 @@ export function removeTrackFromPlaylist(store: PlayerStore, path: string): void 
     }
 
     store
-      .playTrack(store.playlist[nextIndex])
+      .playTrack(store.playlist[nextIndex]!)
       .then(() => {
         if (!wasPlaying) {
           store.pause()

@@ -137,10 +137,10 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[1]
+      store.currentTrack = playlist[1]!
       await store.nextTrack()
       expect(store.currentTrackIndex).toBe(2)
-      expect(store.currentTrack?.path).toBe(playlist[2].path)
+      expect(store.currentTrack?.path).toBe(playlist[2]!.path)
     })
 
     it('nextTrack wraps at end even when repeatMode is none (manual next always wraps)', async () => {
@@ -148,7 +148,7 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[2]
+      store.currentTrack = playlist[2]!
       store.repeatMode = 'none'
       await store.nextTrack()
       expect(store.currentTrackIndex).toBe(0)
@@ -159,7 +159,7 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[2]
+      store.currentTrack = playlist[2]!
       store.repeatMode = 'list'
       await store.nextTrack()
       expect(store.currentTrackIndex).toBe(0)
@@ -170,7 +170,7 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[1]
+      store.currentTrack = playlist[1]!
       store.repeatMode = 'track'
       await store.nextTrack()
       expect(store.currentTrackIndex).toBe(2)
@@ -181,7 +181,7 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[2]
+      store.currentTrack = playlist[2]!
       await store.previousTrack()
       expect(store.currentTrackIndex).toBe(1)
     })
@@ -191,7 +191,7 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[0]
+      store.currentTrack = playlist[0]!
       await store.previousTrack()
       expect(store.currentTrackIndex).toBe(2)
     })
@@ -210,7 +210,7 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[0]
+      store.currentTrack = playlist[0]!
       store._isLoading = true
       await store.nextTrack()
       expect(store.currentTrackIndex).toBe(0)
@@ -226,10 +226,10 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[1]
+      store.currentTrack = playlist[1]!
       store.repeatMode = 'track'
       await store._onEnded()
-      expect(invokeMock).toHaveBeenCalledWith('play_track', { path: playlist[1].path })
+      expect(invokeMock).toHaveBeenCalledWith('play_track', { path: playlist[1]!.path })
     })
 
     it('list repeat wraps to next track at end', async () => {
@@ -237,10 +237,10 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[2]
+      store.currentTrack = playlist[2]!
       store.repeatMode = 'list'
       await store._onEnded()
-      expect(invokeMock).toHaveBeenCalledWith('play_track', { path: playlist[0].path })
+      expect(invokeMock).toHaveBeenCalledWith('play_track', { path: playlist[0]!.path })
     })
 
     it('none mode advances when not at end', async () => {
@@ -248,10 +248,10 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[1]
+      store.currentTrack = playlist[1]!
       store.repeatMode = 'none'
       await store._onEnded()
-      expect(invokeMock).toHaveBeenCalledWith('play_track', { path: playlist[2].path })
+      expect(invokeMock).toHaveBeenCalledWith('play_track', { path: playlist[2]!.path })
     })
 
     it('none mode stops at end without playing next', async () => {
@@ -259,7 +259,7 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[2]
+      store.currentTrack = playlist[2]!
       store.duration = 100
       store.currentTime = 50
       store.isPlaying = true
@@ -287,7 +287,7 @@ describe('usePlayerStore navigation & state', () => {
     it('generates shuffle order on enable with current track at position 0', () => {
       const store = usePlayerStore()
       store.playlist = makePlaylist(3)
-      store.currentTrack = store.playlist[1]
+      store.currentTrack = store.playlist[1]!
       store.toggleShuffle()
       expect(store._shuffleOrder).toHaveLength(3)
       expect(store._shufflePosition).toBe(0)
@@ -298,7 +298,7 @@ describe('usePlayerStore navigation & state', () => {
     it('clears shuffle order on disable', () => {
       const store = usePlayerStore()
       store.playlist = makePlaylist(3)
-      store.currentTrack = store.playlist[1]
+      store.currentTrack = store.playlist[1]!
       store.toggleShuffle() // on
       store.toggleShuffle() // off
       expect(store.isShuffle).toBe(false)
@@ -310,7 +310,7 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       store._shuffleHistory = [1, 2]
       store.playlist = makePlaylist(3)
-      store.currentTrack = store.playlist[0]
+      store.currentTrack = store.playlist[0]!
       store.toggleShuffle()
       expect(store._shuffleHistory).toEqual([])
     })
@@ -459,7 +459,7 @@ describe('usePlayerStore navigation & state', () => {
       const playlist = makePlaylist(3)
       store.loadPlaylist(playlist)
       expect(store.playlist).toHaveLength(3)
-      expect(store.currentTrack?.path).toBe(playlist[0].path)
+      expect(store.currentTrack?.path).toBe(playlist[0]!.path)
       expect(store.currentTrackIndex).toBe(0)
       expect(store.duration).toBe(100)
     })
@@ -467,7 +467,7 @@ describe('usePlayerStore navigation & state', () => {
     it('resets state when playlist is empty', () => {
       const store = usePlayerStore()
       store.playlist = makePlaylist(2)
-      store.currentTrack = store.playlist[0]
+      store.currentTrack = store.playlist[0]!
       store.isPlaying = true
       store.duration = 200
       store.loadPlaylist([])
@@ -480,7 +480,7 @@ describe('usePlayerStore navigation & state', () => {
     it('invalidates shuffle order and history', () => {
       const store = usePlayerStore()
       store.playlist = makePlaylist(3)
-      store.currentTrack = store.playlist[0]
+      store.currentTrack = store.playlist[0]!
       store.toggleShuffle()
       expect(store._shuffleOrder).toHaveLength(3)
       store.loadPlaylist(makePlaylist(3))
@@ -588,11 +588,11 @@ describe('usePlayerStore navigation & state', () => {
     it('inserts a new track right after the current track', () => {
       const store = usePlayerStore()
       store.playlist = [...makePlaylist(3)]
-      store.currentTrack = store.playlist[1]
+      store.currentTrack = store.playlist[1]!
       const newTrack = makeTrack('/music/new.mp3', 'New')
       store.addTrackNext(newTrack)
       expect(store.playlist).toHaveLength(4)
-      expect(store.playlist[2].path).toBe('/music/new.mp3')
+      expect(store.playlist[2]!.path).toBe('/music/new.mp3')
     })
 
     it('unshifts when there is no current track', () => {
@@ -601,17 +601,17 @@ describe('usePlayerStore navigation & state', () => {
       const newTrack = makeTrack('/music/new.mp3', 'New')
       store.addTrackNext(newTrack)
       expect(store.playlist).toHaveLength(3)
-      expect(store.playlist[0].path).toBe('/music/new.mp3')
+      expect(store.playlist[0]!.path).toBe('/music/new.mp3')
     })
 
     it('moves an existing track to the next position', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(4)
       store.playlist = [...playlist]
-      store.currentTrack = playlist[1]
-      store.addTrackNext(playlist[3])
+      store.currentTrack = playlist[1]!
+      store.addTrackNext(playlist[3]!)
       expect(store.playlist).toHaveLength(4)
-      expect(store.playlist[2].path).toBe(playlist[3].path)
+      expect(store.playlist[2]!.path).toBe(playlist[3]!.path)
     })
 
     it('does nothing when track is null', () => {
@@ -641,14 +641,14 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[2]
+      store.currentTrack = playlist[2]!
       expect(store.currentTrackIndex).toBe(2)
     })
 
     it('hasNextTrack is false when playlist has <= 1 track', () => {
       const store = usePlayerStore()
       store.playlist = makePlaylist(1)
-      store.currentTrack = store.playlist[0]
+      store.currentTrack = store.playlist[0]!
       expect(store.hasNextTrack).toBe(false)
     })
 
@@ -656,14 +656,14 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       const playlist = makePlaylist(3)
       store.playlist = playlist
-      store.currentTrack = playlist[0]
+      store.currentTrack = playlist[0]!
       expect(store.hasNextTrack).toBe(true)
     })
 
     it('hasPreviousTrack is false when playlist has <= 1 track', () => {
       const store = usePlayerStore()
       store.playlist = makePlaylist(1)
-      store.currentTrack = store.playlist[0]
+      store.currentTrack = store.playlist[0]!
       expect(store.hasPreviousTrack).toBe(false)
     })
 

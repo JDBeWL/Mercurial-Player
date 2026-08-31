@@ -59,7 +59,7 @@
       <div class="bands-container">
         <div v-for="(band, index) in bands" :key="index" class="band-control">
           <div class="band-value">
-            {{ gains[index] > 0 ? '+' : '' }}{{ gains[index].toFixed(1) }}
+            {{ gains[index]! > 0 ? '+' : '' }}{{ gains[index]!.toFixed(1) }}
           </div>
           <div
             :ref="(el) => (bandSliders[index] = el as HTMLElement)"
@@ -133,7 +133,7 @@ const preampPercent = computed<number>(() => {
 
 // 计算频段增益百分比
 const getBandPercent = (index: number): number => {
-  return ((gains.value[index] - MIN_GAIN) / (MAX_GAIN - MIN_GAIN)) * 100
+  return ((gains.value[index]! - MIN_GAIN) / (MAX_GAIN - MIN_GAIN)) * 100
 }
 
 // 加载 EQ 设置
@@ -160,7 +160,7 @@ const loadSettings = async (): Promise<void> => {
 // 检测当前预设
 const detectCurrentPreset = (): void => {
   for (const preset of presets.value) {
-    const match = preset.gains.every((g, i) => Math.abs(g - gains.value[i]) < 0.1)
+    const match = preset.gains.every((g, i) => Math.abs(g - gains.value[i]!) < 0.1)
     if (match) {
       currentPreset.value = preset.name
       return

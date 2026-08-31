@@ -41,10 +41,10 @@ describe('LyricsParser', () => {
       const result = LyricsParser.parseLRC(content)
 
       expect(result).toHaveLength(2)
-      expect(result[0].time).toBeCloseTo(1.0, 1)
-      expect(result[0].text).toBe('First line')
-      expect(result[1].time).toBeCloseTo(5.5, 1)
-      expect(result[1].text).toBe('Second line')
+      expect(result[0]!.time).toBeCloseTo(1.0, 1)
+      expect(result[0]!.text).toBe('First line')
+      expect(result[1]!.time).toBeCloseTo(5.5, 1)
+      expect(result[1]!.text).toBe('Second line')
     })
 
     it('should handle multiple timestamps per line', () => {
@@ -52,8 +52,8 @@ describe('LyricsParser', () => {
       const result = LyricsParser.parseLRC(content)
 
       expect(result).toHaveLength(2)
-      expect(result[0].text).toBe('Repeated line')
-      expect(result[1].text).toBe('Repeated line')
+      expect(result[0]!.text).toBe('Repeated line')
+      expect(result[1]!.text).toBe('Repeated line')
     })
 
     it('should skip empty lines', () => {
@@ -61,7 +61,7 @@ describe('LyricsParser', () => {
       const result = LyricsParser.parseLRC(content)
 
       expect(result).toHaveLength(1)
-      expect(result[0].text).toBe('Valid line')
+      expect(result[0]!.text).toBe('Valid line')
     })
 
     it('should return empty array for empty content', () => {
@@ -73,15 +73,15 @@ describe('LyricsParser', () => {
       const result = LyricsParser.parseLRC(content)
 
       expect(result).toHaveLength(1)
-      expect(result[0].time).toBeCloseTo(1.5, 2)
+      expect(result[0]!.time).toBeCloseTo(1.5, 2)
     })
 
     it('should sort lyrics by time', () => {
       const content = '[00:10.00]Second\n[00:01.00]First'
       const result = LyricsParser.parseLRC(content)
 
-      expect(result[0].text).toBe('First')
-      expect(result[1].text).toBe('Second')
+      expect(result[0]!.text).toBe('First')
+      expect(result[1]!.text).toBe('Second')
     })
   })
 
@@ -98,9 +98,9 @@ Second subtitle`
       const result = LyricsParser.parseSRT(content)
 
       expect(result).toHaveLength(2)
-      expect(result[0].time).toBe(1)
-      expect(result[0].text).toBe('First subtitle')
-      expect(result[1].time).toBe(5)
+      expect(result[0]!.time).toBe(1)
+      expect(result[0]!.text).toBe('First subtitle')
+      expect(result[1]!.time).toBe(5)
     })
   })
 
@@ -145,7 +145,7 @@ Second subtitle`
       const result = LyricsParser.parse(content, 'auto')
 
       expect(result).toHaveLength(1)
-      expect(result[0].text).toBe('Auto detected')
+      expect(result[0]!.text).toBe('Auto detected')
     })
 
     it('should return empty array for empty content', () => {
@@ -165,7 +165,7 @@ Second subtitle`
       const result = await LyricsParser.parseLRCAsync(content)
 
       expect(result).toHaveLength(2)
-      expect(result[0].texts).toContain('First')
+      expect(result[0]!.texts).toContain('First')
     })
 
     it('should handle karaoke timestamps', async () => {
@@ -173,7 +173,7 @@ Second subtitle`
       const result = await LyricsParser.parseLRCAsync(content)
 
       expect(result).toHaveLength(1)
-      expect(result[0].karaoke).not.toBeNull()
+      expect(result[0]!.karaoke).not.toBeNull()
     })
 
     it('should handle mm:ss:cs format', async () => {
@@ -181,7 +181,7 @@ Second subtitle`
       const result = await LyricsParser.parseLRCAsync(content)
 
       expect(result).toHaveLength(1)
-      expect(result[0].time).toBe(90) // 1m 30s = 90s
+      expect(result[0]!.time).toBe(90) // 1m 30s = 90s
     })
 
     it('should skip lines without timestamps', async () => {
@@ -208,7 +208,7 @@ Dialogue: 0,0:00:01.00,0:00:05.00,orig,,0,0,0,,Hello world`
       const result = await LyricsParser.parseASSAsync(content)
 
       expect(result).toHaveLength(1)
-      expect(result[0].time).toBeCloseTo(1, 1)
+      expect(result[0]!.time).toBeCloseTo(1, 1)
     })
 
     it('should parse karaoke tags in ASS', async () => {
@@ -218,8 +218,8 @@ Dialogue: 0,0:00:01.00,0:00:05.00,orig,,0,0,0,,{\\k50}Hel{\\k50}lo`
       const result = await LyricsParser.parseASSAsync(content)
 
       expect(result).toHaveLength(1)
-      expect(result[0].words).toBeDefined()
-      expect(result[0].words!.length).toBeGreaterThan(0)
+      expect(result[0]!.words).toBeDefined()
+      expect(result[0]!.words!.length).toBeGreaterThan(0)
     })
 
     it('should handle translation style', async () => {
@@ -230,7 +230,7 @@ Dialogue: 0,0:00:01.00,0:00:05.00,ts,,0,0,0,,中文`
       const result = await LyricsParser.parseASSAsync(content)
 
       expect(result).toHaveLength(1)
-      expect(result[0].texts).toHaveLength(2)
+      expect(result[0]!.texts).toHaveLength(2)
     })
 
     it('should skip non-dialogue lines', async () => {
@@ -295,8 +295,8 @@ Dialogue: 0,0:00:01.50,0:00:05.00,Default,,0,0,0,,Hello`
       const result = LyricsParser.parseASS(content)
 
       expect(result).toHaveLength(1)
-      expect(result[0].time).toBeCloseTo(1.5, 2)
-      expect(result[0].text).toBe('Hello')
+      expect(result[0]!.time).toBeCloseTo(1.5, 2)
+      expect(result[0]!.text).toBe('Hello')
     })
 
     it('should handle section transitions', () => {
@@ -318,7 +318,7 @@ Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0,0,0,,{\\k50}Clean{\\k50}Text`
 
       const result = LyricsParser.parseASS(content)
 
-      expect(result[0].text).toBe('CleanText')
+      expect(result[0]!.text).toBe('CleanText')
     })
 
     it('should handle text with commas', () => {
@@ -328,7 +328,7 @@ Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0,0,0,,Hello, World, Test`
 
       const result = LyricsParser.parseASS(content)
 
-      expect(result[0].text).toBe('Hello, World, Test')
+      expect(result[0]!.text).toBe('Hello, World, Test')
     })
   })
 

@@ -26,7 +26,30 @@ vi.mock('@/plugins/pluginManager', async (importOriginal) => {
   }
 })
 
+// Node 测试环境不支持 blob: URL 动态 import，用 new Function 模拟模块执行。
+// 仅替换模块求值机制，包装逻辑(toModuleCode)保持真实实现以覆盖加载路径。
+vi.mock('@/plugins/moduleExecutor', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/plugins/moduleExecutor')>()
+  return {
+    ...actual,
+    importPluginModule: vi.fn(async (code: string) => {
+      if (/export\s+default/.test(code)) {
+        // 模块格式：将默认导出转为返回值（仅测试模拟）
+        const fn = new Function(`${code.replace(/export\s+default\s*/, 'return ')}`)
+        return fn()
+      }
+      // 旧脚本格式：与真实包装逻辑一致的函数作用域执行
+      return new Function(
+        'api',
+        'globals',
+        `${code}\nreturn typeof plugin !== 'undefined' ? plugin : {}`,
+      )
+    }),
+  }
+})
+
 import { loadPlugin } from '@/plugins/pluginLoader'
+import { importPluginModule } from '@/plugins/moduleExecutor'
 
 function manifestFor(id: string, extra: Record<string, unknown> = {}): void {
   mockInvoke.mockImplementation(async (cmd: string) => {
@@ -50,8 +73,43 @@ describe('pluginLoader - loadPlugin 清单与代码安全校验', () => {
     manifestFor('test-plugin')
     await loadPlugin('/plugins/test-plugin')
     expect(mockRegister).toHaveBeenCalledTimes(1)
-    expect(mockRegister.mock.calls[0][0]).toMatchObject({ id: 'test-plugin', name: 'Test Plugin' })
+    expect(mockRegister.mock.calls[0]![0]).toMatchObject({ id: 'test-plugin', name: 'Test Plugin' })
     expect(mockActivate).toHaveBeenCalledWith('test-plugin')
+  })
+
+  it('加载 ES 模块格式外置插件: 默认导出工厂被注册', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'read_plugin_manifest') {
+        return { id: 'esm-plugin', name: 'ESM Plugin' }
+      }
+      if (cmd === 'read_plugin_main') {
+        return 'export default (api) => ({ activate() { api.log.info("ok") } })'
+      }
+      return null
+    })
+    await loadPlugin('/plugins/esm-plugin')
+    expect(mockRegister).toHaveBeenCalledTimes(1)
+    const registered = mockRegister.mock.calls[0]![0]
+    expect(registered.id).toBe('esm-plugin')
+    expect(typeof registered.main).toBe('function')
+    expect(mockActivate).toHaveBeenCalledWith('esm-plugin')
+  })
+
+  it('模块缺少默认导出时加载失败且不注册', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'read_plugin_manifest') {
+        return { id: 'bad-esm-plugin', name: 'Bad ESM' }
+      }
+      if (cmd === 'read_plugin_main') {
+        return 'export const plugin = {}'
+      }
+      return null
+    })
+    vi.mocked(importPluginModule).mockRejectedValueOnce(
+      new Error('插件模块缺少默认导出函数 (export default function/api => {...})'),
+    )
+    await expect(loadPlugin('/plugins/bad-esm')).rejects.toThrow('插件模块缺少默认导出')
+    expect(mockRegister).not.toHaveBeenCalled()
   })
 
   it.each([

@@ -206,7 +206,7 @@ export default {
       ctx.shadowBlur = 0
 
       for (let i = 0; i < bufferLength; i++) {
-        const value = drawData[i]
+        const value = drawData[i]!
         let barHeight = Math.pow(value, 0.9) * height * 0.9
 
         if (barHeight > height) barHeight = height
@@ -237,7 +237,7 @@ export default {
       if (pendingSpectrumData) {
         const data = pendingSpectrumData
         for (let i = 0; i < SPECTRUM_SIZE && i < data.length; i++) {
-          audioData[i] = data[i]
+          audioData[i] = data[i]!
         }
         pendingSpectrumData = null
       }
@@ -274,7 +274,7 @@ export default {
       ctx.shadowBlur = 0
 
       for (let i = 0; i < bufferLength; i++) {
-        const value = drawData[i]
+        const value = drawData[i]!
         let barHeight = Math.pow(value, 0.9) * height * 0.9
 
         if (barHeight > height) barHeight = height

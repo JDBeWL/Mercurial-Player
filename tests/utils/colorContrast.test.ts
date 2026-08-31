@@ -116,10 +116,10 @@ describe('colorContrast', () => {
       const results = checkColorPairs(pairs)
 
       expect(results).toHaveLength(2)
-      expect(results[0].name).toBe('Black on White')
-      expect(results[0].pass).toBe(true)
-      expect(results[1].name).toBe('White on Black')
-      expect(results[1].pass).toBe(true)
+      expect(results[0]!.name).toBe('Black on White')
+      expect(results[0]!.pass).toBe(true)
+      expect(results[1]!.name).toBe('White on Black')
+      expect(results[1]!.pass).toBe(true)
     })
 
     it('should respect largeText option per pair', () => {
@@ -129,8 +129,8 @@ describe('colorContrast', () => {
       ]
 
       const results = checkColorPairs(pairs)
-      expect(results[0].largeText).toBe(false)
-      expect(results[1].largeText).toBe(true)
+      expect(results[0]!.largeText).toBe(false)
+      expect(results[1]!.largeText).toBe(true)
     })
   })
 

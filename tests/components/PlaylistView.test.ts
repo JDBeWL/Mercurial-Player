@@ -178,8 +178,8 @@ describe('PlaylistView.vue', () => {
       wrapper = mountComponent()
       await nextTick()
       const headlines = wrapper.findAll('.list-item-headline')
-      expect(headlines[0].text()).toBe('Track 0')
-      expect(headlines[1].text()).toBe('Track 1')
+      expect(headlines[0]!.text()).toBe('Track 0')
+      expect(headlines[1]!.text()).toBe('Track 1')
     })
 
     it('列表项显示艺术家', async () => {
@@ -187,8 +187,8 @@ describe('PlaylistView.vue', () => {
       wrapper = mountComponent()
       await nextTick()
       const supporting = wrapper.findAll('.list-item-supporting')
-      expect(supporting[0].text()).toBe('Artist 0')
-      expect(supporting[1].text()).toBe('Artist 1')
+      expect(supporting[0]!.text()).toBe('Artist 0')
+      expect(supporting[1]!.text()).toBe('Artist 1')
     })
 
     it('标题缺失时回退到文件名', async () => {
@@ -228,13 +228,13 @@ describe('PlaylistView.vue', () => {
     it('当前播放曲目有 selected 类', async () => {
       const tracks = makeTracks(3)
       store.playlist = tracks
-      store.currentTrack = tracks[1]
+      store.currentTrack = tracks[1]!
       wrapper = mountComponent()
       await nextTick()
       const items = wrapper.findAll('.list-item')
-      expect(items[0].classes()).not.toContain('selected')
-      expect(items[1].classes()).toContain('selected')
-      expect(items[2].classes()).not.toContain('selected')
+      expect(items[0]!.classes()).not.toContain('selected')
+      expect(items[1]!.classes()).toContain('selected')
+      expect(items[2]!.classes()).not.toContain('selected')
     })
 
     it('无当前曲目时无 selected 项', async () => {
@@ -258,22 +258,22 @@ describe('PlaylistView.vue', () => {
       wrapper = mountComponent()
       await nextTick()
       const items = wrapper.findAll('.list-item')
-      await items[1].trigger('click')
+      await items[1]!.trigger('click')
       // 组件传入的是 ProcessedTrack（含 cachedTitle 等额外字段），用 path 匹配
       expect(store.playTrack).toHaveBeenCalledWith(
-        expect.objectContaining({ path: tracks[1].path }),
+        expect.objectContaining({ path: tracks[1]!.path }),
       )
     })
 
     it('点击当前暂停曲目的列表项调用 resume', async () => {
       const tracks = makeTracks(2)
       store.playlist = tracks
-      store.currentTrack = tracks[0]
+      store.currentTrack = tracks[0]!
       store.isPlaying = false
       wrapper = mountComponent()
       await nextTick()
       const items = wrapper.findAll('.list-item')
-      await items[0].trigger('click')
+      await items[0]!.trigger('click')
       // 当前曲目且未播放 → resume
       expect(store.resume).toHaveBeenCalledTimes(1)
       expect(store.playTrack).not.toHaveBeenCalled()
@@ -285,17 +285,17 @@ describe('PlaylistView.vue', () => {
       wrapper = mountComponent()
       await nextTick()
       const playButtons = wrapper.findAll('.play-button')
-      await playButtons[1].trigger('click')
+      await playButtons[1]!.trigger('click')
       // 组件传入的是 ProcessedTrack（含 cachedTitle 等额外字段），用 path 匹配
       expect(store.playTrack).toHaveBeenCalledWith(
-        expect.objectContaining({ path: tracks[1].path }),
+        expect.objectContaining({ path: tracks[1]!.path }),
       )
     })
 
     it('当前曲目播放中显示暂停按钮', async () => {
       const tracks = makeTracks(2)
       store.playlist = tracks
-      store.currentTrack = tracks[0]
+      store.currentTrack = tracks[0]!
       store.isPlaying = true
       wrapper = mountComponent()
       await nextTick()
@@ -307,7 +307,7 @@ describe('PlaylistView.vue', () => {
     it('点击暂停按钮调用 pause', async () => {
       const tracks = makeTracks(2)
       store.playlist = tracks
-      store.currentTrack = tracks[0]
+      store.currentTrack = tracks[0]!
       store.isPlaying = true
       wrapper = mountComponent()
       await nextTick()
@@ -319,7 +319,7 @@ describe('PlaylistView.vue', () => {
     it('非当前曲目不显示暂停按钮', async () => {
       const tracks = makeTracks(3)
       store.playlist = tracks
-      store.currentTrack = tracks[0]
+      store.currentTrack = tracks[0]!
       store.isPlaying = true
       wrapper = mountComponent()
       await nextTick()
@@ -345,8 +345,8 @@ describe('PlaylistView.vue', () => {
       wrapper = mountComponent()
       await nextTick()
       const removeButtons = wrapper.findAll('.remove-button')
-      await removeButtons[1].trigger('click')
-      expect(store.removeTrack).toHaveBeenCalledWith(tracks[1].path)
+      await removeButtons[1]!.trigger('click')
+      expect(store.removeTrack).toHaveBeenCalledWith(tracks[1]!.path)
     })
 
     it('删除按钮点击不触发列表项点击（stop 修饰符）', async () => {
@@ -354,7 +354,7 @@ describe('PlaylistView.vue', () => {
       store.playlist = tracks
       wrapper = mountComponent()
       await nextTick()
-      const removeButton = wrapper.findAll('.remove-button')[0]
+      const removeButton = wrapper.findAll('.remove-button')[0]!
       await removeButton.trigger('click')
       // removeTrack 被调用，但 playTrack 不应被调用
       expect(store.removeTrack).toHaveBeenCalledTimes(1)

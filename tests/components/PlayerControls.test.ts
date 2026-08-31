@@ -117,7 +117,7 @@ describe('PlayerControls.vue', () => {
       await nextTick()
       // 上一首按钮是第二个 icon-button (shuffle 之后)
       const buttons = wrapper.findAll('.icon-button')
-      const prevBtn = buttons[1]
+      const prevBtn = buttons[1]!
       expect(prevBtn.attributes('disabled')).toBeDefined()
     })
 
@@ -126,7 +126,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      const prevBtn = buttons[1]
+      const prevBtn = buttons[1]!
       expect(prevBtn.attributes('disabled')).toBeUndefined()
     })
 
@@ -135,7 +135,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      await buttons[1].trigger('click')
+      await buttons[1]!.trigger('click')
       expect(store.previousTrack).toHaveBeenCalledTimes(1)
     })
 
@@ -145,7 +145,7 @@ describe('PlayerControls.vue', () => {
       await nextTick()
       // 下一首按钮是第四个 icon-button (shuffle, prev, play, next)
       const buttons = wrapper.findAll('.icon-button')
-      const nextBtn = buttons[3]
+      const nextBtn = buttons[3]!
       expect(nextBtn.attributes('disabled')).toBeDefined()
     })
 
@@ -154,7 +154,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      const nextBtn = buttons[3]
+      const nextBtn = buttons[3]!
       expect(nextBtn.attributes('disabled')).toBeUndefined()
     })
 
@@ -163,7 +163,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      await buttons[3].trigger('click')
+      await buttons[3]!.trigger('click')
       expect(store.nextTrack).toHaveBeenCalledTimes(1)
     })
   })
@@ -176,7 +176,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      const shuffleBtn = buttons[0]
+      const shuffleBtn = buttons[0]!
       expect(shuffleBtn.classes()).not.toContain('active')
     })
 
@@ -185,7 +185,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      const shuffleBtn = buttons[0]
+      const shuffleBtn = buttons[0]!
       expect(shuffleBtn.classes()).toContain('active')
     })
 
@@ -193,7 +193,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      await buttons[0].trigger('click')
+      await buttons[0]!.trigger('click')
       expect(store.toggleShuffle).toHaveBeenCalledTimes(1)
     })
   })
@@ -204,7 +204,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      const repeatBtn = buttons[4]
+      const repeatBtn = buttons[4]!
       expect(repeatBtn.classes()).not.toContain('active')
     })
 
@@ -213,7 +213,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      const repeatBtn = buttons[4]
+      const repeatBtn = buttons[4]!
       expect(repeatBtn.classes()).toContain('active')
     })
 
@@ -222,7 +222,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      const repeatBtn = buttons[4]
+      const repeatBtn = buttons[4]!
       expect(repeatBtn.classes()).toContain('active')
     })
 
@@ -231,7 +231,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      const repeatBtn = buttons[4]
+      const repeatBtn = buttons[4]!
       expect(repeatBtn.text()).toContain('repeat_one')
     })
 
@@ -240,7 +240,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      const repeatBtn = buttons[4]
+      const repeatBtn = buttons[4]!
       expect(repeatBtn.text()).toContain('repeat')
       expect(repeatBtn.text()).not.toContain('repeat_one')
     })
@@ -250,7 +250,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      const repeatBtn = buttons[4]
+      const repeatBtn = buttons[4]!
       expect(repeatBtn.text()).toContain('repeat')
       expect(repeatBtn.text()).not.toContain('repeat_one')
     })
@@ -259,7 +259,7 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      await buttons[4].trigger('click')
+      await buttons[4]!.trigger('click')
       expect(store.toggleRepeat).toHaveBeenCalledTimes(1)
     })
   })
@@ -283,11 +283,11 @@ describe('PlayerControls.vue', () => {
       wrapper = mountComponent(store)
       await nextTick()
       const buttons = wrapper.findAll('.icon-button')
-      expect(buttons[0].classes()).not.toContain('active')
+      expect(buttons[0]!.classes()).not.toContain('active')
 
       store.isShuffle = true
       await nextTick()
-      expect(buttons[0].classes()).toContain('active')
+      expect(buttons[0]!.classes()).toContain('active')
     })
   })
 })

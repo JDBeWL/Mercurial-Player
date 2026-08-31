@@ -32,7 +32,7 @@ let refCount = 0
 
 function getSubLine(lyrics: LyricLine[], index: number): string {
   if (index < 0 || index >= lyrics.length) return ''
-  const line = lyrics[index]
+  const line = lyrics[index]!
   if (line.texts && line.texts.length > 1 && line.texts[1]) {
     return line.texts[1]
   }
@@ -64,7 +64,7 @@ function getCurrentWords(
 
 function getCurrentLine(lyrics: LyricLine[], index: number): string {
   if (index < 0 || index >= lyrics.length) return ''
-  const line = lyrics[index]
+  const line = lyrics[index]!
   if (line.texts && line.texts.length > 0) return line.texts[0] || ''
   return line.text || ''
 }
@@ -106,8 +106,8 @@ function getCurrentLyricProgress(
 
   if (validWords.length === 0) return 0
 
-  const firstStart = validWords[0].start
-  const lastEnd = validWords[validWords.length - 1].end
+  const firstStart = validWords[0]!.start
+  const lastEnd = validWords[validWords.length - 1]!.end
   if (syncedTime <= firstStart) return 0
   if (syncedTime >= lastEnd) return 1
 

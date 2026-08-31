@@ -32,8 +32,8 @@ export function generateShuffleOrder(
   // 2. Knuth shuffle: for i = n-1 downto 1, swap(order[i], order[rand(0..i)])
   for (let i = n - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
-    const tmp = order[i]
-    order[i] = order[j]
+    const tmp = order[i]!
+    order[i] = order[j]!
     order[j] = tmp
   }
 
@@ -41,8 +41,8 @@ export function generateShuffleOrder(
   if (currentIndex >= 0 && currentIndex < n) {
     const curPos = order.indexOf(currentIndex)
     if (curPos > 0) {
-      const tmp = order[0]
-      order[0] = order[curPos]
+      const tmp = order[0]!
+      order[0] = order[curPos]!
       order[curPos] = tmp
     }
   }
@@ -95,11 +95,11 @@ export function getNextShuffleIndex(
     const result = generateShuffleOrder(playlistLength, currentIndex)
     currentOrder = result.order
     currentPosition = 0
-    return { index: currentOrder[0], position: currentPosition, order: currentOrder }
+    return { index: currentOrder[0]!, position: currentPosition, order: currentOrder }
   }
 
   currentPosition++
-  return { index: currentOrder[currentPosition], position: currentPosition, order: currentOrder }
+  return { index: currentOrder[currentPosition]!, position: currentPosition, order: currentOrder }
 }
 
 /**
@@ -145,7 +145,7 @@ export function getPreviousShuffleIndex(
   if (currentPosition > 0) {
     currentPosition--
     return {
-      index: currentOrder[currentPosition],
+      index: currentOrder[currentPosition]!,
       position: currentPosition,
       order: currentOrder,
       history: currentHistory,
@@ -155,7 +155,7 @@ export function getPreviousShuffleIndex(
   // 在起点之前:回绕到序列末尾
   currentPosition = currentOrder.length - 1
   return {
-    index: currentOrder[currentPosition],
+    index: currentOrder[currentPosition]!,
     position: currentPosition,
     order: currentOrder,
     history: currentHistory,

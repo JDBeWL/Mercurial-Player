@@ -221,7 +221,7 @@ const processPlaylist = (): void => {
   let changed = false
 
   for (let i = 0; i < raw.length; i++) {
-    const track = raw[i]
+    const track = raw[i]!
     const existing = processedMap.get(track.path)
 
     // 复用已有对象（如果 path 和 coverPath 都没变）
@@ -231,7 +231,7 @@ const processPlaylist = (): void => {
       result[i] = buildProcessedTrack(track)
       changed = true
     }
-    newProcessedMap.set(track.path, result[i])
+    newProcessedMap.set(track.path, result[i]!)
   }
 
   // 列表长度变化或有新增/修改项时才更新
@@ -252,7 +252,7 @@ const stopWatchPlaylist = watch(
   () => {
     const raw = playlist.value
     const paths = new Array<string>(raw.length)
-    for (let i = 0; i < raw.length; i++) paths[i] = raw[i].path
+    for (let i = 0; i < raw.length; i++) paths[i] = raw[i]!.path
     return paths.join('\n')
   },
   processPlaylist,

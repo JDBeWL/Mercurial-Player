@@ -199,10 +199,10 @@ export function useDominantColor(
     const pts: { L: number; a: number; b: number }[] = []
     for (let p = 0; p * 4 < pixels.length; p++) {
       const i = p * 4
-      if (pixels[i + 3] < 128) continue
+      if (pixels[i + 3]! < 128) continue
       const x = width > 1 ? (p % width) / (width - 1) : 1
       if (mode === 'fusion' && x < 0.95) continue
-      const { L, a, b } = rgbToOklab(pixels[i], pixels[i + 1], pixels[i + 2])
+      const { L, a, b } = rgbToOklab(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!)
       pts.push({ L, a, b })
     }
 
@@ -243,7 +243,7 @@ export function useDominantColor(
     const seeds: typeof pts = []
     // 随机选取第一个
     const firstIdx = Math.floor(Math.random() * pts.length)
-    seeds.push({ ...pts[firstIdx] })
+    seeds.push({ ...pts[firstIdx]! })
 
     for (let i = 1; i < k; i++) {
       const distSq = pts.map((p) => {
@@ -258,9 +258,9 @@ export function useDominantColor(
       if (total === 0) break // 所有点已被选为种子（理论上不会）
       let r = Math.random() * total
       for (let j = 0; j < distSq.length; j++) {
-        r -= distSq[j]
+        r -= distSq[j]!
         if (r <= 0) {
-          seeds.push({ ...pts[j] })
+          seeds.push({ ...pts[j]! })
           break
         }
       }
@@ -276,9 +276,9 @@ export function useDominantColor(
         let best = 0
         let bestD = Infinity
         for (let c = 0; c < centers.length; c++) {
-          const dL = pts[p].L - centers[c][0]
-          const da = pts[p].a - centers[c][1]
-          const db = pts[p].b - centers[c][2]
+          const dL = pts[p]!.L - centers[c]![0]
+          const da = pts[p]!.a - centers[c]![1]
+          const db = pts[p]!.b - centers[c]![2]
           const d = dL * dL + da * da + db * db
           if (d < bestD) {
             bestD = d
@@ -291,18 +291,22 @@ export function useDominantColor(
       // 更新中心
       const sums = centers.map(() => ({ n: 0, L: 0, a: 0, b: 0 }))
       for (let p = 0; p < pts.length; p++) {
-        const s = sums[assign[p]]
+        const s = sums[assign[p]!]!
         s.n++
-        s.L += pts[p].L
-        s.a += pts[p].a
-        s.b += pts[p].b
+        s.L += pts[p]!.L
+        s.a += pts[p]!.a
+        s.b += pts[p]!.b
       }
 
       let maxMove = 0
       const newCenters = sums.map((s, i) => {
-        if (s.n === 0) return centers[i]
+        if (s.n === 0) return centers[i]!
         const nc: [number, number, number] = [s.L / s.n, s.a / s.n, s.b / s.n]
-        const move = Math.hypot(nc[0] - centers[i][0], nc[1] - centers[i][1], nc[2] - centers[i][2])
+        const move = Math.hypot(
+          nc[0] - centers[i]![0],
+          nc[1] - centers[i]![1],
+          nc[2] - centers[i]![2],
+        )
         if (move > maxMove) maxMove = move
         return nc
       })
@@ -312,13 +316,13 @@ export function useDominantColor(
 
     // 4. 计算各簇占比
     const counts = new Array<number>(centers.length).fill(0)
-    for (let p = 0; p < pts.length; p++) counts[assign[p]]++
+    for (let p = 0; p < pts.length; p++) counts[assign[p]!]!++
 
     // 5. 综合打分
     let best = { score: -1, L: 0, a: 0, b: 0 }
     for (let c = 0; c < centers.length; c++) {
-      const [L, a, b] = centers[c]
-      const share = counts[c] / pts.length
+      const [L, a, b] = centers[c]!
+      const share = counts[c]! / pts.length
       const chroma = Math.hypot(a, b)
 
       // 基础分：占比重、彩度高

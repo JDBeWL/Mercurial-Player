@@ -253,9 +253,9 @@ describe('LyricsDisplay.vue', () => {
       wrapper = mountComponent()
       await nextTick()
       const lines = wrapper.findAll('.lyrics .first-line')
-      expect(lines[0].text()).toBe('第一行歌词')
-      expect(lines[1].text()).toBe('第二行歌词')
-      expect(lines[2].text()).toBe('第三行歌词')
+      expect(lines[0]!.text()).toBe('第一行歌词')
+      expect(lines[1]!.text()).toBe('第二行歌词')
+      expect(lines[2]!.text()).toBe('第三行歌词')
     })
 
     it('空歌词列表不渲染歌词行', async () => {
@@ -294,8 +294,8 @@ describe('LyricsDisplay.vue', () => {
       await nextTick()
 
       const lines = wrapper.findAll('.lyrics')
-      expect(lines[0].classes()).toContain('active')
-      expect(lines[1].classes()).not.toContain('active')
+      expect(lines[0]!.classes()).toContain('active')
+      expect(lines[1]!.classes()).not.toContain('active')
     })
 
     it('currentTime=6 时高亮第二行 (time=5)', async () => {
@@ -310,9 +310,9 @@ describe('LyricsDisplay.vue', () => {
       await nextTick()
 
       const lines = wrapper.findAll('.lyrics')
-      expect(lines[0].classes()).not.toContain('active')
-      expect(lines[1].classes()).toContain('active')
-      expect(lines[2].classes()).not.toContain('active')
+      expect(lines[0]!.classes()).not.toContain('active')
+      expect(lines[1]!.classes()).toContain('active')
+      expect(lines[2]!.classes()).not.toContain('active')
     })
 
     it('currentTime=12 时高亮第三行 (time=10)', async () => {
@@ -327,9 +327,9 @@ describe('LyricsDisplay.vue', () => {
       await nextTick()
 
       const lines = wrapper.findAll('.lyrics')
-      expect(lines[1].classes()).not.toContain('active')
-      expect(lines[2].classes()).toContain('active')
-      expect(lines[3].classes()).not.toContain('active')
+      expect(lines[1]!.classes()).not.toContain('active')
+      expect(lines[2]!.classes()).toContain('active')
+      expect(lines[3]!.classes()).not.toContain('active')
     })
 
     it('currentTime 超过最后一行时高亮最后一行', async () => {
@@ -344,7 +344,7 @@ describe('LyricsDisplay.vue', () => {
       await nextTick()
 
       const lines = wrapper.findAll('.lyrics')
-      expect(lines[3].classes()).toContain('active')
+      expect(lines[3]!.classes()).toContain('active')
     })
 
     it('currentTime 在第一行之前时无高亮行', async () => {
@@ -362,8 +362,8 @@ describe('LyricsDisplay.vue', () => {
       await nextTick()
 
       const lines = wrapper.findAll('.lyrics')
-      expect(lines[0].classes()).not.toContain('active')
-      expect(lines[1].classes()).not.toContain('active')
+      expect(lines[0]!.classes()).not.toContain('active')
+      expect(lines[1]!.classes()).not.toContain('active')
     })
   })
 
@@ -383,9 +383,9 @@ describe('LyricsDisplay.vue', () => {
       await nextTick()
 
       const lines = wrapper.findAll('.lyrics')
-      expect(lines[2].classes()).toContain('active')
-      expect(lines[1].classes()).not.toContain('active')
-      expect(lines[3].classes()).not.toContain('active')
+      expect(lines[2]!.classes()).toContain('active')
+      expect(lines[1]!.classes()).not.toContain('active')
+      expect(lines[3]!.classes()).not.toContain('active')
       // 同步到 store
       const store = mocks.playerStore as { currentLyricIndex: number }
       expect(store.currentLyricIndex).toBe(2)
@@ -405,7 +405,7 @@ describe('LyricsDisplay.vue', () => {
       await nextTick()
 
       const lines = wrapper.findAll('.lyrics')
-      expect(lines[1].classes()).toContain('active')
+      expect(lines[1]!.classes()).toContain('active')
     })
 
     it('卸载后重新挂载（模拟切换视图返回）仍恢复高亮', async () => {
@@ -424,7 +424,7 @@ describe('LyricsDisplay.vue', () => {
       await nextTick()
 
       const lines = wrapper.findAll('.lyrics')
-      expect(lines[1].classes()).toContain('active')
+      expect(lines[1]!.classes()).toContain('active')
       const store = mocks.playerStore as { currentLyricIndex: number }
       expect(store.currentLyricIndex).toBe(1)
     })
@@ -461,8 +461,8 @@ describe('LyricsDisplay.vue', () => {
       await nextTick()
 
       const lines = wrapper.findAll('.lyrics')
-      expect(lines[0].classes()).not.toContain('active')
-      expect(lines[1].classes()).not.toContain('active')
+      expect(lines[0]!.classes()).not.toContain('active')
+      expect(lines[1]!.classes()).not.toContain('active')
     })
   })
 
@@ -511,7 +511,7 @@ describe('LyricsDisplay.vue', () => {
       await nextTick()
       // 最后一个 offset-btn 是 "+"
       const buttons = wrapper.findAll('.offset-btn')
-      await buttons[1].trigger('click')
+      await buttons[1]!.trigger('click')
       const store = mocks.playerStore as { adjustLyricsOffset: ReturnType<typeof vi.fn> }
       expect(store.adjustLyricsOffset).toHaveBeenCalledWith(0.5)
     })
@@ -523,7 +523,7 @@ describe('LyricsDisplay.vue', () => {
       await nextTick()
       // 第一个 offset-btn 是 "-"
       const buttons = wrapper.findAll('.offset-btn')
-      await buttons[0].trigger('click')
+      await buttons[0]!.trigger('click')
       const store = mocks.playerStore as { adjustLyricsOffset: ReturnType<typeof vi.fn> }
       expect(store.adjustLyricsOffset).toHaveBeenCalledWith(-0.5)
     })
@@ -558,7 +558,7 @@ describe('LyricsDisplay.vue', () => {
 
       const lines = wrapper.findAll('.lyrics')
       // 点击第二行 (time=5)
-      await lines[1].trigger('click')
+      await lines[1]!.trigger('click')
       await nextTick()
 
       const store = mocks.playerStore as { seek: ReturnType<typeof vi.fn> }
@@ -574,7 +574,7 @@ describe('LyricsDisplay.vue', () => {
 
       const lines = wrapper.findAll('.lyrics')
       // 点击第三行 (time=10)
-      await lines[2].trigger('click')
+      await lines[2]!.trigger('click')
       await nextTick()
 
       const store = mocks.playerStore as { seek: ReturnType<typeof vi.fn> }

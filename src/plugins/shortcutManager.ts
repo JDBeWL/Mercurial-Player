@@ -74,7 +74,7 @@ class ShortcutManager {
     // 如果只有修饰键，不处理
     if (
       keys.length === 0 ||
-      (keys.length === 1 && ['ctrl', 'alt', 'shift', 'meta'].includes(keys[0]))
+      (keys.length === 1 && ['ctrl', 'alt', 'shift', 'meta'].includes(keys[0]!))
     ) {
       return
     }

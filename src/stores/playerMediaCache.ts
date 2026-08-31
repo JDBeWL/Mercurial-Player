@@ -46,7 +46,7 @@ export async function cachePlaylistMetadata(store: PlayerStore, playlist: Track[
       return
     }
 
-    const track = playlist[i]
+    const track = playlist[i]!
     if (!track.path || cache.has(track.path)) continue
 
     cache.set(track.path, {

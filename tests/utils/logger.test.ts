@@ -17,7 +17,7 @@ describe('Logger', () => {
 
       const history = logger.getHistory()
       expect(history).toHaveLength(1)
-      expect(history[0].message).toBe('test message')
+      expect(history[0]!.message).toBe('test message')
     })
 
     it('should not log when level is below minimum', () => {
@@ -46,37 +46,37 @@ describe('Logger', () => {
       logger.debug('debug test')
       const history = logger.getHistory()
 
-      expect(history[0].level).toBe('DEBUG')
+      expect(history[0]!.level).toBe('DEBUG')
     })
 
     it('should log info messages', () => {
       logger.info('info test')
       const history = logger.getHistory()
 
-      expect(history[0].level).toBe('INFO')
+      expect(history[0]!.level).toBe('INFO')
     })
 
     it('should log warn messages', () => {
       logger.warn('warn test')
       const history = logger.getHistory()
 
-      expect(history[0].level).toBe('WARN')
+      expect(history[0]!.level).toBe('WARN')
     })
 
     it('should log error messages', () => {
       logger.error('error test')
       const history = logger.getHistory()
 
-      expect(history[0].level).toBe('ERROR')
+      expect(history[0]!.level).toBe('ERROR')
     })
 
     it('should include additional arguments', () => {
       logger.info('message', { key: 'value' }, 123)
       const history = logger.getHistory()
 
-      expect(history[0].args).toHaveLength(2)
-      expect(history[0].args![0]).toEqual({ key: 'value' })
-      expect(history[0].args![1]).toBe(123)
+      expect(history[0]!.args).toHaveLength(2)
+      expect(history[0]!.args![0]).toEqual({ key: 'value' })
+      expect(history[0]!.args![1]).toBe(123)
     })
 
     it('should capture error stack for ERROR level', () => {
@@ -84,7 +84,7 @@ describe('Logger', () => {
       logger.error('error occurred', error)
       const history = logger.getHistory()
 
-      expect(history[0].stack).toBeDefined()
+      expect(history[0]!.stack).toBeDefined()
     })
   })
 
@@ -108,8 +108,8 @@ describe('Logger', () => {
 
       const limited = logger.getHistory(2)
       expect(limited).toHaveLength(2)
-      expect(limited[0].message).toBe('two')
-      expect(limited[1].message).toBe('three')
+      expect(limited[0]!.message).toBe('two')
+      expect(limited[1]!.message).toBe('three')
     })
 
     it('should clear history', () => {
@@ -203,7 +203,7 @@ describe('Logger', () => {
       logger.info('test')
       const history = logger.getHistory()
 
-      expect(history[0].timestamp).toMatch(/^\d{2}:\d{2}:\d{2}\.\d{3}$/)
+      expect(history[0]!.timestamp).toMatch(/^\d{2}:\d{2}:\d{2}\.\d{3}$/)
     })
   })
 })

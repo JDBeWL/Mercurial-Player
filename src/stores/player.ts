@@ -192,7 +192,7 @@ export const usePlayerStore = defineStore('player', {
       ) {
         return null
       }
-      return state.lyrics[state.currentLyricIndex]
+      return state.lyrics[state.currentLyricIndex]!
     },
   },
 
@@ -383,7 +383,7 @@ export const usePlayerStore = defineStore('player', {
       if (this.currentTrack) {
         this.playTrack(this.currentTrack)
       } else if (this.playlist.length > 0) {
-        this.playTrack(this.playlist[0])
+        this.playTrack(this.playlist[0]!)
       }
     },
 
@@ -652,10 +652,10 @@ export const usePlayerStore = defineStore('player', {
         }
       } else if (this.repeatMode === 'list') {
         const nextIndex = (this.currentTrackIndex + 1) % this.playlist.length
-        await this.playTrack(this.playlist[nextIndex])
+        await this.playTrack(this.playlist[nextIndex]!)
       } else if (this.currentTrackIndex < this.playlist.length - 1) {
         const nextIndex = this.currentTrackIndex + 1
-        await this.playTrack(this.playlist[nextIndex])
+        await this.playTrack(this.playlist[nextIndex]!)
       } else {
         this.isPlaying = false
         this.currentTime = this.duration
@@ -740,7 +740,7 @@ export const usePlayerStore = defineStore('player', {
         nextIndex = (this.currentTrackIndex + 1) % this.playlist.length
       }
 
-      await this.playTrack(this.playlist[nextIndex])
+      await this.playTrack(this.playlist[nextIndex]!)
     },
 
     async previousTrack(): Promise<void> {
@@ -772,7 +772,7 @@ export const usePlayerStore = defineStore('player', {
         }
       }
 
-      await this.playTrack(this.playlist[prevIndex])
+      await this.playTrack(this.playlist[prevIndex]!)
     },
 
     // --- 播放控制 ---
@@ -920,7 +920,7 @@ export const usePlayerStore = defineStore('player', {
       this._shufflePosition = -1
       this._shuffleHistory = []
       if (playlist && playlist.length > 0) {
-        const firstTrack = playlist[0]
+        const firstTrack = playlist[0]!
         this.currentTrack = firstTrack
         this.duration = firstTrack.duration || 0
         this.audioInfo = {

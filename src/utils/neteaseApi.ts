@@ -91,7 +91,7 @@ export class NeteaseAPI {
       if (!bestMatch) {
         // 如果没有找到匹配，使用第一个结果
         if (songs.length > 0) {
-          return await this.getLyrics(songs[0].id)
+          return await this.getLyrics(songs[0]!.id)
         }
         return null
       }

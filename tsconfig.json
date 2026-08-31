@@ -16,6 +16,7 @@
 
     /* Linting - 与 ESLint 标准对齐,让 typecheck 也能捕获未使用代码 */
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,

@@ -78,7 +78,7 @@ describe('addTrackNextInPlaylist', () => {
   it('unshifts when playlist is empty or no current track', () => {
     const empty = makeStore([], -1)
     addTrackNextInPlaylist(empty, track('x'))
-    expect(empty.playlist[0].path).toBe('x')
+    expect(empty.playlist[0]!.path).toBe('x')
   })
 
   it('inserts after the current track', () => {

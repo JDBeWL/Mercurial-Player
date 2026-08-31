@@ -484,7 +484,7 @@ const playAll = async (): Promise<void> => {
     handleClose()
   } else if (enhancedPlaylists.value.length > 0) {
     // 如果没有全部歌曲播放列表，则播放第一个播放列表
-    const firstPlaylist = enhancedPlaylists.value[0]
+    const firstPlaylist = enhancedPlaylists.value[0]!
     await playerStore.loadPlaylist(firstPlaylist.files)
     playerStore.play()
     handleClose()
@@ -496,7 +496,7 @@ const loadPlaylist = async (playlist: EnhancedPlaylist): Promise<void> => {
   await playerStore.loadPlaylist(playlist.files)
   // 解码第一首音频但不播放
   if (playlist.files && playlist.files.length > 0) {
-    await playerStore.playTrack(playlist.files[0])
+    await playerStore.playTrack(playlist.files[0]!)
     playerStore.pause()
   }
   handleClose()

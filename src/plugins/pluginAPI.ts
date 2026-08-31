@@ -73,10 +73,10 @@ function dataURLToBlob(
   if (options.mimeType) {
     mime = options.mimeType
   } else {
-    const mimeMatch = arr[0].match(/:(.*?);/)
-    mime = mimeMatch ? mimeMatch[1] : (options.fallbackMime ?? 'application/octet-stream')
+    const mimeMatch = arr[0]!.match(/:(.*?);/)
+    mime = mimeMatch ? mimeMatch[1]! : (options.fallbackMime ?? 'application/octet-stream')
   }
-  const bstr = atob(arr[1])
+  const bstr = atob(arr[1]!)
   let n = bstr.length
   const u8arr = new Uint8Array(n)
   while (n--) {

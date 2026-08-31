@@ -72,7 +72,7 @@ function getRelativeLuminance(r: number, g: number, b: number): number {
     return val <= 0.03928 ? val / 12.92 : Math.pow((val + 0.055) / 1.055, 2.4)
   })
 
-  return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs
+  return 0.2126 * rs! + 0.7152 * gs! + 0.0722 * bs!
 }
 
 /**
@@ -202,8 +202,8 @@ export function getColorFromCSSVar(varName: string): string | null {
     const matches = value.match(/\d+/g)
     if (matches && matches.length >= 3) {
       const r = parseInt(matches[0])
-      const g = parseInt(matches[1])
-      const b = parseInt(matches[2])
+      const g = parseInt(matches[1]!)
+      const b = parseInt(matches[2]!)
       return `#${[r, g, b].map((val) => val.toString(16).padStart(2, '0')).join('')}`
     }
   }

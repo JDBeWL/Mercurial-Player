@@ -10,11 +10,12 @@ import {
   PluginPermission,
   type PluginAPI,
   type PluginInstance,
-  type PluginMainFunction,
   type PluginManifest,
+  type PluginMainFunction,
   type PluginPermissionType,
 } from './pluginTypes'
-import { validatePluginCode, createSafeConsole, createSafeTimers } from './pluginSandbox'
+import { validatePluginCode } from './pluginSandbox'
+import { importPluginModule } from './moduleExecutor'
 
 const builtinPluginModules = import.meta.glob<{
   default: (api: PluginAPI) => Promise<PluginInstance> | PluginInstance
@@ -35,7 +36,7 @@ for (const [manifestPath, manifest] of Object.entries(builtinManifests)) {
   const baseDir = manifestPath.replace(/manifest\.json$/, '')
   for (const modulePath of Object.keys(builtinPluginModules)) {
     if (modulePath.startsWith(baseDir)) {
-      builtinPluginMap.set(pluginId, builtinPluginModules[modulePath])
+      builtinPluginMap.set(pluginId, builtinPluginModules[modulePath]!)
       break
     }
   }
@@ -134,8 +135,7 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
         return await pluginFactory(api)
       }
     } else {
-      // 外置插件
-      // 注意：production 环境 CSP 不允许 new Function，运行时安装的插件需改为 ES 模块格式
+      // 外置插件：以 ES 模块方式执行（blob URL + 动态 import，生产 CSP 兼容）
       const mainCode = await invoke<string>('read_plugin_main', {
         path: pluginPath,
         main: manifest.main || 'index.js',
@@ -148,7 +148,12 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
         throw new Error(`插件安全检查失败: ${(error as Error).message}`)
       }
 
-      mainFn = createPluginFunction(mainCode, manifest.id)
+      try {
+        mainFn = await importPluginModule(mainCode)
+      } catch (error) {
+        logger.error(`插件模块加载失败: ${manifest.id}`, error)
+        throw error
+      }
     }
 
     await pluginManager.register({
@@ -169,129 +174,6 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
   } catch (error) {
     logger.error(`插件加载失败: ${pluginPath}`, error)
     throw error
-  }
-}
-
-// 安全参数类型
-interface SafeParams {
-  [key: string]: unknown
-  console: {
-    log: (...args: unknown[]) => void
-    info: (...args: unknown[]) => void
-    warn: (...args: unknown[]) => void
-    error: (...args: unknown[]) => void
-    debug: (...args: unknown[]) => void
-  }
-  setTimeout: (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => number
-  clearTimeout: (id: number) => void
-  setInterval: (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => number
-  clearInterval: (id: number) => void
-  api: PluginAPI
-}
-
-/**
- * 创建插件函数
- */
-function createPluginFunction(code: string, pluginId: string) {
-  return async (api: PluginAPI) => {
-    try {
-      const safeConsole = createSafeConsole(api.log)
-
-      // 安全的定时器（带清理追踪）
-      const safeTimers = createSafeTimers((e) => api.log.error('定时器错误:', e))
-
-      const safeParams: SafeParams = {
-        Object,
-        Array,
-        String,
-        Number,
-        Boolean,
-        Date,
-        RegExp,
-        Error,
-        TypeError,
-        RangeError,
-        SyntaxError,
-        Map,
-        Set,
-        WeakMap,
-        WeakSet,
-        JSON: Object.freeze({ parse: JSON.parse, stringify: JSON.stringify }),
-        Math,
-        Promise,
-        encodeURIComponent,
-        decodeURIComponent,
-        encodeURI,
-        decodeURI,
-        btoa,
-        atob,
-        isNaN,
-        isFinite,
-        parseInt,
-        parseFloat,
-        NaN,
-        Infinity,
-        console: safeConsole,
-        setTimeout: safeTimers.setTimeout,
-        clearTimeout: safeTimers.clearTimeout,
-        setInterval: safeTimers.setInterval,
-        clearInterval: safeTimers.clearInterval,
-        api,
-        window: undefined,
-        document: undefined,
-        globalThis: undefined,
-        self: undefined,
-        top: undefined,
-        parent: undefined,
-        frames: undefined,
-        eval: undefined,
-        Function: undefined,
-        process: undefined,
-        require: undefined,
-        module: undefined,
-        exports: undefined,
-        __dirname: undefined,
-        __filename: undefined,
-        XMLHttpRequest: undefined,
-        fetch: undefined,
-        WebSocket: undefined,
-        Worker: undefined,
-        SharedWorker: undefined,
-        localStorage: undefined,
-        sessionStorage: undefined,
-        indexedDB: undefined,
-        navigator: undefined,
-        location: undefined,
-        history: undefined,
-        alert: undefined,
-        confirm: undefined,
-        prompt: undefined,
-        open: undefined,
-        close: undefined,
-        Proxy: undefined,
-        Reflect: undefined,
-        importScripts: undefined,
-      }
-
-      const paramNames = Object.keys(safeParams)
-      const paramValues = Object.values(safeParams)
-
-      const wrappedCode = `
-        ${code}
-        return typeof plugin !== 'undefined' ? plugin : {};
-      `
-
-      const fn = new Function(...paramNames, wrappedCode)
-      const result = fn(...paramValues)
-
-      if (result && typeof result.then === 'function') {
-        return await result
-      }
-      return result
-    } catch (error) {
-      logger.error(`插件执行失败: ${pluginId}`, error)
-      throw error
-    }
   }
 }
 

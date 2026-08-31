@@ -254,8 +254,27 @@ export interface SaveAsOptions {
 
 export type EventCallback = (data?: unknown) => void
 
-// 插件主函数类型
-export type PluginMainFunction = (api: PluginAPI) => Promise<PluginInstance> | PluginInstance
+// 外置插件模块可解构使用的沙箱全局子集
+// (安全 console 代理与带清理追踪的定时器,由 pluginSandbox 在激活时注入)
+export interface PluginSandboxGlobals {
+  console: {
+    log: (...args: unknown[]) => void
+    info: (...args: unknown[]) => void
+    warn: (...args: unknown[]) => void
+    error: (...args: unknown[]) => void
+    debug: (...args: unknown[]) => void
+  }
+  setTimeout: (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => number
+  clearTimeout: (id: number) => void
+  setInterval: (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => number
+  clearInterval: (id: number) => void
+}
+
+// 插件主函数类型(外置插件可接收第二个参数 globals 以使用沙箱全局对象)
+export type PluginMainFunction = (
+  api: PluginAPI,
+  globals?: PluginSandboxGlobals,
+) => Promise<PluginInstance> | PluginInstance
 
 // 插件实例类型
 export interface PluginInstance {

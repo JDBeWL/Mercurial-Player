@@ -188,7 +188,7 @@ const enrichTrackInfo = (tracks: Array<{ path: string; count: number }>): MostPl
 const extractFileName = (path: string): string => {
   if (!path) return t('config.unknown')
   const parts = path.replace(/\\/g, '/').split('/')
-  const filename = parts[parts.length - 1]
+  const filename = parts[parts.length - 1]!
   return filename.replace(/\.[^/.]+$/, '')
 }
 

@@ -180,7 +180,7 @@ export class FileUtils {
     )
 
     if (lastSeparatorIndex < 0) return ''
-    if (lastSeparatorIndex === 0) return normalizedPath[0]
+    if (lastSeparatorIndex === 0) return normalizedPath[0]!
 
     return normalizedPath.slice(0, lastSeparatorIndex).replace(/\\/g, '/')
   }
@@ -210,9 +210,9 @@ export class FileUtils {
     const validSegments = segments.filter((segment) => segment.length > 0)
     if (validSegments.length === 0) return ''
 
-    const separator = validSegments[0].includes('\\') ? '\\' : '/'
+    const separator = validSegments[0]!.includes('\\') ? '\\' : '/'
     const [firstSegment, ...restSegments] = validSegments
-    const normalizedFirst = firstSegment.replace(/[\\/]+$/, '')
+    const normalizedFirst = firstSegment!.replace(/[\\/]+$/, '')
     const normalizedRest = restSegments.map((segment) => segment.replace(/^[\\/]+|[\\/]+$/g, ''))
 
     return [normalizedFirst, ...normalizedRest].filter(Boolean).join(separator)

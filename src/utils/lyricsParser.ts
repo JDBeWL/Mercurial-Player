@@ -18,7 +18,7 @@ export function findLyricIndex(lyrics: Pick<LyricLine, 'time'>[], time: number):
   let idx = -1
   while (l <= r) {
     const mid = (l + r) >> 1
-    if (lyrics[mid].time <= time) {
+    if (lyrics[mid]!.time <= time) {
       idx = mid
       l = mid + 1
     } else {
@@ -107,24 +107,26 @@ export class LyricsParser {
         await yieldToMain()
       }
 
-      const line = lines[i]
+      const line = lines[i]!
       const linePattern = new RegExp(pattern)
       const timestamps: Array<{ time: number; index: number }> = []
       let match: RegExpExecArray | null
       while ((match = linePattern.exec(line)) !== null) {
         let time: number
         if (match[1] !== undefined) {
-          time = parseInt(match[1]) * 60 + parseInt(match[2]) + parseInt(match[3]) / 100
+          time = parseInt(match[1]) * 60 + parseInt(match[2]!) + parseInt(match[3]!) / 100
         } else {
           time =
-            parseInt(match[4]) * 60 + parseInt(match[5]) + parseInt(match[6].padEnd(3, '0')) / 1000
+            parseInt(match[4]!) * 60 +
+            parseInt(match[5]!) +
+            parseInt(match[6]!.padEnd(3, '0')) / 1000
         }
         timestamps.push({ time, index: match.index })
       }
       if (timestamps.length < 1) continue
       const text = line.replace(linePattern, '').trim()
       if (!text) continue
-      const startTime = timestamps[0].time
+      const startTime = timestamps[0]!.time
       resultMap[startTime] = resultMap[startTime] || { time: startTime, texts: [], karaoke: null }
       if (timestamps.length > 1) {
         resultMap[startTime].karaoke = {
@@ -145,7 +147,7 @@ export class LyricsParser {
     const dialogues: Array<{ startTime: number; endTime: number; style: string; text: string }> = []
     const toSeconds = (t: string): number => {
       const [h, m, s] = t.split(':')
-      return parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(s)
+      return parseInt(h!) * 3600 + parseInt(m!) * 60 + parseFloat(s!)
     }
     const CHUNK_SIZE = 100
 
@@ -154,13 +156,13 @@ export class LyricsParser {
         await yieldToMain()
       }
 
-      const line = lines[i]
+      const line = lines[i]!
       if (!line.startsWith('Dialogue:')) continue
       const parts = line.split(',')
       if (parts.length < 10) continue
-      const start = parts[1].trim()
-      const end = parts[2].trim()
-      const style = parts[3].trim()
+      const start = parts[1]!.trim()
+      const end = parts[2]!.trim()
+      const style = parts[3]!.trim()
       const text = parts.slice(9).join(',').trim()
       dialogues.push({ startTime: toSeconds(start), endTime: toSeconds(end), style, text })
     }
@@ -260,8 +262,8 @@ export class LyricsParser {
         let accTime = group.startTime
         let match: RegExpExecArray | null
         while ((match = karaokeTag.exec(text)) !== null) {
-          const duration = parseInt(match[1]) * 0.01
-          words.push({ text: match[2], start: accTime, end: accTime + duration })
+          const duration = parseInt(match[1]!) * 0.01
+          words.push({ text: match[2]!, start: accTime, end: accTime + duration })
           accTime += duration
         }
         return words
@@ -302,8 +304,8 @@ export class LyricsParser {
 
       if (timeMatches.length > 0 && textPart) {
         for (const match of timeMatches) {
-          const minutes = parseInt(match[1])
-          const seconds = parseInt(match[2])
+          const minutes = parseInt(match[1]!)
+          const seconds = parseInt(match[2]!)
           const milliseconds = match[3] ? parseInt(match[3].padEnd(3, '0').substring(0, 3)) : 0
           const time = minutes * 60 + seconds + milliseconds / 1000
           lyrics.push({ time, text: textPart, texts: [textPart] })
@@ -311,13 +313,13 @@ export class LyricsParser {
       } else {
         const singleMatch = trimmedLine.match(timeRegex)
         if (singleMatch) {
-          const minutes = parseInt(singleMatch[1])
-          const seconds = parseInt(singleMatch[2])
+          const minutes = parseInt(singleMatch[1]!)
+          const seconds = parseInt(singleMatch[2]!)
           const milliseconds = singleMatch[3]
             ? parseInt(singleMatch[3].padEnd(3, '0').substring(0, 3))
             : 0
           const time = minutes * 60 + seconds + milliseconds / 1000
-          const text = singleMatch[4].trim()
+          const text = singleMatch[4]!.trim()
           if (text) {
             lyrics.push({ time, text, texts: [text] })
           }
@@ -367,7 +369,7 @@ export class LyricsParser {
           const textIndex = formatFields.indexOf('Text')
 
           if (startIndex !== -1 && textIndex !== -1) {
-            const startTime = this.parseASSTime(parts[startIndex])
+            const startTime = this.parseASSTime(parts[startIndex]!)
             const text = parts
               .slice(textIndex)
               .join(',')
@@ -398,14 +400,14 @@ export class LyricsParser {
       const lines = block.trim().split('\n')
       if (lines.length < 2) continue
 
-      const timeMatch = lines[1].match(timeRegex)
+      const timeMatch = lines[1]!.match(timeRegex)
       if (!timeMatch) continue
 
       const startTime =
-        parseInt(timeMatch[1]) * 3600 +
-        parseInt(timeMatch[2]) * 60 +
-        parseInt(timeMatch[3]) +
-        parseInt(timeMatch[4]) / 1000
+        parseInt(timeMatch[1]!) * 3600 +
+        parseInt(timeMatch[2]!) * 60 +
+        parseInt(timeMatch[3]!) +
+        parseInt(timeMatch[4]!) / 1000
       const text = lines.slice(2).join('\n').trim()
 
       if (text) {
@@ -424,10 +426,10 @@ export class LyricsParser {
     const match = timeStr.match(/^(\d+):(\d{2}):(\d{2})\.(\d{2})$/)
     if (match) {
       return (
-        parseInt(match[1]) * 3600 +
-        parseInt(match[2]) * 60 +
-        parseInt(match[3]) +
-        parseInt(match[4]) / 100
+        parseInt(match[1]!) * 3600 +
+        parseInt(match[2]!) * 60 +
+        parseInt(match[3]!) +
+        parseInt(match[4]!) / 100
       )
     }
     return null
@@ -489,7 +491,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             const cs = Math.floor((t % 1) * 100)
             return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`
           }
-          const nextTime = index < lyrics.length - 1 ? lyrics[index + 1].time : item.time + 5
+          const nextTime = index < lyrics.length - 1 ? lyrics[index + 1]!.time : item.time + 5
           return `Dialogue: 0,${formatTime(item.time)},${formatTime(nextTime)},Default,,0,0,0,,${item.text || ''}`
         })
         .join('\n')
@@ -506,7 +508,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           const ms = Math.floor((t % 1) * 1000)
           return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`
         }
-        const nextTime = index < lyrics.length - 1 ? lyrics[index + 1].time : item.time + 5
+        const nextTime = index < lyrics.length - 1 ? lyrics[index + 1]!.time : item.time + 5
         return `${index + 1}\n${formatTime(item.time)} --> ${formatTime(nextTime)}\n${item.text || ''}\n`
       })
       .join('\n')

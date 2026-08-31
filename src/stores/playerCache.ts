@@ -86,7 +86,7 @@ export class PlayerCacheManager {
     if (this.fileExistsCache) {
       const keys = Array.from(this.fileExistsCache.keys())
       for (let i = 0; i < keys.length; i++) {
-        this.fileExistsCache.get(keys[i])
+        this.fileExistsCache.get(keys[i]!)
         if (i > 0 && i % CLEANUP_CHUNK_SIZE === 0) {
           await new Promise((resolve) => setTimeout(resolve, 0))
         }
@@ -95,7 +95,7 @@ export class PlayerCacheManager {
     if (this.metadataCache) {
       const keys = Array.from(this.metadataCache.keys())
       for (let i = 0; i < keys.length; i++) {
-        this.metadataCache.get(keys[i])
+        this.metadataCache.get(keys[i]!)
         if (i > 0 && i % CLEANUP_CHUNK_SIZE === 0) {
           await new Promise((resolve) => setTimeout(resolve, 0))
         }

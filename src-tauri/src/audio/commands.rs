@@ -356,7 +356,7 @@ pub async fn set_audio_device(
     let result = if exclusive_mode {
         switch_to_wasapi_exclusive(&app, &state, &device_name, current_time).await
     } else {
-        switch_to_shared_mode(&app, &state, &device_name, current_time)
+        switch_to_shared_mode(&app, &state, &device_name, current_time).await
     };
 
     // 如果切换成功，更新设备监听器
@@ -408,9 +408,18 @@ async fn switch_to_wasapi_exclusive(
         let _ = old_wasapi.take();
     }
 
-    let wasapi_playback = WasapiExclusivePlayback::new();
+    // WASAPI 独占模式初始化是阻塞系统调用(内部含重试 sleep 与 COM 操作),
+    // 放到阻塞线程池执行,避免阻塞 async runtime 线程
+    let dev_name = device_name.to_string();
+    let (wasapi_playback, init_result) = tauri::async_runtime::spawn_blocking(move || {
+        let playback = WasapiExclusivePlayback::new();
+        let result = playback.initialize(Some(&dev_name));
+        (playback, result)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("WASAPI 初始化任务执行失败: {e}")))?;
 
-    match wasapi_playback.initialize(Some(device_name)) {
+    match init_result {
         Ok((sample_rate, channels, actual_device_name)) => {
             log::info!(
                 "WASAPI Exclusive initialized: {actual_device_name} @ {sample_rate}Hz, {channels} channels"
@@ -488,9 +497,9 @@ async fn switch_to_wasapi_exclusive(
     ))
 }
 
-fn switch_to_shared_mode(
+async fn switch_to_shared_mode(
     app: &AppHandle,
-    state: &State<AppState>,
+    state: &State<'_, AppState>,
     device_name: &str,
     current_time: Option<f32>,
 ) -> Result<(), AppError> {
@@ -535,52 +544,49 @@ fn switch_to_shared_mode(
         let _ = wasapi_guard.take();
     }
 
-    // 3. 等待设备释放 (WASAPI 独占模式释放有延迟)
-    // 短暂 sleep + 重试机制,避免设备未完全释放就尝试打开
+    // 3+4. 尝试打开新的 cpal/rodio stream (带重试,等待 WASAPI 独占模式释放设备)
+    // 设备枚举与流创建是阻塞系统调用,放到阻塞线程池执行避免占用 async runtime;
+    // 重试间隔使用 tokio 异步 sleep,等待期间不阻塞 worker 线程
     // 注意:output_devices() 返回迭代器,设备只能消费一次,因此每次重试都要重新获取
-    let get_device = || -> Result<cpal::Device, AppError> {
-        let host = cpal::default_host();
-        host.output_devices()
-            .map_err(|e| format!("Failed to get output devices: {e}"))?
-            .find(|d| super::device::get_device_friendly_name(d).is_some_and(|n| n == device_name))
-            .ok_or_else(|| format!("Audio device not found: {device_name}").into())
-    };
-
-    // 4. 尝试打开新的 cpal/rodio stream (带重试)
-    // WASAPI 独占模式释放后,OS 可能需要短暂时间才让其他程序打开设备
     let new_mixer_sink = {
         let mut last_err: Option<AppError> = None;
         let mut sink: Option<rodio::MixerDeviceSink> = None;
         for attempt in 1..=5 {
-            let dev = match get_device() {
-                Ok(d) => d,
-                Err(e) => {
-                    last_err = Some(e);
-                    std::thread::sleep(Duration::from_millis(50));
-                    continue;
-                }
-            };
-            match rodio::stream::DeviceSinkBuilder::from_device(dev) {
-                Ok(builder) => match builder.open_stream() {
-                    Ok(s) => {
-                        if attempt > 1 {
-                            log::info!("cpal stream opened after {attempt} attempts");
-                        }
-                        sink = Some(s);
-                        break;
-                    }
-                    Err(e) => {
-                        last_err = Some(format!(
+            let dev_name = device_name.to_string();
+            let open_result = tauri::async_runtime::spawn_blocking(
+                move || -> Result<rodio::MixerDeviceSink, AppError> {
+                    let host = cpal::default_host();
+                    let dev = host
+                        .output_devices()
+                        .map_err(|e| format!("Failed to get output devices: {e}"))?
+                        .find(|d| {
+                            super::device::get_device_friendly_name(d).is_some_and(|n| n == dev_name)
+                        })
+                        .ok_or_else(|| format!("Audio device not found: {dev_name}"))?;
+                    let builder = rodio::stream::DeviceSinkBuilder::from_device(dev)
+                        .map_err(|e| format!("Failed to create device sink builder: {e}"))?;
+                    Ok(builder.open_stream().map_err(|e| {
+                        format!(
                             "Failed to create mixer sink: {e}. The device may be in use by another application."
-                        ).into());
-                        log::warn!("cpal open_stream attempt {attempt}/5 failed: {e}");
-                        std::thread::sleep(Duration::from_millis(50));
-                    }
+                        )
+                    })?)
                 },
+            )
+            .await
+            .map_err(|e| AppError::msg(format!("cpal stream 创建任务执行失败: {e}")))?;
+
+            match open_result {
+                Ok(s) => {
+                    if attempt > 1 {
+                        log::info!("cpal stream opened after {attempt} attempts");
+                    }
+                    sink = Some(s);
+                    break;
+                }
                 Err(e) => {
-                    last_err = Some(format!("Failed to create device sink builder: {e}").into());
-                    log::warn!("cpal DeviceSinkBuilder attempt {attempt}/5 failed: {e}");
-                    std::thread::sleep(Duration::from_millis(50));
+                    log::warn!("cpal open_stream attempt {attempt}/5 failed: {e}");
+                    last_err = Some(e);
+                    tokio::time::sleep(Duration::from_millis(50)).await;
                 }
             }
         }
@@ -692,7 +698,7 @@ pub async fn toggle_exclusive_mode(
     let result = if enabled {
         switch_to_wasapi_exclusive(&app, &state, &device_name, current_time).await
     } else {
-        switch_to_shared_mode(&app, &state, &device_name, current_time)
+        switch_to_shared_mode(&app, &state, &device_name, current_time).await
     };
 
     match result {

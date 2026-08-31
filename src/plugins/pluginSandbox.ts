@@ -224,10 +224,15 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
 
     /**
      * 在沙箱中执行代码
+     *
+     * 第二参数 globals 注入沙箱全局对象（安全 console 代理 + 可清理的定时器），
+     * 供外置插件模块的旧格式包装代码解构使用（新格式/内置插件可忽略）
      */
     async execute<T>(fn: PluginMainFunction | (() => T | Promise<T>)): Promise<T | PluginInstance> {
       try {
-        return await (fn as (api: PluginAPI) => Promise<T | PluginInstance>)(api)
+        return await (
+          fn as (api: PluginAPI, globals?: AllowedGlobals) => Promise<T | PluginInstance>
+        )(api, this.globals)
       } catch (e) {
         api.log.error('插件执行错误:', e)
         throw e
