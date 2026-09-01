@@ -27,19 +27,6 @@ interface AdjustColorOptions extends ContrastCheckOptions {
   step?: number
 }
 
-interface ColorPair {
-  foreground: string
-  background: string
-  name: string
-  largeText?: boolean
-}
-
-interface ColorPairResult extends ContrastCheckResult {
-  name: string
-  foreground: string
-  background: string
-}
-
 /**
  * 将十六进制颜色转换为 RGB
  */
@@ -209,36 +196,4 @@ export function getColorFromCSSVar(varName: string): string | null {
   }
 
   return value.startsWith('#') ? value : null
-}
-
-/**
- * 批量检查颜色组合
- */
-export function checkColorPairs(
-  colorPairs: ColorPair[],
-  level: 'AA' | 'AAA' = 'AA',
-): ColorPairResult[] {
-  return colorPairs.map(({ foreground, background, name, largeText = false }) => {
-    const check = checkContrast(foreground, background, { level, largeText })
-    return {
-      name,
-      foreground,
-      background,
-      ...check,
-    }
-  })
-}
-
-/**
- * WCAG 标准常量
- */
-export const WCAG_STANDARDS = {
-  AA: {
-    normal: 4.5,
-    large: 3.0,
-  },
-  AAA: {
-    normal: 7.0,
-    large: 4.5,
-  },
 }

@@ -508,7 +508,12 @@ export const usePlayerStore = defineStore('player', {
         format: metadata.format || null,
       }
 
-      invoke('pause_track').catch((err) => logger.warn('pause before play:', err))
+      // 串行等待 pause 完成后再 play,避免 pause 晚于 play 返回导致新曲目被立即暂停
+      try {
+        await invoke('pause_track')
+      } catch (err) {
+        logger.warn('pause before play:', err)
+      }
 
       try {
         logger.info('Playing track:', resolvedPath)

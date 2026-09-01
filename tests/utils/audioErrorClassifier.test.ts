@@ -25,6 +25,24 @@ describe('classifyAudioInvokeError', () => {
     ).toBe(ErrorType.AUDIO_DEVICE_ERROR)
   })
 
+  it('should classify Chinese-locale device errors as AUDIO_DEVICE_ERROR', () => {
+    expect(classifyAudioInvokeError('无法初始化音频设备: 拒绝访问')).toBe(
+      ErrorType.AUDIO_DEVICE_ERROR,
+    )
+    expect(classifyAudioInvokeError('音频设备不可用')).toBe(ErrorType.AUDIO_DEVICE_ERROR)
+    expect(classifyAudioInvokeError('另一个程序正在使用该音频设备')).toBe(
+      ErrorType.AUDIO_DEVICE_ERROR,
+    )
+  })
+
+  it('should NOT report internal state errors as device errors', () => {
+    // "not initialized" 是播放器/解码器内部状态错误,不是音频设备故障
+    expect(classifyAudioInvokeError('WASAPI player not initialized')).toBe(
+      ErrorType.AUDIO_PLAYBACK_ERROR,
+    )
+    expect(classifyAudioInvokeError('Decoder not initialized')).toBe(ErrorType.AUDIO_PLAYBACK_ERROR)
+  })
+
   it('should default to AUDIO_PLAYBACK_ERROR when unknown', () => {
     expect(classifyAudioInvokeError(new Error('some other error'))).toBe(
       ErrorType.AUDIO_PLAYBACK_ERROR,

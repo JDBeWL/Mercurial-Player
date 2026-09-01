@@ -352,6 +352,9 @@ export default {
     // 挂载初始化期间由 onMounted 显式定位，抑制 activeIndex 变化触发的自动跟随滚动
     let suppressAutoScrollOnMount = false
 
+    // handleLyricClick 中 forceSync 连锁 rAF 的 id 集合,卸载时取消
+    const syncFrameIds = new Set<number>()
+
     // 监听 activeIndex 变化以滚动
     watch(activeIndex, () => {
       if (suppressAutoScrollOnMount) return
@@ -383,8 +386,18 @@ export default {
       const forceSync = (): void => {
         visualTime.value = playerStore.currentTime
       }
-      requestAnimationFrame(forceSync)
-      requestAnimationFrame(() => requestAnimationFrame(forceSync))
+      // 记录 rAF id 以便卸载时取消连锁调用
+      syncFrameIds.forEach((id) => cancelAnimationFrame(id))
+      syncFrameIds.clear()
+      const trackFrame = (fn: () => void): void => {
+        const id = requestAnimationFrame(() => {
+          syncFrameIds.delete(id)
+          fn()
+        })
+        syncFrameIds.add(id)
+      }
+      trackFrame(forceSync)
+      trackFrame(() => trackFrame(forceSync))
 
       // 明确传入目标 index，確保即使 DOM class 更新滞后也能正确找到元素
       nextTick(() => scrollToActiveLyric(true, true, index))
@@ -428,6 +441,9 @@ export default {
       stopAnimationLoop()
       // 清理滚动冷却定时器与状态
       dispose()
+      // 取消点击跳转后 pending 的 forceSync 连锁 rAF
+      syncFrameIds.forEach((id) => cancelAnimationFrame(id))
+      syncFrameIds.clear()
       // 清理 resize 事件监听器
       window.removeEventListener('resize', handleResize)
     })

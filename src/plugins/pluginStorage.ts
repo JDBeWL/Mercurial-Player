@@ -30,7 +30,14 @@ export function createPluginStorage(pluginId: string): PluginPersistentStorage {
   try {
     const saved = localStorage.getItem(storageKey)
     if (saved) {
-      savedData = JSON.parse(saved)
+      const parsed: unknown = JSON.parse(saved)
+      // 校验类型:localStorage 中可能残留 "null" / "5" / "[]" 等非普通对象值,
+      // 传入 reactive 会导致存储行为异常
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        savedData = parsed as Record<string, unknown>
+      } else {
+        logger.warn(`插件 ${pluginId} 存储数据格式异常,已重置`)
+      }
     }
   } catch (e) {
     logger.warn(`加载插件 ${pluginId} 存储失败:`, e)

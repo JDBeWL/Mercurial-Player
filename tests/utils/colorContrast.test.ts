@@ -3,9 +3,7 @@ import {
   getContrastRatio,
   checkContrast,
   adjustColorForContrast,
-  checkColorPairs,
   getColorFromCSSVar,
-  WCAG_STANDARDS,
 } from '@/utils/colorContrast'
 
 describe('colorContrast', () => {
@@ -103,46 +101,6 @@ describe('colorContrast', () => {
       const adjusted = adjustColorForContrast('#2c2c2c', '#1a1a1a', { level: 'AA' })
       const check = checkContrast(adjusted, '#1a1a1a', { level: 'AA' })
       expect(check.pass).toBe(true)
-    })
-  })
-
-  describe('checkColorPairs', () => {
-    it('should check multiple color pairs', () => {
-      const pairs = [
-        { foreground: '#000000', background: '#ffffff', name: 'Black on White' },
-        { foreground: '#ffffff', background: '#000000', name: 'White on Black' },
-      ]
-
-      const results = checkColorPairs(pairs)
-
-      expect(results).toHaveLength(2)
-      expect(results[0]!.name).toBe('Black on White')
-      expect(results[0]!.pass).toBe(true)
-      expect(results[1]!.name).toBe('White on Black')
-      expect(results[1]!.pass).toBe(true)
-    })
-
-    it('should respect largeText option per pair', () => {
-      const pairs = [
-        { foreground: '#666666', background: '#ffffff', name: 'Normal', largeText: false },
-        { foreground: '#666666', background: '#ffffff', name: 'Large', largeText: true },
-      ]
-
-      const results = checkColorPairs(pairs)
-      expect(results[0]!.largeText).toBe(false)
-      expect(results[1]!.largeText).toBe(true)
-    })
-  })
-
-  describe('WCAG_STANDARDS', () => {
-    it('should have correct AA values', () => {
-      expect(WCAG_STANDARDS.AA.normal).toBe(4.5)
-      expect(WCAG_STANDARDS.AA.large).toBe(3.0)
-    })
-
-    it('should have correct AAA values', () => {
-      expect(WCAG_STANDARDS.AAA.normal).toBe(7.0)
-      expect(WCAG_STANDARDS.AAA.large).toBe(4.5)
     })
   })
 })

@@ -90,6 +90,7 @@ import { pluginManager } from '../../plugins'
 import { useErrorNotification } from '../../composables/useErrorNotification'
 import { usePlayerStore } from '../../stores/player'
 import { getCurrentLocale } from '../../i18n'
+import logger from '../../utils/logger'
 import type { Track } from '@/types'
 
 const { t } = useI18n()
@@ -144,22 +145,28 @@ const playStats = ref<PlayCountStats>({
 const mostPlayed = ref<MostPlayedItem[]>([])
 const recentPlayed = ref<PlayHistoryEntry[]>([])
 let refreshInterval: ReturnType<typeof setInterval> | null = null
+let refreshTimeout: ReturnType<typeof setTimeout> | null = null
 
 // 刷新统计数据
 const refreshStats = async (): Promise<void> => {
-  const playCountInstance = (pluginManager as unknown as PluginManagerWithInstances).instances.get(
-    'builtin-play-count',
-  )
-  if (playCountInstance?.instance) {
-    const instance = playCountInstance.instance
-    playStats.value = instance.getStats()
+  // 轮询场景:插件实例方法抛错时记录日志,避免每 5 秒产生 unhandled rejection
+  try {
+    const playCountInstance = (
+      pluginManager as unknown as PluginManagerWithInstances
+    ).instances.get('builtin-play-count')
+    if (playCountInstance?.instance) {
+      const instance = playCountInstance.instance
+      playStats.value = instance.getStats()
 
-    // 获取最常播放并补充曲目信息
-    const mostPlayedRaw = instance.getMostPlayed(10)
-    mostPlayed.value = enrichTrackInfo(mostPlayedRaw)
+      // 获取最常播放并补充曲目信息
+      const mostPlayedRaw = instance.getMostPlayed(10)
+      mostPlayed.value = enrichTrackInfo(mostPlayedRaw)
 
-    // 获取最近播放
-    recentPlayed.value = instance.getPlayHistory(20)
+      // 获取最近播放
+      recentPlayed.value = instance.getPlayHistory(20)
+    }
+  } catch (error) {
+    logger.error('刷新播放统计失败:', error)
   }
 }
 
@@ -229,7 +236,7 @@ const clearStats = (): void => {
 
 onMounted(async () => {
   // 内置插件已在 main.js 中加载
-  setTimeout(() => {
+  refreshTimeout = setTimeout(() => {
     void refreshStats()
   }, 100)
   refreshInterval = setInterval(() => {
@@ -240,6 +247,9 @@ onMounted(async () => {
 onUnmounted(() => {
   if (refreshInterval) {
     clearInterval(refreshInterval)
+  }
+  if (refreshTimeout) {
+    clearTimeout(refreshTimeout)
   }
 })
 </script>

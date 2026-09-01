@@ -11,6 +11,7 @@
  */
 
 import { toModuleCode } from '../moduleExecutor'
+import { formatTime } from '../../utils/format'
 import {
   PluginPermission,
   type PluginAPI,
@@ -122,6 +123,7 @@ function sanitizeLogArgs(args: unknown[]): unknown[] {
 // ---------------------------------------------------------------------------
 // Worker 本地工具实现 (不经过主窗口)
 // ---------------------------------------------------------------------------
+// (formatTime 已统一收敛到 utils/format.ts,Worker 打包时随 chunk 内联)
 
 /** Worker 全局中需移除的原生网络 API
  *  (插件的全部网络访问必须经 api.network.fetch 的权限代理走后端 HTTP) */
@@ -171,18 +173,6 @@ function neutralizeGlobal(target: Record<string, unknown>, key: string): void {
   } catch {
     // 部分环境不允许修改该属性:忽略 (CSP 继承兜底)
   }
-}
-
-/** 与 pluginAPI.formatTime 行为一致 */
-function formatTime(seconds: number): string {
-  if (isNaN(seconds) || !isFinite(seconds)) return '0:00'
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  const secs = Math.floor(seconds % 60)
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-  }
-  return `${minutes}:${secs.toString().padStart(2, '0')}`
 }
 
 /** 与 pluginAPI.dataURLToBlob 行为一致 */

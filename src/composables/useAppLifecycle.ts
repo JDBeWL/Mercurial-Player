@@ -54,22 +54,57 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
   const themeStore = useThemeStore()
   const { t } = useI18n()
 
-  // 应用关闭前强制保存配置并清理资源
-  const handleBeforeUnload = async (): Promise<void> => {
-    await configStore.flushPendingSave()
+  // 应用关闭前强制保存配置并清理资源。
+  // 注意:beforeunload 中 WebView 不保证等待异步 IPC 完成,
+  // 因此真实关闭路径走 onCloseRequested (见下),此处仅作兜底:
+  // fire-and-forget 发出 IPC,消息一旦发出后端即会处理
+  const flushResourcesOnClose = (): void => {
+    void configStore.flushPendingSave()
     // 清理播放器资源（包括全局快捷键）
-    await playerStore.cleanup()
+    void playerStore.cleanup()
     // 清理插件管理器（停用所有插件、保存存储、清理沙箱）
-    await pluginManager.cleanup()
+    void pluginManager.cleanup()
+  }
+
+  const handleBeforeUnload = (): void => {
+    flushResourcesOnClose()
   }
 
   // 窗口移动监听的取消函数与防抖定时器（onUnmounted 清理）
   let unlistenWindowMove: (() => void) | null = null
+  let unlistenCloseRequested: (() => void) | null = null
   let moveDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  // 防止 CloseRequested 清理期间用户再次触发关闭
+  let isClosing = false
 
   onMounted(async () => {
-    // 注册 beforeunload 事件，确保关闭前保存配置
+    // 注册 beforeunload 事件，确保关闭前保存配置（兜底路径,见 flushResourcesOnClose 注释）
     window.addEventListener('beforeunload', handleBeforeUnload)
+
+    // 主关闭路径:拦截窗口关闭请求,等待异步清理(配置 flush / 播放器 / 插件)
+    // 完成后再销毁窗口,确保数据落盘。beforeunload 无法保证异步 IPC 被等待
+    try {
+      unlistenCloseRequested = await getCurrentWindow().onCloseRequested(async (event) => {
+        if (isClosing) {
+          event.preventDefault()
+          return
+        }
+        isClosing = true
+        event.preventDefault()
+        try {
+          await configStore.flushPendingSave()
+          await playerStore.cleanup()
+          await pluginManager.cleanup()
+        } catch (error) {
+          logger.error('Failed to flush resources on close:', error)
+        } finally {
+          // 清理完成后真正关闭窗口 (destroy 不再触发 CloseRequested)
+          await getCurrentWindow().destroy()
+        }
+      })
+    } catch (error) {
+      logger.warn('Failed to listen close requested:', error)
+    }
 
     // 加载配置文件（启动时允许重置 UI 状态）
     try {
@@ -179,6 +214,10 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
     if (unlistenWindowMove) {
       unlistenWindowMove()
       unlistenWindowMove = null
+    }
+    if (unlistenCloseRequested) {
+      unlistenCloseRequested()
+      unlistenCloseRequested = null
     }
     // 强制保存待处理的配置
     await configStore.flushPendingSave()

@@ -42,6 +42,9 @@ export function classifyAudioInvokeError(err: unknown): ErrorType {
   }
 
   // --- 设备/输出流类 ---
+  // 注意:不含裸 'wasapi' 与 'not initialized' 等宽泛词,
+  // 否则 "WASAPI player not initialized" / "Decoder not initialized"
+  // 这类内部状态错误会被误报为音频设备故障
   const devicePatterns = [
     'audio device not found',
     'failed to get output devices',
@@ -49,12 +52,26 @@ export function classifyAudioInvokeError(err: unknown): ErrorType {
     'failed to create output stream',
     'failed to create output stream builder',
     'failed to initialize wasapi',
-    'wasapi',
+    'failed to create default device sink builder',
+    'failed to create device enumerator',
+    'failed to get device collection',
+    'failed to get default device',
+    'failed to get audio client',
+    'failed to get mix format',
+    'failed to get device period',
     'device may be in use',
+    'device is in use',
     'no default output device',
-    'not initialized',
+    'audio endpoint',
+    // Windows 中文系统下 COM/HRESULT 错误消息为中文
+    '音频设备',
+    '未找到音频',
+    '设备不可用',
+    '设备被占用',
+    '另一个程序正在使用',
+    '拒绝访问',
   ]
-  if (devicePatterns.some((p) => m.includes(p))) {
+  if (devicePatterns.some((p) => m.includes(p) || msg.includes(p))) {
     return ErrorType.AUDIO_DEVICE_ERROR
   }
 

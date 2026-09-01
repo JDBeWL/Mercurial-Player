@@ -42,6 +42,30 @@ export function useLyricsScroll(deps: {
   const isHovering = ref(false) // 标记鼠标是否悬停
   let scrollTimeout: ReturnType<typeof setTimeout> | null = null
 
+  // 跟踪滚动流程中的所有 pending 定时器与 rAF,dispose 时统一取消,
+  // 避免组件卸载后延时回调仍然触发 (双阶段滚动/交互锁释放)
+  const disposed = { value: false } // 用对象包装以便在下方箭头函数中赋值
+  const pendingTimers = new Set<ReturnType<typeof setTimeout>>()
+  const pendingFrames = new Set<number>()
+
+  const trackTimeout = (fn: () => void, ms: number): void => {
+    if (disposed.value) return
+    const id = setTimeout(() => {
+      pendingTimers.delete(id)
+      fn()
+    }, ms)
+    pendingTimers.add(id)
+  }
+
+  const trackFrame = (fn: () => void): void => {
+    if (disposed.value) return
+    const id = requestAnimationFrame(() => {
+      pendingFrames.delete(id)
+      fn()
+    })
+    pendingFrames.add(id)
+  }
+
   const handleScroll = (): void => {
     // 如果是自动滚动触发的事件，忽略
     if (isAutoScrolling.value) return
@@ -82,9 +106,9 @@ export function useLyricsScroll(deps: {
     container.style.scrollBehavior = 'auto'
     container.scrollTop = computeCenteredScroll(container, activeEl)
     // 下一帧恢复 smooth，供后续自动跟随使用；同时避免程序化滚动被误判为用户滚动
-    requestAnimationFrame(() => {
+    trackFrame(() => {
       container.style.scrollBehavior = 'smooth'
-      setTimeout(() => (isAutoScrolling.value = false), 100)
+      trackTimeout(() => (isAutoScrolling.value = false), 100)
     })
   }
 
@@ -119,13 +143,13 @@ export function useLyricsScroll(deps: {
     //   但目标位置应该是 32px 状态,所以也等过渡完成
     if (immediate || isUserClick) {
       // 用户点击: 等 font-size 过渡完成后一次性滚到准确位置
-      setTimeout(() => {
+      trackTimeout(() => {
         const targetScroll = computeTargetScroll()
         container.style.scrollBehavior = 'auto'
         container.scrollTop = targetScroll
-        requestAnimationFrame(() => {
+        trackFrame(() => {
           container.style.scrollBehavior = 'smooth'
-          setTimeout(() => (isAutoScrolling.value = false), 100)
+          trackTimeout(() => (isAutoScrolling.value = false), 100)
         })
       }, FONT_SIZE_TRANSITION_MS)
     } else {
@@ -137,10 +161,10 @@ export function useLyricsScroll(deps: {
         container.scrollTop = estimatedScroll
 
         // 阶段 2: 等 font-size 过渡完成后用稳定尺寸修正
-        setTimeout(() => {
+        trackTimeout(() => {
           const correctedScroll = computeTargetScroll()
           container.scrollTop = correctedScroll
-          setTimeout(() => (isAutoScrolling.value = false), 500)
+          trackTimeout(() => (isAutoScrolling.value = false), 500)
         }, FONT_SIZE_TRANSITION_MS)
       })
     }
@@ -152,10 +176,15 @@ export function useLyricsScroll(deps: {
   }
 
   const dispose = (): void => {
+    disposed.value = true
     if (scrollTimeout) {
       clearTimeout(scrollTimeout)
       scrollTimeout = null
     }
+    pendingTimers.forEach((id) => clearTimeout(id))
+    pendingTimers.clear()
+    pendingFrames.forEach((id) => cancelAnimationFrame(id))
+    pendingFrames.clear()
     isUserScroll.value = false
     isAutoScrolling.value = false
   }

@@ -1,6 +1,7 @@
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { ErrorType, ErrorSeverity, handlePromise } from './errorHandler'
+import { formatTime } from './format'
 import type { Playlist } from '@/types'
 
 /**
@@ -245,33 +246,24 @@ export class FileUtils {
   }
 
   /**
-   * 格式化文件大小
+   * 格式化文件大小（非法输入：负数 / 非有限值返回 "--"）
    */
   static formatFileSize(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes < 0) return '--'
     if (bytes === 0) return '0 Bytes'
 
     const k = 1024
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1)
 
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
   /**
-   * 格式化时间（秒转换为 mm:ss 或 hh:mm:ss）
+   * 格式化时间（秒转换为 mm:ss 或 hh:mm:ss）—— 统一实现见 utils/format.ts
    */
   static formatTime(seconds: number): string {
-    if (isNaN(seconds) || !isFinite(seconds)) return '0:00'
-
-    const hours = Math.floor(seconds / 3600)
-    const minutes = Math.floor((seconds % 3600) / 60)
-    const remainingSeconds = Math.floor(seconds % 60)
-
-    if (hours > 0) {
-      return `${hours}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`
-    } else {
-      return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
-    }
+    return formatTime(seconds)
   }
 }
 
