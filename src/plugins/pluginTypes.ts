@@ -118,7 +118,7 @@ export interface PluginAPI {
     canvasToDataURL: (canvas: HTMLCanvasElement, type?: string, quality?: number) => string
     loadImage: (src: string) => Promise<HTMLImageElement>
     blobToArrayBuffer: (blob: Blob) => Promise<ArrayBuffer>
-    dataURLToBlob: (dataURL: string) => Blob
+    dataURLToBlob: (dataURL: string, options?: { mimeType?: string; fallbackMime?: string }) => Blob
     formatTime: (seconds: number) => string
     generateId: () => string
   }

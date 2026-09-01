@@ -417,15 +417,18 @@ export const usePlayerStore = defineStore('player', {
 
       if (!trackExists) {
         logger.warn('Track file not found:', resolvedPath)
-        const currentTrackIndex = this.playlist.findIndex(
+        const missingIndex = this.playlist.findIndex(
           (t) => t.path === track.path || t.path === resolvedPath,
         )
         if (
           this.playlist.length > 1 &&
-          currentTrackIndex >= 0 &&
-          currentTrackIndex < this.playlist.length - 1
+          missingIndex >= 0 &&
+          missingIndex < this.playlist.length - 1
         ) {
-          return this.nextTrack()
+          // 按缺失曲目自身在播放列表中的位置顺延。
+          // 不能用 nextTrack():它基于 currentTrack 定位"下一首",
+          // 当缺失曲目紧跟当前曲目时会不断回到同一首,造成无限递归
+          return this.playTrack(this.playlist[missingIndex + 1]!)
         }
 
         await this.resetPlayerState()

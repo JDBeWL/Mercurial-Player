@@ -22,13 +22,18 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.d.ts', 'src/types/**', 'src/**/*.test.ts', 'src/**/*.spec.ts'],
-      // 初始阈值随测试补齐逐步提升;
+      // 关闭运行前后的目录清理:清理会一次性删除 coverage/ 下大量报告文件,
+      // 在带批量删除防护的环境中会被拦截并以 Unhandled Error 中断;
+      // 报告文件名为固定值,重复运行时直接覆盖,不会无限累积
+      clean: false,
+      cleanAfterRun: false,
+      // 阈值随测试补齐逐步提升(当前实测:lines 85.3 / branches 78.6 / functions 80.5 / statements 84.0)
       // 注意 include 仅统计 .ts,.vue 组件未纳入统计
       thresholds: {
-        lines: 43,
-        branches: 42,
-        functions: 43,
-        statements: 43,
+        lines: 83,
+        branches: 77,
+        functions: 79,
+        statements: 82,
       },
     },
   },

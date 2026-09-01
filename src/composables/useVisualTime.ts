@@ -38,10 +38,12 @@ export function useVisualTime(): {
 } {
   const playerStore = usePlayerStore()
   const visualTime = ref(0)
-  let lastFrameTime = 0
+  // 用 null 表示"尚未播种"而非 0:时间戳 0 是合法值(测试/首帧均可能出现),
+  // 若用 0 做哨兵会导致此后每一帧都被当作首帧、delta 恒为 0
+  let lastFrameTime: number | null = null
 
   const advanceVisualTime = (timestamp: number): void => {
-    if (!lastFrameTime) lastFrameTime = timestamp
+    if (lastFrameTime === null) lastFrameTime = timestamp
     const deltaTime = Math.min((timestamp - lastFrameTime) / 1000, MAX_DELTA)
     lastFrameTime = timestamp
 
@@ -63,7 +65,7 @@ export function useVisualTime(): {
   }
 
   const resetFrameClock = (): void => {
-    lastFrameTime = 0
+    lastFrameTime = null
   }
 
   const syncToCurrentTime = (): void => {

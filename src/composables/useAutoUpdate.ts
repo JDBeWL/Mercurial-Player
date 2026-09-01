@@ -100,8 +100,10 @@ const downloadAndInstall = async () => {
   downloadSpeed.value = 0
   error.value = null
 
-  // 速度估算：记录上次进度事件的时间与字节数，按差值计算瞬时速度并做指数平滑
-  let lastTime = 0
+  // 速度估算：记录上次进度事件的时间与字节数，按差值计算瞬时速度并做指数平滑。
+  // lastTime 用 null 表示"尚未取样"而非 0：时间戳 0 是合法值，
+  // 若用 0 做哨兵，首个事件恰好落在 0 时计时器永远不会启动。
+  let lastTime: number | null = null
   let lastBytes = 0
 
   try {
@@ -109,7 +111,7 @@ const downloadAndInstall = async () => {
       const { downloaded, total } = e.payload
       const now = performance.now()
 
-      if (lastTime > 0) {
+      if (lastTime !== null) {
         const seconds = (now - lastTime) / 1000
         if (seconds > 0) {
           const instant = (downloaded - lastBytes) / seconds

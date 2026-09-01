@@ -219,8 +219,14 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
       unlistenCloseRequested()
       unlistenCloseRequested = null
     }
-    // 强制保存待处理的配置
-    await configStore.flushPendingSave()
+    // 强制保存待处理的配置。
+    // 每一步异步清理都独立兜错:任一失败都不能中断后续清理,
+    // 否则 beforeunload 监听与音轨监听会泄漏
+    try {
+      await configStore.flushPendingSave()
+    } catch (error) {
+      logger.warn('Failed to flush config on unmount:', error)
+    }
     // 移除 beforeunload 事件监听器
     window.removeEventListener('beforeunload', handleBeforeUnload)
     // 清理错误通知监听器
@@ -230,6 +236,10 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
       options.stopWatchTrack()
     }
     // 清理播放器资源
-    await playerStore.cleanup()
+    try {
+      await playerStore.cleanup()
+    } catch (error) {
+      logger.warn('Failed to cleanup player on unmount:', error)
+    }
   })
 }

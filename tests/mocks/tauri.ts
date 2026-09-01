@@ -1,6 +1,7 @@
 // Re-export mocks from setup
 export {
   mockInvoke,
+  mockConvertFileSrc,
   mockOpen,
   mockStoreGet,
   mockStoreSet,
@@ -10,11 +11,13 @@ export {
   mockShortcutUnregisterAll,
   mockShortcutIsRegistered,
   mockWriteFile,
+  mockReadFile,
   mockTauriFetch,
   mockRelaunch,
 } from '../setup'
 import {
   mockInvoke,
+  mockConvertFileSrc,
   mockOpen,
   mockStoreGet,
   mockStoreSet,
@@ -24,6 +27,7 @@ import {
   mockShortcutUnregisterAll,
   mockShortcutIsRegistered,
   mockWriteFile,
+  mockReadFile,
   mockTauriFetch,
   mockRelaunch,
 } from '../setup'
@@ -31,6 +35,7 @@ import {
 // Helper to reset all mocks
 export function resetTauriMocks() {
   mockInvoke.mockReset()
+  mockConvertFileSrc.mockReset()
   mockOpen.mockReset()
   mockStoreGet.mockReset()
   mockStoreSet.mockReset()
@@ -40,6 +45,7 @@ export function resetTauriMocks() {
   mockShortcutUnregisterAll.mockReset()
   mockShortcutIsRegistered.mockReset()
   mockWriteFile.mockReset()
+  mockReadFile.mockReset()
   mockTauriFetch.mockReset()
   mockRelaunch.mockReset()
 }
