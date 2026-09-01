@@ -26,8 +26,8 @@ const sharedLyricsSource: Ref<'local' | 'online'> = ref('local')
 const sharedOnlineLyricsError = ref<string | null>(null)
 
 // 在线歌词请求经由 Tauri invoke 后端代理,前端的 AbortSignal 无法取消后端 HTTP 请求;
-// 过期结果的丢弃由 loadSequence 守卫负责(旧请求的结果不会被采用)。
-let loadSequence = 0
+// 过期结果的丢弃由 store 的统一歌词请求守卫负责:
+// player.beginLyricsRequest / isLyricsRequestCurrent (store.loadLyrics 与本模块共享同一计数器)。
 
 // 模块级别的初始化标记
 let isInitialized = false
@@ -86,13 +86,15 @@ async function saveLyricsToLocal(trackPath: string, lrcContent: string): Promise
 
 /**
  * 加载歌词（本地优先,失败时尝试在线获取）
+ *
+ * 写入统一走 _playerStore.lyrics (唯一事实源),
+ * sharedLyrics 由 initializeSharedWatchers 中的同步 watcher 跟随更新。
  */
 async function loadLyrics(trackPath: string | undefined): Promise<void> {
   if (!_playerStore || !_configStore) return
   // 序号守卫: 快速切歌时并发请求,只有最新一次的结果允许写入共享状态
-  const seq = ++loadSequence
+  const seq = _playerStore.beginLyricsRequest()
   if (!trackPath) {
-    sharedLyrics.value = []
     _playerStore.lyrics = null
     sharedLyricsSource.value = 'local'
     sharedOnlineLyricsError.value = null
@@ -103,7 +105,6 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
   const cached = onlineLyricsCache.get(trackPath)
   if (cached) {
     logger.debug('Using cached online lyrics for:', trackPath)
-    sharedLyrics.value = cached.parsed
     _playerStore.lyrics = cached.parsed
     sharedLyricsSource.value = cached.source as 'local' | 'online'
     sharedLoading.value = false
@@ -111,33 +112,30 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
   }
 
   sharedLoading.value = true
-  sharedLyrics.value = []
   _playerStore.lyrics = null
   sharedLyricsSource.value = 'local'
   sharedOnlineLyricsError.value = null
   try {
     const lyricsPath = await FileUtils.findLyricsFile(trackPath)
-    if (seq !== loadSequence) return
+    if (!_playerStore.isLyricsRequestCurrent(seq)) return
     if (lyricsPath) {
       const content = await FileUtils.readFile(lyricsPath)
       const ext = FileUtils.getFileExtension(lyricsPath) as 'lrc' | 'ass' | 'srt'
       // 使用统一的异步解析器
       // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
       const parsed = markRaw(await LyricsParser.parseAsync(content, ext))
-      if (seq !== loadSequence) return
-      sharedLyrics.value = parsed
+      if (!_playerStore.isLyricsRequestCurrent(seq)) return
       _playerStore.lyrics = parsed
       sharedLyricsSource.value = 'local'
     } else if (_configStore.lyrics?.enableOnlineFetch) {
       logger.debug('No local lyrics found, trying online fetch...')
       const track = _playerStore.currentTrack
       const onlineLrc = await fetchOnlineLyrics(track)
-      if (seq !== loadSequence) return
+      if (!_playerStore.isLyricsRequestCurrent(seq)) return
       if (onlineLrc) {
         // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
         const parsed = markRaw(await LyricsParser.parseAsync(onlineLrc, 'lrc'))
-        if (seq !== loadSequence) return
-        sharedLyrics.value = parsed
+        if (!_playerStore.isLyricsRequestCurrent(seq)) return
         _playerStore.lyrics = parsed
         sharedLyricsSource.value = 'online'
 
@@ -150,7 +148,7 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
 
         if (_configStore.lyrics?.autoSaveOnlineLyrics) {
           const saved = await saveLyricsToLocal(trackPath, onlineLrc)
-          if (saved && seq === loadSequence) {
+          if (saved && _playerStore.isLyricsRequestCurrent(seq)) {
             sharedLyricsSource.value = 'local'
             // 保存成功后从缓存中移除，下次会从本地加载
             onlineLyricsCache.delete(trackPath)
@@ -160,12 +158,12 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
     }
   } catch (e) {
     logger.error('Error loading lyrics:', e)
-    if (seq === loadSequence) {
+    if (_playerStore.isLyricsRequestCurrent(seq)) {
       sharedOnlineLyricsError.value = (e as Error).message
     }
   } finally {
     // 只有最新一次请求有权结束 loading 状态,避免旧请求过早关闭新请求的 loading
-    if (seq === loadSequence) {
+    if (_playerStore.isLyricsRequestCurrent(seq)) {
       sharedLoading.value = false
     }
   }
@@ -189,6 +187,18 @@ function initializeSharedWatchers(): void {
     immediate: true,
   })
   sharedWatchStopFns.push(stopWatchTrackPath)
+
+  // store.lyrics 是唯一事实源:任何写入路径 (本模块 / store.loadLyrics / 插件 API)
+  // 都经由该同步 watcher 反映到 sharedLyrics,保证两个状态视图一致。
+  // flush: 'sync' 保持与直接赋值相同的时机语义。
+  const stopWatchStoreLyrics = watch(
+    () => _playerStore!.lyrics,
+    (lyrics) => {
+      sharedLyrics.value = lyrics ?? []
+    },
+    { immediate: true, flush: 'sync' },
+  )
+  sharedWatchStopFns.push(stopWatchStoreLyrics)
 
   // activeIndex 更新逻辑 - 使用节流避免高频更新
   let lastActiveIndexUpdate = 0
@@ -237,14 +247,17 @@ export function useLyrics() {
   const fetchAndSaveLyrics = async (): Promise<boolean> => {
     const track = playerStore.currentTrack
     if (!track) return false
+    // 序号守卫:手动刷新也纳入统一计数,快速切歌时旧请求的结果不写入状态
+    const seq = playerStore.beginLyricsRequest()
     sharedLoading.value = true
     sharedOnlineLyricsError.value = null
     try {
       const onlineLrc = await fetchOnlineLyrics(track)
+      if (!playerStore.isLyricsRequestCurrent(seq)) return false
       if (onlineLrc) {
         // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
         const parsed = markRaw(await LyricsParser.parseAsync(onlineLrc, 'lrc'))
-        sharedLyrics.value = parsed
+        if (!playerStore.isLyricsRequestCurrent(seq)) return false
         playerStore.lyrics = parsed
         sharedLyricsSource.value = 'online'
 
@@ -258,7 +271,7 @@ export function useLyrics() {
         // 只有在启用自动保存时才保存到本地
         if (configStore.lyrics?.autoSaveOnlineLyrics) {
           const saved = await saveLyricsToLocal(track.path, onlineLrc)
-          if (saved) {
+          if (saved && playerStore.isLyricsRequestCurrent(seq)) {
             sharedLyricsSource.value = 'local'
             // 保存成功后从缓存中移除
             onlineLyricsCache.delete(track.path)
@@ -269,10 +282,14 @@ export function useLyrics() {
       return false
     } catch (e) {
       logger.error('Error fetching lyrics:', e)
-      sharedOnlineLyricsError.value = (e as Error).message
+      if (playerStore.isLyricsRequestCurrent(seq)) {
+        sharedOnlineLyricsError.value = (e as Error).message
+      }
       return false
     } finally {
-      sharedLoading.value = false
+      if (playerStore.isLyricsRequestCurrent(seq)) {
+        sharedLoading.value = false
+      }
     }
   }
 
@@ -282,8 +299,8 @@ export function useLyrics() {
   // 注意:不要在单个组件 onUnmounted 中调用 cleanup,
   // 否则会停掉其他调用方共享的 watcher 导致丢失更新。
   const cleanup = (): void => {
-    // 作废所有进行中的 loadLyrics 请求 (过期结果由序号守卫丢弃)
-    loadSequence++
+    // 作废所有进行中的歌词请求 (过期结果由统一序号守卫丢弃)
+    _playerStore?.beginLyricsRequest()
     // 停止所有共享 watcher,避免 HMR 重建 store 后旧 watcher 仍引用旧 store
     sharedWatchStopFns.forEach((fn) => fn())
     sharedWatchStopFns.length = 0

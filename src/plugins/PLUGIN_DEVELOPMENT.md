@@ -129,16 +129,16 @@ export const myPlugin: BuiltinPluginDefinition = {
 
 ## 安全限制
 
-插件运行在沙箱环境中，有以下限制：
+外部插件运行在 **Dedicated Worker 沙箱**中：插件代码在一个独立的 Worker 线程里执行，与主窗口物理隔离。Worker 中不存在 `window`、`document`、`localStorage`，也没有 Tauri IPC（`__TAURI_INTERNALS__`）——插件无法直接读写文件、调用系统命令或访问应用数据，只能通过 `api` 对象（由主窗口按 manifest 权限受控代理）访问应用功能。
 
-### 禁止访问的全局对象
+### 沙箱内的真实边界
 
-- `window`、`document`、`globalThis`、`self` - 浏览器全局对象
-- `eval`、`Function` - 动态代码执行
-- `fetch`、`XMLHttpRequest`、`WebSocket` - 网络请求（请使用 `api.network.fetch`）
-- `localStorage`、`sessionStorage`、`indexedDB` - 存储（请使用 `api.storage`）
-- `Proxy`、`Reflect` - 元编程
-- `process`、`require`、`module` - Node.js 相关
+- 无法访问 DOM / `window` / `document` / `localStorage` / `indexedDB`
+- 无法调用 Tauri IPC（`invoke`），即无法触达后端命令
+- Worker 内的 `fetch` 受应用 CSP `connect-src` 白名单约束；跨域请求请声明 `network` 权限并使用 `api.network.fetch`
+- UI 组件类扩展（`registerSettingsPanel` / `registerPlayerDecorator` / `visualizer.register`）无法跨沙箱渲染，沙箱插件调用会直接抛错——这类扩展请使用内置插件实现
+- Canvas 相关 API（`api.utils.createCanvas` 等）基于 `OffscreenCanvas` / `ImageBitmap` 实现，接口与 DOM Canvas 兼容，但返回类型不同（无 `src` 等属性）
+- 同步读 API（`player.getState()` / `storage.get()` / `library.*` / `theme.*`）从主窗口定期推送的镜像快照中读取，数据可能有数百毫秒的滞后
 
 ### 安全的定时器
 
@@ -146,6 +146,8 @@ export const myPlugin: BuiltinPluginDefinition = {
 
 - `setTimeout` 最大延迟 60 秒
 - `setInterval` 最小间隔 100ms
+
+插件停用时其 Worker 会被终止，所有未触发的定时器与事件监听随之一并释放。
 
 ### 代码检查
 
@@ -326,13 +328,6 @@ api.ui.registerActionButton({
 // 取消注册
 api.ui.unregisterActionButton('my-button')
 
-// 注册设置面板
-api.ui.registerSettingsPanel({
-  id: 'my-settings',
-  name: '我的设置',
-  component: MySettingsComponent, // Vue 组件
-})
-
 // 注册菜单项
 api.ui.registerMenuItem({
   id: 'my-menu-item',
@@ -342,14 +337,11 @@ api.ui.registerMenuItem({
     /* ... */
   },
 })
-
-// 注册播放器装饰器
-api.ui.registerPlayerDecorator({
-  id: 'my-decorator',
-  position: 'bottom', // top, bottom, left, right
-  component: MyDecoratorComponent,
-})
 ```
+
+> **沙箱限制**：`api.ui.registerSettingsPanel` 与 `api.ui.registerPlayerDecorator`
+> 需要跨沙箱传递 Vue 组件，仅内置插件可用；沙箱中的外部插件调用会抛出明确错误。
+> 操作按钮 / 菜单项 / 通知对外部插件同样可用。
 
 ### 歌词源 (api.lyrics)
 
@@ -375,6 +367,9 @@ api.lyrics.registerProvider({
 ### 可视化 (api.visualizer)
 
 需要 `visualizer` 权限。
+
+> **沙箱限制**：`render` 回调需要主窗口的 Canvas 上下文，无法跨沙箱传递，
+> 仅内置插件可用；沙箱中的外部插件调用 `api.visualizer.register` 会抛出明确错误。
 
 ```javascript
 api.visualizer.register({
@@ -914,12 +909,21 @@ export const playCountPlugin: BuiltinPluginDefinition = {
    - 验证插件清单
    - 代码安全检查
 
-6. **pluginSandbox.ts** - 沙箱环境
-   - 隔离外部插件代码执行
-   - 限制访问危险 API
-   - 防止恶意代码
+6. **sandbox/** - Worker 沙箱 (P0 安全修复)
+   - `workerSandboxHost.ts` 主窗口侧宿主：RPC 分发、状态镜像推送、回调桥、Worker 生命周期
+   - `workerCore.ts` Worker 侧运行时：插件 API 代理、参数/回调序列化
+   - `workerBootstrap.ts` Worker 入口（消息接线）
+   - `sandboxProtocol.ts` 两侧共享的消息协议
+   - 外部插件代码在 Dedicated Worker 中执行，与主窗口权限物理隔离
 
-7. **builtins/** - 内置插件
+7. **pluginSandbox.ts** - 内置插件执行环境
+   - 为内置插件提供安全 console 代理与可清理的定时器
+   - `validatePluginCode` 代码静态检查（外部插件进入 Worker 前的纵深防御层）
+
+8. **moduleExecutor.ts** - 模块代码包装
+   - 将外部插件代码（含旧脚本格式）包装为 ES 模块源码供 Worker 求值
+
+9. **builtins/** - 内置插件
    - TypeScript 编写的官方插件
    - 直接集成到应用中
    - 作为插件开发示例
@@ -1247,7 +1251,8 @@ api.events.on('plugin:pluginA:myEvent', (data) => {
 - **存储持久化**：`src/plugins/pluginStorage.ts`
 - **示例插件**：`src/plugins/builtins/playCount.ts`
 - **插件加载器**：`src/plugins/pluginLoader.ts`
-- **沙箱实现**：`src/plugins/pluginSandbox.ts`
+- **Worker 沙箱**：`src/plugins/sandbox/`（宿主 / Worker 运行时 / 入口 / 协议）
+- **内置插件执行环境**：`src/plugins/pluginSandbox.ts`
 
 ## 贡献插件
 

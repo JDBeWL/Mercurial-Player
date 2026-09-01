@@ -7,6 +7,7 @@ import { reactive, markRaw, watch, type WatchStopHandle } from 'vue'
 import logger from '../utils/logger'
 import { createPluginAPI } from './pluginAPI'
 import { createPluginSandbox, type PluginSandbox } from './pluginSandbox'
+import type { PluginWorkerHost } from './sandbox/workerSandboxHost'
 import {
   createPluginStorage,
   PLUGIN_STORAGE_PREFIX,
@@ -103,6 +104,8 @@ class PluginManager {
   private storage: Map<string, PluginPersistentStorage>
   // 播放器状态监听器
   private _playerWatcherStop: WatchStopHandle | null
+  // Worker 沙箱宿主注册表 (外置插件;停用即 terminate,卸载时移除)
+  private workerHosts: Map<string, PluginWorkerHost>
 
   constructor() {
     this.plugins = reactive(new Map()) as Map<string, Plugin>
@@ -121,6 +124,7 @@ class PluginManager {
     this.eventListeners = new Map()
     this.storage = new Map()
     this._playerWatcherStop = null
+    this.workerHosts = new Map()
   }
 
   /**
@@ -214,6 +218,12 @@ class PluginManager {
       throw new Error(`插件 ${id} 已存在`)
     }
 
+    // 外置插件的 Worker 沙箱宿主 (生命周期随插件管理)
+    const workerHost = (pluginDef as PluginDefinition).workerHost
+    if (workerHost) {
+      this.workerHosts.set(id, workerHost)
+    }
+
     const plugin: Plugin = reactive({
       id,
       name,
@@ -253,8 +263,19 @@ class PluginManager {
 
     try {
       const api = createPluginAPI(pluginId, plugin.permissions, this)
-      const sandbox = createPluginSandbox(api)
-      const instance = await sandbox.execute(plugin.main)
+
+      // 外置插件:在 Worker 沙箱中执行 (与主窗口权限物理隔离);
+      // 内置插件:受信任代码,直接在主窗口执行
+      const workerHost = this.workerHosts.get(pluginId)
+      let sandbox: PluginSandbox
+      let instance: PluginInstance
+      if (workerHost) {
+        sandbox = workerHost.getSandboxAdapter()
+        instance = await workerHost.runMain(api)
+      } else {
+        sandbox = createPluginSandbox(api)
+        instance = await sandbox.execute(plugin.main)
+      }
 
       if (instance && typeof instance.activate === 'function') {
         await sandbox.execute(() => instance.activate!())
@@ -267,6 +288,15 @@ class PluginManager {
       logger.info(`插件已激活: ${plugin.name}`)
       this.emit('plugin:activated', { pluginId, plugin })
     } catch (error) {
+      // 激活失败时终止 Worker 避免泄漏 (下次激活会由宿主自动重建)
+      const workerHost = this.workerHosts.get(pluginId)
+      if (workerHost) {
+        try {
+          workerHost.terminate()
+        } catch (terminateError) {
+          logger.warn(`终止沙箱宿主失败: ${pluginId}`, terminateError)
+        }
+      }
       plugin.state = PluginState.ERROR
       plugin.error = error instanceof Error ? error.message : String(error)
       logger.error(`插件激活失败: ${plugin.name}`, error)
@@ -338,6 +368,8 @@ class PluginManager {
    */
   async uninstall(pluginId: string, clearStorage = false): Promise<void> {
     await this.deactivate(pluginId)
+    // 移除沙箱宿主注册 (deactivate 已 terminate Worker,此处释放引用)
+    this.workerHosts.delete(pluginId)
     this.plugins.delete(pluginId)
     this.storage.delete(pluginId)
 

@@ -14,6 +14,11 @@ export default defineConfig({
     },
   },
   envPrefix: ['VITE_', 'TAURI_'],
+  // 插件沙箱使用 module Worker (blob URL 动态 import 仅在 ES Worker 中可用);
+  // 产物为独立同源 chunk,CSP script-src 'self' 允许加载
+  worker: {
+    format: 'es',
+  },
   // 生产构建时移除 console 和 debugger
   esbuild: {
     drop: process.env.TAURI_DEBUG ? [] : ['console', 'debugger'],

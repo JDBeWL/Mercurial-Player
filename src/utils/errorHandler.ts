@@ -280,6 +280,9 @@ const errorHandler = new ErrorHandler()
 
 /**
  * Promise 错误处理包装器
+ *
+ * options.throw 为 true 时,错误在记录日志并通知监听器后重新抛出 (AppError),
+ * 供调用方以异常流继续处理;默认 (throw: false / 未设置) 返回 { success: false }。
  */
 export async function handlePromise<T>(
   promise: Promise<T>,
@@ -294,6 +297,9 @@ export async function handlePromise<T>(
     }
   } catch (error) {
     const handledError = errorHandler.handle(error, options)
+    if (options.throw) {
+      throw handledError
+    }
     return {
       success: false,
       data: null,

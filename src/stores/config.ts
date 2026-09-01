@@ -257,20 +257,27 @@ export const useConfigStore = defineStore('config', {
       }
 
       // 主存储：后端 ConfigManager 写 data/config.json(原子写:先 .tmp 再 rename)
-      this._savePromise = handlePromise(invoke('save_config', { config: configToSave }), {
+      const savePromise = handlePromise(invoke('save_config', { config: configToSave }), {
         type: ErrorType.CONFIG_SAVE_ERROR,
-        severity: ErrorSeverity.LOW,
+        severity: ErrorSeverity.MEDIUM,
         context: { action: 'saveConfig' },
         showToUser: false,
         throw: false,
       })
+      this._savePromise = savePromise
 
-      await this._savePromise
+      const saveResult = await savePromise
       this._savePromise = null
 
-      this._lastSavedConfig = configToSave
-      this._isDirty = false
-      logger.debug('Configuration saved successfully')
+      if (saveResult.success) {
+        this._lastSavedConfig = configToSave
+        this._isDirty = false
+        logger.debug('Configuration saved successfully')
+      } else {
+        // 保存失败 (磁盘满/权限错误等):保留脏标记与旧快照,
+        // 下一次防抖保存会因 _hasRealChanges() 为 true 而自动重试
+        logger.error('Configuration save failed; dirty flag retained for retry', saveResult.error)
+      }
     },
 
     // 防抖保存（2秒延迟）

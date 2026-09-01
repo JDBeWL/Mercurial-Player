@@ -366,6 +366,8 @@
     "builtin": "Built-in",
     "noDescription": "No description",
     "permissionsCount": "{count} permission | {count} permissions",
+    "sandboxNoticeTitle": "Plugin security notice",
+    "sandboxNotice": "External plugins run in an isolated sandbox with no direct access to system files, the clipboard, or user data — they can only use app-provided, permission-gated interfaces. Built-in plugins are bundled with the app and run with full privileges. Only install plugins from trusted sources.",
     "state": {
       "active": "Active",
       "inactive": "Inactive",

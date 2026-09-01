@@ -26,30 +26,28 @@ vi.mock('@/plugins/pluginManager', async (importOriginal) => {
   }
 })
 
-// Node 测试环境不支持 blob: URL 动态 import，用 new Function 模拟模块执行。
-// 仅替换模块求值机制，包装逻辑(toModuleCode)保持真实实现以覆盖加载路径。
-vi.mock('@/plugins/moduleExecutor', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/plugins/moduleExecutor')>()
+// Node 测试环境不支持真实 Worker,mock 掉沙箱宿主,
+// 只保留 loadPlugin 依赖的清单校验与注册流程。
+const { mockHostInit, mockHostTerminate, mockHostCreateMain } = vi.hoisted(() => ({
+  mockHostInit: vi.fn(async () => {}),
+  mockHostTerminate: vi.fn(),
+  mockHostCreateMain: vi.fn(() => vi.fn()),
+}))
+
+vi.mock('@/plugins/sandbox/workerSandboxHost', () => {
   return {
-    ...actual,
-    importPluginModule: vi.fn(async (code: string) => {
-      if (/export\s+default/.test(code)) {
-        // 模块格式：将默认导出转为返回值（仅测试模拟）
-        const fn = new Function(`${code.replace(/export\s+default\s*/, 'return ')}`)
-        return fn()
+    // 注意:实现必须用 function 形式返回对象,箭头函数不能被 new 调用
+    PluginWorkerHost: vi.fn(function () {
+      return {
+        init: mockHostInit,
+        terminate: mockHostTerminate,
+        createMainFunction: mockHostCreateMain,
       }
-      // 旧脚本格式：与真实包装逻辑一致的函数作用域执行
-      return new Function(
-        'api',
-        'globals',
-        `${code}\nreturn typeof plugin !== 'undefined' ? plugin : {}`,
-      )
     }),
   }
 })
 
 import { loadPlugin } from '@/plugins/pluginLoader'
-import { importPluginModule } from '@/plugins/moduleExecutor'
 
 function manifestFor(id: string, extra: Record<string, unknown> = {}): void {
   mockInvoke.mockImplementation(async (cmd: string) => {
@@ -105,11 +103,12 @@ describe('pluginLoader - loadPlugin 清单与代码安全校验', () => {
       }
       return null
     })
-    vi.mocked(importPluginModule).mockRejectedValueOnce(
+    mockHostInit.mockRejectedValueOnce(
       new Error('插件模块缺少默认导出函数 (export default function/api => {...})'),
     )
     await expect(loadPlugin('/plugins/bad-esm')).rejects.toThrow('插件模块缺少默认导出')
     expect(mockRegister).not.toHaveBeenCalled()
+    expect(mockHostTerminate).toHaveBeenCalled() // 加载失败时终止沙箱宿主
   })
 
   it.each([

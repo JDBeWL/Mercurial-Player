@@ -42,6 +42,17 @@ logger.info('应用程序启动中...')
 const app = createApp(App)
 const pinia = createPinia()
 
+// 全局错误兜底:生产构建会 drop console,未捕获异常若不落盘则完全不可诊断
+// Vue 组件渲染 / watcher / 生命周期钩子中的同步异常统一进入此处理器
+app.config.errorHandler = (err, _instance, info) => {
+  logger.error(`[全局错误] ${info}:`, err)
+}
+
+// 未处理的 Promise 拒绝 (fire-and-forget 的 async 调用等)
+window.addEventListener('unhandledrejection', (event) => {
+  logger.error('[未处理的 Promise 拒绝]:', event.reason)
+})
+
 app.use(pinia)
 app.use(i18n)
 app.mount('#app')
@@ -91,7 +102,11 @@ import { shortcutManager } from './plugins/shortcutManager'
 
 const loadBuiltinPlugins = async (): Promise<void> => {
   // 先初始化插件管理器（设置播放器状态监听）
-  await pluginManager.init()
+  try {
+    await pluginManager.init()
+  } catch (error) {
+    logger.error('插件管理器初始化失败:', error)
+  }
 
   for (const plugin of builtinPlugins as BuiltinPluginDefinition[]) {
     try {
@@ -117,4 +132,6 @@ const loadBuiltinPlugins = async (): Promise<void> => {
   shortcutManager.start()
 }
 
-loadBuiltinPlugins()
+loadBuiltinPlugins().catch((error) => {
+  logger.error('插件加载流程异常终止:', error)
+})

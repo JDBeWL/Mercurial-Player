@@ -538,9 +538,8 @@ export const usePlayerStore = defineStore('player', {
         this.isPlaying = true
         this._updateTaskbarState()
 
-        this.loadLyrics(resolvedPath, requestId).catch((err) => {
-          logger.debug('Lyrics load error:', err)
-        })
+        // 歌词加载不再在此显式触发:useLyrics 的共享 watcher 监听 currentTrack.path
+        // 变化后会统一加载 (缓存 → 本地文件 → 在线获取),单一入口避免双路径竞态
       } catch (err) {
         if (this._activePlayRequestId !== requestId || this._isDestroyed) {
           return
@@ -962,11 +961,24 @@ export const usePlayerStore = defineStore('player', {
       await loadPlaylistCovers(this, playlist)
     },
 
-    async loadLyrics(trackPath: string, requestId?: number): Promise<void> {
-      // requestId 由 playTrack 传入 (与播放序列对齐);独立调用则使用歌词自己的计数器。
-      // 守卫统一比对 _activeLyricsRequestId (最近一次请求),两类调用方都能正确过期。
-      const lyricsRequestId = requestId ?? ++this._lyricsRequestId
-      this._activeLyricsRequestId = lyricsRequestId
+    /** 发起新的歌词请求,作废所有进行中的旧歌词请求。
+     *  统一守卫入口:store.loadLyrics 与 useLyrics 的加载路径共享同一计数器,
+     *  任一路径发起新请求都会作废另一路径进行中的请求,避免双路径竞态覆盖 */
+    beginLyricsRequest(): number {
+      const id = ++this._lyricsRequestId
+      this._activeLyricsRequestId = id
+      return id
+    },
+
+    /** 歌词请求 id 是否仍为当前有效请求 (未被更新的请求作废) */
+    isLyricsRequestCurrent(id: number): boolean {
+      return !this._isDestroyed && this._activeLyricsRequestId === id
+    },
+
+    async loadLyrics(trackPath: string): Promise<void> {
+      // 守卫统一走 beginLyricsRequest (与 useLyrics 共享计数器),
+      // 两类调用方的过期结果都会被正确丢弃。
+      const lyricsRequestId = this.beginLyricsRequest()
 
       try {
         const lyricsPath = await FileUtils.findLyricsFile(trackPath)
@@ -1023,8 +1035,8 @@ export const usePlayerStore = defineStore('player', {
       this._initPromise = null
       this._isLoading = false
       this._activePlayRequestId = ++this._playRequestId
-      this._lyricsRequestId = this._activePlayRequestId
-      this._activeLyricsRequestId = this._activePlayRequestId
+      // 作废所有进行中的歌词请求 (歌词守卫独立于播放计数器,不与之混用)
+      this._activeLyricsRequestId = ++this._lyricsRequestId
       this._isSwitchingDevice = false
       this._lastDeviceSwitchTarget = null
 

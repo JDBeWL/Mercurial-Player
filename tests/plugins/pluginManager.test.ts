@@ -97,6 +97,105 @@ describe('pluginManager - 生命周期', () => {
   })
 })
 
+describe('pluginManager - Worker 沙箱插件生命周期', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    localStorage.clear()
+    for (const id of Array.from(pluginManager.plugins.keys())) {
+      pluginManager.plugins.delete(id)
+    }
+  })
+
+  /** 构造模拟的 Worker 沙箱宿主 */
+  function createMockHost(instance: Record<string, unknown> = {}) {
+    const terminate = vi.fn()
+    const runMain = vi.fn(async () => instance)
+    return {
+      host: {
+        runMain,
+        getSandboxAdapter: () => ({
+          globals: {},
+          execute: async (fn: () => unknown) => await fn(),
+          cleanup: terminate,
+        }),
+        terminate,
+      },
+      terminate,
+      runMain,
+    }
+  }
+
+  it('带 workerHost 的插件: activate 走 runMain,不走 main 直接执行', async () => {
+    const activateFn = vi.fn()
+    const mainFn = vi.fn()
+    const { host, runMain } = createMockHost({ activate: activateFn })
+
+    await pluginManager.register({
+      id: 'sandboxed',
+      name: 'S',
+      permissions: [],
+      main: mainFn,
+      workerHost: host,
+    } as never)
+    await pluginManager.activate('sandboxed')
+
+    expect(runMain).toHaveBeenCalledTimes(1)
+    expect(activateFn).toHaveBeenCalledTimes(1) // activate 钩子经 adapter.execute 调用
+    expect(mainFn).not.toHaveBeenCalled()
+    expect(pluginManager.plugins.get('sandboxed')?.state).toBe(PluginState.ACTIVE)
+  })
+
+  it('deactivate 沙箱插件时终止 Worker', async () => {
+    const { host, terminate } = createMockHost({ deactivate: vi.fn() })
+    await pluginManager.register({
+      id: 'sandboxed-stop',
+      name: 'S',
+      permissions: [],
+      main: vi.fn(),
+      workerHost: host,
+    } as never)
+    await pluginManager.activate('sandboxed-stop')
+    await pluginManager.deactivate('sandboxed-stop')
+
+    expect(terminate).toHaveBeenCalled()
+    expect(pluginManager.plugins.get('sandboxed-stop')?.state).toBe(PluginState.INACTIVE)
+  })
+
+  it('uninstall 移除沙箱宿主注册', async () => {
+    const { host, terminate } = createMockHost({})
+    await pluginManager.register({
+      id: 'sandboxed-uninstall',
+      name: 'S',
+      permissions: [],
+      main: vi.fn(),
+      workerHost: host,
+    } as never)
+    await pluginManager.activate('sandboxed-uninstall')
+    await pluginManager.uninstall('sandboxed-uninstall')
+
+    expect(terminate).toHaveBeenCalled()
+  })
+
+  it('activate 失败时终止 Worker 并进入 ERROR 状态', async () => {
+    const { host, terminate } = createMockHost()
+    ;(host.runMain as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('worker factory boom'),
+    )
+    await pluginManager.register({
+      id: 'sandboxed-boom',
+      name: 'S',
+      permissions: [],
+      main: vi.fn(),
+      workerHost: host,
+    } as never)
+
+    await expect(pluginManager.activate('sandboxed-boom')).rejects.toThrow('worker factory boom')
+    expect(terminate).toHaveBeenCalled()
+    expect(pluginManager.plugins.get('sandboxed-boom')?.state).toBe(PluginState.ERROR)
+  })
+})
+
 describe('pluginAPI - 权限门禁 (最小权限原则)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

@@ -292,6 +292,12 @@ export interface PluginDefinition {
   description?: string
   permissions?: PluginPermissionType[]
   main: PluginMainFunction
+  /**
+   * Worker 沙箱宿主 (外置插件由 pluginLoader 创建并注入)。
+   * 存在时 pluginManager 将在 Worker 隔离环境中执行插件,
+   * 其生命周期 (激活/停用/卸载) 由宿主管理。
+   */
+  workerHost?: import('./sandbox/workerSandboxHost').PluginWorkerHost
 }
 
 // 内置插件定义类型（main 可以是简化形式）

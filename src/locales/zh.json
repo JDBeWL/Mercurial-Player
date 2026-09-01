@@ -366,6 +366,8 @@
     "builtin": "内置",
     "noDescription": "暂无描述",
     "permissionsCount": "{count} 项权限",
+    "sandboxNoticeTitle": "插件安全提示",
+    "sandboxNotice": "外部插件在隔离沙箱中运行，无法直接访问系统文件、剪贴板与用户数据，只能通过权限声明使用应用提供的受控接口。内置插件为应用自带代码，拥有完整权限。请仅安装来自可信来源的插件。",
     "state": {
       "active": "运行中",
       "inactive": "未激活",

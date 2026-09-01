@@ -61,6 +61,16 @@ const mockPlayerState = reactive({
   lyrics: null as unknown,
   currentLyricIndex: -1,
   lyricsOffset: 0,
+  // 统一歌词请求守卫 (与真实 player store 的 beginLyricsRequest / isLyricsRequestCurrent 语义一致)
+  _lyricsRequestId: 0,
+  _activeLyricsRequestId: 0,
+  _isDestroyed: false,
+  beginLyricsRequest: (): number => {
+    mockPlayerState._activeLyricsRequestId = ++mockPlayerState._lyricsRequestId
+    return mockPlayerState._activeLyricsRequestId
+  },
+  isLyricsRequestCurrent: (id: number): boolean =>
+    !mockPlayerState._isDestroyed && mockPlayerState._activeLyricsRequestId === id,
 })
 vi.mock('@/stores/player', () => ({
   usePlayerStore: vi.fn(() => mockPlayerState),
@@ -103,6 +113,9 @@ describe('useLyrics', () => {
     mockPlayerState.lyrics = null
     mockPlayerState.currentLyricIndex = -1
     mockPlayerState.lyricsOffset = 0
+    mockPlayerState._lyricsRequestId = 0
+    mockPlayerState._activeLyricsRequestId = 0
+    mockPlayerState._isDestroyed = false
     mockConfigState.lyrics.enableOnlineFetch = false
     mockConfigState.lyrics.autoSaveOnlineLyrics = true
     mockConfigState.lyrics.preferTranslation = true
@@ -150,9 +163,10 @@ describe('useLyrics', () => {
 
   describe('loadLyrics', () => {
     it('无路径时清空歌词状态', async () => {
-      // 先设置一些状态
+      // 先设置一些状态 (store.lyrics 是唯一事实源,sharedLyrics 由同步 watcher 跟随)
       const parsedLyrics: LyricLine[] = [{ time: 1, text: 'old', texts: ['old'] }]
-      result.lyrics.value = parsedLyrics
+      mockPlayerState.lyrics = parsedLyrics
+      await nextTick()
       result.lyricsSource.value = 'online'
       result.onlineLyricsError.value = 'some error'
 

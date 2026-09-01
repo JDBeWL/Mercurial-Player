@@ -15,7 +15,7 @@ import {
   type PluginPermissionType,
 } from './pluginTypes'
 import { validatePluginCode } from './pluginSandbox'
-import { importPluginModule } from './moduleExecutor'
+import { PluginWorkerHost } from './sandbox/workerSandboxHost'
 
 const builtinPluginModules = import.meta.glob<{
   default: (api: PluginAPI) => Promise<PluginInstance> | PluginInstance
@@ -124,6 +124,7 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
     }
 
     let mainFn: PluginMainFunction
+    let workerHost: PluginWorkerHost | undefined
 
     // 优先使用内置插件
     const builtinLoader = builtinPluginMap.get(manifest.id)
@@ -135,7 +136,9 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
         return await pluginFactory(api)
       }
     } else {
-      // 外置插件：以 ES 模块方式执行（blob URL + 动态 import，生产 CSP 兼容）
+      // 外置插件：在 Worker 沙箱中执行。
+      // 插件代码运行于独立 Dedicated Worker (无 DOM / localStorage / Tauri IPC),
+      // 通过 postMessage RPC 访问受权限控制的 PluginAPI,与主窗口权限物理隔离。
       const mainCode = await invoke<string>('read_plugin_main', {
         path: pluginPath,
         main: manifest.main || 'index.js',
@@ -148,12 +151,17 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
         throw new Error(`插件安全检查失败: ${(error as Error).message}`)
       }
 
+      const permissions = (manifest.permissions || []) as string[]
+      workerHost = new PluginWorkerHost(manifest.id, mainCode, permissions)
       try {
-        mainFn = await importPluginModule(mainCode)
+        await workerHost.init()
       } catch (error) {
+        workerHost.terminate()
         logger.error(`插件模块加载失败: ${manifest.id}`, error)
         throw error
       }
+
+      mainFn = workerHost.createMainFunction() as PluginMainFunction
     }
 
     await pluginManager.register({
@@ -164,6 +172,7 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
       description: manifest.description,
       permissions: manifest.permissions || [],
       main: mainFn,
+      workerHost,
     })
 
     if (manifest.auto_activate !== false) {

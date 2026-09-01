@@ -1,7 +1,23 @@
 <template>
   <div class="tab-content">
     <div class="content-header">
-      <h3>{{ $t('config.plugins') }}</h3>
+      <h3>
+        {{ $t('config.plugins') }}
+        <!-- 外置插件沙箱与来源安全提示 -->
+        <span class="help-tooltip">
+          <button
+            class="help-tooltip__trigger"
+            type="button"
+            :aria-label="$t('plugin.sandboxNoticeTitle')"
+          >
+            <span class="material-symbols-rounded">help</span>
+          </button>
+          <span class="help-tooltip__bubble" role="tooltip">
+            <strong>{{ $t('plugin.sandboxNoticeTitle') }}</strong>
+            {{ $t('plugin.sandboxNotice') }}
+          </span>
+        </span>
+      </h3>
       <div class="header-actions">
         <button class="filled-tonal-button" @click="openPluginsFolder">
           <span class="material-symbols-rounded">folder_open</span>
@@ -199,6 +215,74 @@ onMounted(async () => {
   font-size: 24px;
   font-weight: 400;
   color: var(--md-sys-color-on-surface);
+}
+
+/* 沙箱与来源安全提示 (标题右侧问号按钮,hover 显示气泡) */
+.help-tooltip {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
+.help-tooltip__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--md-sys-color-on-surface-variant);
+  transition: color 0.2s ease;
+}
+
+.help-tooltip__trigger:hover,
+.help-tooltip__trigger:focus-visible {
+  color: var(--md-sys-color-primary);
+}
+
+.help-tooltip__trigger .material-symbols-rounded {
+  font-size: 18px;
+}
+
+.help-tooltip__bubble {
+  position: absolute;
+  top: 100%;
+  left: calc(100% + 8px);
+  transform: translateY(-4px);
+  width: max-content;
+  max-width: 320px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background-color: var(--md-sys-color-background);
+  color: var(--md-sys-color-on-surface-variant);
+  box-shadow: var(--md-sys-elevation-2, 0 2px 6px rgba(0, 0, 0, 0.25));
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+  text-align: left;
+  white-space: normal;
+  z-index: 10;
+  /* 未激活时隐藏且不可交互,保持过渡 */
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.15s ease,
+    visibility 0.15s ease;
+}
+
+.help-tooltip:hover .help-tooltip__bubble,
+.help-tooltip:focus-within .help-tooltip__bubble {
+  opacity: 1;
+  visibility: visible;
+}
+
+.help-tooltip__bubble strong {
+  display: block;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+  margin-bottom: 4px;
 }
 
 .header-actions {
