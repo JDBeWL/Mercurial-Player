@@ -1,6 +1,20 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it } from 'vitest'
-import { useDeveloperMode } from '@/composables/useDeveloperMode'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Node 26+ 在全局内置了懒加载的 localStorage getter(未启用 --localstorage-file 时
+// 读取为 undefined),happy-dom 不会覆盖内置全局;补一个内存实现保证行为一致。
+// 被测模块在模块顶层读取 localStorage,shim 必须先于模块导入就位,故用动态导入。
+if (typeof localStorage === 'undefined') {
+  const backing = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => (backing.has(key) ? (backing.get(key) as string) : null),
+    setItem: (key: string, value: string) => void backing.set(key, String(value)),
+    removeItem: (key: string) => void backing.delete(key),
+    clear: () => void backing.clear(),
+  })
+}
+
+const { useDeveloperMode } = await import('@/composables/useDeveloperMode')
 
 const STORAGE_KEY = 'mercurial-player.developer-mode'
 
