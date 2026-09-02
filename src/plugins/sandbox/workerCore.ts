@@ -10,7 +10,6 @@
  * 通道驱动真实的协议实现。
  */
 
-import { toModuleCode } from '../moduleExecutor'
 import { formatTime } from '../../utils/format'
 import {
   PluginPermission,
@@ -44,8 +43,7 @@ export type ModuleLoader = (code: string) => Promise<PluginFactory>
 
 /** 默认模块加载器:blob URL + 动态 import (Worker 中 CSP script-src blob: 允许) */
 async function importPluginModule(code: string): Promise<PluginFactory> {
-  const moduleCode = toModuleCode(code)
-  const blob = new Blob([moduleCode], { type: 'text/javascript' })
+  const blob = new Blob([code], { type: 'text/javascript' })
   const url = URL.createObjectURL(blob)
   let mod: { default?: unknown }
   try {

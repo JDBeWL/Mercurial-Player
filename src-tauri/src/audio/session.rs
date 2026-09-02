@@ -85,9 +85,11 @@ pub async fn try_resume_last_session(
     app: &AppHandle,
     state: &State<'_, AppState>,
 ) -> Result<ResumeResult, AppError> {
-    let mut config = state.config_manager.load_config()?;
-
-    let session = match config.last_session.take() {
+    // 取出会话记录: 「读-改-写」在写锁内一次完成,避免与 save_last_session
+    // 等并发时丢失更新。本段是同步代码,唯一的 .await 在下方 play_track_*
+    // 处 —— std 互斥锁守卫绝不能跨 await 持有 (会让 Future 非 Send 且可死锁),
+    // 因此后续写回另起一个临界区。
+    let session = match state.config_manager.update_config(|config| config.last_session.take())? {
         None => {
             return Ok(ResumeResult {
                 resumed: false,
@@ -113,8 +115,7 @@ pub async fn try_resume_last_session(
             session.saved_at,
             now
         );
-        // 持久化清除
-        let _ = state.config_manager.save_config(&config);
+        // 记录已在上面的 update_config 中取出并落盘 (last_session = None)
         return Ok(ResumeResult {
             resumed: false,
             track_path: None,
@@ -137,7 +138,7 @@ pub async fn try_resume_last_session(
         );
         // 静默清除记录 - 前端通过 status="not_found" 决定是否从播放列表移除
         // 但不在此处直接操作播放列表 (播放列表管理在前端 store 中)
-        let _ = state.config_manager.save_config(&config);
+        // (记录已在 update_config 中取出并落盘)
         return Ok(ResumeResult {
             resumed: false,
             track_path: Some(session.track_path),
@@ -158,12 +159,11 @@ pub async fn try_resume_last_session(
         meta
     } else {
         // 文件存在但无法读取 metadata (权限问题等)
-        // 视为不可用,清除记录
+        // 视为不可用,清除记录 (记录已在 update_config 中取出并落盘)
         log::warn!(
             "Failed to read file metadata for last session: {}",
             session.track_path
         );
-        let _ = state.config_manager.save_config(&config);
         return Ok(ResumeResult {
             resumed: false,
             track_path: Some(session.track_path),
@@ -200,8 +200,10 @@ pub async fn try_resume_last_session(
     updated_session.file_size = actual_size;
     updated_session.file_mtime = actual_mtime;
     updated_session.saved_at = now;
-    config.last_session = Some(updated_session.clone());
-    let _ = state.config_manager.save_config(&config);
+    // 写回配置 (保持记录新鲜):独立的临界区,不与下方的 .await 重叠
+    let _ = state.config_manager.update_config(|config| {
+        config.last_session = Some(updated_session.clone());
+    });
 
     // 调用 play_track 恢复播放
     // 根据 exclusive_mode 标志派发到对应路径
@@ -252,9 +254,9 @@ pub async fn try_resume_last_session(
         Err(e) => {
             log::error!("Failed to resume last session playback: {e}");
             // 播放失败也清除记录,避免下次启动又失败
-            let mut config = state.config_manager.load_config()?;
-            config.last_session = None;
-            let _ = state.config_manager.save_config(&config);
+            let _ = state.config_manager.update_config(|config| {
+                config.last_session = None;
+            });
             Ok(ResumeResult {
                 resumed: false,
                 track_path: None,
@@ -378,17 +380,16 @@ pub fn save_last_session(
         playlist_tracks,
     };
 
-    let mut config = state.config_manager.load_config()?;
-    config.last_session = Some(session);
-    state.config_manager.save_config(&config)
+    state
+        .config_manager
+        .update_config(|config| config.last_session = Some(session))
 }
 
 /// 清除上次播放会话记录 (用于文件失效场景)
 pub fn clear_last_session(state: &State<AppState>) -> Result<(), AppError> {
-    let mut config = state.config_manager.load_config()?;
-    if config.last_session.is_some() {
-        config.last_session = None;
-        state.config_manager.save_config(&config)?;
-    }
-    Ok(())
+    state.config_manager.update_config(|config| {
+        if config.last_session.is_some() {
+            config.last_session = None;
+        }
+    })
 }

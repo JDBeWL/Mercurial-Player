@@ -98,35 +98,84 @@ export function createPluginStorage(pluginId: string): PluginPersistentStorage {
     saveTimeout = setTimeout(() => void enqueueSave(target), 300) // 减少延迟
   }
 
-  const persistentStorage = new Proxy(storage, {
-    set(target, key: string, value) {
-      target[key] = value
-      debouncedSave(target)
-      return true
+  const cancelPendingSave = () => {
+    if (saveTimeout) {
+      clearTimeout(saveTimeout)
+      saveTimeout = null
+    }
+  }
+
+  /**
+   * 生命周期方法: flush / cleanup
+   *
+   * 必须作为不可枚举、不可覆盖的能力暴露,而不是写成 storage 上的数据键。
+   * 早期实现直接 `persistentStorage.flush = ...`,由于 storage 是 Proxy,
+   * 赋值会走 set 陷阱 → 变成 reactive 对象的可枚举自有属性,带来两个后果:
+   *   1. api.storage.getAll() 的 `{ ...storage }` 展开会带上这两个函数,
+   *      宿主 postMessage 时结构化克隆抛 DataCloneError,而 pushMirror 只
+   *      logger.warn 吞掉 → 整份状态镜像 (playerState/theme/tracks) 静默丢失;
+   *   2. 插件可 `api.storage.set('flush', 1)` 覆盖,使停用时的落盘静默失败。
+   */
+  const lifecycle = {
+    flush: (): Promise<void> => {
+      cancelPendingSave()
+      return enqueueSave(storage)
     },
-    deleteProperty(target, key: string) {
-      delete target[key]
+    cleanup: (): void => {
+      cancelPendingSave()
+    },
+  }
+
+  const LIFECYCLE_KEYS: ReadonlySet<string> = new Set(Object.keys(lifecycle))
+
+  const persistentStorage = new Proxy(storage, {
+    get(target, key) {
+      if (typeof key === 'string' && LIFECYCLE_KEYS.has(key)) {
+        return lifecycle[key as keyof typeof lifecycle]
+      }
+      return Reflect.get(target, key)
+    },
+
+    set(target, key, value) {
+      // 生命周期键不是数据键,允许覆盖会让 flush/cleanup 静默失效
+      if (typeof key === 'string' && LIFECYCLE_KEYS.has(key)) return false
+      const ok = Reflect.set(target, key, value)
       debouncedSave(target)
-      return true
+      return ok
+    },
+
+    deleteProperty(target, key) {
+      if (typeof key === 'string' && LIFECYCLE_KEYS.has(key)) return false
+      const ok = Reflect.deleteProperty(target, key)
+      debouncedSave(target)
+      return ok
+    },
+
+    has(target, key) {
+      if (typeof key === 'string' && LIFECYCLE_KEYS.has(key)) return true
+      return Reflect.has(target, key)
+    },
+
+    // 从自有键中剔除生命周期方法:使 `{ ...storage }` / Object.keys 只看到数据键
+    ownKeys(target) {
+      return Reflect.ownKeys(target).filter(
+        (key) => typeof key !== 'string' || !LIFECYCLE_KEYS.has(key),
+      )
+    },
+
+    getOwnPropertyDescriptor(target, key) {
+      if (typeof key === 'string' && LIFECYCLE_KEYS.has(key)) {
+        return {
+          value: lifecycle[key as keyof typeof lifecycle],
+          writable: false,
+          enumerable: false,
+          // 必须为 true:Proxy 不变量禁止把目标上不存在属性报为不可配置
+          configurable: true,
+        }
+      }
+      return Reflect.getOwnPropertyDescriptor(target, key)
     },
   }) as PluginPersistentStorage
-
-  // 添加强制保存方法（用于应用关闭/插件停用时）
-  persistentStorage.flush = () => {
-    if (saveTimeout) {
-      clearTimeout(saveTimeout)
-      saveTimeout = null
-    }
-    return enqueueSave(storage)
-  }
-
-  // 添加清理方法（用于插件卸载时）
-  persistentStorage.cleanup = () => {
-    if (saveTimeout) {
-      clearTimeout(saveTimeout)
-      saveTimeout = null
-    }
-  }
 
   return persistentStorage
 }

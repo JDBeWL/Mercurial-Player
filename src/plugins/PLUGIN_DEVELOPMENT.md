@@ -54,25 +54,26 @@ src/plugins/builtins/
 ### 外部插件示例 (index.js)
 
 ```javascript
-// 插件主入口
-// api 对象由插件系统自动注入
+// 插件主入口:默认导出一个工厂函数,api 对象由插件系统自动注入
 
-const plugin = {
-  // 插件激活时调用
-  activate() {
-    api.log.info('插件已激活！')
-  },
+export default function (api) {
+  return {
+    // 插件激活时调用
+    activate() {
+      api.log.info('插件已激活！')
+    },
 
-  // 插件停用时调用
-  deactivate() {
-    api.log.info('插件已停用')
-  },
+    // 插件停用时调用
+    deactivate() {
+      api.log.info('插件已停用')
+    },
 
-  // 自定义方法
-  doSomething() {
-    const state = api.player.getState()
-    api.log.info('当前播放:', state.currentTrack?.title)
-  },
+    // 自定义方法
+    doSomething() {
+      const state = api.player.getState()
+      api.log.info('当前播放:', state.currentTrack?.title)
+    },
+  }
 }
 ```
 
@@ -549,82 +550,86 @@ manifest.json:
 index.js:
 
 ```javascript
-const plugin = {
-  activate() {
-    api.log.info('歌词截图插件已激活')
+export default function (api) {
+  const plugin = {
+    activate() {
+      api.log.info('歌词截图插件已激活')
 
-    // 注册快捷键
-    api.shortcuts.register({
-      id: 'lyrics-share-copy',
-      name: '复制歌词图片',
-      key: 'Ctrl+Shift+C',
-      action: () => this.copyImage(),
-    })
+      // 注册快捷键
+      api.shortcuts.register({
+        id: 'lyrics-share-copy',
+        name: '复制歌词图片',
+        key: 'Ctrl+Shift+C',
+        action: () => plugin.copyImage(),
+      })
 
-    // 注册操作按钮
-    api.ui.registerActionButton({
-      id: 'lyrics-share-btn',
-      name: '复制歌词图片',
-      icon: 'content_copy',
-      location: 'lyrics',
-      action: () => this.copyImage(),
-    })
-  },
+      // 注册操作按钮
+      api.ui.registerActionButton({
+        id: 'lyrics-share-btn',
+        name: '复制歌词图片',
+        icon: 'content_copy',
+        location: 'lyrics',
+        action: () => plugin.copyImage(),
+      })
+    },
 
-  deactivate() {
-    api.shortcuts.unregister('lyrics-share-copy')
-    api.ui.unregisterActionButton('lyrics-share-btn')
-    api.log.info('歌词截图插件已停用')
-  },
+    deactivate() {
+      api.shortcuts.unregister('lyrics-share-copy')
+      api.ui.unregisterActionButton('lyrics-share-btn')
+      api.log.info('歌词截图插件已停用')
+    },
 
-  async copyImage() {
-    const state = api.player.getState()
-    if (!state.currentTrack) {
-      api.ui.showNotification('没有正在播放的歌曲', 'warning')
-      return
-    }
-
-    const lyrics = await api.player.getLyrics()
-    const lyricIndex = api.player.getCurrentLyricIndex()
-    const theme = api.theme.getCurrent()
-
-    // 创建画布
-    const { canvas, ctx } = api.utils.createCanvas(800, 400)
-
-    // 绘制背景
-    ctx.fillStyle = theme.isDark ? '#1a1a1a' : '#ffffff'
-    ctx.fillRect(0, 0, 800, 400)
-
-    // 绘制歌词
-    ctx.fillStyle = api.theme.getCSSVariable('md-sys-color-primary') || '#6750a4'
-    ctx.font = 'bold 32px system-ui'
-    ctx.textAlign = 'center'
-
-    if (lyrics && lyricIndex >= 0 && lyrics[lyricIndex]) {
-      const line = lyrics[lyricIndex]
-      ctx.fillText(line.texts[0]?.text || '', 400, 180)
-
-      if (line.texts[0]?.translation) {
-        ctx.globalAlpha = 0.7
-        ctx.font = '24px system-ui'
-        ctx.fillText(line.texts[0].translation, 400, 220)
-        ctx.globalAlpha = 1
+    async copyImage() {
+      const state = api.player.getState()
+      if (!state.currentTrack) {
+        api.ui.showNotification('没有正在播放的歌曲', 'warning')
+        return
       }
-    }
 
-    // 绘制歌曲信息
-    ctx.fillStyle = theme.isDark ? '#ffffff' : '#000000'
-    ctx.font = 'bold 20px system-ui'
-    ctx.fillText(state.currentTrack.title || '未知歌曲', 400, 320)
+      const lyrics = await api.player.getLyrics()
+      const lyricIndex = api.player.getCurrentLyricIndex()
+      const theme = api.theme.getCurrent()
 
-    ctx.font = '16px system-ui'
-    ctx.globalAlpha = 0.7
-    ctx.fillText(state.currentTrack.artist || '未知艺术家', 400, 350)
+      // 创建画布
+      const { canvas, ctx } = api.utils.createCanvas(800, 400)
 
-    // 复制到剪贴板
-    await api.clipboard.writeImage(canvas)
-    api.ui.showNotification('图片已复制到剪贴板', 'info')
-  },
+      // 绘制背景
+      ctx.fillStyle = theme.isDark ? '#1a1a1a' : '#ffffff'
+      ctx.fillRect(0, 0, 800, 400)
+
+      // 绘制歌词
+      ctx.fillStyle = api.theme.getCSSVariable('md-sys-color-primary') || '#6750a4'
+      ctx.font = 'bold 32px system-ui'
+      ctx.textAlign = 'center'
+
+      if (lyrics && lyricIndex >= 0 && lyrics[lyricIndex]) {
+        const line = lyrics[lyricIndex]
+        ctx.fillText(line.texts[0]?.text || '', 400, 180)
+
+        if (line.texts[0]?.translation) {
+          ctx.globalAlpha = 0.7
+          ctx.font = '24px system-ui'
+          ctx.fillText(line.texts[0].translation, 400, 220)
+          ctx.globalAlpha = 1
+        }
+      }
+
+      // 绘制歌曲信息
+      ctx.fillStyle = theme.isDark ? '#ffffff' : '#000000'
+      ctx.font = 'bold 20px system-ui'
+      ctx.fillText(state.currentTrack.title || '未知歌曲', 400, 320)
+
+      ctx.font = '16px system-ui'
+      ctx.globalAlpha = 0.7
+      ctx.fillText(state.currentTrack.artist || '未知艺术家', 400, 350)
+
+      // 复制到剪贴板
+      await api.clipboard.writeImage(canvas)
+      api.ui.showNotification('图片已复制到剪贴板', 'info')
+    },
+  }
+
+  return plugin
 }
 ```
 
@@ -647,55 +652,59 @@ manifest.json:
 index.js:
 
 ```javascript
-let lastTrackPath = null
+export default function (api) {
+  let lastTrackPath = null
 
-const plugin = {
-  activate() {
-    api.log.info('播放统计插件已激活')
+  const plugin = {
+    activate() {
+      api.log.info('播放统计插件已激活')
 
-    // 监听歌曲切换事件(保存回调引用,停用时移除监听需要用到)
-    api.events.on('player:trackChanged', onTrackChanged)
-  },
+      // 监听歌曲切换事件(保存回调引用,停用时移除监听需要用到)
+      api.events.on('player:trackChanged', onTrackChanged)
+    },
 
-  deactivate() {
-    // 必须传入注册时的同一个回调引用
-    api.events.off('player:trackChanged', onTrackChanged)
-    lastTrackPath = null
-    api.log.info('播放统计插件已停用')
-  },
+    deactivate() {
+      // 必须传入注册时的同一个回调引用
+      api.events.off('player:trackChanged', onTrackChanged)
+      lastTrackPath = null
+      api.log.info('播放统计插件已停用')
+    },
 
-  recordPlay(track) {
-    if (!track.path || track.path === lastTrackPath) return
+    recordPlay(track) {
+      if (!track.path || track.path === lastTrackPath) return
 
-    lastTrackPath = track.path
-    const counts = api.storage.get('playCounts', {})
-    counts[track.path] = (counts[track.path] || 0) + 1
-    api.storage.set('playCounts', counts)
+      lastTrackPath = track.path
+      const counts = api.storage.get('playCounts', {})
+      counts[track.path] = (counts[track.path] || 0) + 1
+      api.storage.set('playCounts', counts)
 
-    api.log.debug(`${track.title} 播放次数: ${counts[track.path]}`)
-  },
+      api.log.debug(`${track.title} 播放次数: ${counts[track.path]}`)
+    },
 
-  getMostPlayed(limit = 10) {
-    const counts = api.storage.get('playCounts', {})
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
-      .map(([path, count]) => ({ path, count }))
-  },
+    getMostPlayed(limit = 10) {
+      const counts = api.storage.get('playCounts', {})
+      return Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limit)
+        .map(([path, count]) => ({ path, count }))
+    },
 
-  getStats() {
-    const counts = api.storage.get('playCounts', {})
-    return {
-      totalTracks: Object.keys(counts).length,
-      totalPlays: Object.values(counts).reduce((a, b) => a + b, 0),
-    }
-  },
-}
-
-function onTrackChanged(data) {
-  if (data.track && data.isPlaying) {
-    plugin.recordPlay(data.track)
+    getStats() {
+      const counts = api.storage.get('playCounts', {})
+      return {
+        totalTracks: Object.keys(counts).length,
+        totalPlays: Object.values(counts).reduce((a, b) => a + b, 0),
+      }
+    },
   }
+
+  function onTrackChanged(data) {
+    if (data.track && data.isPlaying) {
+      plugin.recordPlay(data.track)
+    }
+  }
+
+  return plugin
 }
 ```
 
@@ -913,7 +922,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
    - 验证插件清单
    - 代码安全检查
 
-6. **sandbox/** - Worker 沙箱 (P0 安全修复)
+6. **sandbox/** - Worker 沙箱
    - `workerSandboxHost.ts` 主窗口侧宿主：RPC 分发、状态镜像推送、回调桥、Worker 生命周期
    - `workerCore.ts` Worker 侧运行时：插件 API 代理、参数/回调序列化
    - `workerBootstrap.ts` Worker 入口（消息接线）
@@ -924,10 +933,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
    - 为内置插件提供安全 console 代理与可清理的定时器
    - `validatePluginCode` 代码静态检查（外部插件进入 Worker 前的纵深防御层）
 
-8. **moduleExecutor.ts** - 模块代码包装
-   - 将外部插件代码（含旧脚本格式）包装为 ES 模块源码供 Worker 求值
-
-9. **builtins/** - 内置插件
+8. **builtins/** - 内置插件
    - TypeScript 编写的官方插件
    - 直接集成到应用中
    - 作为插件开发示例
@@ -1099,13 +1105,15 @@ export default builtinPlugins
 /**
  * @param {PluginAPI} api
  */
-const plugin = {
-  activate() {
-    api.log.info('插件已激活')
-  },
-  deactivate() {
-    api.log.info('插件已停用')
-  },
+export default function (api) {
+  return {
+    activate() {
+      api.log.info('插件已激活')
+    },
+    deactivate() {
+      api.log.info('插件已停用')
+    },
+  }
 }
 ```
 
@@ -1199,10 +1207,12 @@ const plugin = {
 /**
  * @param {PluginAPI} api
  */
-const plugin = {
-  activate() {
-    // 现在可以获得 api 的类型提示
-  },
+export default function (api) {
+  return {
+    activate() {
+      // 现在可以获得 api 的类型提示
+    },
+  }
 }
 ```
 

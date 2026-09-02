@@ -12,7 +12,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { PluginWorkerHost } from '@/plugins/sandbox/workerSandboxHost'
 import { SandboxWorkerRuntime, removeNetworkGlobals } from '@/plugins/sandbox/workerCore'
-import { toModuleCode } from '@/plugins/moduleExecutor'
 import type { PluginAPI, PluginInstance } from '@/plugins/pluginTypes'
 
 /**
@@ -63,13 +62,12 @@ const flushAsync = async (): Promise<void> => {
 }
 
 // ---------------------------------------------------------------------------
-// 测试模块加载器:复用真实 toModuleCode 包装,new Function 求值
+// 测试模块加载器:外置插件仅接受 ES 模块格式,直接剥离默认导出求值
 // (node 环境不支持 blob: 动态 import)
 // ---------------------------------------------------------------------------
 
 const testLoader = async (code: string): Promise<(api: unknown, globals: unknown) => unknown> => {
-  const moduleCode = toModuleCode(code)
-  const body = moduleCode.replace(/export\s+default\s*/, 'return ')
+  const body = code.replace(/export\s+default\s*/, 'return ')
   // 一次调用 = 模拟模块求值,返回默认导出的工厂函数 (与 blob import 语义一致)
   return new Function(body)() as (api: unknown, globals: unknown) => unknown
 }
@@ -218,13 +216,12 @@ describe('workerSandbox - 模块加载与主函数执行', () => {
     await expect(host.runMain(api)).rejects.toThrow('factory boom')
   })
 
-  it('旧脚本格式 (顶层 plugin 变量) 通过包装后正常执行', async () => {
+  it('缺少默认导出的代码无法成为插件实例 (runMain 以 "尚未初始化" 失败)', async () => {
     const code = `
       var plugin = { activate: function () {} }
     `
     const { host, api } = await setupSandbox(code)
-    const instance = await host.runMain(api)
-    expect(typeof instance.activate).toBe('function')
+    await expect(host.runMain(api)).rejects.toThrow('插件模块尚未初始化')
   })
 })
 
@@ -659,5 +656,122 @@ describe('workerSandbox - 宿主侧权限强制 (api-call 白名单)', () => {
 
     expect(api.player.play).toHaveBeenCalledTimes(1)
     expect(results.some((m) => m.type === 'api-result' && m.ok === true)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// P1-2 回归:沙箱消息结构校验与反序列化预算
+//
+// 历史问题:handleWorkerMessage 对 Worker 消息不做字段校验,reviveValue
+// 无限递归。畸形 payload (深嵌套对象/非法日志级别/非法 callId) 会造成
+// RangeError 从 onmessage 逃逸,等待中的 Promise 永不 settle。
+// ---------------------------------------------------------------------------
+
+describe('workerSandbox - 消息结构校验与反序列化预算 (P1-2)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  async function setupHost(permissions: string[]) {
+    const api = createMockApi()
+    const { host, worker } = await setupSandbox(`export default () => ({})`, permissions, api)
+    await runSandboxMain(host, api)
+    const results: { type: string; ok?: boolean; callId?: number }[] = []
+    const originalPost = worker.postMessage.bind(worker)
+    worker.postMessage = (data: unknown): void => {
+      results.push(data as { type: string; ok?: boolean; callId?: number })
+      originalPost(data)
+    }
+    return { host, worker, api, results }
+  }
+
+  /** 构造 depth 层纯对象嵌套 (每层 1 个节点) */
+  const deepObject = (depth: number): Record<string, unknown> => {
+    let node: Record<string, unknown> = {}
+    const root = node
+    for (let i = 0; i < depth; i++) {
+      const next: Record<string, unknown> = {}
+      node.child = next
+      node = next
+    }
+    return root
+  }
+
+  /** 伪造 Worker → 宿主的 api-call (绕过 workerCore 权限预检) */
+  const forgeApiCall = (
+    worker: FakeWorker,
+    callId: unknown,
+    path: unknown,
+    args: unknown[] = [],
+  ): void => {
+    worker.emitToHost({ type: 'api-call', callId, path, args } as never)
+  }
+
+  it('api-call 参数深嵌套触发反序列化预算:回执 ok:false 而非栈溢出', async () => {
+    const { api, worker, results } = await setupHost(['player:control'])
+    worker.emitToHost({
+      type: 'api-call',
+      callId: 1,
+      path: 'player.play',
+      args: [deepObject(2_000)],
+    } as never)
+    await flushAsync()
+
+    const rejected = results.find((m) => m.type === 'api-result' && m.ok === false)
+    expect(rejected).toBeDefined()
+    expect(api.player.play).not.toHaveBeenCalled()
+  })
+
+  it('畸形 log 消息 (level 非法 / args 非数组) 被降级,宿主仍可服务后续请求', async () => {
+    const { worker, results } = await setupHost(['player:control'])
+    worker.emitToHost({ type: 'log', level: 'constructor', args: ['boom'] } as never)
+    worker.emitToHost({ type: 'log', level: 42, args: 'not-an-array' } as never)
+    worker.emitToHost({ type: 'log', args: [] } as never)
+    await flushAsync()
+
+    // 宿主未被毒化:后续合法 api-call 仍得到 ok:true
+    forgeApiCall(worker, 9, 'player.play')
+    await flushAsync()
+    expect(
+      results.some((m) => m.type === 'api-result' && m.ok === true && m.callId === 9),
+    ).toBe(true)
+  })
+
+  it('callback-result 带非法 callId 被丢弃且不抛出', async () => {
+    const { worker, results } = await setupHost(['player:control'])
+    expect(() => {
+      worker.emitToHost({ type: 'callback-result', callId: 'x', ok: true, value: 1 } as never)
+      worker.emitToHost({ type: 'callback-result', callId: -1, ok: true, value: 1 } as never)
+      worker.emitToHost({
+        type: 'callback-result',
+        callId: Number.MAX_SAFE_INTEGER + 1,
+        ok: false,
+      } as never)
+    }).not.toThrow()
+    await flushAsync()
+
+    // 丢弃畸形消息后宿主仍正常工作
+    forgeApiCall(worker, 10, 'player.play')
+    await flushAsync()
+    expect(
+      results.some((m) => m.type === 'api-result' && m.ok === true && m.callId === 10),
+    ).toBe(true)
+  })
+
+  it('api-call 带非法 callId 被丢弃 (无对应挂起可回执)', async () => {
+    const { api, worker, results } = await setupHost(['player:control'])
+    expect(() => {
+      forgeApiCall(worker, 'x' as unknown as number, 'player.play')
+      forgeApiCall(worker, -5, 'player.play')
+    }).not.toThrow()
+    await flushAsync()
+
+    expect(api.player.play).not.toHaveBeenCalled()
+    // 宿主仍正常
+    forgeApiCall(worker, 11, 'player.play')
+    await flushAsync()
+    expect(
+      results.some((m) => m.type === 'api-result' && m.ok === true && m.callId === 11),
+    ).toBe(true)
   })
 })

@@ -679,19 +679,17 @@ pub async fn toggle_exclusive_mode(
         .clone();
     if device_name.is_empty() {
         // 没有当前设备,只能保存配置并要求重启 (首次启动场景)
-        if let Ok(mut config) = state.config_manager.load_config() {
+        state.config_manager.update_config(|config| {
             config.audio.exclusive_mode = enabled;
-            state.config_manager.save_config(&config)?;
-        }
+        })?;
         return Err("RESTART_REQUIRED".to_string().into());
     }
 
     // 先保存配置,无论切换成功与否都持久化用户选择
-    if let Ok(mut config) = state.config_manager.load_config() {
+    if let Err(e) = state.config_manager.update_config(|config| {
         config.audio.exclusive_mode = enabled;
-        if let Err(e) = state.config_manager.save_config(&config) {
-            log::warn!("Failed to save config after toggling exclusive mode: {e}");
-        }
+    }) {
+        log::warn!("Failed to save config after toggling exclusive mode: {e}");
     }
 
     // 热切换到目标模式
@@ -723,10 +721,10 @@ pub async fn toggle_exclusive_mode(
         Err(e) => {
             // 切换失败,回滚配置
             log::error!("Failed to hot-switch exclusive mode to {enabled}: {e}");
-            if let Ok(mut config) = state.config_manager.load_config() {
+            // 回滚:独立临界区 (上方的 .await 已完成,锁不跨 await 持有)
+            let _ = state.config_manager.update_config(|config| {
                 config.audio.exclusive_mode = prev_exclusive;
-                let _ = state.config_manager.save_config(&config);
-            }
+            });
             Err(format!(
                 "Failed to switch exclusive mode: {e}. The device may be in use by another application."
             ).into())

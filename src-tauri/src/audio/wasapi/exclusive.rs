@@ -1545,6 +1545,15 @@ mod simd_tests {
 mod spsc_ring_tests {
     use super::*;
 
+    /// f32 位模式比较:环形缓冲对样本是纯拷贝,相等是设计要求而非数值近似。
+    /// 用 to_bits 绕开 clippy::float_cmp,同时保证 0.0/-0.0 也不混淆。
+    fn assert_f32_slice_eq(actual: &[f32], expected: &[f32]) {
+        assert_eq!(actual.len(), expected.len(), "长度不一致");
+        for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
+            assert_eq!(a.to_bits(), e.to_bits(), "index {i}: {a} != {e}");
+        }
+    }
+
     #[test]
     fn basic_push_pop() {
         let ring = SpscSampleRing::new(8);
@@ -1554,12 +1563,12 @@ mod spsc_ring_tests {
 
         let mut out = [0.0f32; 2];
         assert_eq!(ring.pop_slice(&mut out), 2);
-        assert_eq!(out, [1.0, 2.0]);
+        assert_f32_slice_eq(&out, &[1.0, 2.0]);
 
         // 欠载:只取到 1 个,其余填 0
         let mut out2 = [0.0f32; 5];
         assert_eq!(ring.pop_slice(&mut out2), 1);
-        assert_eq!(out2, [3.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_f32_slice_eq(&out2, &[3.0, 0.0, 0.0, 0.0, 0.0]);
         assert_eq!(ring.len(), 0);
     }
 
@@ -1569,13 +1578,13 @@ mod spsc_ring_tests {
         let mut out = [0.0f32; 3];
         ring.push_slice(&[1.0, 2.0, 3.0]);
         assert_eq!(ring.pop_slice(&mut out), 3);
-        assert_eq!(out, [1.0, 2.0, 3.0]);
+        assert_f32_slice_eq(&out, &[1.0, 2.0, 3.0]);
 
         // head=3, 写入跨越缓冲区末尾
         assert_eq!(ring.push_slice(&[4.0, 5.0, 6.0]), 3);
         let mut out2 = [0.0f32; 3];
         assert_eq!(ring.pop_slice(&mut out2), 3);
-        assert_eq!(out2, [4.0, 5.0, 6.0]);
+        assert_f32_slice_eq(&out2, &[4.0, 5.0, 6.0]);
     }
 
     #[test]
@@ -1597,7 +1606,7 @@ mod spsc_ring_tests {
         assert_eq!(ring.push_slice(&[7.0]), 1);
         let mut out = [0.0f32; 1];
         assert_eq!(ring.pop_slice(&mut out), 1);
-        assert_eq!(out, [7.0]);
+        assert_f32_slice_eq(&out, &[7.0]);
     }
 
     /// 双线程压测:验证 SPSC 契约下数据不丢失、不乱序
@@ -1631,7 +1640,7 @@ mod spsc_ring_tests {
                         std::hint::spin_loop();
                     }
                     for &v in &out {
-                        assert_eq!(v, (i % 100) as f32);
+                        assert_eq!(v.to_bits(), ((i % 100) as f32).to_bits());
                     }
                 }
             })

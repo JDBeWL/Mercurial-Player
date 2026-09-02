@@ -5,7 +5,7 @@ use crate::error::AppError;
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// 应用程序配置数据结构
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -304,6 +304,13 @@ pub struct ConfigManager {
     /// 进程内配置缓存（Arc 共享，读命中时免磁盘 IO + JSON 解析 + 目录扫描）。
     /// save_config 写穿更新，reset_config 清空；ConfigManager 在 AppState 中单例存在
     cache: RwLock<Option<Arc<AppConfig>>>,
+    /// 写互斥锁:串行化「读-改-写」序列
+    ///
+    /// 大量命令都是 load_config() → 修改 → save_config() 三段式。若不加锁,
+    /// 两个并发命令会读到同一份旧配置,后写的覆盖先写的 (TOCTOU 丢失更新),
+    /// 例如同时添加音乐目录与保存播放会话时,其中一项会被静默丢弃。
+    /// 所有三段式修改都必须走 [`Self::update_config`]。
+    write_lock: Mutex<()>,
 }
 
 impl Default for ConfigManager {
@@ -322,6 +329,7 @@ impl ConfigManager {
         Self {
             config_dir,
             cache: RwLock::new(None),
+            write_lock: Mutex::new(()),
         }
     }
 
@@ -512,6 +520,27 @@ impl ConfigManager {
         // 写穿：保存成功后同步更新进程内缓存
         self.store_cache(config);
         Ok(())
+    }
+
+    /// 在写锁保护下原子地「读-改-写」配置
+    ///
+    /// `load_config()` + `save_config()` 的分步组合在并发下会丢失更新:
+    /// 两个命令可能读到同一份旧值,各自改完再写回,后写者抹掉前写者的修改。
+    /// 凡是「先 load 再 save」的地方都应改用本方法,`f` 内拿到的 `config`
+    /// 保证是最新落盘值,写回也保证不被并发修改插队。
+    pub fn update_config<F, T>(&self, f: F) -> Result<T, AppError>
+    where
+        F: FnOnce(&mut AppConfig) -> T,
+    {
+        // 锁中毒时不能沿用可能不一致的内存状态,直接报错
+        let _guard = self
+            .write_lock
+            .lock()
+            .map_err(|_| AppError::Config("配置写锁已中毒，无法安全修改配置".to_string()))?;
+        let mut config = self.load_config()?;
+        let result = f(&mut config);
+        self.save_config(&config)?;
+        Ok(result)
     }
 
     fn save_config_to_file(config: &AppConfig, file_path: &str) -> Result<(), AppError> {

@@ -23,7 +23,7 @@ import {
   type PluginPermissionType,
 } from '../pluginTypes'
 import type { PluginSandbox } from '../pluginSandbox'
-import type { HostToWorkerMessage, MirrorData, WorkerToHostMessage } from './sandboxProtocol'
+import type { HostToWorkerMessage, MirrorData, SerializedError } from './sandboxProtocol'
 import { SANDBOX_FN_MARKER, SANDBOX_RESPONSE_MARKER, deserializeError } from './sandboxProtocol'
 // blob URL 内联 Worker: 安全考量见下方 defaultWorkerFactory 注释
 import SandboxWorker from './workerBootstrap?worker&inline'
@@ -103,6 +103,41 @@ const MAIN_TIMEOUT_MS = 30_000
 /** 宿主→Worker 回调 RPC(activate/deactivate/事件回调等)超时 */
 const CALLBACK_TIMEOUT_MS = 30_000
 
+/**
+ * 反序列化 (reviveValue) 的资源预算。
+ *
+ * Worker 与插件代码共享同一全局作用域,插件可自行 postMessage 任意 payload;
+ * 恶意/失控的深度嵌套对象会让无限制的递归直接 RangeError (栈溢出),
+ * 该异常从 onmessage 逃逸后等待中的 Promise 永不 settle。
+ * 这里改为预算耗尽即抛普通 Error,可被调用方捕获并拒绝等待者。
+ */
+const REVIVE_MAX_DEPTH = 32
+const REVIVE_MAX_NODES = 20_000
+
+/** 允许插件使用的日志级别白名单 (替代 logger[msg.level] 的任意索引) */
+const LOG_LEVELS = new Set(['error', 'warn', 'info', 'debug'])
+
+type LogLevel = 'error' | 'warn' | 'info' | 'debug'
+
+// ---------------------------------------------------------------------------
+// 不可信消息校验
+// ---------------------------------------------------------------------------
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+/** callId 必须是安全非负整数:它是挂起 Promise 的查找键 */
+function isCallId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isSerializedError(value: unknown): value is SerializedError {
+  return (
+    isRecord(value) && typeof value.name === 'string' && typeof value.message === 'string'
+  )
+}
+
 /** 给 promise 附加超时:超时后 reject(调用方负责 terminate 清理) */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -168,7 +203,8 @@ export class PluginWorkerHost {
     const worker = this.workerFactory()
     this.worker = worker
     worker.onmessage = (event: MessageEvent) => {
-      this.handleWorkerMessage(event.data as WorkerToHostMessage)
+      // 不做类型断言:消息来自不可信侧,由 handleWorkerMessage 逐字段校验
+      this.handleWorkerMessage(event.data)
     }
     worker.onerror = (event: ErrorEvent) => {
       logger.error(`[Plugin:${this.pluginId}] 沙箱 Worker 异常:`, event.message || event)
@@ -264,52 +300,116 @@ export class PluginWorkerHost {
     this.cbCallPending.clear()
   }
 
-  private handleWorkerMessage(msg: WorkerToHostMessage): void {
-    if (!msg || typeof msg.type !== 'string') return
-    switch (msg.type) {
-      case 'init-result':
-        if (msg.ok) {
-          this.initResolve?.()
-        } else {
-          this.initReject?.(deserializeError(msg.error))
-        }
-        this.initResolve = null
-        this.initReject = null
-        break
+  /**
+   * 处理来自 Worker 的消息
+   *
+   * 消息来自不可信侧:插件代码与沙箱运行时共享同一全局作用域,可自行
+   * postMessage 伪造任意 payload。因此这里做三层防护:
+   *   1. 按消息类型逐一校验字段形状,不合法直接丢弃(不改变任何宿主状态);
+   *   2. revive 阶段受深度/节点数预算约束,越界抛可捕获的普通 Error,
+   *      而不是让无限制递归触发栈溢出 RangeError;
+   *   3. 整体 try/catch —— 任何残留异常都必须拒绝全部挂起 Promise 并终止
+   *      Worker,否则插件会永久卡在半初始化状态且不产生任何报错。
+   */
+  private handleWorkerMessage(raw: unknown): void {
+    if (!isRecord(raw) || typeof raw.type !== 'string') return
+    const type = raw.type
 
-      case 'main-result':
-        if (msg.ok) {
-          this.mainWaiter?.resolve(
-            reviveInstance(msg.instance, (cbId) => this.makeCallbackStub(cbId)),
-          )
-        } else {
-          this.mainWaiter?.reject(deserializeError(msg.error))
+    try {
+      switch (type) {
+        case 'init-result': {
+          if (typeof raw.ok !== 'boolean') return this.dropMalformed(type, 'ok')
+          if (raw.ok) {
+            this.initResolve?.()
+          } else {
+            this.initReject?.(
+              deserializeError(
+                isSerializedError(raw.error)
+                  ? raw.error
+                  : { name: 'Error', message: '插件沙箱初始化失败' },
+              ),
+            )
+          }
+          this.initResolve = null
+          this.initReject = null
+          break
         }
-        this.mainWaiter = null
-        break
 
-      case 'api-call':
-        void this.handleApiCall(msg.callId, msg.path, msg.args)
-        break
-
-      case 'callback-result': {
-        const pending = this.cbCallPending.get(msg.callId)
-        this.cbCallPending.delete(msg.callId)
-        if (!pending) return
-        if (msg.ok) {
-          pending.resolve(reviveValue(msg.value, (cbId) => this.makeCallbackStub(cbId)))
-        } else {
-          pending.reject(deserializeError(msg.error))
+        case 'main-result': {
+          if (typeof raw.ok !== 'boolean') return this.dropMalformed(type, 'ok')
+          const waiter = this.mainWaiter
+          this.mainWaiter = null
+          if (!waiter) break
+          if (raw.ok) {
+            waiter.resolve(reviveInstance(raw.instance, (cbId) => this.makeCallbackStub(cbId)))
+          } else {
+            waiter.reject(
+              deserializeError(
+                isSerializedError(raw.error)
+                  ? raw.error
+                  : { name: 'Error', message: '插件主函数执行失败' },
+              ),
+            )
+          }
+          break
         }
-        break
+
+        case 'api-call': {
+          // callId 无法定位调用时只能丢弃 (回执无从投递);
+          // path / args 的形状交给 handleApiCall 校验并回一条 ok:false,
+          // 否则 Worker 侧挂起的 Promise 会一直等下去。
+          if (!isCallId(raw.callId)) return this.dropMalformed(type, 'callId')
+          void this.handleApiCall(raw.callId, raw.path as string, raw.args as unknown[])
+          break
+        }
+
+        case 'callback-result': {
+          if (!isCallId(raw.callId)) return this.dropMalformed(type, 'callId')
+          const pending = this.cbCallPending.get(raw.callId)
+          this.cbCallPending.delete(raw.callId)
+          if (!pending) break
+          if (raw.ok === true) {
+            pending.resolve(reviveValue(raw.value, (cbId) => this.makeCallbackStub(cbId)))
+          } else if (raw.ok === false) {
+            pending.reject(
+              deserializeError(
+                isSerializedError(raw.error)
+                  ? raw.error
+                  : { name: 'Error', message: '插件回调执行失败' },
+              ),
+            )
+          } else {
+            return this.dropMalformed(type, 'ok')
+          }
+          break
+        }
+
+        case 'log': {
+          if (!Array.isArray(raw.args)) return this.dropMalformed(type, 'args')
+          const level: LogLevel = LOG_LEVELS.has(raw.level as string)
+            ? (raw.level as LogLevel)
+            : 'info'
+          logger[level](`[Plugin:${this.pluginId}]`, ...raw.args)
+          break
+        }
+
+        default:
+          logger.warn(`[Plugin:${this.pluginId}] 忽略未知的沙箱消息类型: ${type}`)
       }
-
-      case 'log': {
-        const args = msg.args ?? []
-        logger[msg.level](`[Plugin:${this.pluginId}]`, ...args)
-        break
-      }
+    } catch (error) {
+      logger.error(`[Plugin:${this.pluginId}] 处理沙箱消息 "${type}" 时出错:`, error)
+      this.rejectAllPending(
+        new Error(
+          `沙箱消息 "${type}" 处理失败: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      )
+      this.terminate()
     }
+  }
+
+  /** 丢弃形状不合法的沙箱消息:不改变宿主状态,不终止插件 */
+  private dropMalformed(type: string, field: string): void {
+    logger.warn(`[Plugin:${this.pluginId}] 沙箱消息 "${type}" 的字段 ${field} 不合法,已丢弃`)
   }
 
   /** Worker 代理发起的 API 调用 → 真实 PluginAPI (宿主侧白名单 + 权限强制校验) */
@@ -495,11 +595,28 @@ export class PluginWorkerHost {
     return data
   }
 
+  /**
+   * 推送状态镜像
+   *
+   * postMessage 走结构化克隆,只要有一个字段不可克隆 (函数、异常代理值等),
+   * 整条消息就会失败。早期实现只 logger.warn 吞掉异常,结果是某个字段坏掉时
+   * playerState / theme / tracks 全部静默丢失,插件侧只能读到零值。
+   * 这里做降级重试:先丢弃最不可控的 storage 字段,保证核心状态仍能送达。
+   */
   private pushMirror(data: Partial<MirrorData>): void {
     try {
       this.post({ type: 'mirror', data })
     } catch (error) {
-      logger.warn(`[Plugin:${this.pluginId}] 状态镜像推送失败:`, error)
+      if (data.storage === undefined) {
+        logger.warn(`[Plugin:${this.pluginId}] 状态镜像推送失败:`, error)
+        return
+      }
+      try {
+        this.post({ type: 'mirror', data: { ...data, storage: null } })
+        logger.warn(`[Plugin:${this.pluginId}] 状态镜像 storage 字段不可克隆,已降级推送`)
+      } catch (retryError) {
+        logger.error(`[Plugin:${this.pluginId}] 状态镜像推送失败:`, retryError)
+      }
     }
   }
 
@@ -588,12 +705,45 @@ export class PluginWorkerHost {
 
 type StubFactory = (cbId: number) => (...args: unknown[]) => unknown
 
-/** 还原 Worker 传来的值:函数句柄标记 → 调用 Worker 的 stub 函数 */
-function reviveValue(value: unknown, makeStub: StubFactory): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => reviveValue(item, makeStub))
+interface ReviveBudget {
+  depth: number
+  nodes: number
+}
+
+/** 序列化预算耗尽:抛普通 Error 而非依赖栈溢出的 RangeError,便于调用方捕获 */
+class ReviveLimitError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ReviveLimitError'
   }
-  if (value && typeof value === 'object') {
+}
+
+/**
+ * 还原 Worker 传来的值:函数句柄标记 → 调用 Worker 的 stub 函数
+ *
+ * 递归受 REVIVE_MAX_DEPTH / REVIVE_MAX_NODES 约束。超限时抛出
+ * ReviveLimitError,由 handleWorkerMessage 捕获后拒绝等待者并终止 Worker,
+ * 避免插件用深嵌套 payload 让宿主卡在半初始化状态。
+ */
+function reviveValue(value: unknown, makeStub: StubFactory): unknown {
+  return reviveInner(value, makeStub, { depth: 0, nodes: 0 })
+}
+
+function reviveInner(value: unknown, makeStub: StubFactory, budget: ReviveBudget): unknown {
+  if (value === null || typeof value !== 'object') return value
+
+  budget.nodes += 1
+  if (budget.nodes > REVIVE_MAX_NODES) {
+    throw new ReviveLimitError(`沙箱消息对象过大（超过 ${REVIVE_MAX_NODES} 个节点）`)
+  }
+  if (budget.depth >= REVIVE_MAX_DEPTH) {
+    throw new ReviveLimitError(`沙箱消息嵌套过深（超过 ${REVIVE_MAX_DEPTH} 层）`)
+  }
+  budget.depth += 1
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item) => reviveInner(item, makeStub, budget))
+    }
     const proto = Object.getPrototypeOf(value)
     if (proto !== Object.prototype && proto !== null) return value
     const record = value as Record<string, unknown>
@@ -603,11 +753,12 @@ function reviveValue(value: unknown, makeStub: StubFactory): unknown {
     }
     const out: Record<string, unknown> = {}
     for (const [key, item] of Object.entries(record)) {
-      out[key] = reviveValue(item, makeStub)
+      out[key] = reviveInner(item, makeStub, budget)
     }
     return out
+  } finally {
+    budget.depth -= 1
   }
-  return value
 }
 
 function reviveInstance(value: unknown, makeStub: StubFactory): PluginInstance {

@@ -40,7 +40,28 @@ import { formatTime } from '../utils/format'
 import { findLyricIndex } from '../utils/lyricsParser'
 
 /**
- * Canvas 转 Blob 的 Promise 包装
+ * 插件存储快照:只保留可结构化克隆的纯数据
+ *
+ * storage 底层是 Vue reactive 代理,`{ ...storage }` 的浅展开对嵌套对象
+ * 仍然会拿到 reactive 代理;代理对象在 postMessage / structuredClone 下行为
+ * 不稳定,且插件拿到后可直接改动宿主状态。这里统一转成纯值快照,
+ * 顺带过滤掉函数等不可克隆的值(防御性:任何来源污染都不应让整份镜像报废)。
+ */
+function toCloneableSnapshot(source: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === 'function' || typeof value === 'symbol') continue
+    try {
+      out[key] = JSON.parse(JSON.stringify(value ?? null))
+    } catch {
+      // 循环引用 / BigInt 等无法 JSON 化的值:直接跳过,不影响其余键
+      logger.warn(`插件存储键 ${key} 无法序列化,快照中已跳过`)
+    }
+  }
+  return out
+}
+
+/** Canvas 转 Blob 的 Promise 包装
  * @param errorMessage 转换失败时抛出的错误文案(保持各调用方原有文案)
  */
 function canvasToBlob(
@@ -584,7 +605,7 @@ export function createPluginAPI(
 
       getAll(): Record<string, unknown> {
         requirePermission(PluginPermission.STORAGE, 'storage.getAll')
-        return { ...manager.getStorage(pluginId) }
+        return toCloneableSnapshot({ ...manager.getStorage(pluginId) })
       },
     },
 

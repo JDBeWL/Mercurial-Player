@@ -3,7 +3,7 @@
 //! 提供从网易云音乐搜索和获取歌词的功能
 
 use crate::error::AppError;
-use crate::media::http_client::get_client;
+use crate::media::http_client::{get, post};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tauri_plugin_http::reqwest::Response;
@@ -172,9 +172,7 @@ pub async fn search_songs(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<SearchSongResult>, AppError> {
-    let client = get_client()?;
-
-    // 使用 cloudsearch API
+    // 使用 cloudsearch API (post() 内部执行主机白名单校验)
     let url = "https://music.163.com/api/cloudsearch/pc";
 
     let params = [
@@ -184,7 +182,7 @@ pub async fn search_songs(
         ("offset", &offset.to_string()),
     ];
 
-    let response = send_with_retry(client.post(url).headers(build_headers()).form(&params)).await?;
+    let response = send_with_retry(post(url)?.headers(build_headers()).form(&params)).await?;
 
     let status = response.status();
     let response_text = read_response_text(response).await?;
@@ -233,11 +231,10 @@ pub async fn get_lyrics(song_id: &str) -> Result<LyricsData, AppError> {
         return Err("非法的歌曲 ID".to_string().into());
     }
 
-    let client = get_client()?;
-
+    // get() 内部执行主机白名单校验
     let url = format!("https://music.163.com/api/song/lyric?id={song_id}&lv=-1&tv=-1&rv=-1&kv=-1");
 
-    let response = send_with_retry(client.get(&url).headers(build_headers())).await?;
+    let response = send_with_retry(get(&url)?.headers(build_headers())).await?;
 
     let status = response.status();
     let response_text = read_response_text(response).await?;

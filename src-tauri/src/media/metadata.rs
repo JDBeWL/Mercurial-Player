@@ -700,11 +700,18 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
     if is_sensitive_path(audio_path) {
         return Err("安全限制：不允许访问敏感目录".to_string().into());
     }
-    // 校验输出路径：显式扩展名必须是图片格式，且不允许写入敏感目录
-    if Path::new(output_path).extension().is_some()
-        && !has_allowed_extension(output_path, &COVER_OUTPUT_EXTENSIONS)
-    {
-        return Err("封面输出路径必须是图片文件".to_string().into());
+    // 校验输出路径：必须是图片扩展名，且不允许写入敏感目录。
+    //
+    // 这里不能写成「有扩展名才校验白名单」——那样无扩展名的路径会整体跳过
+    // 扩展名检查，只剩 is_sensitive_path 兜底，仍可向用户目录写入任意字节
+    // （例如把音频标签里的图片数据写到 AppData 下的无扩展名文件）。
+    // has_allowed_extension 对无扩展名返回 false，因此可直接作为闸门。
+    if !has_allowed_extension(output_path, &COVER_OUTPUT_EXTENSIONS) {
+        return Err(format!(
+            "封面输出路径必须是图片文件 ({})",
+            COVER_OUTPUT_EXTENSIONS.join("/")
+        )
+        .into());
     }
     if is_sensitive_path(output_path) {
         return Err("安全限制：不允许写入敏感目录".to_string().into());

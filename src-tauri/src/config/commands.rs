@@ -69,10 +69,15 @@ pub fn load_config(state: State<AppState>) -> Result<AppConfig, AppError> {
 /// 前端负载不含该字段;若直接落盘会把已记录的播放会话抹掉,这里沿用现有值。
 #[command]
 pub fn save_config(state: State<AppState>, mut config: AppConfig) -> Result<(), AppError> {
-    if config.last_session.is_none() {
-        config.last_session = state.config_manager.load_config()?.last_session;
-    }
-    state.config_manager.save_config(&config)
+    // 读-改-写必须在同一把写锁内完成,否则与 save_last_session 等并发时会互相覆盖
+    state.config_manager.update_config(|current| {
+        // last_session 由后端 save_last_session / clear_last_session 独立管理,
+        // 前端负载不含该字段;若直接落盘会把已记录的播放会话抹掉
+        if config.last_session.is_none() {
+            config.last_session.clone_from(&current.last_session);
+        }
+        *current = config;
+    })
 }
 
 /// 导出配置到指定路径
@@ -99,12 +104,13 @@ pub fn add_music_directory(state: State<AppState>, path: String) -> Result<Vec<S
     // 验证路径安全性
     is_path_safe(&path)?;
 
-    let mut config = state.config_manager.load_config()?;
-    if !config.music_directories.contains(&path) {
-        config.music_directories.push(path);
-        state.config_manager.save_config(&config)?;
-    }
-    Ok(config.music_directories)
+    // 读-改-写原子化:并发添加目录时不会互相覆盖
+    state.config_manager.update_config(|config| {
+        if !config.music_directories.contains(&path) {
+            config.music_directories.push(path);
+        }
+        config.music_directories.clone()
+    })
 }
 
 /// 移除音乐目录
@@ -113,10 +119,10 @@ pub fn remove_music_directory(
     state: State<AppState>,
     path: String,
 ) -> Result<Vec<String>, AppError> {
-    let mut config = state.config_manager.load_config()?;
-    config.music_directories.retain(|p| p != &path);
-    state.config_manager.save_config(&config)?;
-    Ok(config.music_directories)
+    state.config_manager.update_config(|config| {
+        config.music_directories.retain(|p| p != &path);
+        config.music_directories.clone()
+    })
 }
 
 /// 设置音乐目录列表
@@ -130,10 +136,10 @@ pub fn set_music_directories(
         is_path_safe(path)?;
     }
 
-    let mut config = state.config_manager.load_config()?;
-    config.music_directories = paths;
-    state.config_manager.save_config(&config)?;
-    Ok(config.music_directories)
+    state.config_manager.update_config(|config| {
+        config.music_directories = paths;
+        config.music_directories.clone()
+    })
 }
 
 /// 获取当前音乐目录列表

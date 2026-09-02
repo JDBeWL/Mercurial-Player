@@ -28,13 +28,12 @@
     "core:window:allow-set-always-on-top",
     "core:window:allow-set-content-protected",
     "dialog:default",
-    "opener:default",
-    "process:default",
     "store:default",
     "global-shortcut:default",
     "global-shortcut:allow-is-registered",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
+    "process:allow-restart",
     {
       "identifier": "http:default",
       "allow": [
