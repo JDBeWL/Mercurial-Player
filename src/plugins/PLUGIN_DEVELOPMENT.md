@@ -135,6 +135,9 @@ export const myPlugin: BuiltinPluginDefinition = {
 
 - 无法访问 DOM / `window` / `document` / `localStorage` / `indexedDB`
 - 无法调用 Tauri IPC（`invoke`），即无法触达后端命令
+- 全局 `postMessage` / `close` / `indexedDB` / `importScripts` / `addEventListener` 家族被移除（含原型链定义，`self.__proto__.postMessage` 等引用同样失效），无法伪造沙箱协议消息、窃听宿主下行消息或自行终止/外传
+- 所有跨沙箱 API 调用由主窗口（可信侧）按精确路径白名单 + manifest 权限二次校验，Worker 内的预检仅用于快速失败
+- 快捷键注册做全局冲突检测：同一按键组合已被占用时抛错拒绝（大小写与修饰键顺序归一化后比较）
 - Worker 内的 `fetch` 受应用 CSP `connect-src` 白名单约束；跨域请求请声明 `network` 权限并使用 `api.network.fetch`
 - UI 组件类扩展（`registerSettingsPanel` / `registerPlayerDecorator` / `visualizer.register`）无法跨沙箱渲染，沙箱插件调用会直接抛错——这类扩展请使用内置插件实现
 - Canvas 相关 API（`api.utils.createCanvas` 等）基于 `OffscreenCanvas` / `ImageBitmap` 实现，接口与 DOM Canvas 兼容，但返回类型不同（无 `src` 等属性）
@@ -166,7 +169,7 @@ export const myPlugin: BuiltinPluginDefinition = {
 | `player:control`  | 控制播放器     | `api.player.play()`, `api.player.pause()`, `api.player.next()`, `api.player.seek()`, `api.player.setVolume()`                      |
 | `library:read`    | 读取音乐库     | `api.library.getPlaylists()`, `api.library.getCurrentPlaylist()`, `api.library.getTracks()`                                        |
 | `lyrics:provider` | 提供歌词源     | `api.lyrics.registerProvider()`, `api.player.setLyrics()`                                                                          |
-| `ui:extend`       | 扩展用户界面   | `api.ui.registerSettingsPanel()`, `api.ui.registerMenuItem()`, `api.ui.registerActionButton()`, `api.ui.registerPlayerDecorator()` |
+| `ui:extend`       | 扩展用户界面   | `api.ui.registerSettingsPanel()`, `api.ui.registerMenuItem()`, `api.ui.registerActionButton()`, `api.ui.registerPlayerDecorator()`, `api.commands.register()`, `api.shortcuts.register()` |
 | `visualizer`      | 注册可视化效果 | `api.visualizer.register()`                                                                                                        |
 | `theme`           | 自定义主题颜色 | `api.theme.setColors()`                                                                                                            |
 | `storage`         | 本地数据存储   | `api.storage.*`, `api.file.*`, `api.clipboard.*`                                                                                   |
@@ -178,9 +181,10 @@ export const myPlugin: BuiltinPluginDefinition = {
 - `api.utils.*` - 工具函数
 - `api.theme.getCurrent()`, `api.theme.getCSSVariable()`, `api.theme.getAllColors()` - 读取主题
 - `api.ui.showNotification()` - 显示通知
-- `api.events.*` - 事件系统
-- `api.commands.*` - 命令系统
-- `api.shortcuts.*` - 快捷键
+- `api.events.emit()` / `api.events.on()`（订阅 `plugin:*` 自定义与生命周期事件）- 事件系统
+- `api.commands.execute()` - 仅能执行本插件注册的命令
+
+事件订阅白名单：`player:trackChanged` / `player:stateChanged` 需要 `player:read` 权限（事件载荷含曲目本地路径等敏感数据）；`plugin:*` 事件无需权限；其他事件名会被拒绝。
 
 ## API 参考
 
@@ -274,7 +278,7 @@ const all = api.storage.getAll()
 
 ### 事件 (api.events)
 
-无需权限。
+订阅白名单：`player:trackChanged` / `player:stateChanged` 需要 `player:read` 权限（事件载荷含曲目本地路径等敏感数据）；`plugin:*` 生命周期与自定义事件无需权限；其他事件名会被拒绝。`api.events.emit()` 无需权限（自动携带 `plugin:{pluginId}:` 前缀）。
 
 ```javascript
 // 监听播放器事件
@@ -488,7 +492,7 @@ await api.clipboard.writeText('Hello World')
 
 ### 快捷键 (api.shortcuts)
 
-无需权限。
+注册与取消注册需要 `ui:extend` 权限（快捷键是全局键盘监听入口）。
 
 ```javascript
 // 注册快捷键
@@ -508,7 +512,7 @@ api.shortcuts.unregister('my-shortcut')
 
 ### 命令 (api.commands)
 
-无需权限。
+注册需要 `ui:extend` 权限；执行仅限本插件注册的命令（跨插件执行等价于借道他人权限，会被静默拒绝）。
 
 ```javascript
 // 注册命令

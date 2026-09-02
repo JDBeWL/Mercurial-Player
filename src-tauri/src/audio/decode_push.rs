@@ -1,7 +1,8 @@
 //! WASAPI 独占模式的解码推送线程
 //!
 //! 由 play_track_exclusive 启动:解码 -> (可选重采样) -> EQ -> 通道转换 -> 推送
-//! 到 WASAPI 独占播放器。通过代际计数器(generation)实现线程取消。
+//! 到 WASAPI 独占播放器。推送采样同时驱动频谱分析器发送 `spectrum-update`。
+//! 通过代际计数器(generation)实现线程取消。
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -14,6 +15,7 @@ use crate::equalizer::EqSettings;
 use super::decoder::LockFreeSymphoniaSource;
 use super::dsp::convert_channels_into;
 use super::playback::{EqProcessor, emit_playback_position, emit_track_ended};
+use super::spectrum::SpectrumAnalyzer;
 
 /// 根据采样率计算解码chunk 大小
 /// 目标是保持约~21ms的处理块（1024@48kHz）
@@ -41,6 +43,8 @@ pub(super) fn decode_and_push_to_wasapi(
     target_sr: u32,
     target_ch: u16,
     eq_settings: Arc<RwLock<EqSettings>>,
+    spectrum_data: Arc<Mutex<Vec<f32>>>,
+    target_fps: Arc<AtomicU64>,
     start_position: f32,
 ) {
     use audioadapter_buffers::direct::SequentialSliceOfVecs;
@@ -100,6 +104,10 @@ pub(super) fn decode_and_push_to_wasapi(
 
     // 播放位置追踪
     let mut last_position_emit_time: u64 = 0;
+
+    // 频谱分析器:用最终输出采样(重采样/EQ/声道转换之后)驱动,
+    // 与共享模式 VisualizationSource 发送相同的 spectrum-update 事件
+    let mut spectrum_analyzer = SpectrumAnalyzer::new(target_sr);
 
     // 发送播放位置的闭包
     let emit_position = |last_time: &mut u64| {
@@ -282,6 +290,9 @@ pub(super) fn decode_and_push_to_wasapi(
         };
 
         if !final_out.is_empty() {
+            // 可视化:推送采样同时计算频谱并发送 spectrum-update
+            spectrum_analyzer.push_and_maybe_emit(final_out, &spectrum_data, &target_fps, &app);
+
             // 等待缓冲区有空间。
             // 注意:不能在持有 wasapi 外层锁的状态下进入 Condvar 等待,
             // 否则 pause_track/set_volume 等命令会被阻塞最长一个超时周期;

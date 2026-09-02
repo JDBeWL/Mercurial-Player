@@ -10,6 +10,7 @@ import { writeFile, readFile } from '@tauri-apps/plugin-fs'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import {
   PluginPermission,
+  assertPluginEventSubscriptionAllowed,
   type PluginAPI,
   type PluginPermissionType,
   type PlayerState,
@@ -429,6 +430,7 @@ export function createPluginAPI(
       },
 
       registerActionButton(button: ActionButton): void {
+        requirePermission(PluginPermission.UI_EXTEND, 'ui.registerActionButton')
         if (!button.id || !button.name || !button.icon || !button.action) {
           throw new Error('按钮必须包含 id, name, icon 和 action')
         }
@@ -440,6 +442,7 @@ export function createPluginAPI(
       },
 
       unregisterActionButton(buttonId: string): void {
+        requirePermission(PluginPermission.UI_EXTEND, 'ui.unregisterActionButton')
         const buttons = manager.extensions.actionButtons
         const index = buttons.findIndex(
           (b: ActionButton & { pluginId: string }) => b.id === buttonId && b.pluginId === pluginId,
@@ -483,6 +486,7 @@ export function createPluginAPI(
     // ========== 命令 API ==========
     commands: {
       register(command: Command): void {
+        requirePermission(PluginPermission.UI_EXTEND, 'commands.register')
         if (!command.id || !command.name || !command.execute) {
           throw new Error('命令必须包含 id, name 和 execute 方法')
         }
@@ -490,8 +494,12 @@ export function createPluginAPI(
       },
 
       async execute(commandId: string): Promise<void> {
+        // 仅允许执行本插件注册的命令:命令在注册插件自身的权限上下文中运行,
+        // 跨插件执行等价于借道其他插件的权限提权
         const commands = manager.getExtensions('commands')
-        const command = commands.find((c: Command & { pluginId: string }) => c.id === commandId)
+        const command = commands.find(
+          (c: Command & { pluginId: string }) => c.id === commandId && c.pluginId === pluginId,
+        )
         if (command) {
           await command.execute()
         }
@@ -501,6 +509,7 @@ export function createPluginAPI(
     // ========== 快捷键 API ==========
     shortcuts: {
       register(shortcut: Shortcut): void {
+        requirePermission(PluginPermission.UI_EXTEND, 'shortcuts.register')
         if (!shortcut.id || !shortcut.name || !shortcut.key || !shortcut.action) {
           throw new Error('快捷键必须包含 id, name, key 和 action')
         }
@@ -515,6 +524,24 @@ export function createPluginAPI(
           })
           .join('+')
 
+        // 冲突检测:同一按键组合已被其他快捷键占用时拒绝注册,
+        // 防止后注册者静默遮蔽/劫持既有快捷键 (shortcutManager 取首个匹配)
+        const conflicting = manager.extensions.shortcuts.find(
+          (s: Shortcut & { pluginId: string }) => s.key === normalizedKey && s.id !== shortcut.id,
+        )
+        if (conflicting) {
+          throw new Error(
+            `快捷键 ${normalizedKey} 已被 ${conflicting.name} (${conflicting.pluginId}) 注册，无法重复绑定`,
+          )
+        }
+        // 同 id 重复注册 (重复激活):替换旧条目而非追加
+        const selfIndex = manager.extensions.shortcuts.findIndex(
+          (s: Shortcut & { pluginId: string }) => s.id === shortcut.id && s.pluginId === pluginId,
+        )
+        if (selfIndex > -1) {
+          manager.extensions.shortcuts.splice(selfIndex, 1)
+        }
+
         manager.registerExtension('shortcuts', pluginId, {
           ...shortcut,
           key: normalizedKey,
@@ -523,6 +550,7 @@ export function createPluginAPI(
       },
 
       unregister(shortcutId: string): void {
+        requirePermission(PluginPermission.UI_EXTEND, 'shortcuts.unregister')
         const shortcuts = manager.extensions.shortcuts
         const index = shortcuts.findIndex(
           (s: Shortcut & { pluginId: string }) => s.id === shortcutId && s.pluginId === pluginId,
@@ -563,6 +591,8 @@ export function createPluginAPI(
     // ========== 事件 API ==========
     events: {
       on(event: string, callback: EventCallback): void {
+        // 白名单 + 权限校验 (player:* 事件载荷含曲目路径等敏感数据,见 pluginTypes)
+        assertPluginEventSubscriptionAllowed(event, hasPermission, pluginId)
         manager.on(event, pluginId, callback)
       },
 

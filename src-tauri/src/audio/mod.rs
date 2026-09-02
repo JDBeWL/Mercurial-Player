@@ -41,6 +41,7 @@ pub mod device;
 pub mod device_monitor;
 pub mod playback;
 pub mod session;
+pub mod spectrum;
 
 #[cfg(windows)]
 pub mod wasapi;

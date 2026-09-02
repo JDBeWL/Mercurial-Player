@@ -9,7 +9,8 @@
 #[cfg(windows)]
 use super::decode_push::decode_and_push_to_wasapi;
 use super::decoder::{LockFreeSymphoniaSource, SymphoniaDecoder};
-use super::dsp::{precompute_hann_window, soft_clip_fast};
+use super::dsp::soft_clip_fast;
+use super::spectrum::SpectrumAnalyzer;
 use crate::error::AppError;
 
 use super::{FADE_IN_MS, FADE_IN_ON_SEEK_MS};
@@ -17,8 +18,6 @@ use super::{FADE_IN_MS, FADE_IN_ON_SEEK_MS};
 use crate::AppState;
 use crate::equalizer::{EQ_BAND_COUNT, EqSettings};
 use rodio::Source;
-use spectrum_analyzer::scaling::divide_by_N_sqrt;
-use spectrum_analyzer::{FrequencyLimit, samples_fft_to_spectrum};
 use std::fs::File;
 use std::io::BufReader;
 // AtomicBool 仅在下方 #[cfg(windows)] 的 WASAPI 独占模式代码中使用
@@ -37,30 +36,9 @@ use tauri::{AppHandle, Emitter, State};
 /// 批量处理块大小（对齐到SIMD友好的边界）
 const BATCH_SIZE: usize = 64;
 
-/// 频谱更新事件 - 简化结构减少序列化开销
-#[derive(Debug, serde::Serialize, Clone)]
-pub struct SpectrumUpdateEvent {
-    pub data: Vec<f32>,
-}
-
 /// 音轨结束事件
 #[derive(Debug, serde::Serialize, Clone)]
 pub struct TrackEndedEvent {}
-
-#[inline]
-fn emit_spectrum_update(
-    app: &AppHandle,
-    data: &[f32],
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // 直接发送数据数组，减少JSON包装开销
-    app.emit(
-        "spectrum-update",
-        SpectrumUpdateEvent {
-            data: data.to_vec(),
-        },
-    )?;
-    Ok(())
-}
 
 #[inline]
 pub(super) fn emit_track_ended(
@@ -191,22 +169,16 @@ impl EqProcessor {
 pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     input: I,
     spectrum_data: Arc<Mutex<Vec<f32>>>,
-    buffer: Vec<f32>,
-    prev_spectrum: Vec<f32>,
+    /// 频谱分析器(滚动缓冲 + FFT + 事件发送)
+    analyzer: SpectrumAnalyzer,
     app_handle: Option<AppHandle>,
-    last_fft_time: AtomicU64,
     last_position_emit_time: AtomicU64,
     eq_settings: Arc<RwLock<EqSettings>>,
     eq_processor: EqProcessor,
     eq_update_counter: u32,
-    fft_buffer: Vec<f32>,
-    /// 预计算的 Hann 窗口(按 fft_size 一次预计算,避免每次 FFT 堆分配)
-    hann_window: Vec<f32>,
-    spectrum_buffer: Vec<f32>,
     samples_played: u64,
     sample_rate: u32,
     channels: u16,
-    fft_size: usize,
     // 批量处理缓冲区:直接存 EQ 处理后的采样,避免原始采样的中间拷贝
     pending_processed: Vec<f32>,
     pending_index: usize,
@@ -214,21 +186,6 @@ pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     eof_sent: bool,
     /// 目标刷新率（用于FFT计算频率）
     target_fps: Arc<AtomicU64>,
-}
-
-/// 根据采样率计算最佳FFT缓冲区大小
-/// 目标是保持约~43ms的分析窗口（2048@48kHz）
-#[must_use]
-const fn calculate_fft_size(sample_rate: u32) -> usize {
-    // 基准：48kHz使用2048样本 ≈ 42.7ms
-    // 公式：fft_size = sample_rate * 0.0427
-    // FFT大小必须是2的幂次
-    match sample_rate {
-        0..=32000 => 1024,       // ≤32kHz: 1024 样本
-        32001..=64000 => 2048,   // 44.1k/48k: 2048 样本
-        64001..=128_000 => 4096, // 88.2k/96k: 4096 样本
-        _ => 8192,               // 176.4k/192k/384k: 8192 样本
-    }
 }
 
 impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
@@ -239,25 +196,18 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         target_fps: Arc<AtomicU64>,
     ) -> Self {
         let (sr, ch) = (input.sample_rate().get(), input.channels().get());
-        let fft_size = calculate_fft_size(sr);
         Self {
             input,
             spectrum_data,
-            buffer: Vec::with_capacity(fft_size),
-            prev_spectrum: vec![0.0; 128],
+            analyzer: SpectrumAnalyzer::new(sr),
             app_handle,
-            last_fft_time: AtomicU64::new(0),
             last_position_emit_time: AtomicU64::new(0),
             eq_settings: Arc::new(RwLock::new(EqSettings::default())),
             eq_processor: EqProcessor::new(sr, ch),
             eq_update_counter: 0,
-            fft_buffer: vec![0.0; fft_size],
-            hann_window: precompute_hann_window(fft_size),
-            spectrum_buffer: vec![0.0; 128],
             samples_played: 0,
             sample_rate: sr,
             channels: ch,
-            fft_size,
             pending_processed: Vec::with_capacity(BATCH_SIZE),
             pending_index: 0,
             eof_sent: false,
@@ -341,10 +291,10 @@ impl<I: Source<Item = f32> + Send> Iterator for VisualizationSource<I> {
         self.samples_played += 1;
 
         // 添加到可视化缓冲区
-        self.buffer.push(processed);
+        self.analyzer.push_sample(processed);
 
         // FFT和事件发送逻辑（仅在缓冲区满时执行）
-        if self.buffer.len() >= self.fft_size {
+        if self.analyzer.buffer_len() >= self.analyzer.fft_size() {
             self.process_visualization();
         }
 
@@ -372,83 +322,14 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             }
         }
 
-        let last_fft = self.last_fft_time.load(Ordering::Relaxed);
-
         // 限制FFT计算和发送频率（与目标帧率一致；画面同步由前端 rAF 天然保证）
-        let target_fps = self.target_fps.load(Ordering::Relaxed).max(1);
-        let fft_interval_ms = 1000 / target_fps;
-        if now - last_fft >= fft_interval_ms {
-            self.last_fft_time.store(now, Ordering::Relaxed);
-            self.compute_spectrum();
+        if self.analyzer.should_compute(now, &self.target_fps) {
+            self.analyzer
+                .compute_and_emit(now, &self.spectrum_data, self.app_handle.as_ref());
         }
 
         // 保留后半部分数据用于重叠分析
-        let half = self.buffer.len() / 2;
-        self.buffer.drain(..half);
-    }
-
-    /// 计算频谱数据
-    #[inline(never)]
-    fn compute_spectrum(&mut self) {
-        if let Ok(mut spec) = self.spectrum_data.try_lock() {
-            // 复用预分配的缓冲区
-            self.fft_buffer[..self.fft_size].copy_from_slice(&self.buffer[..self.fft_size]);
-            // 手动应用预计算的 Hann 窗口(避免 hann_window() 每次堆分配 Vec)
-            for i in 0..self.fft_size {
-                self.fft_buffer[i] *= self.hann_window[i];
-            }
-
-            if let Ok(spectrum) = samples_fft_to_spectrum(
-                &self.fft_buffer,
-                self.sample_rate,
-                FrequencyLimit::Range(20.0, 20000.0),
-                Some(&divide_by_N_sqrt),
-            ) {
-                // 重置频谱缓冲区
-                self.spectrum_buffer.fill(0.0);
-
-                // AE风格：线性频率分布
-                const NUM_BINS: usize = 128;
-                const FREQ_MIN: f32 = 20.0;
-                const FREQ_MAX: f32 = 16000.0;
-                const FREQ_STEP: f32 = (FREQ_MAX - FREQ_MIN) / NUM_BINS as f32;
-
-                for (freq, value) in spectrum.data() {
-                    let f = freq.val();
-                    if !(FREQ_MIN..=FREQ_MAX).contains(&f) {
-                        continue;
-                    }
-
-                    let bin = ((f - FREQ_MIN) / FREQ_STEP).floor() as usize;
-                    let bin = bin.min(NUM_BINS - 1);
-
-                    let v = value.val();
-                    if v > self.spectrum_buffer[bin] {
-                        self.spectrum_buffer[bin] = v;
-                    }
-                }
-
-                // AE风格的平滑：快速上升，缓慢下降
-                for i in 0..128 {
-                    let target = self.spectrum_buffer[i];
-                    let current = self.prev_spectrum[i];
-
-                    self.prev_spectrum[i] = if target > current {
-                        current * 0.3 + target * 0.7 // 快速上升
-                    } else {
-                        current * 0.85 + target * 0.15 // 缓慢下降
-                    };
-                }
-
-                spec.clear();
-                spec.extend_from_slice(&self.prev_spectrum);
-            }
-        }
-
-        // 发送事件 - 与FFT计算同步，不再单独节流
-        if let Some(ref app) = self.app_handle {
-            let _ = emit_spectrum_update(app, &self.prev_spectrum);
-        }
+        self.analyzer.retain_half();
     }
 }
 
@@ -633,11 +514,13 @@ pub async fn play_track_exclusive(
 
     let source = LockFreeSymphoniaSource::new(decoder);
     let start_pos = position.unwrap_or(0.0);
-    let (wasapi_clone, generation, thread_id, eq_settings) = (
+    let (wasapi_clone, generation, thread_id, eq_settings, spectrum_data, target_fps) = (
         Arc::clone(&player.output.wasapi_player),
         Arc::clone(&player.decode.generation),
         Arc::clone(&player.decode.id),
         state.equalizer.get_settings_handle(),
+        Arc::clone(&player.visualization.spectrum_data),
+        Arc::clone(&player.visualization.target_fps),
     );
     let app_clone = app.clone();
     let thread_started = Arc::new(AtomicBool::new(false));
@@ -658,6 +541,8 @@ pub async fn play_track_exclusive(
                 target_sr,
                 target_ch,
                 eq_settings,
+                spectrum_data,
+                target_fps,
                 start_pos,
             );
         }));

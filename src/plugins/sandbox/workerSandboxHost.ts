@@ -20,6 +20,7 @@ import {
   type PluginAPI,
   type PluginInstance,
   type PluginMainFunction,
+  type PluginPermissionType,
 } from '../pluginTypes'
 import type { PluginSandbox } from '../pluginSandbox'
 import type { HostToWorkerMessage, MirrorData, WorkerToHostMessage } from './sandboxProtocol'
@@ -29,6 +30,53 @@ import SandboxWorker from './workerBootstrap?worker&inline'
 
 /** Worker 工厂 (注入点:测试环境替换为 FakeWorker) */
 export type WorkerFactory = () => Worker
+
+/**
+ * 沙箱 api-call 路径白名单:精确路径 → 所需权限 (null = 无需权限)。
+ *
+ * 权限校验的权威位置在宿主 (主窗口可信侧):Worker 内的 requirePermission
+ * (workerCore) 与插件代码共享同一全局作用域,可被插件以
+ * self.postMessage({type:'api-call',...}) 直接绕过。本表以精确匹配取代
+ * 任意属性链遍历,不在表中的路径 (如 log.info.constructor、
+ * permissions.__proto__.push) 一律拒绝。
+ * 使用 Map 避免对象原型链键 (constructor 等) 干扰白名单查找。
+ */
+const API_CALL_POLICY: ReadonlyMap<string, PluginPermissionType | null> = new Map([
+  ['player.getLyrics', PluginPermission.PLAYER_READ],
+  ['player.getCoverPath', PluginPermission.PLAYER_READ],
+  ['player.play', PluginPermission.PLAYER_CONTROL],
+  ['player.pause', PluginPermission.PLAYER_CONTROL],
+  ['player.togglePlay', PluginPermission.PLAYER_CONTROL],
+  ['player.next', PluginPermission.PLAYER_CONTROL],
+  ['player.previous', PluginPermission.PLAYER_CONTROL],
+  ['player.seek', PluginPermission.PLAYER_CONTROL],
+  ['player.setVolume', PluginPermission.PLAYER_CONTROL],
+  ['player.setLyrics', PluginPermission.LYRICS_PROVIDER],
+  ['theme.setColors', PluginPermission.THEME],
+  ['ui.registerMenuItem', PluginPermission.UI_EXTEND],
+  ['ui.registerActionButton', PluginPermission.UI_EXTEND],
+  ['ui.unregisterActionButton', PluginPermission.UI_EXTEND],
+  ['ui.showNotification', null],
+  ['lyrics.registerProvider', PluginPermission.LYRICS_PROVIDER],
+  ['commands.register', PluginPermission.UI_EXTEND],
+  // 仅可执行本插件注册的命令 (pluginAPI 侧按 pluginId 校验)
+  ['commands.execute', null],
+  ['shortcuts.register', PluginPermission.UI_EXTEND],
+  ['shortcuts.unregister', PluginPermission.UI_EXTEND],
+  ['storage.set', PluginPermission.STORAGE],
+  ['storage.remove', PluginPermission.STORAGE],
+  // 事件白名单与权限由 pluginAPI.events.on 在可信侧校验
+  ['events.on', null],
+  ['events.off', null],
+  ['events.emit', null],
+  ['network.fetch', PluginPermission.NETWORK],
+  ['utils.loadImage', null],
+  ['file.saveAs', PluginPermission.STORAGE],
+  ['file.saveImage', PluginPermission.STORAGE],
+  ['file.openScreenshotsDirectory', null],
+  ['clipboard.writeImage', PluginPermission.STORAGE],
+  ['clipboard.writeText', PluginPermission.STORAGE],
+])
 
 /**
  * 默认 Worker 工厂:blob URL 内联 Worker (vite `?worker&inline`)。
@@ -99,6 +147,10 @@ export class PluginWorkerHost {
     worker.onerror = (event: ErrorEvent) => {
       logger.error(`[Plugin:${this.pluginId}] 沙箱 Worker 异常:`, event.message || event)
       this.rejectAllPending(new Error('插件沙箱 Worker 发生未捕获异常'))
+    }
+    // 宿主→Worker 消息在 Worker 侧反序列化失败时落盘 (默认仅静默丢弃)
+    worker.onmessageerror = (event: MessageEvent) => {
+      logger.warn(`[Plugin:${this.pluginId}] 沙箱消息反序列化失败:`, event.data)
     }
 
     const initMsg: HostToWorkerMessage = {
@@ -232,9 +284,23 @@ export class PluginWorkerHost {
     }
   }
 
-  /** Worker 代理发起的 API 调用 → 真实 PluginAPI */
+  /** Worker 代理发起的 API 调用 → 真实 PluginAPI (宿主侧白名单 + 权限强制校验) */
   private async handleApiCall(callId: number, path: string, rawArgs: unknown[]): Promise<void> {
     try {
+      // 可信侧强制校验:Worker 内的消息可能来自插件伪造 (共享全局作用域),
+      // 先校验消息形状,再查路径白名单与权限,最后进入真实 API (其内部还有逐方法校验)
+      if (typeof path !== 'string' || !Array.isArray(rawArgs)) {
+        throw new Error('非法的沙箱 API 调用消息 (path/args 形状不合法)')
+      }
+      const requiredPermission = API_CALL_POLICY.get(path)
+      if (requiredPermission === undefined) {
+        throw new Error(`未知或禁止的插件 API 调用: ${String(path)}`)
+      }
+      if (requiredPermission !== null && !this.hasPerm(requiredPermission)) {
+        throw new Error(
+          `插件 ${this.pluginId} 没有 ${requiredPermission} 权限，无法调用 ${String(path)}`,
+        )
+      }
       let args = rawArgs.map((arg) => reviveValue(arg, (cbId) => this.makeCallbackStub(cbId)))
       // Worker 侧绘制的 OffscreenCanvas 转为 Blob (真实 API 只认 Blob/HTMLCanvasElement)
       if (path === 'file.saveImage' || path === 'clipboard.writeImage') {

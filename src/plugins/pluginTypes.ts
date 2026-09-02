@@ -38,6 +38,53 @@ export const PluginPermission = {
 
 export type PluginPermissionType = (typeof PluginPermission)[keyof typeof PluginPermission]
 
+// ---------------------------------------------------------------------------
+// 事件订阅白名单
+// ---------------------------------------------------------------------------
+
+/**
+ * 插件可订阅的应用事件 → 所需权限。
+ * 应用事件载荷含曲目绝对路径等敏感数据 (如 player:trackChanged 的 track 对象),
+ * 订阅权限必须与对应的读取 API 权限对齐,否则零权限插件可经事件绕过
+ * player:read / library:read。
+ * 使用 Map 避免对象的原型链键 (constructor 等) 干扰白名单查找。
+ */
+const SUBSCRIBABLE_EVENT_PERMISSIONS = new Map<string, PluginPermissionType>([
+  ['player:trackChanged', PluginPermission.PLAYER_READ],
+  ['player:stateChanged', PluginPermission.PLAYER_READ],
+])
+
+/** plugin: 前缀事件 (生命周期 + 插件自定义事件 plugin:<id>:<name>) 对所有插件开放 */
+const PLUGIN_EVENT_PREFIX = 'plugin:'
+
+/**
+ * 校验插件事件订阅的白名单与权限。
+ *
+ * 权威校验点在可信侧 (pluginAPI.events.on 在主窗口执行);
+ * Worker 沙箱内的预检 (workerCore) 仅用于快速失败与一致的错误语义,
+ * 不能作为安全边界 —— 插件与沙箱 runtime 共享同一 Worker 全局作用域。
+ */
+export function assertPluginEventSubscriptionAllowed(
+  event: string,
+  hasPermission: (permission: PluginPermissionType) => boolean,
+  pluginId: string,
+): void {
+  if (typeof event !== 'string') {
+    throw new Error(`未知插件事件: ${String(event)}`)
+  }
+  // 插件自定义事件与生命周期事件无敏感载荷
+  if (event.startsWith(PLUGIN_EVENT_PREFIX)) return
+  const required = SUBSCRIBABLE_EVENT_PERMISSIONS.get(event)
+  if (required === undefined) {
+    throw new Error(
+      `未知插件事件: ${event}（可订阅: player:trackChanged / player:stateChanged / plugin:* 自定义事件）`,
+    )
+  }
+  if (!hasPermission(required)) {
+    throw new Error(`插件 ${pluginId} 没有 ${required} 权限，无法订阅事件 ${event}`)
+  }
+}
+
 // 插件 API 类型
 export interface PluginAPI {
   pluginId: string

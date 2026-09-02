@@ -575,6 +575,10 @@ describe('ui API', () => {
     expect(() => pluginApi.ui.registerSettingsPanel({ id: 'p' } as never)).toThrow(/ui:extend/)
     expect(() => pluginApi.ui.registerMenuItem({ id: 'm' } as never)).toThrow(/ui:extend/)
     expect(() => pluginApi.ui.registerPlayerDecorator({ id: 'd' } as never)).toThrow(/ui:extend/)
+    expect(() =>
+      pluginApi.ui.registerActionButton({ id: 'b', name: 'B', icon: 'i', action: vi.fn() } as never),
+    ).toThrow(/ui:extend/)
+    expect(() => pluginApi.ui.unregisterActionButton('b')).toThrow(/ui:extend/)
   })
 })
 
@@ -674,6 +678,34 @@ describe('commands API', () => {
     await api(ALL_PERMISSIONS, manager).commands.execute('async')
     expect(done).toBe(true)
   })
+
+  it('refuses to execute a command registered by another plugin', async () => {
+    const manager = createMockManager()
+    const foreignExecute = vi.fn()
+    manager.extensions.commands.push({
+      id: 'foreign',
+      name: 'Foreign',
+      execute: foreignExecute,
+      pluginId: 'other-plugin',
+    })
+
+    await expect(
+      api(ALL_PERMISSIONS, manager).commands.execute('foreign'),
+    ).resolves.toBeUndefined()
+    expect(foreignExecute).not.toHaveBeenCalled()
+  })
+
+  it('guards command registration behind UI_EXTEND', () => {
+    const manager = createMockManager()
+    expect(() =>
+      api([], manager).commands.register({
+        id: 'c1',
+        name: 'C1',
+        execute: vi.fn(),
+      } as never),
+    ).toThrow(/ui:extend/)
+    expect(manager.registerExtension).not.toHaveBeenCalled()
+  })
 })
 
 describe('shortcuts API', () => {
@@ -737,6 +769,64 @@ describe('shortcuts API', () => {
     const manager = createMockManager()
     expect(() => api(ALL_PERMISSIONS, manager).shortcuts.unregister('ghost')).not.toThrow()
   })
+
+  it('rejects a key already bound by another shortcut', () => {
+    const manager = createMockManager()
+    manager.extensions.shortcuts.push({
+      id: 's1',
+      name: 'S1',
+      key: 'ctrl+shift+k',
+      pluginId: 'other',
+    })
+
+    expect(() =>
+      api(ALL_PERMISSIONS, manager).shortcuts.register({
+        id: 's2',
+        name: 'S2',
+        key: 'CTRL+SHIFT+K', // 大小写差异归一化后仍冲突
+        action: vi.fn(),
+      } as never),
+    ).toThrow(/已被 S1 \(other\) 注册/)
+
+    // 冲突注册被拒绝,不追加新条目
+    expect(manager.extensions.shortcuts).toHaveLength(1)
+  })
+
+  it('replaces its own shortcut when re-registering the same id', () => {
+    const manager = createMockManager()
+    const pluginApi = api(ALL_PERMISSIONS, manager)
+
+    pluginApi.shortcuts.register({
+      id: 's',
+      name: 'First',
+      key: 'ctrl+k',
+      action: vi.fn(),
+    } as never)
+    pluginApi.shortcuts.register({
+      id: 's',
+      name: 'Second',
+      key: 'ctrl+j',
+      action: vi.fn(),
+    } as never)
+
+    expect(manager.extensions.shortcuts).toHaveLength(1)
+    expect(manager.extensions.shortcuts[0]?.name).toBe('Second')
+    expect(manager.extensions.shortcuts[0]?.key).toBe('ctrl+j')
+  })
+
+  it('guards shortcut registration behind UI_EXTEND', () => {
+    const manager = createMockManager()
+    expect(() =>
+      api([], manager).shortcuts.register({
+        id: 's',
+        name: 'S',
+        key: 'Ctrl+K',
+        action: vi.fn(),
+      } as never),
+    ).toThrow(/ui:extend/)
+    expect(() => api([], manager).shortcuts.unregister('s')).toThrow(/ui:extend/)
+    expect(manager.extensions.shortcuts).toHaveLength(0)
+  })
 })
 
 describe('storage API', () => {
@@ -797,10 +887,31 @@ describe('events API', () => {
     const pluginApi = api(ALL_PERMISSIONS, manager)
     const callback = vi.fn()
 
-    pluginApi.events.on('tick', callback)
-    expect(manager.on).toHaveBeenCalledWith('tick', 'demo-plugin', callback)
-    pluginApi.events.off('tick', callback)
-    expect(manager.off).toHaveBeenCalledWith('tick', 'demo-plugin', callback)
+    pluginApi.events.on('plugin:other:tick', callback)
+    expect(manager.on).toHaveBeenCalledWith('plugin:other:tick', 'demo-plugin', callback)
+    pluginApi.events.off('plugin:other:tick', callback)
+    expect(manager.off).toHaveBeenCalledWith('plugin:other:tick', 'demo-plugin', callback)
+  })
+
+  it('allows player events only with PLAYER_READ', () => {
+    const manager = createMockManager()
+    const callback = vi.fn()
+
+    expect(() => api([], manager).events.on('player:trackChanged', callback)).toThrow(
+      /player:read 权限，无法订阅事件 player:trackChanged/,
+    )
+    expect(manager.on).not.toHaveBeenCalled()
+
+    api([PluginPermission.PLAYER_READ], manager).events.on('player:trackChanged', callback)
+    expect(manager.on).toHaveBeenCalledWith('player:trackChanged', 'demo-plugin', callback)
+  })
+
+  it('rejects events outside the whitelist even with full permissions', () => {
+    const manager = createMockManager()
+    expect(() => api(ALL_PERMISSIONS, manager).events.on('secret', vi.fn())).toThrow(
+      /未知插件事件: secret/,
+    )
+    expect(manager.on).not.toHaveBeenCalled()
   })
 })
 

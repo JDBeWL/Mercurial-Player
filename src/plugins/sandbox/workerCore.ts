@@ -14,6 +14,7 @@ import { toModuleCode } from '../moduleExecutor'
 import { formatTime } from '../../utils/format'
 import {
   PluginPermission,
+  assertPluginEventSubscriptionAllowed,
   type PluginAPI,
   type SaveAsOptions,
   type LyricLine,
@@ -125,27 +126,46 @@ function sanitizeLogArgs(args: unknown[]): unknown[] {
 // ---------------------------------------------------------------------------
 // (formatTime 已统一收敛到 utils/format.ts,Worker 打包时随 chunk 内联)
 
-/** Worker 全局中需移除的原生网络 API
- *  (插件的全部网络访问必须经 api.network.fetch 的权限代理走后端 HTTP) */
-const NETWORK_GLOBAL_KEYS = [
+/**
+ * Worker 全局中需移除的原生 API:
+ * - 网络类:插件的全部网络访问必须经 api.network.fetch 的权限代理走后端 HTTP
+ * - 逃逸/外传类:postMessage (伪造沙箱协议消息)、close (自杀 Worker)、
+ *   indexedDB (本地持久化外传)、importScripts (经典脚本加载)
+ * - 事件类:addEventListener/removeEventListener/dispatchEvent
+ *   (窃听宿主下行消息、以合成 MessageEvent 向运行时注入伪造消息;
+ *   运行时自身的 unhandledrejection 监听在中和前捕获原生引用,见 workerBootstrap)
+ */
+const SANDBOX_BLOCKED_GLOBAL_KEYS = [
   'fetch',
   'XMLHttpRequest',
   'WebSocket',
   'EventSource',
   'WebSocketStream',
+  'postMessage',
+  'close',
+  'indexedDB',
+  'importScripts',
+  'addEventListener',
+  'removeEventListener',
+  'dispatchEvent',
 ] as const
 
 /**
- * 从 Worker 全局作用域移除原生网络 API。
+ * 从 Worker 全局作用域移除原生网络与逃逸相关 API。
  *
  * blob Worker 的 CSP 继承 (script-src/connect-src 生效) 之外的纵深防御:
  * 即使 CSP 继承在某个 WebView 版本中失效,插件也无法直接发起网络请求。
+ * 注意:真正的权限边界在宿主侧 (workerSandboxHost 的 API_CALL_POLICY),
+ * 本函数仅消除明显的绕过入口;运行时自身的消息收发必须在中和前捕获
+ * 原生引用 (见 workerBootstrap)。
  * - 自身可配置属性:直接删除
- * - 原型链上的属性:以抛错的 getter 遮蔽
+ * - 原型链上的属性:删除最近一处原型定义 (WebIDL 接口原型成员均为
+ *   configurable,且每个 Worker 拥有独立 realm,删除仅影响本 Worker),
+ *   阻断经 self.__proto__.postMessage 等原型链引用绕过;再以抛错 getter 遮蔽
  * - 自身不可配置属性:保留 (由 CSP 兜底拦截)
  */
 export function removeNetworkGlobals(scope: Record<string, unknown>): void {
-  for (const key of NETWORK_GLOBAL_KEYS) {
+  for (const key of SANDBOX_BLOCKED_GLOBAL_KEYS) {
     neutralizeGlobal(scope, key)
   }
   // navigator.sendBeacon 是另一个数据外传通道 (定义在原型链上)
@@ -158,18 +178,30 @@ export function removeNetworkGlobals(scope: Record<string, unknown>): void {
 function neutralizeGlobal(target: Record<string, unknown>, key: string): void {
   try {
     if (!(key in target)) return
-    const desc = Object.getOwnPropertyDescriptor(target, key)
-    if (desc) {
-      if (desc.configurable) delete target[key]
-    } else {
-      // 属性在原型链上:定义自身抛错 getter 遮蔽
-      Object.defineProperty(target, key, {
-        configurable: true,
-        get() {
-          throw new Error(`沙箱禁止使用 ${key}，请使用 api.network.fetch`)
-        },
-      })
+    const own = Object.getOwnPropertyDescriptor(target, key)
+    if (own) {
+      // 自身可配置属性:直接删除 (自身不占位,`key in target` 为 false)
+      if (own.configurable) delete target[key]
+      // 自身不可配置属性:保留 (由 CSP 兜底拦截)
+      return
     }
+    // 属性在原型链上:删除最近一处原型定义
+    let proto = Object.getPrototypeOf(target) as Record<string, unknown> | null
+    while (proto && proto !== Object.prototype) {
+      const desc = Object.getOwnPropertyDescriptor(proto, key)
+      if (desc) {
+        if (desc.configurable) delete proto[key]
+        break
+      }
+      proto = Object.getPrototypeOf(proto) as Record<string, unknown> | null
+    }
+    // 自身以抛错 getter 遮蔽 (原型定义不可配置、删除失败时仍阻断访问)
+    Object.defineProperty(target, key, {
+      configurable: true,
+      get() {
+        throw new Error(`沙箱禁止使用 ${key}`)
+      },
+    })
   } catch {
     // 部分环境不允许修改该属性:忽略 (CSP 继承兜底)
   }
@@ -424,7 +456,12 @@ export class SandboxWorkerRuntime {
     return id
   }
 
-  /** 权限预检:与 pluginAPI 的同步 throw 语义一致 */
+  /**
+   * 权限预检:与 pluginAPI 的同步 throw 语义一致。
+   * 注意:本方法运行在与插件共享的 Worker 全局作用域内,仅作快速失败,
+   * 不能作为安全边界 —— 权威校验在宿主侧 (workerSandboxHost API_CALL_POLICY
+   * + pluginAPI 各方法的 requirePermission)。
+   */
   private requirePermission(permission: string, action: string): void {
     if (!this.permissions.includes(permission)) {
       throw new Error(`插件 ${this.pluginId} 没有 ${permission} 权限，无法执行 ${action}`)
@@ -632,12 +669,14 @@ export class SandboxWorkerRuntime {
           this.fire('ui.registerMenuItem', [item])
         },
         registerActionButton: (button: ActionButton) => {
+          this.requirePermission(P.UI_EXTEND, 'ui.registerActionButton')
           if (!button.id || !button.name || !button.icon || !button.action) {
             throw new Error('按钮必须包含 id, name, icon 和 action')
           }
           this.fire('ui.registerActionButton', [button])
         },
         unregisterActionButton: (buttonId: string) => {
+          this.requirePermission(P.UI_EXTEND, 'ui.unregisterActionButton')
           this.fire('ui.unregisterActionButton', [buttonId])
         },
         showNotification: (message: string, type?: 'error' | 'warning' | 'info') => {
@@ -666,6 +705,7 @@ export class SandboxWorkerRuntime {
 
       commands: {
         register: (command: Command) => {
+          this.requirePermission(P.UI_EXTEND, 'commands.register')
           if (!command.id || !command.name || !command.execute) {
             throw new Error('命令必须包含 id, name 和 execute 方法')
           }
@@ -676,12 +716,14 @@ export class SandboxWorkerRuntime {
 
       shortcuts: {
         register: (shortcut: Shortcut) => {
+          this.requirePermission(P.UI_EXTEND, 'shortcuts.register')
           if (!shortcut.id || !shortcut.name || !shortcut.key || !shortcut.action) {
             throw new Error('快捷键必须包含 id, name, key 和 action')
           }
           this.fire('shortcuts.register', [shortcut])
         },
         unregister: (shortcutId: string) => {
+          this.requirePermission(P.UI_EXTEND, 'shortcuts.unregister')
           this.fire('shortcuts.unregister', [shortcutId])
         },
       },
@@ -710,6 +752,12 @@ export class SandboxWorkerRuntime {
 
       events: {
         on: (event: string, callback: (data?: unknown) => void): void => {
+          // 预检仅用于快速失败;权威校验在宿主侧 pluginAPI.events.on
+          assertPluginEventSubscriptionAllowed(
+            event,
+            (p) => this.permissions.includes(p),
+            this.pluginId,
+          )
           const id = this.registerCallback(callback)
           let handlers = this.eventHandlerIds.get(event)
           if (!handlers) {

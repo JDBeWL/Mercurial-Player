@@ -193,9 +193,8 @@
                   >
                     <span class="material-symbols-rounded">cloud_done</span>
                   </div>
-                  <!-- 视图切换按钮（非独占模式） -->
+                  <!-- 视图切换按钮 -->
                   <button
-                    v-if="!configStore.audio.exclusiveMode"
                     class="icon-button view-toggle-btn"
                     :title="
                       viewMode === 'lyrics'
@@ -212,7 +211,7 @@
 
                 <Transition name="fade" mode="out-in">
                   <LyricsDisplay
-                    v-if="viewMode === 'lyrics' || configStore.audio.exclusiveMode"
+                    v-if="viewMode === 'lyrics'"
                     class="lyrics-container"
                   />
                   <VisualizerPanel v-else class="lyrics-container" />

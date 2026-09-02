@@ -321,7 +321,7 @@ describe('workerSandbox - 回调桥', () => {
       }
     `
     const api = createMockApi()
-    const { host } = await setupSandbox(code, [], api)
+    const { host } = await setupSandbox(code, ['player:read'], api)
     const instance = await runSandboxMain(host, api)
 
     await instance.activate!()
@@ -498,6 +498,31 @@ describe('workerSandbox - 原生网络 API 移除 (removeNetworkGlobals)', () =>
     expect(typeof scope.setTimeout).toBe('function')
   })
 
+  it('删除逃逸/外传相关的全局 API (postMessage/close/indexedDB/importScripts)', () => {
+    const scope: Record<string, unknown> = {
+      fetch: () => 'fetch',
+      postMessage: () => {},
+      close: () => {},
+      indexedDB: {},
+      importScripts: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => {},
+      setTimeout: () => 1, // 必须保留
+    }
+    removeNetworkGlobals(scope)
+
+    expect('fetch' in scope).toBe(false)
+    expect('postMessage' in scope).toBe(false)
+    expect('close' in scope).toBe(false)
+    expect('indexedDB' in scope).toBe(false)
+    expect('importScripts' in scope).toBe(false)
+    expect('addEventListener' in scope).toBe(false)
+    expect('removeEventListener' in scope).toBe(false)
+    expect('dispatchEvent' in scope).toBe(false)
+    expect(typeof scope.setTimeout).toBe('function')
+  })
+
   it('原型链上的属性以抛错 getter 遮蔽 (fetch 定义在 WorkerGlobalScope.prototype)', () => {
     // 模拟原型链定义:实例上无自身属性
     const proto: Record<string, unknown> = { fetch: () => 'native-fetch' }
@@ -506,6 +531,22 @@ describe('workerSandbox - 原生网络 API 移除 (removeNetworkGlobals)', () =>
     removeNetworkGlobals(scope)
 
     expect(() => scope.fetch).toThrow('沙箱禁止使用 fetch')
+  })
+
+  it('原型链上的定义被删除,无法经 __proto__ 引用绕过 (self.__proto__.postMessage)', () => {
+    const proto: Record<string, unknown> = {
+      postMessage: () => 'native-postMessage',
+      addEventListener: () => {},
+    }
+    const scope = Object.create(proto) as Record<string, unknown>
+
+    removeNetworkGlobals(scope)
+
+    // 原型定义已删除:经原型链直接取引用不再可行
+    expect('postMessage' in proto).toBe(false)
+    expect('addEventListener' in proto).toBe(false)
+    // 自身遮蔽仍抛错
+    expect(() => scope.postMessage).toThrow('沙箱禁止使用 postMessage')
   })
 
   it('navigator.sendBeacon 被遮蔽', () => {
@@ -534,5 +575,89 @@ describe('workerSandbox - 原生网络 API 移除 (removeNetworkGlobals)', () =>
 
     expect(() => removeNetworkGlobals(scope)).not.toThrow()
     expect(scope.fetch).toBeDefined()
+  })
+})
+
+describe('workerSandbox - 宿主侧权限强制 (api-call 白名单)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  /**
+   * 模拟攻击:插件代码与沙箱 runtime 共享 Worker 全局作用域,
+   * 可绕过 workerCore 的 requirePermission 直接 postMessage 伪造 api-call。
+   * 宿主 (可信侧) 必须独立完成路径白名单与权限校验。
+   */
+  async function setupAttacker(permissions: string[]): Promise<{
+    api: PluginAPI
+    worker: FakeWorker
+    results: { type: string; ok?: boolean; callId?: number }[]
+  }> {
+    const api = createMockApi()
+    const { host, worker } = await setupSandbox(`export default () => ({})`, permissions, api)
+    await runSandboxMain(host, api)
+    // 捕获宿主回执:api-result 经 host→worker 通道 (worker.postMessage) 下发
+    const results: { type: string; ok?: boolean; callId?: number }[] = []
+    const originalPost = worker.postMessage.bind(worker)
+    worker.postMessage = (data: unknown): void => {
+      results.push(data as { type: string; ok?: boolean; callId?: number })
+      originalPost(data)
+    }
+    return { api, worker, results }
+  }
+
+  const forgeApiCall = (worker: FakeWorker, callId: number, path: unknown, args: unknown[] = []) => {
+    worker.emitToHost({ type: 'api-call', callId, path, args } as never)
+  }
+
+  it('伪造白名单外路径 (属性链遍历) 被拒绝,真实 API 不被触碰', async () => {
+    const { api, worker, results } = await setupAttacker([])
+    forgeApiCall(worker, 1, 'log.info.constructor')
+    forgeApiCall(worker, 2, 'permissions.__proto__.push')
+    forgeApiCall(worker, 3, 'player') // 非方法路径
+    forgeApiCall(worker, 4, 'pluginId')
+    forgeApiCall(worker, 5, 'constructor')
+    await flushAsync()
+
+    const rejects = results.filter((m) => m.type === 'api-result' && m.ok === false)
+    expect(rejects.length).toBe(5)
+    expect(api.player.play).not.toHaveBeenCalled()
+  })
+
+  it('伪造消息也无法调用超出权限的 API (宿主侧权限校验)', async () => {
+    const { api, worker, results } = await setupAttacker([]) // 零权限插件
+    forgeApiCall(worker, 1, 'player.play')
+    forgeApiCall(worker, 2, 'network.fetch', ['https://evil.example/'])
+    forgeApiCall(worker, 3, 'storage.set', ['k', 'v'])
+    forgeApiCall(worker, 4, 'commands.register', [{ id: 'c', name: 'C', execute: () => {} }])
+    await flushAsync()
+
+    const ok = results.filter((m) => m.type === 'api-result' && m.ok === true)
+    expect(ok.length).toBe(0)
+    expect(api.player.play).not.toHaveBeenCalled()
+    expect(api.network.fetch).not.toHaveBeenCalled()
+    expect(api.storage.set).not.toHaveBeenCalled()
+    expect(api.commands.register).not.toHaveBeenCalled()
+  })
+
+  it('畸形消息 (path 非字符串 / args 非数组) 被拒绝', async () => {
+    const { api, worker, results } = await setupAttacker([])
+    worker.emitToHost({ type: 'api-call', callId: 1, path: 123, args: [] } as never)
+    worker.emitToHost({ type: 'api-call', callId: 2, path: 'player.play', args: 'nope' } as never)
+    worker.emitToHost({ type: 'api-call', callId: 3, path: 'player.play' } as never)
+    await flushAsync()
+
+    const rejects = results.filter((m) => m.type === 'api-result' && m.ok === false)
+    expect(rejects.length).toBe(3)
+    expect(api.player.play).not.toHaveBeenCalled()
+  })
+
+  it('具备权限时白名单内调用正常放行', async () => {
+    const { api, worker, results } = await setupAttacker(['player:control'])
+    forgeApiCall(worker, 1, 'player.play')
+    await flushAsync()
+
+    expect(api.player.play).toHaveBeenCalledTimes(1)
+    expect(results.some((m) => m.type === 'api-result' && m.ok === true)).toBe(true)
   })
 })

@@ -86,26 +86,33 @@ class ShortcutManager {
       })
       .join('+')
 
-    // 查找匹配的快捷键
+    // 查找匹配的快捷键 (按键串为规范化后的精确匹配;
+    // 注册侧已做冲突检测,此处多匹配仅作防御性告警)
     const shortcuts = pluginManager.getExtensions('shortcuts') as ShortcutExtension[]
-    const matched = shortcuts.find((s) => s.key === pressedKey)
+    const matched = shortcuts.filter((s) => s.key === pressedKey)
+    if (matched.length > 1) {
+      logger.warn(
+        `快捷键 ${pressedKey} 存在 ${matched.length} 个冲突注册，仅触发首个 (${matched[0]!.name})`,
+      )
+    }
+    const shortcut = matched[0]
 
-    if (matched) {
+    if (shortcut) {
       event.preventDefault()
       event.stopPropagation()
 
-      logger.debug(`触发快捷键: ${matched.name} (${pressedKey})`)
+      logger.debug(`触发快捷键: ${shortcut.name} (${pressedKey})`)
 
       try {
-        const result = matched.action()
+        const result = shortcut.action()
         // 如果返回 Promise，等待它完成
         if (result instanceof Promise) {
           result.catch((err) => {
-            logger.error(`快捷键执行失败: ${matched.name}`, err)
+            logger.error(`快捷键执行失败: ${shortcut.name}`, err)
           })
         }
       } catch (error) {
-        logger.error(`快捷键执行失败: ${matched.name}`, error)
+        logger.error(`快捷键执行失败: ${shortcut.name}`, error)
       }
     }
   }
