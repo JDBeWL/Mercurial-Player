@@ -44,6 +44,9 @@ for (const [manifestPath, manifest] of Object.entries(builtinManifests)) {
 
 /**
  * 加载所有插件
+ *
+ * 并发加载 + 单插件故障隔离:各插件的 init/runMain/回调均有超时保护
+ * (见 workerSandboxHost.ts),一个插件挂起不会阻塞其余插件加载。
  */
 export async function loadAllPlugins(): Promise<void> {
   try {
@@ -51,13 +54,8 @@ export async function loadAllPlugins(): Promise<void> {
 
     logger.info(`发现 ${pluginDirs.length} 个插件`)
 
-    for (const pluginDir of pluginDirs) {
-      try {
-        await loadPlugin(pluginDir)
-      } catch (error) {
-        logger.error(`加载插件失败: ${pluginDir}`, error)
-      }
-    }
+    // 并发加载;loadPlugin 内部已捕获并记录单插件错误
+    await Promise.allSettled(pluginDirs.map((pluginDir) => loadPlugin(pluginDir)))
   } catch (error) {
     logger.error('加载插件列表失败:', error)
   }

@@ -536,6 +536,10 @@ fn extract_cover_to_cache(audio_path: &Path, picture: &Picture) -> Result<String
 /// 默认轻量模式：不提取封面，降低扫描负担，避免前端长时间卡顿。
 /// 优先从缓存读取，如果文件未修改则直接使用缓存。
 pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, AppError> {
+    if is_sensitive_path(path) {
+        return Err("安全限制：不允许访问敏感目录".to_string().into());
+    }
+
     // 首先尝试从缓存获取
     if let Some(cached) = get_metadata_from_cache(path) {
         log::debug!("使用缓存的元数据: {path}");
@@ -553,6 +557,10 @@ pub fn get_track_metadata_internal(path: &str) -> Result<TrackMetadata, AppError
 
 /// 获取音轨元数据（包含封面路径）
 pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, AppError> {
+    if is_sensitive_path(path) {
+        return Err("安全限制：不允许访问敏感目录".to_string().into());
+    }
+
     // 首先尝试从缓存获取
     if let Some(mut cached) = get_metadata_from_cache(path) {
         log::debug!("使用缓存的元数据: {path}");
@@ -658,6 +666,10 @@ fn get_track_metadata_with_options(
 
 /// 获取音频封面缓存路径（按需提取）
 pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, AppError> {
+    if is_sensitive_path(path) {
+        return Err("安全限制：不允许访问敏感目录".to_string().into());
+    }
+
     let file_path = Path::new(path);
     log::debug!("Getting cover for: {path}");
 
@@ -685,6 +697,9 @@ pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, AppEr
 
 /// 提取音频文件的封面并保存到指定路径
 pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<String, AppError> {
+    if is_sensitive_path(audio_path) {
+        return Err("安全限制：不允许访问敏感目录".to_string().into());
+    }
     // 校验输出路径：显式扩展名必须是图片格式，且不允许写入敏感目录
     if Path::new(output_path).extension().is_some()
         && !has_allowed_extension(output_path, &COVER_OUTPUT_EXTENSIONS)

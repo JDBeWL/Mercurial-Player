@@ -4,9 +4,9 @@
 
 use crate::error::AppError;
 use crossbeam_channel::{Receiver, Sender, bounded};
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::cell::UnsafeCell;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -131,6 +131,152 @@ pub enum PlaybackState {
     Pausing,
 }
 
+// ============================================================================
+// 无锁 SPSC 采样环形缓冲
+// ============================================================================
+
+/// SPSC 环形缓冲容量(采样数)
+///
+/// 按最坏情况一次性预分配:覆盖立体声 ≤384kHz、6声道 ≤192kHz 等所有现实的
+/// 独占模式设备格式。生产者按 2 秒水位门控(decode_push),容量远大于门控
+/// 阈值即可;固定预分配避免了设备初始化后跨线程重设容量的问题。
+const SPSC_RING_CAPACITY: usize = 384_000 * 2 * 4;
+
+/// 无锁 SPSC(单生产者/单消费者)采样环形缓冲
+///
+/// 替代 `Mutex<VecDeque<f32>>`:WASAPI 渲染回调与解码推送线程不再竞争
+/// 互斥锁,消除实时音频路径上的内核态等待与优先级反转风险(Windows 上
+/// 争用的 std::sync::Mutex 会陷入内核,渲染线程被抢占即产生 xrun/爆音)。
+///
+/// 线程契约:
+/// - [`push_slice`](Self::push_slice) 仅由生产者线程(解码推送线程)调用;
+/// - [`pop_slice`](Self::pop_slice) 仅由消费者线程(WASAPI 音频线程)调用;
+/// - [`clear`](Self::clear) 允许生产者/音频/宿主线程调用(tail 快进到
+///   head 使缓冲立即为空;与 push/pop 并发时语义为"最终清空",与旧实现
+///   持锁清空在停止场景下行为等价);
+/// - [`len`](Self::len) 可从任意线程调用,返回近似水位(供水位门控)。
+///
+/// 内存序:head 的 store(Release)/load(Acquire) 配对保证消费者能看到已
+/// 发布的数据;tail 同理。单调递增计数器以 `usize` 计,远不会回绕。
+struct SpscSampleRing {
+    /// 内部可变性:生产者/消费者访问不相交区间(见各方法的 SAFETY 说明)
+    buf: UnsafeCell<Box<[f32]>>,
+    capacity: usize,
+    /// 单调递增写入计数(生产者独占写)
+    head: AtomicUsize,
+    /// 单调递增读取计数(消费者独占写)
+    tail: AtomicUsize,
+}
+
+// SAFETY: SPSC 契约下生产者只写 [head, head+free) 区间、消费者只读
+// [tail, head) 区间,两者不相交且各自唯一;跨线程共享安全。
+#[allow(unsafe_code)] // 无锁 SPSC 需要受控的非安全访问,SAFETY 说明见各处
+unsafe impl Sync for SpscSampleRing {}
+
+#[allow(unsafe_code)] // 无锁 SPSC 需要受控的非安全访问,SAFETY 说明见各处
+impl SpscSampleRing {
+    #[must_use]
+    fn new(capacity: usize) -> Self {
+        Self {
+            buf: UnsafeCell::new(vec![0.0; capacity].into_boxed_slice()),
+            capacity,
+            head: AtomicUsize::new(0),
+            tail: AtomicUsize::new(0),
+        }
+    }
+
+    /// 生产者:写入采样,返回实际写入数(缓冲满时截断)
+    fn push_slice(&self, samples: &[f32]) -> usize {
+        let tail = self.tail.load(Ordering::Acquire);
+        let head = self.head.load(Ordering::Relaxed); // 生产者独占,无需同步
+        let used = head - tail;
+        let free = self.capacity - used;
+        let n = free.min(samples.len());
+        if n == 0 {
+            return 0;
+        }
+        let start = head % self.capacity;
+        let first = (self.capacity - start).min(n);
+        // SAFETY: 本方法是 [head, head+n) 区间的唯一写入者(SPSC 契约),
+        // 该区间尚未通过 head 的 Release store 发布,消费者不会读取;
+        // 生产者线程唯一,不存在并发写。
+        let buf = unsafe { &mut *self.buf.get() };
+        buf[start..start + first].copy_from_slice(&samples[..first]);
+        if n > first {
+            buf[..n - first].copy_from_slice(&samples[first..n]);
+        }
+        self.head.store(head + n, Ordering::Release);
+        n
+    }
+
+    /// 消费者:读出采样到 out,不足部分填 0(欠载)
+    ///
+    /// 返回实际读出的采样数(欠载数 = `out.len() - 返回值`)。
+    fn pop_slice(&self, out: &mut [f32]) -> usize {
+        let head = self.head.load(Ordering::Acquire);
+        let tail = self.tail.load(Ordering::Relaxed); // 消费者独占,无需同步
+        let n = (head - tail).min(out.len());
+        if n > 0 {
+            let start = tail % self.capacity;
+            let first = (self.capacity - start).min(n);
+            // SAFETY: head 已通过 Acquire load 观察到,[tail, tail+n) 区间的
+            // 写入均已发布;该区间在消费者推进 tail 前不会被生产者复写
+            // (free space 计算排除了它);消费者线程唯一,不存在并发读。
+            let buf = unsafe { &*self.buf.get() };
+            out[..first].copy_from_slice(&buf[start..start + first]);
+            if n > first {
+                out[first..n].copy_from_slice(&buf[..n - first]);
+            }
+            self.tail.store(tail + n, Ordering::Release);
+        }
+        if n < out.len() {
+            out[n..].fill(0.0);
+        }
+        n
+    }
+
+    /// 当前缓冲采样数(近似值,供水位检查)
+    #[must_use]
+    fn len(&self) -> usize {
+        self.head.load(Ordering::Acquire) - self.tail.load(Ordering::Acquire)
+    }
+
+    /// 清空缓冲(tail 快进到 head)
+    fn clear(&self) {
+        let head = self.head.load(Ordering::Acquire);
+        self.tail.store(head, Ordering::Release);
+    }
+}
+
+/// 欠载统计与节流上报
+///
+/// 爆音/欠载发生时高频打印日志本身会加剧实时线程的延迟恶化,
+/// 因此只在欠载占比过半且距上次上报 ≥5s 时输出一次累计值。
+struct UnderrunLogger {
+    last_log: std::time::Instant,
+    total: u64,
+}
+
+impl UnderrunLogger {
+    fn new() -> Self {
+        Self {
+            last_log: std::time::Instant::now(),
+            total: 0,
+        }
+    }
+
+    fn record(&mut self, underrun: usize, samples_needed: usize) {
+        self.total = self.total.saturating_add(underrun as u64);
+        if underrun > samples_needed / 2 && self.last_log.elapsed() >= Duration::from_secs(5) {
+            log::warn!(
+                "WASAPI buffer underrun: {underrun}/{samples_needed} samples (累计 {})",
+                self.total
+            );
+            self.last_log = std::time::Instant::now();
+        }
+    }
+}
+
 /// WASAPI独占模式播放器
 pub struct WasapiExclusivePlayback {
     command_tx: Sender<AudioCommand>,
@@ -141,19 +287,10 @@ pub struct WasapiExclusivePlayback {
     channels: AtomicU32,
     volume: Arc<Mutex<f32>>,
     is_running: Arc<AtomicBool>,
-    sample_buffer: Arc<(Mutex<VecDeque<f32>>, Condvar)>,
+    /// 无锁 SPSC 采样缓冲:音频线程消费,解码线程生产,宿主线程查水位/清空
+    sample_buffer: Arc<SpscSampleRing>,
     /// 已写入硬件的采样数（用于计算播放位置）
     samples_written: Arc<AtomicU64>,
-}
-
-/// 根据采样率和声道数计算 WASAPI 缓冲区容量
-/// 目标是保持约4秒的缓冲（48000 * 2 * 4 @48kHz stereo）
-#[must_use]
-fn calculate_wasapi_buffer_capacity(sample_rate: u32, channels: u16) -> usize {
-    // 基准：48kHz立体声使用4秒缓冲
-    // 高采样率需要更大缓冲以保持相同时长
-    let duration_secs = 4;
-    sample_rate as usize * channels as usize * duration_secs
 }
 
 impl WasapiExclusivePlayback {
@@ -166,12 +303,8 @@ impl WasapiExclusivePlayback {
         let volume = Arc::new(Mutex::new(1.0f32));
         let is_running = Arc::new(AtomicBool::new(true));
         let samples_written = Arc::new(AtomicU64::new(0));
-        // 初始使用默认48kHz立体声的缓冲区大小，初始化后会调整
-        let initial_capacity = calculate_wasapi_buffer_capacity(48000, 2);
-        let sample_buffer = Arc::new((
-            Mutex::new(VecDeque::with_capacity(initial_capacity)),
-            Condvar::new(),
-        ));
+        // 无锁环形缓冲:一次性按最坏情况预分配(见 SPSC_RING_CAPACITY 注释)
+        let sample_buffer = Arc::new(SpscSampleRing::new(SPSC_RING_CAPACITY));
         let sample_rate = Arc::new(AtomicU32::new(48000));
 
         let state_clone = Arc::clone(&state);
@@ -225,18 +358,7 @@ impl WasapiExclusivePlayback {
                 self.sample_rate.store(sample_rate, Ordering::SeqCst);
                 self.channels.store(u32::from(channels), Ordering::SeqCst);
                 *lock_or_log!(self.state.lock()) = PlaybackState::Stopped;
-
-                // 根据实际采样率和声道数调整缓冲区容量
-                let new_capacity = calculate_wasapi_buffer_capacity(sample_rate, channels);
-                let (buffer, _) = &*self.sample_buffer;
-                let mut buf = lock_or_log!(buffer.lock());
-                // 如果新容量更大，预留更多空间
-                let current_capacity = buf.capacity();
-                if new_capacity > current_capacity {
-                    buf.reserve(new_capacity - current_capacity);
-                }
-                drop(buf);
-
+                // 采样缓冲(SPSC 环形缓冲)已按最坏情况预分配,无需按格式调整
                 Ok((sample_rate, channels, device_name))
             }
             Ok(AudioResponse::InitFailed(e)) => Err(e.into()),
@@ -338,21 +460,16 @@ impl WasapiExclusivePlayback {
     }
 
     pub fn push_samples(&self, samples: &[f32]) -> Result<(), AppError> {
-        let (buffer, cvar) = &*self.sample_buffer;
-        let mut buf = lock_or_log!(buffer.lock());
-        // 预先 reserve 避免多次扩容(VecDeque 的 extend 走迭代器路径无 slice 特化)
-        buf.reserve(samples.len());
-        // 使用 extend_from_slice 的等价:VecDeque 在 stable 上无该 API,手动 push_back
-        // 但 Iter::copied 的 Extend 实现已优化为 memcpy,保留以避免循环开销
-        buf.extend(samples.iter().copied());
-        drop(buf);
-        cvar.notify_one();
+        let written = self.sample_buffer.push_slice(samples);
+        if written < samples.len() {
+            // 生产者有 2 秒水位门控,正常不应满;截断意味着门控失效(如异常设备格式)
+            log::warn!("SPSC 缓冲已满,截断 {} 采样", samples.len() - written);
+        }
         Ok(())
     }
 
     pub fn clear_buffer(&self) -> Result<(), AppError> {
-        let (buffer, _) = &*self.sample_buffer;
-        lock_or_log!(buffer.lock()).clear();
+        self.sample_buffer.clear();
         self.samples_written.store(0, Ordering::SeqCst);
         Ok(())
     }
@@ -390,8 +507,7 @@ impl WasapiExclusivePlayback {
 
     #[must_use]
     pub fn get_buffer_size(&self) -> usize {
-        let (buffer, _) = &*self.sample_buffer;
-        lock_or_log!(buffer.lock()).len()
+        self.sample_buffer.len()
     }
 }
 
@@ -405,8 +521,6 @@ impl Drop for WasapiExclusivePlayback {
     fn drop(&mut self) {
         self.is_running.store(false, Ordering::SeqCst);
         let _ = self.command_tx.send(AudioCommand::Shutdown);
-        let (_, cvar) = &*self.sample_buffer;
-        cvar.notify_all();
         if let Some(thread) = self.audio_thread.take() {
             let _ = thread.join();
         }
@@ -419,7 +533,7 @@ fn audio_thread_main(
     state: Arc<Mutex<PlaybackState>>,
     _volume: Arc<Mutex<f32>>,
     is_running: Arc<AtomicBool>,
-    sample_buffer: Arc<(Mutex<VecDeque<f32>>, Condvar)>,
+    sample_buffer: Arc<SpscSampleRing>,
     samples_written: Arc<AtomicU64>,
     sample_rate_atomic: Arc<AtomicU32>,
 ) {
@@ -437,6 +551,9 @@ fn audio_thread_main(
     // fade_factor 是当前实际应用到采样的系数(0.0..=1.0)
     let mut fade_state = FadeState::Idle;
     let mut fade_factor: f32 = 1.0;
+
+    // 欠载统计与节流上报
+    let mut underrun_logger = UnderrunLogger::new();
 
     // 复用缓冲区:避免每次 WASAPI 回调都堆分配(每秒~100次)
     // 容量按 48kHz/10ms/立体声 ≈ 960 samples 估算,预分配 4096 避免初次扩容
@@ -476,7 +593,7 @@ fn audio_thread_main(
                     fade_state = FadeState::Idle;
                     fade_factor = 1.0;
                     *lock_or_log!(state.lock()) = PlaybackState::Stopped;
-                    lock_or_log!(sample_buffer.0.lock()).clear();
+                    sample_buffer.clear();
                 }
             }
             Ok(AudioCommand::Pause) => {
@@ -505,7 +622,7 @@ fn audio_thread_main(
                 // 注意：wasapi crate的AudioClient没有直接的音量控制方法
                 // 音量在process_audio_output中通过软件乘法应用
             }
-            Ok(AudioCommand::ClearBuffer) => lock_or_log!(sample_buffer.0.lock()).clear(),
+            Ok(AudioCommand::ClearBuffer) => sample_buffer.clear(),
             Ok(AudioCommand::Shutdown) => break,
             Ok(AudioCommand::StopWithFadeOut { duration_ms }) => {
                 // 切歌/退出场景:启动淡出,完成后 stop_stream + clear_buffer
@@ -582,7 +699,7 @@ fn audio_thread_main(
                             if let Some(ref client) = audio_client {
                                 let _ = client.stop_stream();
                                 is_playing = false;
-                                lock_or_log!(sample_buffer.0.lock()).clear();
+                                sample_buffer.clear();
                             }
                             fade_factor = 1.0; // 重置为 1.0,准备下一次播放
                             *lock_or_log!(state.lock()) = PlaybackState::Stopped;
@@ -623,6 +740,7 @@ fn audio_thread_main(
                 &samples_written,
                 &mut reusable_samples,
                 &mut reusable_bytes,
+                &mut underrun_logger,
             );
             // 按实际处理的帧数推进淡入淡出剩余帧计数
             if frames_processed > 0 {
@@ -704,7 +822,7 @@ fn process_audio_output(
     audio_client: Option<&wasapi::AudioClient>,
     render_client: Option<&wasapi::AudioRenderClient>,
     event_handle: Option<&wasapi::Handle>,
-    sample_buffer: &Arc<(Mutex<VecDeque<f32>>, Condvar)>,
+    sample_buffer: &SpscSampleRing,
     current_channels: u16,
     current_bits: u16,
     current_sample_type_is_float: bool,
@@ -714,6 +832,7 @@ fn process_audio_output(
     samples_written: &Arc<AtomicU64>,
     reusable_samples: &mut Vec<f32>,
     reusable_bytes: &mut Vec<u8>,
+    underrun_logger: &mut UnderrunLogger,
 ) -> usize {
     if let (Some(client), Some(rc), Some(eh)) = (audio_client, render_client, event_handle) {
         // 使用更短的超时以获得更低延迟
@@ -721,41 +840,19 @@ fn process_audio_output(
             if let Ok(frames_available) = client.get_available_space_in_frames() {
                 if frames_available > 0 {
                     let samples_needed = frames_available as usize * current_channels as usize;
-                    let (buffer, cvar) = &**sample_buffer;
 
-                    // 检测缓冲区欠载 - 在锁内批量取走,缩短锁持有时间
-                    let mut underrun_count = 0;
+                    // 无锁批量取走采样,不足部分填 0(欠载)
                     reusable_samples.clear();
-                    reusable_samples.reserve(samples_needed);
+                    reusable_samples.resize(samples_needed, 0.0);
+                    let popped = sample_buffer.pop_slice(reusable_samples);
 
-                    {
-                        let mut buf = lock_or_log!(buffer.lock());
-                        for _ in 0..samples_needed {
-                            let sample = buf.pop_front().unwrap_or_else(|| {
-                                underrun_count += 1;
-                                0.0
-                            });
-                            // 音量乘法放到锁外做以缩短锁持有时间
-                            reusable_samples.push(sample);
-                        }
-                        drop(buf);
-                    }
+                    // 记录欠载情况(节流上报,避免高频日志恶化实时性)
+                    underrun_logger.record(samples_needed - popped, samples_needed);
 
-                    // 释放锁后做音量乘法(无锁争用)
-                    // 注: 乘 1.0 的开销可忽略,无需特判
+                    // 音量乘法(无锁争用;乘 1.0 的开销可忽略,无需特判)
                     for s in reusable_samples.iter_mut() {
                         *s *= current_volume;
                     }
-
-                    // 记录欠载情况
-                    if underrun_count > samples_needed / 2 {
-                        log::warn!(
-                            "WASAPI buffer underrun: {underrun_count}/{samples_needed} samples"
-                        );
-                    }
-
-                    // 通知等待的生产者 (有空间了)
-                    cvar.notify_one();
 
                     // 复用 Vec<u8> 缓冲区
                     convert_samples_to_bytes_into(
@@ -1441,5 +1538,107 @@ mod simd_tests {
         }
 
         assert_eq!(sse2_out, avx2_out, "SSE2 与 AVX2 i32 输出应完全一致");
+    }
+}
+
+#[cfg(test)]
+mod spsc_ring_tests {
+    use super::*;
+
+    #[test]
+    fn basic_push_pop() {
+        let ring = SpscSampleRing::new(8);
+        assert_eq!(ring.len(), 0);
+        assert_eq!(ring.push_slice(&[1.0, 2.0, 3.0]), 3);
+        assert_eq!(ring.len(), 3);
+
+        let mut out = [0.0f32; 2];
+        assert_eq!(ring.pop_slice(&mut out), 2);
+        assert_eq!(out, [1.0, 2.0]);
+
+        // 欠载:只取到 1 个,其余填 0
+        let mut out2 = [0.0f32; 5];
+        assert_eq!(ring.pop_slice(&mut out2), 1);
+        assert_eq!(out2, [3.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(ring.len(), 0);
+    }
+
+    #[test]
+    fn wraps_around() {
+        let ring = SpscSampleRing::new(4);
+        let mut out = [0.0f32; 3];
+        ring.push_slice(&[1.0, 2.0, 3.0]);
+        assert_eq!(ring.pop_slice(&mut out), 3);
+        assert_eq!(out, [1.0, 2.0, 3.0]);
+
+        // head=3, 写入跨越缓冲区末尾
+        assert_eq!(ring.push_slice(&[4.0, 5.0, 6.0]), 3);
+        let mut out2 = [0.0f32; 3];
+        assert_eq!(ring.pop_slice(&mut out2), 3);
+        assert_eq!(out2, [4.0, 5.0, 6.0]);
+    }
+
+    #[test]
+    fn full_truncates() {
+        let ring = SpscSampleRing::new(4);
+        assert_eq!(ring.push_slice(&[1.0, 2.0, 3.0, 4.0, 5.0]), 4);
+        assert_eq!(ring.len(), 4);
+        assert_eq!(ring.push_slice(&[6.0]), 0);
+    }
+
+    #[test]
+    fn clear_resets() {
+        let ring = SpscSampleRing::new(8);
+        ring.push_slice(&[1.0, 2.0, 3.0]);
+        ring.clear();
+        assert_eq!(ring.len(), 0);
+
+        // clear 后可继续正常读写
+        assert_eq!(ring.push_slice(&[7.0]), 1);
+        let mut out = [0.0f32; 1];
+        assert_eq!(ring.pop_slice(&mut out), 1);
+        assert_eq!(out, [7.0]);
+    }
+
+    /// 双线程压测:验证 SPSC 契约下数据不丢失、不乱序
+    #[test]
+    fn multithreaded_spsc() {
+        const CHUNK: usize = 16;
+        const CHUNKS: u32 = 20_000;
+        let ring = Arc::new(SpscSampleRing::new(1024));
+
+        let producer = {
+            let ring = Arc::clone(&ring);
+            thread::spawn(move || {
+                for i in 0..CHUNKS {
+                    let chunk = [(i % 100) as f32; CHUNK];
+                    let mut written = 0;
+                    while written < CHUNK {
+                        written += ring.push_slice(&chunk[written..]);
+                        std::hint::spin_loop();
+                    }
+                }
+            })
+        };
+        let consumer = {
+            let ring = Arc::clone(&ring);
+            thread::spawn(move || {
+                let mut out = [0.0f32; CHUNK];
+                for i in 0..CHUNKS {
+                    let mut read = 0;
+                    while read < CHUNK {
+                        read += ring.pop_slice(&mut out[read..]);
+                        std::hint::spin_loop();
+                    }
+                    for &v in &out {
+                        assert_eq!(v, (i % 100) as f32);
+                    }
+                }
+            })
+        };
+
+        producer.join().expect("producer panicked");
+        consumer.join().expect("consumer panicked");
+        assert_eq!(ring.len(), 0);
     }
 }

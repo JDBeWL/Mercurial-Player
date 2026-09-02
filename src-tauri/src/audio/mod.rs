@@ -17,6 +17,10 @@ pub mod commands;
 // 可视化数据(spectrum_data)与 device_monitor/equalizer 相互独立,
 // 不与上述锁同栈嵌套。
 //
+// 注意:WASAPI 独占模式的采样缓冲(SpscSampleRing)是无锁 SPSC 环形缓冲,
+// 不参与上述锁序——音频渲染线程/解码线程/宿主线程通过原子计数访问,
+// 持有 wasapi_player 锁期间操作它不再构成锁序嵌套。
+//
 // 两个既有约定:
 // - 核心路径(音频线程等)用 `lock_or_log!`:锁中毒自动恢复,不中断播放;
 // - 命令边界(返回错误给前端的 Tauri command)用 [`LockOrErr`]:把获取锁的

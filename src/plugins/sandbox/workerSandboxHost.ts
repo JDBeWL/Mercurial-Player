@@ -96,6 +96,32 @@ const defaultWorkerFactory = (): Worker => new SandboxWorker()
 /** playerState 镜像推送的节流间隔 */
 const PLAYER_STATE_THROTTLE_MS = 300
 
+/** init(Worker 启动 + 模块加载)超时 */
+const INIT_TIMEOUT_MS = 5_000
+/** runMain(插件工厂执行)超时 */
+const MAIN_TIMEOUT_MS = 30_000
+/** 宿主→Worker 回调 RPC(activate/deactivate/事件回调等)超时 */
+const CALLBACK_TIMEOUT_MS = 30_000
+
+/** 给 promise 附加超时:超时后 reject(调用方负责 terminate 清理) */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} 超时 (${ms}ms)，插件可能已挂起`))
+    }, ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
 interface PendingCall {
   resolve: (value: unknown) => void
   reject: (error: Error) => void
@@ -164,7 +190,8 @@ export class PluginWorkerHost {
       this.initReject = reject
     })
     worker.postMessage(initMsg)
-    await this.initWaiter
+    // 超时保护:插件模块加载若挂起(如顶层死循环),reject 由调用方 terminate
+    await withTimeout(this.initWaiter, INIT_TIMEOUT_MS, `插件 ${this.pluginId} 初始化`)
   }
 
   private initResolve: (() => void) | null = null
@@ -190,7 +217,8 @@ export class PluginWorkerHost {
       this.mainWaiter = { resolve, reject }
     })
     this.post({ type: 'run-main' })
-    return mainPromise
+    // 超时保护:插件工厂函数若死循环,resolve 永远不会到达
+    return withTimeout(mainPromise, MAIN_TIMEOUT_MS, `插件 ${this.pluginId} 主函数执行`)
   }
 
   /** 适配 pluginManager 的 PluginSandbox 接口 (execute 在主窗口闭包执行,cleanup 终止 Worker) */
@@ -406,10 +434,26 @@ export class PluginWorkerHost {
         // callId 与 cbId 是两个独立的 id 空间:
         // callId 关联本次挂起调用 (callback-result 按 callId 回执),cbId 定位 Worker 内回调
         const callId = this.nextCbCallId++
-        this.cbCallPending.set(callId, { resolve, reject })
+        // 超时保护:插件回调(activate/deactivate/事件处理)死循环时拒绝本次调用,
+        // 避免宿主侧调用方永久挂起;不 terminate 整个 Worker(单次回调失败可恢复)
+        const timer = setTimeout(() => {
+          if (this.cbCallPending.delete(callId)) {
+            reject(new Error(`插件 ${this.pluginId} 回调执行超时 (${CALLBACK_TIMEOUT_MS}ms)`))
+          }
+        }, CALLBACK_TIMEOUT_MS)
+        const wrappedResolve: (value: unknown) => void = (value) => {
+          clearTimeout(timer)
+          resolve(value)
+        }
+        const wrappedReject: (error: Error) => void = (error) => {
+          clearTimeout(timer)
+          reject(error)
+        }
+        this.cbCallPending.set(callId, { resolve: wrappedResolve, reject: wrappedReject })
         try {
           this.post({ type: 'callback-call', callId, cbId, args })
         } catch (error) {
+          clearTimeout(timer)
           this.cbCallPending.delete(callId)
           reject(
             new Error(

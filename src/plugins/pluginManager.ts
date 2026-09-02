@@ -311,7 +311,26 @@ class PluginManager {
     const plugin = this.plugins.get(pluginId)
     if (!plugin) return
 
-    if (plugin.state === PluginState.LOADING || plugin.state === PluginState.UNLOADING) {
+    if (plugin.state === PluginState.LOADING) {
+      // 强制终止:插件在激活流程中挂起(init/runMain 超时或死循环)。
+      // terminate 会 reject 挂起的 activate Promise,其 catch 分支会置 ERROR;
+      // 这里同步置 ERROR 保证 deactivate 返回后状态立即可用
+      const workerHost = this.workerHosts.get(pluginId)
+      if (workerHost) {
+        try {
+          workerHost.terminate()
+        } catch (error) {
+          logger.warn(`强制终止沙箱宿主失败: ${pluginId}`, error)
+        }
+      }
+      this.cleanupPluginExtensions(pluginId)
+      plugin.state = PluginState.ERROR
+      plugin.error = '插件激活挂起，已被强制终止'
+      logger.warn(`插件 ${pluginId} 在加载中被强制终止`)
+      return
+    }
+
+    if (plugin.state === PluginState.UNLOADING) {
       throw new Error(`插件 ${pluginId} 正在处理中，请稍后再试`)
     }
 

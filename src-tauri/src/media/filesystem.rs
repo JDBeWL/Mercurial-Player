@@ -29,8 +29,39 @@ fn validate_lyrics_path(path: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// 单次目录扫描的最大递归深度（防止对深层目录树的 DoS 式扫描）
+const MAX_SCAN_DEPTH: usize = 10;
+
+/// 校验媒体路径：词法敏感目录检查 + canonicalize 复查（防 symlink/junction 逃逸）
+///
+/// 适用于所有接受前端传入 path 的媒体命令入口（目录枚举、扫描、元数据读取）。
+/// canonicalize 失败（路径不存在）视为不安全，与 [`super::super::config`] 的
+/// `is_path_safe` 模式一致。
+pub fn validate_media_path(path: &str) -> Result<(), AppError> {
+    // 先对原始输入做词法检查
+    if is_sensitive_path(path) {
+        return Err(AppError::Path("安全限制：不允许访问敏感目录".to_string()));
+    }
+
+    // 规范化路径
+    let canonical = fs::canonicalize(path)
+        .map_err(|_| AppError::Path("无法解析路径，请确保路径存在".to_string()))?;
+
+    // canonicalize 可能解析出输入中未显现的敏感位置（如 junction/symlink），需复查
+    let mut canonical_str = canonical.to_string_lossy().to_string();
+    if let Some(stripped) = canonical_str.strip_prefix(r"\\?\") {
+        canonical_str = stripped.to_string();
+    }
+    if is_sensitive_path(&canonical_str) {
+        return Err(AppError::Path("安全限制：不允许访问敏感目录".to_string()));
+    }
+
+    Ok(())
+}
+
 /// 读取指定目录中的子目录列表
 pub fn read_dir(path: &str) -> Result<Vec<String>, AppError> {
+    validate_media_path(path)?;
     let dir = Path::new(path);
     if !dir.is_dir() {
         return Err("Provided path is not a directory".to_string().into());
@@ -47,12 +78,14 @@ pub fn read_dir(path: &str) -> Result<Vec<String>, AppError> {
 
 /// 获取指定目录中的所有音频文件，并创建播放列表
 pub fn get_audio_files_from_dir(path: &str) -> Result<Playlist, AppError> {
+    validate_media_path(path)?;
     let dir = Path::new(path);
     if !dir.is_dir() {
         return Err("Provided path is not a directory".to_string().into());
     }
 
     let audio_files: Vec<_> = WalkDir::new(dir)
+        .max_depth(MAX_SCAN_DEPTH)
         .into_iter()
         .filter_map(Result::ok)
         .filter(is_audio_file)
@@ -87,6 +120,11 @@ pub fn get_all_audio_files_from_dirs(
     let mut all_playlists: Vec<Playlist> = Vec::new();
 
     for path in paths {
+        // 校验每个目录（敏感目录/不存在则跳过，不中断批量扫描）
+        if let Err(e) = validate_media_path(path) {
+            log::warn!("Skipping path '{path}': {e}");
+            continue;
+        }
         let dir = Path::new(path);
         if !dir.is_dir() {
             log::warn!("Provided path is not a directory: {path}");
@@ -98,7 +136,9 @@ pub fn get_all_audio_files_from_dirs(
             let playlists =
                 scan_with_folder_playlists(dir, config.directory_scan.max_depth as usize);
             all_playlists.extend(playlists);
-        } else if let Some(playlist) = scan_single_playlist(dir) {
+        } else if let Some(playlist) =
+            scan_single_playlist(dir, config.directory_scan.max_depth as usize)
+        {
             all_playlists.push(playlist);
         }
     }
@@ -155,13 +195,14 @@ fn scan_with_folder_playlists(dir: &Path, max_depth: usize) -> Vec<Playlist> {
 }
 
 /// 扫描目录创建单个播放列表（完整模式，包含封面）
-fn scan_single_playlist(dir: &Path) -> Option<Playlist> {
+fn scan_single_playlist(dir: &Path, max_depth: usize) -> Option<Playlist> {
     let playlist_name = dir.file_name().map_or_else(
         || "Unknown".to_string(),
         |s| s.to_string_lossy().to_string(),
     );
 
     let audio_files: Vec<_> = WalkDir::new(dir)
+        .max_depth(max_depth)
         .into_iter()
         .filter_map(Result::ok)
         .filter(is_audio_file)
@@ -187,9 +228,13 @@ fn scan_single_playlist(dir: &Path) -> Option<Playlist> {
     }
 }
 
-/// 检查文件是否存在
+/// 检查文件是否存在（敏感路径一律返回 false）
 #[must_use]
 pub fn check_file_exists_internal(path: &str) -> bool {
+    if is_sensitive_path(path) {
+        return false;
+    }
+
     if Path::new(path).exists() {
         return true;
     }
@@ -231,4 +276,44 @@ fn is_audio_file(entry: &DirEntry) -> bool {
         .extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_media_path_rejects_sensitive_paths() {
+        assert!(validate_media_path("C:\\Windows\\System32").is_err());
+        assert!(validate_media_path("/etc").is_err());
+        assert!(validate_media_path("C:\\Users\\a\\.ssh\\id_rsa").is_err());
+        assert!(validate_media_path("D:\\Music\\.gnupg\\x").is_err());
+    }
+
+    #[test]
+    fn validate_media_path_rejects_nonexistent() {
+        assert!(validate_media_path("Z:\\definitely\\not\\exist").is_err());
+    }
+
+    #[test]
+    fn validate_media_path_allows_normal_dir() {
+        // 测试运行于 crate 根目录，属于普通工作目录；
+        // 极端环境下（cwd 位于敏感目录）跳过断言
+        let cwd = std::env::current_dir().expect("current dir");
+        if !is_sensitive_path(&cwd.to_string_lossy()) {
+            assert!(validate_media_path(&cwd.to_string_lossy()).is_ok());
+        }
+    }
+
+    #[test]
+    fn check_file_exists_blocks_sensitive_paths() {
+        // 即使文件确实存在，敏感路径也一律返回 false
+        if cfg!(windows) {
+            assert!(!check_file_exists_internal(
+                "C:\\Windows\\System32\\cmd.exe"
+            ));
+        }
+        assert!(!check_file_exists_internal("/etc/passwd"));
+        assert!(!check_file_exists_internal("C:\\Users\\a\\.ssh\\id_rsa"));
+    }
 }

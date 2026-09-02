@@ -294,11 +294,9 @@ pub(super) fn decode_and_push_to_wasapi(
             spectrum_analyzer.push_and_maybe_emit(final_out, &spectrum_data, &target_fps, &app);
 
             // 等待缓冲区有空间。
-            // 注意:不能在持有 wasapi 外层锁的状态下进入 Condvar 等待,
-            // 否则 pause_track/set_volume 等命令会被阻塞最长一个超时周期;
-            // 这里改为"快速查水位 -> 不持锁短暂 sleep -> 重查"。
+            // 水位查询与推送都只触碰 SPSC 环形缓冲的原子计数(无互斥锁),
+            // 不与音频渲染线程竞争;外层 wasapi 锁仅用于访问播放器实例。
             // 缓冲区容量约 2 秒 (远大于 21ms 的处理块),轮询延迟不构成欠载风险。
-            // 缓冲区容量约为 target_sr * target_ch * 4 秒,保持在 2 秒以下
             let max_buffer = target_sr as usize * target_ch as usize * 2;
             loop {
                 if generation.load(Ordering::SeqCst) != my_generation
