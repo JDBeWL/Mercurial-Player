@@ -82,11 +82,61 @@ impl AppError {
     }
 }
 
+/// 抹去错误信息中的绝对路径（Windows 盘符路径与 UNC 路径）。
+///
+/// `Display` 文案会经 IPC 原样回传前端，用户可见的错误不应暴露本机目录
+/// 结构；完整路径仅保存在 `From` 转换处的 `log::debug!` 中。路径替换为
+/// 保留文件名的形式，便于用户定位问题文件。
+#[must_use]
+fn sanitize_path_in_message(msg: &str) -> String {
+    const PATH_END: &[u8] = b" \t\r\n\"'()<>,;";
+    let bytes = msg.as_bytes();
+    let mut out = String::with_capacity(msg.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        // Windows 盘符路径 (X:\ 或 X:/) 或 UNC 路径 (\\server\share)
+        let is_drive = b.is_ascii_alphabetic()
+            && i + 2 < bytes.len()
+            && bytes[i + 1] == b':'
+            && (bytes[i + 2] == b'\\' || bytes[i + 2] == b'/');
+        let is_unc = b == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'\\';
+        if is_drive || is_unc {
+            let mut j = i + if is_unc { 2 } else { 3 };
+            while j < bytes.len() && !PATH_END.contains(&bytes[j]) {
+                j += 1;
+            }
+            let path = &msg[i..j];
+            match std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+            {
+                Some(name) if !name.is_empty() => out.push_str(name),
+                _ => out.push_str("<路径>"),
+            }
+            i = j;
+        } else {
+            // 非 ASCII 字节按 char 边界推进
+            let ch_len = msg[i..].chars().next().map_or(1, char::len_utf8);
+            out.push_str(&msg[i..i + ch_len]);
+            i += ch_len;
+        }
+    }
+    out
+}
+
 impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(e) => write!(f, "IO 错误: {e}"),
-            Self::Serde(e) => write!(f, "序列化错误: {e}"),
+            // Display 文案经 IPC 回传前端:OS 错误原文可能含绝对路径,统一脱敏
+            Self::Io(e) => write!(f, "IO 错误: {}", sanitize_path_in_message(&e.to_string())),
+            Self::Serde(e) => {
+                write!(
+                    f,
+                    "序列化错误: {}",
+                    sanitize_path_in_message(&e.to_string())
+                )
+            }
             Self::Lock(s) => write!(f, "锁错误: {s}"),
             Self::Config(s) => write!(f, "配置错误: {s}"),
             Self::Audio(s) => write!(f, "音频错误: {s}"),
@@ -113,12 +163,15 @@ impl std::error::Error for AppError {
 
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
+        // OS 错误原文可能含绝对路径,完整信息仅供诊断日志,Display 侧已脱敏
+        log::debug!("完整 IO 错误(仅供诊断,可能含路径): {e}");
         Self::Io(e)
     }
 }
 
 impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
+        log::debug!("完整序列化错误(仅供诊断): {e}");
         Self::Serde(e)
     }
 }
@@ -135,10 +188,100 @@ impl From<&str> for AppError {
     }
 }
 
+// ── 音频库错误:让 `?` 直接归入 Audio,避免 `.to_string().into()` 落入 Other ──
+//
+// 注:cpal 0.15+ 已无统一的 `cpal::Error`,错误按操作拆分
+// (BuildStreamError/StreamError/DevicesError/...);rodio 0.22 在根路径
+// 导出 `PlayError`/`DeviceSinkError`(无 `StreamError`,其由 `PlayError` 携带)。
+
+macro_rules! impl_audio_from {
+    ($($ty:ty => $desc:literal),+ $(,)?) => {
+        $(
+            impl From<$ty> for AppError {
+                fn from(err: $ty) -> Self {
+                    // 显式具名参数绑定,规避宏 hygiene 下 `{e}` 找不到调用侧变量的情况
+                    Self::Audio(format!($desc, e = err))
+                }
+            }
+        )+
+    };
+}
+
+impl_audio_from!(
+    cpal::BuildStreamError => "打开音频输出流失败: {e}",
+    cpal::StreamError => "音频流运行错误: {e}",
+    cpal::PlayStreamError => "音频流播放错误: {e}",
+    cpal::PauseStreamError => "音频流暂停错误: {e}",
+    cpal::DefaultStreamConfigError => "获取音频设备默认配置失败: {e}",
+    cpal::SupportedStreamConfigsError => "查询音频设备支持配置失败: {e}",
+    cpal::DevicesError => "枚举音频设备失败: {e}",
+    cpal::DeviceNameError => "读取音频设备名称失败: {e}",
+    cpal::DeviceIdError => "解析音频设备标识失败: {e}",
+    rodio::PlayError => "播放流创建错误: {e}",
+    rodio::DeviceSinkError => "创建设备音频输出失败: {e}",
+);
+
+#[cfg(windows)]
+impl From<windows_core::Error> for AppError {
+    fn from(e: windows_core::Error) -> Self {
+        Self::Audio(format!("WASAPI/COM 错误: {e}"))
+    }
+}
+
 // ── 向下兼容：AppError -> String，让旧 Result<T, String> 代码可用 ? ─────
 
 impl From<AppError> for String {
     fn from(e: AppError) -> Self {
         e.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_path_in_message;
+    use crate::error::AppError;
+
+    #[test]
+    fn sanitize_removes_drive_paths_and_keeps_filename() {
+        let msg = "IO 错误: 无法打开 D:\\Users\\me\\Music\\song.mp3 (os error 2)";
+        assert_eq!(
+            sanitize_path_in_message(msg),
+            "IO 错误: 无法打开 song.mp3 (os error 2)"
+        );
+    }
+
+    #[test]
+    fn sanitize_handles_forward_slash_and_unc_paths() {
+        assert_eq!(
+            sanitize_path_in_message("read C:/tmp/cover.png failed"),
+            "read cover.png failed"
+        );
+        assert_eq!(
+            sanitize_path_in_message(r"access \\?\D:\a\b\f.txt denied"),
+            "access f.txt denied"
+        );
+        assert_eq!(
+            sanitize_path_in_message(r"share \\server\share\dir\f.lrc missing"),
+            "share f.lrc missing"
+        );
+    }
+
+    #[test]
+    fn sanitize_leaves_plain_messages_and_chinese_text_intact() {
+        let msg = "No such file or directory (os error 2)";
+        assert_eq!(sanitize_path_in_message(msg), msg);
+        let zh = "无法识别的音频格式";
+        assert_eq!(sanitize_path_in_message(zh), zh);
+        // 盘符后不带斜杠的裸字母不应被误判为路径
+        let version = "版本 C: 更新说明";
+        assert_eq!(sanitize_path_in_message(version), version);
+    }
+
+    #[test]
+    fn io_display_no_longer_leaks_absolute_path() {
+        let err = std::io::Error::other("failed to read D:\\secret\\folder\\track.flac");
+        let text = AppError::Io(err).to_string();
+        assert!(!text.contains("D:\\secret\\folder"), "泄漏绝对路径: {text}");
+        assert!(text.contains("track.flac"), "应保留文件名便于定位: {text}");
     }
 }

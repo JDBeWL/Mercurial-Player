@@ -86,21 +86,28 @@ pub struct FrontendLogEntry {
 }
 
 impl FrontendLogEntry {
+    /// 转义换行符,防止前端可控内容伪造日志行(args 中的字符串经
+    /// `serde_json::Value::to_string` 已单行化,这里覆盖 message/stack 等原始字段)
+    fn escape_line_breaks(s: &str) -> String {
+        s.replace('\r', "\\r").replace('\n', "\\n")
+    }
+
     fn format_line(&self) -> String {
         let date = self.date.as_deref().unwrap_or("----/--/--");
-        let mut line = format!(
-            "[{date} {}] [{}] {}",
-            self.timestamp, self.level, self.message
-        );
+        let date = Self::escape_line_breaks(date);
+        let timestamp = Self::escape_line_breaks(&self.timestamp);
+        let level = Self::escape_line_breaks(&self.level);
+        let message = Self::escape_line_breaks(&self.message);
+        let mut line = format!("[{date} {timestamp}] [{level}] {message}");
         if let Some(args) = &self.args {
             for arg in args {
                 line.push(' ');
-                line.push_str(&arg.to_string());
+                line.push_str(&Self::escape_line_breaks(&arg.to_string()));
             }
         }
         if let Some(stack) = &self.stack {
             line.push('\n');
-            line.push_str(stack);
+            line.push_str(&Self::escape_line_breaks(stack));
         }
         line.push('\n');
         line

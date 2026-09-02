@@ -75,6 +75,20 @@ fn remove_temp_file(path: &Path) {
     }
 }
 
+/// 以 `create_new` 语义创建空临时文件。
+///
+/// 不用 `File::create`(可截断已存在文件):临时文件路径仅含 pid+时间戳,
+/// 攻击者可先在同名路径预创建普通文件或符号链接,使后续写入落盘到攻击者
+/// 指定的位置。`create_new` 在文件已存在时报 `AlreadyExists`,保证我们
+/// 写入的一定是本进程新建的文件。
+fn create_temp_file_exclusive(path: &Path) -> std::io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map(|_| ())
+}
+
 /// 丢弃 pending 中保存的临时文件路径并删除对应文件
 fn clear_pending_path(guard: &mut Option<PathBuf>) {
     if let Some(old) = guard.take() {
@@ -314,8 +328,9 @@ async fn download_parallel(
     path: &Path,
     app: &AppHandle,
 ) -> Result<u64, AppError> {
-    // 先创建并截断目标文件；各分片任务各自持有写句柄，seek 到自己的偏移写入
-    std::fs::File::create(path).map_err(|e| format!("创建临时文件失败: {e}"))?;
+    // 先以 create_new 创建并独占目标文件;各分片任务各自持有写句柄,
+    // seek 到自己的偏移写入 (create_new 保证不覆盖任何已存在的预创建文件)
+    create_temp_file_exclusive(path).map_err(|e| format!("创建临时文件失败: {e}"))?;
 
     let fetched = Arc::new(AtomicU64::new(0));
     let done = Arc::new(AtomicBool::new(false));
@@ -463,7 +478,11 @@ async fn download_single(
         spawn_progress_reporter(app.clone(), Arc::clone(&fetched), Arc::clone(&done), total);
 
     let download_result: Result<u64, AppError> = async {
-        let mut file = tokio::fs::File::create(path)
+        // create_new:防止攻击者预创建同名文件/符号链接后被覆盖写入
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
             .await
             .map_err(|e| format!("创建临时文件失败: {e}"))?;
 

@@ -115,8 +115,9 @@ const TARGET_FILL_RATIO_DENOM: usize = 100;
 const MAX_PACKETS_PER_FILL: u32 = 50;
 
 pub struct LockFreeSymphoniaSource {
-    receiver: Receiver<f32>,
-    _decoder_thread: thread::JoinHandle<()>,
+    receiver: Option<Receiver<f32>>,
+    /// 保留句柄以便 Drop 时 join,避免解码线程 detached 存活到进程退出
+    decoder_thread: Option<thread::JoinHandle<()>>,
     stop_flag: Arc<AtomicBool>,
     producer_finished: Arc<AtomicBool>,
     cached_channels: u16,
@@ -174,8 +175,8 @@ impl LockFreeSymphoniaSource {
         });
 
         Self {
-            receiver,
-            _decoder_thread: decoder_thread,
+            receiver: Some(receiver),
+            decoder_thread: Some(decoder_thread),
             stop_flag,
             producer_finished,
             cached_channels: channels,
@@ -191,6 +192,8 @@ impl Iterator for LockFreeSymphoniaSource {
     type Item = f32;
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
+        let receiver = self.receiver.as_ref()?;
+
         if self.chunk_pos < self.chunk_buffer.len() {
             let s = self.chunk_buffer[self.chunk_pos];
             self.chunk_pos += 1;
@@ -201,10 +204,10 @@ impl Iterator for LockFreeSymphoniaSource {
         self.chunk_pos = 0;
 
         let first = loop {
-            match self.receiver.recv_timeout(Duration::from_millis(10)) {
+            match receiver.recv_timeout(Duration::from_millis(10)) {
                 Ok(s) => break Some(s),
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                    if self.producer_finished.load(Ordering::Acquire) && self.receiver.is_empty() {
+                    if self.producer_finished.load(Ordering::Acquire) && receiver.is_empty() {
                         break None;
                     }
                 }
@@ -214,7 +217,7 @@ impl Iterator for LockFreeSymphoniaSource {
 
         self.chunk_buffer.push(first);
         while self.chunk_buffer.len() < 16384 {
-            match self.receiver.try_recv() {
+            match receiver.try_recv() {
                 Ok(s) => self.chunk_buffer.push(s),
                 Err(crossbeam_channel::TryRecvError::Empty) => break,
                 Err(crossbeam_channel::TryRecvError::Disconnected) => break,
@@ -246,6 +249,13 @@ impl Source for LockFreeSymphoniaSource {
 impl Drop for LockFreeSymphoniaSource {
     fn drop(&mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
+        // 先释放 receiver:若解码线程正阻塞在有界通道的 send 上,通道断开
+        // 会让 send 立即失败并退出线程,随后的 join 不会死锁
+        drop(self.receiver.take());
+        // join 解码线程,避免 detached 线程在后台存活到进程退出
+        if let Some(handle) = self.decoder_thread.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -588,7 +598,7 @@ impl Iterator for SymphoniaDecoder {
     fn next(&mut self) -> Option<f32> {
         if self.buffer.is_empty() || self.buffer.needs_refill() {
             if let Err(e) = self.fill_buffer() {
-                eprintln!("Buffer fill error: {e}");
+                log::warn!("Buffer fill error: {e}");
                 if self.buffer.is_empty() {
                     return None;
                 }

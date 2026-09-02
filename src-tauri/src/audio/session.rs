@@ -300,7 +300,7 @@ fn pause_playback(state: &State<AppState>) -> Result<(), AppError> {
             if let Some(ref wasapi) = *guard {
                 wasapi.pause()?;
             } else {
-                return Err("WASAPI player not initialized".to_string().into());
+                return Err(AppError::Audio("WASAPI player not initialized".to_string()));
             }
             drop(guard);
             return Ok(());

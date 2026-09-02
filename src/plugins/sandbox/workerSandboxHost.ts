@@ -104,6 +104,58 @@ const MAIN_TIMEOUT_MS = 30_000
 const CALLBACK_TIMEOUT_MS = 30_000
 
 /**
+ * 沙箱上行消息令牌桶参数:log 与 api-call 是插件唯一可持续向宿主
+ * 发送消息的通道,失控/恶意插件可借此刷爆主窗口事件循环与日志文件。
+ * 超过令牌补充速率视为洪泛,直接终止 Worker(失败关闭)。
+ */
+const LOG_BUCKET_CAPACITY = 200
+const LOG_BUCKET_REFILL_PER_SEC = 100
+const API_CALL_BUCKET_CAPACITY = 400
+const API_CALL_BUCKET_REFILL_PER_SEC = 200
+/** 宿主侧同时存活的回调 stub 上限(事件监听/返回值携带函数等),防内存刷爆 */
+const MAX_CALLBACK_STUBS = 10_000
+/** 单个插件可注册的扩展点上限(菜单/按钮/命令/快捷键/歌词源等) */
+const EXTENSION_LIMIT = 200
+/** 计入扩展点配额的注册类 API(注册消耗配额) */
+const EXTENSION_REGISTER_PATHS: ReadonlySet<string> = new Set([
+  'ui.registerMenuItem',
+  'ui.registerActionButton',
+  'lyrics.registerProvider',
+  'commands.register',
+  'shortcuts.register',
+])
+/** 注销类 API(归还配额) */
+const EXTENSION_UNREGISTER_PATHS: ReadonlySet<string> = new Set([
+  'ui.unregisterActionButton',
+  'shortcuts.unregister',
+])
+
+/** 简单的令牌桶:按固定速率补充令牌,桶满为止;取令牌失败即超限 */
+class TokenBucket {
+  private tokens: number
+  private lastRefill = Date.now()
+
+  constructor(
+    private readonly capacity: number,
+    private readonly refillPerSecond: number,
+  ) {
+    this.tokens = capacity
+  }
+
+  tryTake(): boolean {
+    const now = Date.now()
+    const elapsed = Math.max(0, (now - this.lastRefill) / 1000)
+    this.lastRefill = now
+    this.tokens = Math.min(this.capacity, this.tokens + elapsed * this.refillPerSecond)
+    if (this.tokens >= 1) {
+      this.tokens -= 1
+      return true
+    }
+    return false
+  }
+}
+
+/**
  * 反序列化 (reviveValue) 的资源预算。
  *
  * Worker 与插件代码共享同一全局作用域,插件可自行 postMessage 任意 payload;
@@ -133,9 +185,7 @@ function isCallId(value: unknown): value is number {
 }
 
 function isSerializedError(value: unknown): value is SerializedError {
-  return (
-    isRecord(value) && typeof value.name === 'string' && typeof value.message === 'string'
-  )
+  return isRecord(value) && typeof value.name === 'string' && typeof value.message === 'string'
 }
 
 /** 给 promise 附加超时:超时后 reject(调用方负责 terminate 清理) */
@@ -179,10 +229,16 @@ export class PluginWorkerHost {
   private mainWaiter: PendingMain | null = null
   private pendingCalls = new Map<number, PendingCall>()
   private callbackStubs = new Map<number, (...args: unknown[]) => Promise<unknown>>()
+  /** events.on 注册回调的引用计数:events.off 归零时同步释放对应 stub */
+  private callbackStubRefs = new Map<number, number>()
   private cbCallPending = new Map<number, PendingCall>()
   private watchStops: WatchStopHandle[] = []
   private nextCbCallId = 1
   private terminated = false
+  private logBucket = new TokenBucket(LOG_BUCKET_CAPACITY, LOG_BUCKET_REFILL_PER_SEC)
+  private apiCallBucket = new TokenBucket(API_CALL_BUCKET_CAPACITY, API_CALL_BUCKET_REFILL_PER_SEC)
+  /** 本插件剩余可注册的扩展点配额(init 时重置) */
+  private extensionSlots = EXTENSION_LIMIT
 
   constructor(
     pluginId: string,
@@ -200,6 +256,7 @@ export class PluginWorkerHost {
   async init(): Promise<void> {
     if (this.worker) return
     this.terminated = false
+    this.extensionSlots = EXTENSION_LIMIT
     const worker = this.workerFactory()
     this.worker = worker
     worker.onmessage = (event: MessageEvent) => {
@@ -277,6 +334,7 @@ export class PluginWorkerHost {
     this.worker = null
     this.rejectAllPending(new Error('插件沙箱已终止'))
     this.callbackStubs.clear()
+    this.callbackStubRefs.clear()
     this.api = null
   }
 
@@ -314,6 +372,18 @@ export class PluginWorkerHost {
   private handleWorkerMessage(raw: unknown): void {
     if (!isRecord(raw) || typeof raw.type !== 'string') return
     const type = raw.type
+
+    // 令牌桶限速:log / api-call 是插件可无限发送的上行通道,
+    // 超过补充速率即视为洪泛,拒绝挂起调用并终止 Worker (失败关闭)
+    if (type === 'log' || type === 'api-call') {
+      const bucket = type === 'log' ? this.logBucket : this.apiCallBucket
+      if (!bucket.tryTake()) {
+        logger.error(`[Plugin:${this.pluginId}] ${type} 消息速率超限,终止插件沙箱`)
+        this.rejectAllPending(new Error(`插件 ${type} 消息速率超限`))
+        this.terminate()
+        return
+      }
+    }
 
     try {
       switch (type) {
@@ -414,6 +484,8 @@ export class PluginWorkerHost {
 
   /** Worker 代理发起的 API 调用 → 真实 PluginAPI (宿主侧白名单 + 权限强制校验) */
   private async handleApiCall(callId: number, path: string, rawArgs: unknown[]): Promise<void> {
+    // 注册类扩展调用进入后预扣配额,失败时在 catch 中退还 (需在 try 外声明以便 catch 访问)
+    let extReserved = false
     try {
       // 可信侧强制校验:Worker 内的消息可能来自插件伪造 (共享全局作用域),
       // 先校验消息形状,再查路径白名单与权限,最后进入真实 API (其内部还有逐方法校验)
@@ -429,15 +501,51 @@ export class PluginWorkerHost {
           `插件 ${this.pluginId} 没有 ${requiredPermission} 权限，无法调用 ${String(path)}`,
         )
       }
+      // 扩展点配额:注册消耗配额、注销归还,防插件无限堆 UI/命令/歌词源。
+      // 并发下(连续多条 api-call 尚未结算)检查必须先扣减预留,否则竞态可
+      // 让实际调用数越过上限;若后续执行失败(如 PluginAPI 校验拒绝)再退还。
+      const isExtRegister = EXTENSION_REGISTER_PATHS.has(path)
+      const isExtUnregister = EXTENSION_UNREGISTER_PATHS.has(path)
+      if (isExtRegister) {
+        if (this.extensionSlots <= 0) {
+          throw new Error(
+            `插件 ${this.pluginId} 扩展注册数量超过上限 (${EXTENSION_LIMIT})，请先注销不再使用的扩展`,
+          )
+        }
+        this.extensionSlots -= 1
+        extReserved = true
+      } // events.on/off 按 cbId 引用计数:注册 +1、注销成功后 -1,
+      // 归零时同步释放宿主侧 callbackStub,防止反复订阅/退订泄漏 stub
+      const subCbId =
+        path === 'events.on' || path === 'events.off' ? this.extractCallbackId(rawArgs) : null
+      if (path === 'events.on' && subCbId !== null) {
+        this.callbackStubRefs.set(subCbId, (this.callbackStubRefs.get(subCbId) ?? 0) + 1)
+      }
       let args = rawArgs.map((arg) => reviveValue(arg, (cbId) => this.makeCallbackStub(cbId)))
       // Worker 侧绘制的 OffscreenCanvas 转为 Blob (真实 API 只认 Blob/HTMLCanvasElement)
       if (path === 'file.saveImage' || path === 'clipboard.writeImage') {
         args = await PluginWorkerHost.flattenCanvasArgs(args)
       }
       let value = await this.invokeApi(path, args)
+      // 注销归还配额(注册配额已在进入时预留,成功无需再扣)
+      if (isExtUnregister) {
+        this.extensionSlots = Math.min(EXTENSION_LIMIT, this.extensionSlots + 1)
+      }
+      // events.off 注销成功后才归还引用;失败(如权限拒绝)保持 stub 存活
+      if (path === 'events.off' && subCbId !== null) {
+        const remain = (this.callbackStubRefs.get(subCbId) ?? 1) - 1
+        if (remain <= 0) {
+          this.callbackStubRefs.delete(subCbId)
+          this.callbackStubs.delete(subCbId)
+        } else {
+          this.callbackStubRefs.set(subCbId, remain)
+        }
+      }
       value = await this.adaptReturnValue(path, value)
       this.post({ type: 'api-result', callId, ok: true, value })
     } catch (error) {
+      // 注册类调用失败时退还预扣的配额(注销类无需处理,失败不影响配额)
+      if (extReserved) this.extensionSlots += 1
       logger.debug(`[Plugin:${this.pluginId}] 沙箱 API 调用失败: ${path}`, error)
       this.post({
         type: 'api-result',
@@ -501,6 +609,15 @@ export class PluginWorkerHost {
     return value
   }
 
+  /** 从 api-call 原始参数中提取沙箱函数标记的 cbId(仅 events.on/off 的第二个参数) */
+  private extractCallbackId(rawArgs: unknown[]): number | null {
+    const marker = rawArgs[1]
+    if (!isRecord(marker)) return null
+    const id = marker[SANDBOX_FN_MARKER]
+    if (typeof id === 'number' && Number.isSafeInteger(id) && id >= 0) return id
+    return null
+  }
+
   /** 参数中的 OffscreenCanvas (Worker 侧绘制结果) 转为 Blob 后交给真实 API */
   private static async flattenCanvasArgs(args: unknown[]): Promise<unknown[]> {
     const result: unknown[] = []
@@ -524,6 +641,10 @@ export class PluginWorkerHost {
   private makeCallbackStub(cbId: number): (...args: unknown[]) => Promise<unknown> {
     const existing = this.callbackStubs.get(cbId)
     if (existing) return existing
+    // 上限保护:失控插件反复订阅事件/在返回值中携带函数会让 stub 无限增长
+    if (this.callbackStubs.size >= MAX_CALLBACK_STUBS) {
+      throw new Error(`插件 ${this.pluginId} 回调数量超过上限 (${MAX_CALLBACK_STUBS})`)
+    }
 
     const stub = (...args: unknown[]): Promise<unknown> =>
       new Promise<unknown>((resolve, reject) => {

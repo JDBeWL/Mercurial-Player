@@ -468,7 +468,11 @@ class PluginManager {
     if (listeners) {
       for (const { callback } of listeners) {
         try {
-          callback(data)
+          // 沙箱回调通常返回 Promise,同步 try/catch 无法捕获其拒绝 →
+          // 统一包一层 Promise.resolve 并挂 .catch,避免每次事件产生 unhandledrejection
+          void Promise.resolve(callback(data)).catch((error) => {
+            logger.error(`事件处理出错: ${event}`, error)
+          })
         } catch (error) {
           logger.error(`事件处理出错: ${event}`, error)
         }

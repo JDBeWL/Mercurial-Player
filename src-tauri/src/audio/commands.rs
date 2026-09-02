@@ -125,7 +125,7 @@ pub fn pause_track(state: State<AppState>) -> Result<(), AppError> {
                     wasapi.pause_no_fade()?;
                 }
             } else {
-                return Err("WASAPI player not initialized".to_string().into());
+                return Err(AppError::Audio("WASAPI player not initialized".to_string()));
             }
             drop(guard);
             return Ok(());
@@ -188,7 +188,7 @@ pub fn resume_track(state: State<AppState>) -> Result<(), AppError> {
                     wasapi.resume_no_fade()?;
                 }
             } else {
-                return Err("WASAPI player not initialized".to_string().into());
+                return Err(AppError::Audio("WASAPI player not initialized".to_string()));
             }
             drop(guard);
             return Ok(());
@@ -240,7 +240,9 @@ pub fn resume_track(state: State<AppState>) -> Result<(), AppError> {
 #[command]
 pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), AppError> {
     if !(0.0..=1.0).contains(&volume) {
-        return Err("Volume must be between 0.0 and 1.0".to_string().into());
+        return Err(AppError::Audio(
+            "Volume must be between 0.0 and 1.0".to_string(),
+        ));
     }
 
     {
@@ -276,7 +278,7 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), AppError> {
             if let Some(ref wasapi) = *guard {
                 wasapi.set_volume(volume)?;
             } else {
-                return Err("WASAPI player not initialized".to_string().into());
+                return Err(AppError::Audio("WASAPI player not initialized".to_string()));
             }
             drop(guard);
             return Ok(());

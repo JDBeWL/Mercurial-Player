@@ -502,7 +502,7 @@ pub async fn play_track_exclusive(
     let (target_sr, target_ch) = {
         let g = lock_or_log!(player.output.wasapi_player.lock());
         let wasapi = g.as_ref().ok_or("WASAPI player not initialized")?;
-        let sr_ch = (wasapi.get_sample_rate(), wasapi.get_channels());
+        let sr_ch = (wasapi.sample_rate(), wasapi.channels());
         drop(g);
         sr_ch
     };
@@ -575,7 +575,7 @@ pub async fn play_track_exclusive(
         loop {
             let current_size = {
                 let g = lock_or_log!(player.output.wasapi_player.lock());
-                g.as_ref().map_or(0, |p| p.get_buffer_size())
+                g.as_ref().map_or(0, |p| p.buffer_size())
             };
             if current_size >= min_buffer_samples || buffer_wait >= 50 {
                 break;

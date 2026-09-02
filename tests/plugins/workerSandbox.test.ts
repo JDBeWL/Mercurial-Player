@@ -603,7 +603,12 @@ describe('workerSandbox - 宿主侧权限强制 (api-call 白名单)', () => {
     return { api, worker, results }
   }
 
-  const forgeApiCall = (worker: FakeWorker, callId: number, path: unknown, args: unknown[] = []) => {
+  const forgeApiCall = (
+    worker: FakeWorker,
+    callId: number,
+    path: unknown,
+    args: unknown[] = [],
+  ) => {
     worker.emitToHost({ type: 'api-call', callId, path, args } as never)
   }
 
@@ -732,9 +737,9 @@ describe('workerSandbox - 消息结构校验与反序列化预算 (P1-2)', () =>
     // 宿主未被毒化:后续合法 api-call 仍得到 ok:true
     forgeApiCall(worker, 9, 'player.play')
     await flushAsync()
-    expect(
-      results.some((m) => m.type === 'api-result' && m.ok === true && m.callId === 9),
-    ).toBe(true)
+    expect(results.some((m) => m.type === 'api-result' && m.ok === true && m.callId === 9)).toBe(
+      true,
+    )
   })
 
   it('callback-result 带非法 callId 被丢弃且不抛出', async () => {
@@ -753,9 +758,9 @@ describe('workerSandbox - 消息结构校验与反序列化预算 (P1-2)', () =>
     // 丢弃畸形消息后宿主仍正常工作
     forgeApiCall(worker, 10, 'player.play')
     await flushAsync()
-    expect(
-      results.some((m) => m.type === 'api-result' && m.ok === true && m.callId === 10),
-    ).toBe(true)
+    expect(results.some((m) => m.type === 'api-result' && m.ok === true && m.callId === 10)).toBe(
+      true,
+    )
   })
 
   it('api-call 带非法 callId 被丢弃 (无对应挂起可回执)', async () => {
@@ -770,8 +775,65 @@ describe('workerSandbox - 消息结构校验与反序列化预算 (P1-2)', () =>
     // 宿主仍正常
     forgeApiCall(worker, 11, 'player.play')
     await flushAsync()
-    expect(
-      results.some((m) => m.type === 'api-result' && m.ok === true && m.callId === 11),
-    ).toBe(true)
+    expect(results.some((m) => m.type === 'api-result' && m.ok === true && m.callId === 11)).toBe(
+      true,
+    )
+  })
+})
+
+describe('workerSandbox - P3-12 回调双向清理与扩展点配额', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('events.off 同时释放宿主侧回调 stub (双向清理,不随时间增长)', async () => {
+    const code = `
+      export default (api) => {
+        const listener = () => {}
+        return {
+          subscribe: () => { api.events.on('plugin:demo:ping', listener) },
+          unsubscribe: () => { api.events.off('plugin:demo:ping', listener) },
+        }
+      }
+    `
+    const api = createMockApi()
+    const { host } = await setupSandbox(code, [], api)
+    const instance = await runSandboxMain(host, api)
+    const hostInternals = host as unknown as { callbackStubs: Map<number, unknown> }
+
+    // 主函数返回的实例方法自身即为宿主 stub (基准值)
+    const baseCount = hostInternals.callbackStubs.size
+
+    await instance.subscribe!()
+    await flushAsync()
+    expect(hostInternals.callbackStubs.size).toBe(baseCount + 1) // listener stub
+
+    await instance.unsubscribe!()
+    await flushAsync()
+    // off 后归还引用并删除 stub,回到基准值 → 反复订阅/退订不会泄漏
+    expect(hostInternals.callbackStubs.size).toBe(baseCount)
+  })
+
+  it('扩展注册超过配额后宿主不再转发 (配额保护)', async () => {
+    const code = `
+      export default (api) => ({
+        registerMany: async () => {
+          for (let i = 0; i < 205; i++) {
+            await api.ui.registerMenuItem({ id: 'm' + i, name: 'm' + i, action: 'x' })
+          }
+        },
+      })
+    `
+    const api = createMockApi()
+    const { host } = await setupSandbox(code, ['ui:extend'], api)
+    const instance = await runSandboxMain(host, api)
+
+    await instance.registerMany!()
+    await flushAsync()
+    // 配额 200:第 201+ 次注册在宿主侧被拦截,真实 PluginAPI 只收到 200 次
+    expect(api.ui.registerMenuItem).toHaveBeenCalledTimes(200)
+    // 拦截后宿主未崩溃,仍可继续处理合法调用
+    const hostInternals = host as unknown as { terminated: boolean }
+    expect(hostInternals.terminated).toBe(false)
   })
 })

@@ -119,6 +119,9 @@ function sanitizeLogArgs(args: unknown[]): unknown[] {
   })
 }
 
+/** 单个插件同时注册的回调上限(事件监听/返回值携带函数等),防失控插件刷爆内存 */
+const MAX_REGISTERED_CALLBACKS = 10_000
+
 // ---------------------------------------------------------------------------
 // Worker 本地工具实现 (不经过主窗口)
 // ---------------------------------------------------------------------------
@@ -449,6 +452,9 @@ export class SandboxWorkerRuntime {
   }
 
   private registerCallback(fn: (...args: unknown[]) => unknown): number {
+    if (this.callbackMap.size >= MAX_REGISTERED_CALLBACKS) {
+      throw new Error(`插件回调注册超过上限 (${MAX_REGISTERED_CALLBACKS})`)
+    }
     const id = this.nextCbId++
     this.callbackMap.set(id, fn)
     return id
@@ -793,6 +799,8 @@ export class SandboxWorkerRuntime {
           const id = handlers?.get(callback)
           if (id === undefined) return
           handlers!.delete(callback)
+          // 双向清理:同时释放 callbackMap 中的条目,防止事件注销后回调泄漏
+          this.callbackMap.delete(id)
           this.fire('events.off', [event, { [SANDBOX_FN_MARKER]: id }])
         },
         emit: (event: string, data?: unknown): void => {

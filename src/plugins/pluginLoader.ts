@@ -142,11 +142,17 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
         main: manifest.main || 'index.js',
       })
 
+      // 静态检查为「告警不阻断」:正则黑名单可被等价变形绕过
+      // (如 `(()=>{}).constructor('x')()`、字符串拼接关键字),阈值规则
+      // 也可能误伤正常插件;安全边界由 Worker 沙箱 + CSP + 宿主侧 API
+      // 白名单承担,这里仅保留纵深观测价值,不再拦截加载。
       try {
         validatePluginCode(mainCode)
       } catch (error) {
-        logger.error(`插件代码安全检查失败: ${manifest.id}`, error)
-        throw new Error(`插件安全检查失败: ${(error as Error).message}`)
+        logger.warn(
+          `插件代码静态检查告警(不阻断加载,安全边界由 Worker 沙箱承担): ${manifest.id}`,
+          error,
+        )
       }
 
       const permissions = (manifest.permissions || []) as string[]

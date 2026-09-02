@@ -48,6 +48,7 @@ vi.mock('@/plugins/sandbox/workerSandboxHost', () => {
 })
 
 import { loadPlugin } from '@/plugins/pluginLoader'
+import logger from '@/utils/logger'
 
 function manifestFor(id: string, extra: Record<string, unknown> = {}): void {
   mockInvoke.mockImplementation(async (cmd: string) => {
@@ -142,20 +143,27 @@ describe('pluginLoader - loadPlugin 清单与代码安全校验', () => {
     expect(mockRegister).not.toHaveBeenCalled()
   })
 
-  it('外置插件代码未通过安全检查时不注册、不执行', async () => {
+  it('外置插件代码未通过静态检查时仅告警,不阻断加载 (安全边界由沙箱承担)', async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'read_plugin_manifest') {
         return { id: 'evil-plugin', name: 'Evil' }
       }
       if (cmd === 'read_plugin_main') {
-        // 试图逃逸沙箱访问全局对象
+        // 试图逃逸沙箱访问全局对象 (正则黑名单可被等价变形绕过,故不阻断)
         return 'var exfil = eval("globalThis"); var plugin = {};'
       }
       return null
     })
-    await expect(loadPlugin('/plugins/evil')).rejects.toThrow('插件安全检查失败')
-    expect(mockRegister).not.toHaveBeenCalled()
-    expect(mockActivate).not.toHaveBeenCalled()
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    try {
+      await loadPlugin('/plugins/evil')
+      // 告警不阻断:插件仍被注册并在沙箱中隔离执行
+      expect(mockRegister).toHaveBeenCalledTimes(1)
+      expect(mockActivate).toHaveBeenCalledWith('evil-plugin')
+      expect(warnSpy).toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it('清单读取失败 (null) 时报错且不注册', async () => {

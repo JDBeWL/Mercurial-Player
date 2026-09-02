@@ -475,28 +475,28 @@ impl WasapiExclusivePlayback {
     }
 
     #[must_use]
-    pub fn get_state(&self) -> PlaybackState {
+    pub fn state(&self) -> PlaybackState {
         *lock_or_log!(self.state.lock())
     }
 
     #[must_use]
-    pub fn get_sample_rate(&self) -> u32 {
+    pub fn sample_rate(&self) -> u32 {
         self.sample_rate.load(Ordering::SeqCst)
     }
 
     #[must_use]
-    pub fn get_channels(&self) -> u16 {
+    pub fn channels(&self) -> u16 {
         self.channels.load(Ordering::SeqCst) as u16
     }
 
     #[must_use]
-    pub fn get_volume(&self) -> f32 {
+    pub fn volume(&self) -> f32 {
         *lock_or_log!(self.volume.lock())
     }
 
     /// 获取已写入硬件的采样数
     #[must_use]
-    pub fn get_samples_written(&self) -> u64 {
+    pub fn samples_written(&self) -> u64 {
         self.samples_written.load(Ordering::SeqCst)
     }
 
@@ -506,7 +506,7 @@ impl WasapiExclusivePlayback {
     }
 
     #[must_use]
-    pub fn get_buffer_size(&self) -> usize {
+    pub fn buffer_size(&self) -> usize {
         self.sample_buffer.len()
     }
 }

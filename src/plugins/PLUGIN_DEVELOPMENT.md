@@ -164,20 +164,20 @@ export const myPlugin: BuiltinPluginDefinition = {
 
 ## 可用权限
 
-| 权限              | 说明           | 涉及的 API                                                                                                                         |
-| ----------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `player:read`     | 读取播放器状态 | `api.player.getState()`, `api.player.getLyrics()`, `api.player.getCurrentLyricIndex()`, `api.player.getCoverPath()`                |
-| `player:control`  | 控制播放器     | `api.player.play()`, `api.player.pause()`, `api.player.next()`, `api.player.seek()`, `api.player.setVolume()`                      |
-| `library:read`    | 读取音乐库     | `api.library.getPlaylists()`, `api.library.getCurrentPlaylist()`, `api.library.getTracks()`                                        |
-| `lyrics:provider` | 提供歌词源     | `api.lyrics.registerProvider()`, `api.player.setLyrics()`                                                                          |
+| 权限              | 说明           | 涉及的 API                                                                                                                                                                                |
+| ----------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `player:read`     | 读取播放器状态 | `api.player.getState()`, `api.player.getLyrics()`, `api.player.getCurrentLyricIndex()`, `api.player.getCoverPath()`                                                                       |
+| `player:control`  | 控制播放器     | `api.player.play()`, `api.player.pause()`, `api.player.next()`, `api.player.seek()`, `api.player.setVolume()`                                                                             |
+| `library:read`    | 读取音乐库     | `api.library.getPlaylists()`, `api.library.getCurrentPlaylist()`, `api.library.getTracks()`                                                                                               |
+| `lyrics:provider` | 提供歌词源     | `api.lyrics.registerProvider()`, `api.player.setLyrics()`                                                                                                                                 |
 | `ui:extend`       | 扩展用户界面   | `api.ui.registerSettingsPanel()`, `api.ui.registerMenuItem()`, `api.ui.registerActionButton()`, `api.ui.registerPlayerDecorator()`, `api.commands.register()`, `api.shortcuts.register()` |
-| `visualizer`      | 注册可视化效果 | `api.visualizer.register()`                                                                                                        |
-| `theme`           | 修改主题颜色   | `api.theme.setColors()`                                                                                                            |
-| `theme:read`      | 读取主题       | `api.theme.getCurrent()`, `api.theme.getCSSVariable()`, `api.theme.getAllColors()`(仅 `--md-sys-*` 变量)                          |
-| `storage`         | 本地数据存储   | `api.storage.*`                                                                                                                    |
-| `file:write`      | 写入文件       | `api.file.saveAs()`, `api.file.saveImage()`                                                                                        |
-| `clipboard:write` | 写入剪贴板     | `api.clipboard.writeImage()`, `api.clipboard.writeText()`                                                                          |
-| `network`         | 网络请求       | `api.network.fetch()` (仅 HTTPS)                                                                                                   |
+| `visualizer`      | 注册可视化效果 | `api.visualizer.register()`                                                                                                                                                               |
+| `theme`           | 修改主题颜色   | `api.theme.setColors()`                                                                                                                                                                   |
+| `theme:read`      | 读取主题       | `api.theme.getCurrent()`, `api.theme.getCSSVariable()`, `api.theme.getAllColors()`(仅 `--md-sys-*` 变量)                                                                                  |
+| `storage`         | 本地数据存储   | `api.storage.*`                                                                                                                                                                           |
+| `file:write`      | 写入文件       | `api.file.saveAs()`, `api.file.saveImage()`                                                                                                                                               |
+| `clipboard:write` | 写入剪贴板     | `api.clipboard.writeImage()`, `api.clipboard.writeText()`                                                                                                                                 |
+| `network`         | 网络请求       | `api.network.fetch()` (仅 HTTPS)                                                                                                                                                          |
 
 **注意：** 以下 API 不需要权限：
 
@@ -934,7 +934,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
 
 7. **pluginSandbox.ts** - 内置插件执行环境
    - 为内置插件提供安全 console 代理与可清理的定时器
-   - `validatePluginCode` 代码静态检查（外部插件进入 Worker 前的纵深防御层）
+   - `validatePluginCode` 正则静态检查：**仅告警不阻断**（黑名单可被等价变形绕过，也会误伤正常插件；真正的安全边界由 Worker 沙箱 + CSP + 宿主侧 API 白名单承担）
 
 8. **builtins/** - 内置插件
    - TypeScript 编写的官方插件

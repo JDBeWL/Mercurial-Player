@@ -119,7 +119,7 @@ pub(super) fn decode_and_push_to_wasapi(
             *last_time = now;
             let samples_played = lock_or_log!(wasapi.lock())
                 .as_ref()
-                .map_or(0, |p| p.get_samples_written());
+                .map_or(0, |p| p.samples_written());
             let position =
                 start_position + samples_played as f32 / (target_sr as f32 * target_ch as f32);
             let _ = emit_playback_position(&app, position);
@@ -306,7 +306,7 @@ pub(super) fn decode_and_push_to_wasapi(
                 }
                 let has_space = lock_or_log!(wasapi.lock())
                     .as_ref()
-                    .is_none_or(|p| p.get_buffer_size() < max_buffer);
+                    .is_none_or(|p| p.buffer_size() < max_buffer);
                 if has_space {
                     break;
                 }
@@ -336,7 +336,7 @@ pub(super) fn decode_and_push_to_wasapi(
                 }
                 let buf_size = lock_or_log!(wasapi.lock())
                     .as_ref()
-                    .map_or(0, |p| p.get_buffer_size());
+                    .map_or(0, |p| p.buffer_size());
                 if buf_size == 0 {
                     break;
                 }
