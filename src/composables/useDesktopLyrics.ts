@@ -328,20 +328,19 @@ export function useDesktopLyrics() {
       }),
     )
 
-    const stopWatchLyricIndex = watch(
-      () => playerStore.currentLyricIndex,
-      () => scheduleDesktopLyricsUpdate(),
-    )
-    stopFns.push(stopWatchLyricIndex)
-
-    const stopWatchLyricsOffset = watch(
-      () => playerStore.lyricsOffset,
-      () => scheduleDesktopLyricsUpdate(),
-    )
-    stopFns.push(stopWatchLyricsOffset)
-
-    const stopWatchLyrics = watch(
-      () => playerStore.lyrics,
+    // 原先分散的 9 个 watch 收敛为 4 个:
+    // 1) 播放进度/歌词变化 → 统一刷新桌面歌词
+    // 2) 桌面歌词开关 → 显示/隐藏 + 轮询启停
+    // 3) 锁定/字号/配色 → 按变化项分别同步
+    // 4) 字体族(原文/译文) → 同步字体
+    // 每个 watcher 都 push 进 stopFns,由 onUnmounted 统一清理
+    const stopWatchPlayerRefresh = watch(
+      [
+        () => playerStore.currentLyricIndex,
+        () => playerStore.lyricsOffset,
+        () => playerStore.lyrics,
+        () => playerStore.currentTrack?.path,
+      ],
       () => {
         lastCurrentLine = ''
         lastSubLine = ''
@@ -349,7 +348,7 @@ export function useDesktopLyrics() {
         scheduleDesktopLyricsUpdate()
       },
     )
-    stopFns.push(stopWatchLyrics)
+    stopFns.push(stopWatchPlayerRefresh)
 
     const stopWatchEnabled = watch(
       () => configStore.lyrics?.desktopLyrics?.enabled,
@@ -370,41 +369,27 @@ export function useDesktopLyrics() {
     )
     stopFns.push(stopWatchEnabled)
 
-    const stopWatchLocked = watch(
-      () => configStore.lyrics?.desktopLyrics?.locked,
-      () => syncLockState(),
+    // 锁定/字号/配色:仅对实际变化的那一项执行同步,避免无关配置改动触发多余 IPC
+    const stopWatchDesktopSettings = watch(
+      [
+        () => configStore.lyrics?.desktopLyrics?.locked,
+        () => configStore.lyrics?.desktopLyrics?.fontSize,
+        () => configStore.lyrics?.desktopLyrics?.colorPreset,
+      ],
+      ([locked, fontSize, colorPreset], [prevLocked, prevFontSize, prevColorPreset]) => {
+        if (locked !== prevLocked) syncLockState()
+        if (fontSize !== prevFontSize) syncFontSize()
+        if (colorPreset !== prevColorPreset) syncColorPreset()
+      },
     )
-    stopFns.push(stopWatchLocked)
+    stopFns.push(stopWatchDesktopSettings)
 
-    const stopWatchFontSize = watch(
-      () => configStore.lyrics?.desktopLyrics?.fontSize,
-      () => syncFontSize(),
-    )
-    stopFns.push(stopWatchFontSize)
-
-    // 歌词字体设置（原文/译文）变化时同步到桌面歌词
+    // 歌词字体设置(原文/译文)变化时同步到桌面歌词
     const stopWatchLyricsFontFamily = watch(
       () => [configStore.lyrics?.lyricsFontFamily, configStore.lyrics?.translationFontFamily],
       () => syncFontFamily(),
     )
     stopFns.push(stopWatchLyricsFontFamily)
-
-    const stopWatchColorPreset = watch(
-      () => configStore.lyrics?.desktopLyrics?.colorPreset,
-      () => syncColorPreset(),
-    )
-    stopFns.push(stopWatchColorPreset)
-
-    const stopWatchTrack = watch(
-      () => playerStore.currentTrack?.path,
-      () => {
-        lastCurrentLine = ''
-        lastSubLine = ''
-        lastProgress = -1
-        scheduleDesktopLyricsUpdate()
-      },
-    )
-    stopFns.push(stopWatchTrack)
   }
 
   onMounted(() => {

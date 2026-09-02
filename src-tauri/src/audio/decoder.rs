@@ -337,86 +337,6 @@ impl SymphoniaDecoder {
         }
     }
 
-    /// 5.1/7.1 环绕声到立体声的专业混音
-    /// 使用 ITU-R BS.775-1 标准的下混系数
-    fn downmix_to_stereo(planes: &[&[f32]], frame: usize, src_channels: usize) -> (f32, f32) {
-        // 标准声道布局:
-        // 5.1: FL(0), FR(1), FC(2), LFE(3), SL/BL(4), SR/BR(5)
-        // 7.1: FL(0), FR(1), FC(2), LFE(3), BL(4), BR(5), SL(6), SR(7)
-
-        let fl = if src_channels > 0 {
-            planes[0][frame]
-        } else {
-            0.0
-        };
-        let fr = if src_channels > 1 {
-            planes[1][frame]
-        } else {
-            fl
-        };
-        let fc = if src_channels > 2 {
-            planes[2][frame]
-        } else {
-            0.0
-        };
-        let _lfe = if src_channels > 3 {
-            planes[3][frame]
-        } else {
-            0.0
-        }; // LFE 通常不混入
-
-        // 混音系数 (ITU-R BS.775-1)
-        const CENTER_MIX: f32 = 0.707; // -3dB
-        const SURROUND_MIX: f32 = 0.707; // -3dB
-        const BACK_MIX: f32 = 0.5; // -6dB (用于 7.1)
-
-        let (mut left, mut right) = (fl, fr);
-
-        // 添加中置声道
-        left += fc * CENTER_MIX;
-        right += fc * CENTER_MIX;
-
-        match src_channels {
-            6 => {
-                // 5.1: SL(4), SR(5)
-                let sl = planes[4][frame];
-                let sr = planes[5][frame];
-                left += sl * SURROUND_MIX;
-                right += sr * SURROUND_MIX;
-            }
-            8 => {
-                // 7.1: BL(4), BR(5), SL(6), SR(7)
-                let bl = planes[4][frame];
-                let br = planes[5][frame];
-                let sl = planes[6][frame];
-                let sr = planes[7][frame];
-                left += sl * SURROUND_MIX + bl * BACK_MIX;
-                right += sr * SURROUND_MIX + br * BACK_MIX;
-            }
-            n if n > 2 => {
-                // 其他多声道格式，简单混合额外声道
-                let mix = 0.5 / (src_channels - 2) as f32;
-                for sample in planes[2..src_channels].iter().map(|p| p[frame]) {
-                    left += sample * mix;
-                    right += sample * mix;
-                }
-            }
-            _ => {}
-        }
-
-        // 归一化防止削波（5.1 最大增益约 1.414，7.1 约 1.5）
-        let normalize = match src_channels {
-            6 => 0.707, // 1/sqrt(2)
-            8 => 0.667, // 约 1/1.5
-            _ => 0.8,
-        };
-
-        (
-            (left * normalize).clamp(-1.0, 1.0),
-            (right * normalize).clamp(-1.0, 1.0),
-        )
-    }
-
     pub fn adjust_buffer_settings(&mut self, buffer_duration_ms: u32, refill_threshold_ms: u32) {
         let new_size =
             calculate_buffer_size(self.sample_rate, self.target_channels, buffer_duration_ms);
@@ -646,20 +566,19 @@ impl SymphoniaDecoder {
         let target_ch = if needs_downmix { 2 } else { channels };
         samples.reserve(frames * target_ch);
 
-        if needs_downmix && src_channels > 2 {
-            // 0.6 API: 直接复制为 planar f32 (每个声道一个 Vec)
-            // 替代 0.5 的手动 match AudioBufferRef::F32/S16/U8/S32/S24
-            let mut planes: Vec<Vec<f32>> = Vec::with_capacity(src_channels);
-            audio_buf.copy_to_vecs_planar(&mut planes);
-            let plane_refs: Vec<&[f32]> = planes.iter().map(|v| v.as_slice()).collect();
-            for i in 0..frames {
-                let (left, right) = Self::downmix_to_stereo(&plane_refs, i, src_channels);
-                samples.push(left);
-                samples.push(right);
+        // 0.6 API: 先复制为交错 f32(自动做样本格式转换);
+        // 多声道场景再原地复用 super::dsp::downmix_surround_to_stereo 下混,
+        // 与独占模式(decode_push)共用同一实现,避免两套 5.1/7.1 系数漂移。
+        audio_buf.copy_to_vec_interleaved(samples);
+        if needs_downmix && channels > 2 {
+            let mut write = 0usize;
+            for f in 0..frames {
+                let (left, right) = super::dsp::downmix_surround_to_stereo(samples, channels, f);
+                samples[write] = left;
+                samples[write + 1] = right;
+                write += 2;
             }
-        } else {
-            // 0.6 API: 直接复制为交错 f32,自动做样本格式转换
-            audio_buf.copy_to_vec_interleaved(samples);
+            samples.truncate(write);
         }
     }
 }

@@ -54,7 +54,7 @@ pub mod wasapi;
 pub use decoder::{LockFreeSymphoniaSource, SymphoniaDecoder};
 pub use device::AudioDeviceInfo;
 pub use device_monitor::{DeviceChangeEvent, DeviceMonitor};
-pub use playback::VisualizationSource;
+pub use playback::{EqProcessor, VisualizationSource};
 
 #[cfg(windows)]
 pub use wasapi::{PlaybackState, WasapiExclusivePlayback};

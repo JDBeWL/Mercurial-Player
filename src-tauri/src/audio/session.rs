@@ -89,7 +89,10 @@ pub async fn try_resume_last_session(
     // 等并发时丢失更新。本段是同步代码,唯一的 .await 在下方 play_track_*
     // 处 —— std 互斥锁守卫绝不能跨 await 持有 (会让 Future 非 Send 且可死锁),
     // 因此后续写回另起一个临界区。
-    let session = match state.config_manager.update_config(|config| config.last_session.take())? {
+    let session = match state
+        .config_manager
+        .update_config(|config| config.last_session.take())?
+    {
         None => {
             return Ok(ResumeResult {
                 resumed: false,

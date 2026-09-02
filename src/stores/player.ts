@@ -7,6 +7,7 @@ import FileUtils from '../utils/fileUtils'
 import { LyricsParser } from '../utils/lyricsParser'
 import logger from '../utils/logger'
 import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
+import { safeInvoke } from '../utils/safeInvoke'
 import { classifyAudioInvokeError } from '../utils/audioErrorClassifier'
 import { useConfigStore } from './config'
 import {
@@ -43,6 +44,7 @@ import {
   takeCoverUpdates as takeCoverUpdatesFromMap,
 } from './playerMediaCache'
 import type { Track, AudioInfo, LyricLine, RepeatMode, ResumeResult } from '@/types'
+import { seekTrack, setPlayerVolume, togglePlayerMute } from './playerPlayback'
 
 interface PlayerState {
   currentTrack: Track | null
@@ -785,68 +787,17 @@ export const usePlayerStore = defineStore('player', {
     // --- 播放控制 ---
 
     seek(time: number): void {
-      if (!this.currentTrack) return
-
-      const wasPlaying = this.isPlaying
-      const newTime = Math.max(0, Math.min(time, this.duration))
-
-      invoke('seek_track', { time: newTime })
-        .then(() => {
-          this.currentTime = newTime
-          if (!wasPlaying) {
-            // 后端 seek 总是 play，如果之前是暂停状态需要重新暂停
-            invoke('pause_track').catch((err) => logger.error('Failed to pause after seek:', err))
-          }
-        })
-        .catch((err) => logger.error('Failed to seek:', err))
+      // 播放控制已抽到 playerPlayback.ts(与 setVolume/toggleMute 同模块),
+      // 经 safeInvoke 统一走 errorHandler,不再在此重复 invoke 样板
+      seekTrack(this, time)
     },
 
     setVolume(volume: number): void {
-      const newVolume = Math.max(0, Math.min(1, volume))
-      this.volume = newVolume
-
-      // 如果设置音量大于0，取消静音状态
-      if (newVolume > 0 && this.isMuted) {
-        this.isMuted = false
-      }
-
-      // 如果音量大于0，更新 previousVolume
-      if (newVolume > 0) {
-        this.previousVolume = newVolume
-      }
-
-      invoke('set_volume', { volume: this.isMuted ? 0 : newVolume })
-        .then(() => {
-          const configStore = useConfigStore()
-          configStore.audio.volume = newVolume
-          // 拖动音量条时每次 mousemove 都会走到这里：saveConfigNow 会对整个
-          // config（含 lastSession 的播放队列快照）做深比较 + 深拷贝 + 写盘，
-          // 大队列下足以卡住主线程、让滑块看起来掉帧。
-          // 改用防抖保存（2s），停止拖动后仍会落盘，关应用前还有 flushPendingSave 兜底。
-          configStore.saveConfig()
-        })
-        .catch((err) => logger.error('Failed to set volume:', err))
+      setPlayerVolume(this, volume)
     },
 
     toggleMute(): void {
-      if (this.isMuted) {
-        // 取消静音，恢复之前的音量
-        this.isMuted = false
-        const volumeToRestore = this.previousVolume > 0 ? this.previousVolume : 0.5
-        this.volume = volumeToRestore
-        invoke('set_volume', { volume: volumeToRestore })
-          .then(() => {
-            const configStore = useConfigStore()
-            configStore.audio.volume = volumeToRestore
-            configStore.saveConfigNow()
-          })
-          .catch((err) => logger.error('Failed to unmute:', err))
-      } else {
-        // 静音，保存当前音量
-        this.previousVolume = this.volume > 0 ? this.volume : this.previousVolume
-        this.isMuted = true
-        invoke('set_volume', { volume: 0 }).catch((err) => logger.error('Failed to mute:', err))
-      }
+      togglePlayerMute(this)
     },
 
     toggleRepeat(): void {
@@ -1080,12 +1031,10 @@ export const usePlayerStore = defineStore('player', {
       // 注销全局媒体键快捷方式
       await unregisterGlobalShortcuts()
 
-      // invoke 返回 Promise,同步抛错仅发生在极端序列化场景,.catch 已覆盖常规错误
-      invoke('pause_track').catch((err) => logger.warn('pause during cleanup:', err))
+      // 暂停后端播放;destroy 场景的失败仅记录,无需打扰用户
+      safeInvoke('pause_track', undefined, { severity: ErrorSeverity.LOW })
       // 设置任务栏为停止状态
-      invoke('set_taskbar_stopped').catch((e) =>
-        errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false }),
-      )
+      safeInvoke('set_taskbar_stopped', undefined, { severity: ErrorSeverity.LOW })
 
       if (this._cacheAbortController) {
         this._cacheAbortController.abort()

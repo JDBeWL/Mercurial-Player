@@ -306,7 +306,8 @@ describe('player.playback > seek', () => {
 
     store.seek(10)
     await vi.waitFor(() => {
-      expect(loggerMock.error).toHaveBeenCalledWith('Failed to seek:', expect.any(Error))
+      // safeInvoke 统一经 errorHandler 记录(MEDIUM → logger.warn)
+      expect(loggerMock.warn).toHaveBeenCalledWith('[UNKNOWN] seek failed', expect.anything())
     })
   })
 })
@@ -831,7 +832,7 @@ describe('player.playback > volume & mute', () => {
 
     store.setVolume(0.5)
     await vi.waitFor(() => {
-      expect(loggerMock.error).toHaveBeenCalledWith('Failed to set volume:', expect.any(Error))
+      expect(loggerMock.warn).toHaveBeenCalledWith('[UNKNOWN] volume rejected', expect.anything())
     })
   })
 
@@ -868,7 +869,7 @@ describe('player.playback > volume & mute', () => {
 
     store.toggleMute()
     await vi.waitFor(() => {
-      expect(loggerMock.error).toHaveBeenCalledWith('Failed to mute:', expect.any(Error))
+      expect(loggerMock.warn).toHaveBeenCalledWith('[UNKNOWN] mute rejected', expect.anything())
     })
   })
 
@@ -880,7 +881,7 @@ describe('player.playback > volume & mute', () => {
 
     store.toggleMute()
     await vi.waitFor(() => {
-      expect(loggerMock.error).toHaveBeenCalledWith('Failed to unmute:', expect.any(Error))
+      expect(loggerMock.warn).toHaveBeenCalledWith('[UNKNOWN] unmute rejected', expect.anything())
     })
   })
 })

@@ -12,7 +12,6 @@
 
 import { formatTime } from '../../utils/format'
 import {
-  PluginPermission,
   assertPluginEventSubscriptionAllowed,
   type PluginAPI,
   type SaveAsOptions,
@@ -23,6 +22,7 @@ import {
   type Command,
   type Shortcut,
 } from '../pluginTypes'
+import { permissionForAction } from '../apiRegistry'
 import type { HostToWorkerMessage, MirrorData, WorkerToHostMessage } from './sandboxProtocol'
 import {
   SANDBOX_FN_MARKER,
@@ -466,6 +466,14 @@ export class SandboxWorkerRuntime {
     }
   }
 
+  /** 按动作名查 apiRegistry 统一校验(与 pluginAPI 主侧同一元数据源) */
+  private requireAction(action: string): void {
+    const permission = permissionForAction(action)
+    if (permission !== null) {
+      this.requirePermission(permission, action)
+    }
+  }
+
   private log(level: 'info' | 'warn' | 'error' | 'debug', args: unknown[]): void {
     this.post({ type: 'log', level, args: sanitizeLogArgs(args) })
   }
@@ -566,7 +574,6 @@ export class SandboxWorkerRuntime {
 
   /** Worker 侧 PluginAPI 代理:同步读走镜像,命令/异步调用走 RPC */
   private buildApiProxy(): PluginAPI {
-    const P = PluginPermission
     const mirror = this.mirror
 
     return {
@@ -582,72 +589,88 @@ export class SandboxWorkerRuntime {
 
       player: {
         getState: () => {
-          this.requirePermission(P.PLAYER_READ, 'player.getState')
+          this.requireAction('player.getState')
           return structuredClone(mirror.playerState)
         },
-        getLyrics: () => this.rpc('player.getLyrics'),
+        getLyrics: () => {
+          this.requireAction('player.getLyrics')
+          return this.rpc('player.getLyrics')
+        },
         getCurrentLyricIndex: () => {
-          this.requirePermission(P.PLAYER_READ, 'player.getCurrentLyricIndex')
+          this.requireAction('player.getCurrentLyricIndex')
           return mirror.currentLyricIndex
         },
-        getCoverPath: () => this.rpc('player.getCoverPath'),
+        getCoverPath: () => {
+          this.requireAction('player.getCoverPath')
+          return this.rpc('player.getCoverPath')
+        },
         play: () => {
-          this.requirePermission(P.PLAYER_CONTROL, 'player.play')
+          this.requireAction('player.play')
           this.fire('player.play')
         },
         pause: () => {
-          this.requirePermission(P.PLAYER_CONTROL, 'player.pause')
+          this.requireAction('player.pause')
           this.fire('player.pause')
         },
         togglePlay: () => {
-          this.requirePermission(P.PLAYER_CONTROL, 'player.togglePlay')
+          this.requireAction('player.togglePlay')
           this.fire('player.togglePlay')
         },
         next: () => {
-          this.requirePermission(P.PLAYER_CONTROL, 'player.next')
+          this.requireAction('player.next')
           return this.rpc('player.next')
         },
         previous: () => {
-          this.requirePermission(P.PLAYER_CONTROL, 'player.previous')
+          this.requireAction('player.previous')
           return this.rpc('player.previous')
         },
         seek: (time: number) => {
-          this.requirePermission(P.PLAYER_CONTROL, 'player.seek')
+          this.requireAction('player.seek')
           this.fire('player.seek', [time])
         },
         setVolume: (volume: number) => {
-          this.requirePermission(P.PLAYER_CONTROL, 'player.setVolume')
+          this.requireAction('player.setVolume')
           this.fire('player.setVolume', [volume])
         },
         setLyrics: (lyrics: LyricLine[]) => {
-          this.requirePermission(P.LYRICS_PROVIDER, 'player.setLyrics')
+          this.requireAction('player.setLyrics')
           this.fire('player.setLyrics', [lyrics])
         },
       },
 
       library: {
         getPlaylists: () => {
-          this.requirePermission(P.LIBRARY_READ, 'library.getPlaylists')
+          this.requireAction('library.getPlaylists')
           return structuredClone(mirror.playlists)
         },
         getCurrentPlaylist: () => {
-          this.requirePermission(P.LIBRARY_READ, 'library.getCurrentPlaylist')
+          this.requireAction('library.getCurrentPlaylist')
           return structuredClone(mirror.currentPlaylist)
         },
         getTracks: () => {
-          this.requirePermission(P.LIBRARY_READ, 'library.getTracks')
+          this.requireAction('library.getTracks')
           return structuredClone(mirror.tracks)
         },
       },
 
       theme: {
-        getCurrent: () => structuredClone(mirror.theme),
+        getCurrent: () => {
+          this.requireAction('theme.getCurrent')
+          return structuredClone(mirror.theme)
+        },
         setColors: (colors: Record<string, string>) => {
-          this.requirePermission(P.THEME, 'theme.setColors')
+          this.requireAction('theme.setColors')
           return this.rpc('theme.setColors', [colors])
         },
-        getCSSVariable: (name: string) => mirror.colors[cssVarToCamel(name)] ?? '',
-        getAllColors: () => ({ ...mirror.colors }),
+        getCSSVariable: (name: string) => {
+          this.requireAction('theme.getCSSVariable')
+          // 镜像仅含 --md-sys-* 色彩表(见 sandboxProtocol),不在表中的名字返回空串
+          return mirror.colors[cssVarToCamel(name)] ?? ''
+        },
+        getAllColors: () => {
+          this.requireAction('theme.getAllColors')
+          return { ...mirror.colors }
+        },
       },
 
       ui: {
@@ -663,18 +686,18 @@ export class SandboxWorkerRuntime {
           )
         },
         registerMenuItem: (item: MenuItem) => {
-          this.requirePermission(P.UI_EXTEND, 'ui.registerMenuItem')
+          this.requireAction('ui.registerMenuItem')
           this.fire('ui.registerMenuItem', [item])
         },
         registerActionButton: (button: ActionButton) => {
-          this.requirePermission(P.UI_EXTEND, 'ui.registerActionButton')
+          this.requireAction('ui.registerActionButton')
           if (!button.id || !button.name || !button.icon || !button.action) {
             throw new Error('按钮必须包含 id, name, icon 和 action')
           }
           this.fire('ui.registerActionButton', [button])
         },
         unregisterActionButton: (buttonId: string) => {
-          this.requirePermission(P.UI_EXTEND, 'ui.unregisterActionButton')
+          this.requireAction('ui.unregisterActionButton')
           this.fire('ui.unregisterActionButton', [buttonId])
         },
         showNotification: (message: string, type?: 'error' | 'warning' | 'info') => {
@@ -684,7 +707,7 @@ export class SandboxWorkerRuntime {
 
       lyrics: {
         registerProvider: (provider: LyricsProvider) => {
-          this.requirePermission(P.LYRICS_PROVIDER, 'lyrics.registerProvider')
+          this.requireAction('lyrics.registerProvider')
           if (!provider.id || !provider.name || !provider.search) {
             throw new Error('歌词源必须包含 id, name 和 search 方法')
           }
@@ -703,7 +726,7 @@ export class SandboxWorkerRuntime {
 
       commands: {
         register: (command: Command) => {
-          this.requirePermission(P.UI_EXTEND, 'commands.register')
+          this.requireAction('commands.register')
           if (!command.id || !command.name || !command.execute) {
             throw new Error('命令必须包含 id, name 和 execute 方法')
           }
@@ -714,36 +737,36 @@ export class SandboxWorkerRuntime {
 
       shortcuts: {
         register: (shortcut: Shortcut) => {
-          this.requirePermission(P.UI_EXTEND, 'shortcuts.register')
+          this.requireAction('shortcuts.register')
           if (!shortcut.id || !shortcut.name || !shortcut.key || !shortcut.action) {
             throw new Error('快捷键必须包含 id, name, key 和 action')
           }
           this.fire('shortcuts.register', [shortcut])
         },
         unregister: (shortcutId: string) => {
-          this.requirePermission(P.UI_EXTEND, 'shortcuts.unregister')
+          this.requireAction('shortcuts.unregister')
           this.fire('shortcuts.unregister', [shortcutId])
         },
       },
 
       storage: {
         get: <T>(key: string, defaultValue: T | null = null): T => {
-          this.requirePermission(P.STORAGE, 'storage.get')
+          this.requireAction('storage.get')
           return (mirror.storage?.[key] as T) ?? (defaultValue as T)
         },
         set: <T>(key: string, value: T): void => {
-          this.requirePermission(P.STORAGE, 'storage.set')
+          this.requireAction('storage.set')
           if (!mirror.storage) mirror.storage = {}
           mirror.storage[key] = value
           this.fire('storage.set', [key, value])
         },
         remove: (key: string): void => {
-          this.requirePermission(P.STORAGE, 'storage.remove')
+          this.requireAction('storage.remove')
           if (mirror.storage) delete mirror.storage[key]
           this.fire('storage.remove', [key])
         },
         getAll: (): Record<string, unknown> => {
-          this.requirePermission(P.STORAGE, 'storage.getAll')
+          this.requireAction('storage.getAll')
           return { ...mirror.storage }
         },
       },
@@ -779,7 +802,7 @@ export class SandboxWorkerRuntime {
 
       network: {
         fetch: (url: string, options: RequestInit = {}): Promise<ResponseLike> => {
-          this.requirePermission(P.NETWORK, 'network.fetch')
+          this.requireAction('network.fetch')
           // AbortSignal 不可结构化克隆,Worker 沙箱不支持取消信号
           const { signal: _signal, ...rest } = options
           return this.rpc('network.fetch', [url, rest]) as Promise<ResponseLike>
@@ -811,7 +834,7 @@ export class SandboxWorkerRuntime {
 
       file: {
         saveAs: (data: Blob | Uint8Array | string, options: SaveAsOptions = {}) => {
-          this.requirePermission(P.STORAGE, 'file.saveAs')
+          this.requireAction('file.saveAs')
           return this.rpc('file.saveAs', [data, options])
         },
         saveImage: (
@@ -819,7 +842,7 @@ export class SandboxWorkerRuntime {
           defaultName = 'image.png',
           format = 'png',
         ) => {
-          this.requirePermission(P.STORAGE, 'file.saveImage')
+          this.requireAction('file.saveImage')
           return this.rpc('file.saveImage', [image, defaultName, format])
         },
         openScreenshotsDirectory: () => this.rpc('file.openScreenshotsDirectory'),
@@ -827,11 +850,11 @@ export class SandboxWorkerRuntime {
 
       clipboard: {
         writeImage: (image: OffscreenCanvas | Blob | string) => {
-          this.requirePermission(P.STORAGE, 'clipboard.writeImage')
+          this.requireAction('clipboard.writeImage')
           return this.rpc('clipboard.writeImage', [image])
         },
         writeText: (text: string) => {
-          this.requirePermission(P.STORAGE, 'clipboard.writeText')
+          this.requireAction('clipboard.writeText')
           return this.rpc('clipboard.writeText', [text])
         },
       },

@@ -438,12 +438,24 @@ describe('library API', () => {
 })
 
 describe('theme API', () => {
-  it('reports the current theme without requiring a permission', () => {
-    expect(api([]).theme.getCurrent()).toEqual({
+  it('reports the current theme with theme:read', () => {
+    expect(api().theme.getCurrent()).toEqual({
       preference: 'dark',
       isDark: true,
       primaryColor: '#123456',
     })
+  })
+
+  it('requires theme:read for theme reads', () => {
+    const pluginApi = api([])
+    expect(() => pluginApi.theme.getCurrent()).toThrow(/theme:read/)
+    expect(() => pluginApi.theme.getCSSVariable('md-sys-color-primary')).toThrow(/theme:read/)
+    expect(() => pluginApi.theme.getAllColors()).toThrow(/theme:read/)
+  })
+
+  it('rejects reading non-md-sys CSS variables', () => {
+    document.documentElement.style.setProperty('--plugin-demo-accent', '#123456')
+    expect(() => api().theme.getCSSVariable('plugin-demo-accent')).toThrow(/md-sys/)
   })
 
   it('writes namespaced CSS variables', async () => {

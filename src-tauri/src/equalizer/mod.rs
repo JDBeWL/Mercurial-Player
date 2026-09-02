@@ -8,5 +8,5 @@ pub mod processor;
 // 重新导出常用类型
 pub use processor::{
     BiquadCoefficients, BiquadState, EQ_BAND_COUNT, EQ_FREQUENCIES, EQ_Q_VALUES, EqPreset,
-    EqSettings, Equalizer, GlobalEqualizer, get_all_presets,
+    EqSettings, GlobalEqualizer, get_all_presets,
 };

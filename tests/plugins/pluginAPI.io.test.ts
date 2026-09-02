@@ -336,7 +336,7 @@ describe('file API', () => {
     })
 
     it('requires STORAGE', async () => {
-      await expect(api([]).file.saveAs('x')).rejects.toThrow(/storage/)
+      await expect(api([]).file.saveAs('x')).rejects.toThrow(/file:write/)
       expect(save).not.toHaveBeenCalled()
     })
   })
@@ -399,7 +399,7 @@ describe('file API', () => {
     })
 
     it('requires STORAGE', async () => {
-      await expect(api([]).file.saveImage(new Blob(['x']))).rejects.toThrow(/storage/)
+      await expect(api([]).file.saveImage(new Blob(['x']))).rejects.toThrow(/file:write/)
     })
   })
 
@@ -459,7 +459,7 @@ describe('clipboard API', () => {
   })
 
   it('requires STORAGE for both clipboard methods', async () => {
-    await expect(api([]).clipboard.writeImage(new Blob(['x']))).rejects.toThrow(/storage/)
-    await expect(api([]).clipboard.writeText('x')).rejects.toThrow(/storage/)
+    await expect(api([]).clipboard.writeImage(new Blob(['x']))).rejects.toThrow(/clipboard:write/)
+    await expect(api([]).clipboard.writeText('x')).rejects.toThrow(/clipboard:write/)
   })
 })

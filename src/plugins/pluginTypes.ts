@@ -31,8 +31,11 @@ export const PluginPermission = {
   LYRICS_PROVIDER: 'lyrics:provider', // 提供歌词源
   UI_EXTEND: 'ui:extend', // 扩展 UI
   VISUALIZER: 'visualizer', // 可视化效果
-  THEME: 'theme', // 主题
+  THEME: 'theme', // 修改主题
+  THEME_READ: 'theme:read', // 读取主题信息(theme.getCurrent/getCSSVariable/getAllColors)
   STORAGE: 'storage', // 本地存储
+  FILE_WRITE: 'file:write', // 写文件(文件选择对话框另存为/图片导出)
+  CLIPBOARD_WRITE: 'clipboard:write', // 写剪贴板
   NETWORK: 'network', // 网络请求
 } as const
 

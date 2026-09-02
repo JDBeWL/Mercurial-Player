@@ -3,8 +3,6 @@
 //! 实现 10 段参数均衡器，支持实时调节。
 
 use serde::{Deserialize, Serialize};
-#[cfg(test)]
-use std::f32::consts::PI;
 use std::sync::{Arc, RwLock};
 
 pub const EQ_BAND_COUNT: usize = 10;
@@ -285,133 +283,6 @@ impl EqSettings {
     }
 }
 
-pub struct Equalizer {
-    settings: Arc<RwLock<EqSettings>>,
-    coefficients: Vec<BiquadCoefficients>,
-    states: Vec<Vec<BiquadState>>,
-    sample_rate: f32,
-    channels: usize,
-}
-
-impl Equalizer {
-    #[must_use]
-    pub fn new(sample_rate: u32, channels: u16) -> Self {
-        let mut eq = Self {
-            settings: Arc::new(RwLock::new(EqSettings::default())),
-            coefficients: vec![BiquadCoefficients::default(); EQ_BAND_COUNT],
-            states: vec![vec![BiquadState::default(); channels as usize]; EQ_BAND_COUNT],
-            sample_rate: sample_rate as f32,
-            channels: channels as usize,
-        };
-        eq.update_coefficients();
-        eq
-    }
-
-    #[must_use]
-    pub fn get_settings_handle(&self) -> Arc<RwLock<EqSettings>> {
-        Arc::clone(&self.settings)
-    }
-
-    pub fn update_coefficients(&mut self) {
-        let settings = lock_or_log!(self.settings.read());
-        for (i, &gain) in settings.gains.iter().enumerate() {
-            self.coefficients[i] = BiquadCoefficients::for_band(self.sample_rate, i, gain);
-        }
-    }
-
-    pub fn process_sample(&mut self, input: f32, channel: usize) -> f32 {
-        let settings = lock_or_log!(self.settings.read());
-        if !settings.enabled {
-            return input;
-        }
-        let preamp_gain = 10.0_f32.powf(settings.effective_preamp_db() / 20.0);
-        let mut sample = input * preamp_gain;
-        drop(settings);
-        for (band, coeffs) in self.coefficients.iter().enumerate() {
-            sample = self.states[band][channel].process(sample, coeffs);
-        }
-        soft_clip(sample)
-    }
-
-    pub fn process_buffer(&mut self, buffer: &mut [f32]) {
-        let settings = lock_or_log!(self.settings.read());
-        if !settings.enabled {
-            return;
-        }
-        let preamp_gain = 10.0_f32.powf(settings.effective_preamp_db() / 20.0);
-        drop(settings);
-        for (i, sample) in buffer.iter_mut().enumerate() {
-            let channel = i % self.channels;
-            let mut s = *sample * preamp_gain;
-            for (band, coeffs) in self.coefficients.iter().enumerate() {
-                s = self.states[band][channel].process(s, coeffs);
-            }
-            *sample = soft_clip(s);
-        }
-    }
-
-    pub fn reset(&mut self) {
-        for band_states in &mut self.states {
-            for state in band_states {
-                state.reset();
-            }
-        }
-    }
-
-    pub fn set_gains(&mut self, gains: [f32; EQ_BAND_COUNT]) {
-        lock_or_log!(self.settings.write()).gains = gains;
-        self.update_coefficients();
-    }
-
-    pub fn set_band_gain(&mut self, band: usize, gain: f32) {
-        if band < EQ_BAND_COUNT {
-            lock_or_log!(self.settings.write()).gains[band] = gain.clamp(-8.0, 8.0);
-            self.update_coefficients();
-        }
-    }
-
-    pub fn set_preamp(&mut self, preamp: f32) {
-        lock_or_log!(self.settings.write()).preamp = preamp.clamp(-8.0, 8.0);
-    }
-
-    pub fn set_enabled(&mut self, enabled: bool) {
-        lock_or_log!(self.settings.write()).enabled = enabled;
-    }
-
-    #[must_use]
-    pub fn get_settings(&self) -> EqSettings {
-        lock_or_log!(self.settings.read()).clone()
-    }
-
-    pub fn set_sample_rate(&mut self, sample_rate: u32) {
-        self.sample_rate = sample_rate as f32;
-        self.update_coefficients();
-    }
-}
-
-fn soft_clip(x: f32) -> f32 {
-    // 软限制器: 在 DAC 0dBFS 之前平滑压缩,避免硬削波破音
-    //
-    // 设计要点:
-    // - 阈值 0.9: 留 10% 余量才开始压缩,对正常音量音乐几乎无影响
-    // - 上限 0.97: 给 DAC 留 3% 余量,避免硬件削波
-    // - tanh 曲线: 在阈值处导数连续(=1),从线性段平滑过渡到压缩段,无折角
-    //   y = threshold + range * tanh((|x| - threshold) / range)
-    //   在 |x|=threshold 时 dy/dx = 1(与线性段匹配)
-    //   当 |x|→∞ 时 y → threshold + range = ceiling
-    let threshold = 0.9;
-    let ceiling = 0.97;
-    let abs_x = x.abs();
-    if abs_x <= threshold {
-        x
-    } else {
-        let sign = x.signum();
-        let over = abs_x - threshold;
-        let range = ceiling - threshold;
-        sign * (threshold + range * (over / range).tanh())
-    }
-}
-
 pub struct GlobalEqualizer {
     settings: Arc<RwLock<EqSettings>>,
 }
@@ -539,51 +410,6 @@ mod tests {
     }
 
     #[test]
-    fn test_equalizer_new_defaults() {
-        let eq = Equalizer::new(48000, 2);
-        let settings = eq.get_settings();
-        assert!(!settings.enabled, "default enabled should be false");
-        assert!(settings.preamp.abs() < 1e-5, "default preamp should be 0");
-        assert_eq!(settings.gains.len(), EQ_BAND_COUNT);
-        for &g in &settings.gains {
-            assert!(g.abs() < 1e-5, "default gains should be 0");
-        }
-    }
-
-    #[test]
-    fn test_equalizer_disabled_passthrough() {
-        let mut eq = Equalizer::new(48000, 2);
-        // enabled 默认为 false
-        for &x in &[0.5_f32, -0.3, 0.8, 0.0] {
-            let y = eq.process_sample(x, 0);
-            assert!(approx_eq(y, x), "disabled EQ output {y} != input {x}");
-        }
-    }
-
-    #[test]
-    fn test_equalizer_enabled_changes_signal() {
-        let mut eq = Equalizer::new(48000, 2);
-        // 提升 1 kHz 频段 (索引 5) +6 dB
-        eq.set_band_gain(5, 6.0);
-        eq.set_enabled(true);
-        let sample_rate = 48000.0_f32;
-        let freq = 1000.0_f32;
-        let mut input_energy = 0.0_f64;
-        let mut output_energy = 0.0_f64;
-        for n in 0..480i32 {
-            let t = n as f32 / sample_rate;
-            let x = (2.0 * PI * freq * t).sin() * 0.5;
-            let y = eq.process_sample(x, 0);
-            input_energy += f64::from(x) * f64::from(x);
-            output_energy += f64::from(y) * f64::from(y);
-        }
-        assert!(
-            (output_energy - input_energy).abs() > 1e-4,
-            "enabled EQ should change signal energy: in={input_energy}, out={output_energy}"
-        );
-    }
-
-    #[test]
     fn test_effective_preamp_compensates_max_boost() {
         let mut settings = EqSettings::default();
         assert!(
@@ -605,126 +431,6 @@ mod tests {
             approx_eq(settings.effective_preamp_db(), -1.0),
             "cut-only EQ should not be compensated"
         );
-    }
-
-    /// 稳态正弦幅度(丢弃前 warmup 个采样,取峰值)
-    fn steady_state_amplitude(
-        eq: &mut Equalizer,
-        freq: f32,
-        amplitude: f32,
-        channel: usize,
-    ) -> f32 {
-        let sample_rate = 48000.0_f32;
-        let warmup = 4800;
-        let mut peak = 0.0_f32;
-        for n in 0..warmup * 2 {
-            let t = n as f32 / sample_rate;
-            let x = (2.0 * PI * freq * t).sin() * amplitude;
-            let y = eq.process_sample(x, channel);
-            if n >= warmup {
-                peak = peak.max(y.abs());
-            }
-        }
-        peak
-    }
-
-    #[test]
-    fn test_low_shelf_boosts_bass_region() {
-        let mut eq = Equalizer::new(48000, 2);
-        eq.set_band_gain(0, 6.0); // 31Hz low shelf
-        // 设 preamp = 最大提升量,抵消自动增益补偿,以便单独验证滤波器响应
-        eq.set_preamp(6.0);
-        eq.set_enabled(true);
-        // 8Hz 位于 shelf 通带深处,应获得接近 +6dB (×2) 的增益
-        let boosted = steady_state_amplitude(&mut eq, 8.0, 0.25, 0);
-        assert!(
-            (boosted - 0.5).abs() < 0.06,
-            "8Hz should be boosted ~+6dB by 31Hz low shelf, got peak {boosted}"
-        );
-        // 1kHz 应基本不受影响(shelf 拐点以上的阻带)
-        let untouched = steady_state_amplitude(&mut eq, 1000.0, 0.25, 0);
-        assert!(
-            (untouched - 0.25).abs() < 0.03,
-            "1kHz should be nearly unaffected by 31Hz low shelf, got peak {untouched}"
-        );
-    }
-
-    #[test]
-    fn test_high_shelf_boosts_treble_region() {
-        let mut eq = Equalizer::new(48000, 2);
-        eq.set_band_gain(9, 6.0); // 16kHz high shelf
-        eq.set_preamp(6.0);
-        eq.set_enabled(true);
-        // 22kHz 位于 shelf 通带深处(接近但不越过 Nyquist 24kHz)
-        let boosted = steady_state_amplitude(&mut eq, 22000.0, 0.25, 0);
-        assert!(
-            (boosted - 0.5).abs() < 0.06,
-            "22kHz should be boosted ~+6dB by 16kHz high shelf, got peak {boosted}"
-        );
-        let untouched = steady_state_amplitude(&mut eq, 500.0, 0.25, 0);
-        assert!(
-            (untouched - 0.25).abs() < 0.03,
-            "500Hz should be nearly unaffected by 16kHz high shelf, got peak {untouched}"
-        );
-    }
-
-    #[test]
-    fn test_auto_preamp_prevents_clipping_on_boost() {
-        // +8dB boost + 满幅正弦:自动补偿后输出峰值不应超过 soft clip 阈值
-        let mut eq = Equalizer::new(48000, 2);
-        eq.set_band_gain(5, 8.0);
-        eq.set_enabled(true);
-        let peak = steady_state_amplitude(&mut eq, 1000.0, 0.95, 0);
-        assert!(
-            peak <= 0.96,
-            "auto preamp should keep boosted peak <=0dBFS, got {peak}"
-        );
-    }
-
-    #[test]
-    fn test_set_band_gain_clamps_high() {
-        let mut eq = Equalizer::new(48000, 2);
-        eq.set_band_gain(0, 100.0);
-        let settings = eq.get_settings();
-        assert!(
-            approx_eq(settings.gains[0], 8.0),
-            "gain over +8 should clamp to 8"
-        );
-    }
-
-    #[test]
-    fn test_set_band_gain_clamps_low() {
-        let mut eq = Equalizer::new(48000, 2);
-        eq.set_band_gain(0, -100.0);
-        let settings = eq.get_settings();
-        assert!(
-            approx_eq(settings.gains[0], -8.0),
-            "gain below -8 should clamp to -8"
-        );
-    }
-
-    #[test]
-    fn test_set_band_gain_out_of_range_ignored() {
-        let mut eq = Equalizer::new(48000, 2);
-        eq.set_band_gain(EQ_BAND_COUNT + 5, 5.0);
-        let settings = eq.get_settings();
-        for &g in &settings.gains {
-            assert!(g.abs() < 1e-5, "out-of-range band gain should be ignored");
-        }
-    }
-
-    #[test]
-    fn test_set_preamp_clamps_high() {
-        let mut eq = Equalizer::new(48000, 2);
-        eq.set_preamp(100.0);
-        assert!(approx_eq(eq.get_settings().preamp, 8.0));
-    }
-
-    #[test]
-    fn test_set_preamp_clamps_low() {
-        let mut eq = Equalizer::new(48000, 2);
-        eq.set_preamp(-100.0);
-        assert!(approx_eq(eq.get_settings().preamp, -8.0));
     }
 
     #[test]
@@ -771,129 +477,64 @@ mod tests {
     }
 
     #[test]
-    fn test_soft_clip_below_threshold_passthrough() {
-        // |x| <= 0.9 时返回 x (阈值从 0.95 降至 0.9)
-        for &x in &[0.0_f32, 0.1, 0.5, 0.89, 0.9, -0.89, -0.9, -0.5, -0.1] {
-            let y = soft_clip(x);
-            assert!(approx_eq(y, x), "soft_clip({x}) = {y}, expected {x}");
+    fn test_global_equalizer_defaults() {
+        let eq = GlobalEqualizer::new();
+        let settings = eq.get_settings();
+        assert!(!settings.enabled, "default enabled should be false");
+        assert!(settings.preamp.abs() < 1e-5, "default preamp should be 0");
+        assert_eq!(settings.gains.len(), EQ_BAND_COUNT);
+        for &g in &settings.gains {
+            assert!(g.abs() < 1e-5, "default gains should be 0");
         }
     }
 
     #[test]
-    fn test_soft_clip_above_threshold_compresses() {
-        // |x| > 0.9 时压缩,输出幅度减小且符号保持
-        // 上限为 0.97 (给 DAC 留 3% 余量)
-        for &x in &[
-            0.91_f32, 0.95, 1.0, 1.5, 2.0, 10.0, -0.91, -0.95, -1.0, -1.5, -2.0,
-        ] {
-            let y = soft_clip(x);
-            assert!(
-                y.abs() < x.abs(),
-                "soft_clip should reduce magnitude: |{x}| -> |{y}|"
-            );
-            assert!(
-                y.abs() <= 0.97 + 1e-5,
-                "soft_clip output |{y}| should be <= 0.97"
-            );
-            assert!(x * y >= 0.0, "soft_clip should preserve sign: x={x}, y={y}");
+    fn test_global_equalizer_set_band_gain_clamps_high() {
+        let eq = GlobalEqualizer::new();
+        eq.set_band_gain(0, 100.0);
+        assert!(
+            approx_eq(eq.get_settings().gains[0], 8.0),
+            "gain over +8 should clamp to 8"
+        );
+    }
+
+    #[test]
+    fn test_global_equalizer_set_band_gain_clamps_low() {
+        let eq = GlobalEqualizer::new();
+        eq.set_band_gain(0, -100.0);
+        assert!(
+            approx_eq(eq.get_settings().gains[0], -8.0),
+            "gain below -8 should clamp to -8"
+        );
+    }
+
+    #[test]
+    fn test_global_equalizer_set_band_gain_out_of_range_ignored() {
+        let eq = GlobalEqualizer::new();
+        eq.set_band_gain(EQ_BAND_COUNT + 5, 5.0);
+        for &g in &eq.get_settings().gains {
+            assert!(g.abs() < 1e-5, "out-of-range band gain should be ignored");
         }
     }
 
     #[test]
-    fn test_soft_clip_ceiling_at_extreme_input() {
-        // 极端输入应趋近上限 0.97 而非 1.0
-        let y = soft_clip(100.0);
-        assert!(
-            y < 0.971,
-            "soft_clip(100) = {y}, should approach 0.97 ceiling"
-        );
-        assert!(
-            y > 0.969,
-            "soft_clip(100) = {y}, should be close to 0.97 ceiling"
-        );
+    fn test_global_equalizer_preamp_clamps() {
+        let eq = GlobalEqualizer::new();
+        eq.set_preamp(100.0);
+        assert!(approx_eq(eq.get_settings().preamp, 8.0));
+        eq.set_preamp(-100.0);
+        assert!(approx_eq(eq.get_settings().preamp, -8.0));
     }
 
     #[test]
-    fn test_soft_clip_derivative_continuous_at_threshold() {
-        // 验证阈值处导数连续: 阈值附近的小增量应产生近似线性的响应
-        let threshold = 0.9_f32;
-        let eps = 1e-4;
-        let below = soft_clip(threshold - eps);
-        let at = soft_clip(threshold);
-        let above = soft_clip(threshold + eps);
-        // 阈值处函数值连续: 两侧增量应近似 eps
-        let diff_below = (below - at).abs();
-        let diff_above = (above - at).abs();
-        assert!(
-            diff_below <= eps * 1.05,
-            "should be continuous at threshold from below: diff={diff_below}, eps={eps}"
-        );
-        assert!(
-            diff_above <= eps * 1.05,
-            "should be continuous at threshold from above: diff={diff_above}, eps={eps}"
-        );
-        // 导数连续: 两侧斜率应接近 (tanh 在 over=0 时斜率=1,与线性段匹配)
-        let slope_below = diff_below / eps;
-        let slope_above = diff_above / eps;
-        assert!(
-            (slope_below - slope_above).abs() < 0.05,
-            "slopes should be close: below={slope_below}, above={slope_above}"
-        );
-    }
-
-    #[test]
-    fn test_process_buffer_disabled_passthrough() {
-        let mut eq = Equalizer::new(48000, 2);
-        let original = [0.1_f32, -0.2, 0.3, -0.4, 0.5, -0.6];
-        let mut buffer = original;
-        eq.process_buffer(&mut buffer);
-        for (i, (a, b)) in original.iter().zip(buffer.iter()).enumerate() {
-            assert!(
-                approx_eq(*a, *b),
-                "buffer[{i}] changed when disabled: {a} -> {b}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_process_buffer_multichannel_interleaved() {
-        let mut eq = Equalizer::new(48000, 2);
-        eq.set_band_gain(5, 4.0);
+    fn test_global_equalizer_set_gains_and_enabled_roundtrip() {
+        let eq = GlobalEqualizer::new();
         eq.set_enabled(true);
-
-        let n_frames: usize = 480;
-        let mut buffer: Vec<f32> = (0..n_frames * 2)
-            .map(|i| {
-                let frame = i / 2;
-                let t = frame as f32 / 48000.0_f32;
-                (2.0 * PI * 1000.0 * t).sin() * 0.3
-            })
-            .collect();
-        let original = buffer.clone();
-        eq.process_buffer(&mut buffer);
-
-        // 逐样本对比 process_buffer 与 process_sample 结果一致
-        let mut eq2 = Equalizer::new(48000, 2);
-        eq2.set_band_gain(5, 4.0);
-        eq2.set_enabled(true);
-        for (i, &s) in original.iter().enumerate() {
-            let channel = i % 2;
-            let y = eq2.process_sample(s, channel);
-            assert!(
-                approx_eq(y, buffer[i]),
-                "buffer[{i}] (={}) != process_sample (={y})",
-                buffer[i]
-            );
-        }
-
-        // 确认 EQ 启用时 buffer 确实被修改
-        let any_changed = original
-            .iter()
-            .zip(buffer.iter())
-            .any(|(a, b)| (a - b).abs() > 1e-4);
-        assert!(
-            any_changed,
-            "process_buffer should modify samples with EQ enabled"
-        );
+        eq.set_gains([1.0; EQ_BAND_COUNT]);
+        let settings = eq.get_settings();
+        assert!(settings.enabled);
+        assert!(settings.gains.iter().all(|&g| approx_eq(g, 1.0)));
+        eq.set_settings(EqSettings::default());
+        assert!(!eq.get_settings().enabled);
     }
 }

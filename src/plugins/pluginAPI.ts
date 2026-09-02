@@ -9,7 +9,6 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile, readFile } from '@tauri-apps/plugin-fs'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import {
-  PluginPermission,
   assertPluginEventSubscriptionAllowed,
   type PluginAPI,
   type PluginPermissionType,
@@ -29,6 +28,7 @@ import {
   type SaveAsOptions,
   type EventCallback,
 } from './pluginTypes'
+import { permissionForAction } from './apiRegistry'
 import type { PluginManager } from './pluginManager'
 import logger from '../utils/logger'
 import { usePlayerStore } from '../stores/player'
@@ -125,6 +125,14 @@ export function createPluginAPI(
     }
   }
 
+  /** 按动作名查 apiRegistry 统一校验;null 表示该动作无需权限 */
+  const requireAction = (action: string): void => {
+    const permission = permissionForAction(action)
+    if (permission !== null) {
+      requirePermission(permission, action)
+    }
+  }
+
   // 歌词行格式转换辅助函数
   const convertLyricLine = (line: {
     time: number
@@ -183,7 +191,7 @@ export function createPluginAPI(
     // ========== 播放器 API ==========
     player: {
       getState(): PlayerState {
-        requirePermission(PluginPermission.PLAYER_READ, 'player.getState')
+        requireAction('player.getState')
         const store = getPlayerStore()
         return {
           currentTrack: store.currentTrack ? JSON.parse(JSON.stringify(store.currentTrack)) : null,
@@ -197,7 +205,7 @@ export function createPluginAPI(
       },
 
       async getLyrics(): Promise<LyricLine[] | null> {
-        requirePermission(PluginPermission.PLAYER_READ, 'player.getLyrics')
+        requireAction('player.getLyrics')
         const store = getPlayerStore()
 
         // 如果 store 中已有歌词，直接返回
@@ -239,7 +247,7 @@ export function createPluginAPI(
       },
 
       getCurrentLyricIndex(): number {
-        requirePermission(PluginPermission.PLAYER_READ, 'player.getCurrentLyricIndex')
+        requireAction('player.getCurrentLyricIndex')
         const store = getPlayerStore()
 
         // 如果没有歌词，返回 -1
@@ -255,42 +263,42 @@ export function createPluginAPI(
       },
 
       play(): void {
-        requirePermission(PluginPermission.PLAYER_CONTROL, 'player.play')
+        requireAction('player.play')
         getPlayerStore().play()
       },
 
       pause(): void {
-        requirePermission(PluginPermission.PLAYER_CONTROL, 'player.pause')
+        requireAction('player.pause')
         getPlayerStore().pause()
       },
 
       togglePlay(): void {
-        requirePermission(PluginPermission.PLAYER_CONTROL, 'player.togglePlay')
+        requireAction('player.togglePlay')
         getPlayerStore().togglePlay()
       },
 
       async next(): Promise<void> {
-        requirePermission(PluginPermission.PLAYER_CONTROL, 'player.next')
+        requireAction('player.next')
         await getPlayerStore().nextTrack()
       },
 
       async previous(): Promise<void> {
-        requirePermission(PluginPermission.PLAYER_CONTROL, 'player.previous')
+        requireAction('player.previous')
         await getPlayerStore().previousTrack()
       },
 
       seek(time: number): void {
-        requirePermission(PluginPermission.PLAYER_CONTROL, 'player.seek')
+        requireAction('player.seek')
         getPlayerStore().seek(time)
       },
 
       setVolume(volume: number): void {
-        requirePermission(PluginPermission.PLAYER_CONTROL, 'player.setVolume')
+        requireAction('player.setVolume')
         getPlayerStore().setVolume(volume)
       },
 
       setLyrics(lyrics: LyricLine[]): void {
-        requirePermission(PluginPermission.LYRICS_PROVIDER, 'player.setLyrics')
+        requireAction('player.setLyrics')
         // 转换为 store 的格式 (pluginAPI LyricLine.texts 是 {text,translation?}[],
         // store 期望 @/types LyricLine.texts 为 string[]
         const store = getPlayerStore()
@@ -303,7 +311,7 @@ export function createPluginAPI(
       },
 
       async getCoverPath(): Promise<string | null> {
-        requirePermission(PluginPermission.PLAYER_READ, 'player.getCoverPath')
+        requireAction('player.getCoverPath')
         const store = getPlayerStore()
 
         // 先检查 store 中是否已有 coverPath（可能已异步加载完成）
@@ -327,7 +335,7 @@ export function createPluginAPI(
     // ========== 音乐库 API ==========
     library: {
       getPlaylists(): Playlist[] {
-        requirePermission(PluginPermission.LIBRARY_READ, 'library.getPlaylists')
+        requireAction('library.getPlaylists')
         const store = getMusicLibraryStore()
         if (!store.playlists) return []
         return store.playlists.map((p) => ({
@@ -338,7 +346,7 @@ export function createPluginAPI(
       },
 
       getCurrentPlaylist(): Playlist | null {
-        requirePermission(PluginPermission.LIBRARY_READ, 'library.getCurrentPlaylist')
+        requireAction('library.getCurrentPlaylist')
         const store = getMusicLibraryStore()
         if (!store.currentPlaylist) return null
         return {
@@ -349,7 +357,7 @@ export function createPluginAPI(
       },
 
       getTracks(): Track[] {
-        requirePermission(PluginPermission.LIBRARY_READ, 'library.getTracks')
+        requireAction('library.getTracks')
         const store = getPlayerStore()
         return store.playlist ? [...store.playlist] : []
       },
@@ -358,6 +366,7 @@ export function createPluginAPI(
     // ========== 主题 API ==========
     theme: {
       getCurrent(): ThemeInfo {
+        requireAction('theme.getCurrent')
         const store = getThemeStore()
         return {
           preference: store.themePreference,
@@ -367,7 +376,7 @@ export function createPluginAPI(
       },
 
       async setColors(colors: Record<string, string>): Promise<void> {
-        requirePermission(PluginPermission.THEME, 'theme.setColors')
+        requireAction('theme.setColors')
         const root = document.documentElement
         for (const [key, value] of Object.entries(colors)) {
           root.style.setProperty(`--plugin-${pluginId}-${key}`, value)
@@ -375,12 +384,19 @@ export function createPluginAPI(
       },
 
       getCSSVariable(name: string): string {
+        // 读取仅开放 MD3 设计令牌,避免插件枚举任意 CSS 自定义属性(如 --plugin-* 注入面)
+        requireAction('theme.getCSSVariable')
+        const normalized = name.startsWith('--') ? name : `--${name}`
+        if (!normalized.startsWith('--md-sys-')) {
+          throw new Error(`theme.getCSSVariable 仅允许读取 --md-sys-* 变量,收到: ${name}`)
+        }
         const root = document.documentElement
         const varName = name.startsWith('--') ? name : `--${name}`
         return getComputedStyle(root).getPropertyValue(varName).trim()
       },
 
       getAllColors(): Record<string, string> {
+        requireAction('theme.getAllColors')
         const root = document.documentElement
         const style = getComputedStyle(root)
 
@@ -436,22 +452,22 @@ export function createPluginAPI(
     // ========== UI 扩展 API ==========
     ui: {
       registerSettingsPanel(panel: SettingsPanel): void {
-        requirePermission(PluginPermission.UI_EXTEND, 'ui.registerSettingsPanel')
+        requireAction('ui.registerSettingsPanel')
         manager.registerExtension('settingsPanels', pluginId, panel)
       },
 
       registerMenuItem(item: MenuItem): void {
-        requirePermission(PluginPermission.UI_EXTEND, 'ui.registerMenuItem')
+        requireAction('ui.registerMenuItem')
         manager.registerExtension('menuItems', pluginId, item)
       },
 
       registerPlayerDecorator(decorator: PlayerDecorator): void {
-        requirePermission(PluginPermission.UI_EXTEND, 'ui.registerPlayerDecorator')
+        requireAction('ui.registerPlayerDecorator')
         manager.registerExtension('playerDecorators', pluginId, decorator)
       },
 
       registerActionButton(button: ActionButton): void {
-        requirePermission(PluginPermission.UI_EXTEND, 'ui.registerActionButton')
+        requireAction('ui.registerActionButton')
         if (!button.id || !button.name || !button.icon || !button.action) {
           throw new Error('按钮必须包含 id, name, icon 和 action')
         }
@@ -463,7 +479,7 @@ export function createPluginAPI(
       },
 
       unregisterActionButton(buttonId: string): void {
-        requirePermission(PluginPermission.UI_EXTEND, 'ui.unregisterActionButton')
+        requireAction('ui.unregisterActionButton')
         const buttons = manager.extensions.actionButtons
         const index = buttons.findIndex(
           (b: ActionButton & { pluginId: string }) => b.id === buttonId && b.pluginId === pluginId,
@@ -483,7 +499,7 @@ export function createPluginAPI(
     // ========== 歌词源 API ==========
     lyrics: {
       registerProvider(provider: LyricsProvider): void {
-        requirePermission(PluginPermission.LYRICS_PROVIDER, 'lyrics.registerProvider')
+        requireAction('lyrics.registerProvider')
         if (!provider.id || !provider.name || !provider.search) {
           throw new Error('歌词源必须包含 id, name 和 search 方法')
         }
@@ -495,7 +511,7 @@ export function createPluginAPI(
     // ========== 可视化 API ==========
     visualizer: {
       register(visualizer: Visualizer): void {
-        requirePermission(PluginPermission.VISUALIZER, 'visualizer.register')
+        requireAction('visualizer.register')
         if (!visualizer.id || !visualizer.name || !visualizer.render) {
           throw new Error('可视化效果必须包含 id, name 和 render 方法')
         }
@@ -507,7 +523,7 @@ export function createPluginAPI(
     // ========== 命令 API ==========
     commands: {
       register(command: Command): void {
-        requirePermission(PluginPermission.UI_EXTEND, 'commands.register')
+        requireAction('commands.register')
         if (!command.id || !command.name || !command.execute) {
           throw new Error('命令必须包含 id, name 和 execute 方法')
         }
@@ -530,7 +546,7 @@ export function createPluginAPI(
     // ========== 快捷键 API ==========
     shortcuts: {
       register(shortcut: Shortcut): void {
-        requirePermission(PluginPermission.UI_EXTEND, 'shortcuts.register')
+        requireAction('shortcuts.register')
         if (!shortcut.id || !shortcut.name || !shortcut.key || !shortcut.action) {
           throw new Error('快捷键必须包含 id, name, key 和 action')
         }
@@ -571,7 +587,7 @@ export function createPluginAPI(
       },
 
       unregister(shortcutId: string): void {
-        requirePermission(PluginPermission.UI_EXTEND, 'shortcuts.unregister')
+        requireAction('shortcuts.unregister')
         const shortcuts = manager.extensions.shortcuts
         const index = shortcuts.findIndex(
           (s: Shortcut & { pluginId: string }) => s.id === shortcutId && s.pluginId === pluginId,
@@ -586,25 +602,25 @@ export function createPluginAPI(
     // ========== 存储 API ==========
     storage: {
       get<T>(key: string, defaultValue: T | null = null): T {
-        requirePermission(PluginPermission.STORAGE, 'storage.get')
+        requireAction('storage.get')
         const storage = manager.getStorage(pluginId)
         return (storage[key] as T) ?? (defaultValue as T)
       },
 
       set<T>(key: string, value: T): void {
-        requirePermission(PluginPermission.STORAGE, 'storage.set')
+        requireAction('storage.set')
         const storage = manager.getStorage(pluginId)
         storage[key] = value
       },
 
       remove(key: string): void {
-        requirePermission(PluginPermission.STORAGE, 'storage.remove')
+        requireAction('storage.remove')
         const storage = manager.getStorage(pluginId)
         delete storage[key]
       },
 
       getAll(): Record<string, unknown> {
-        requirePermission(PluginPermission.STORAGE, 'storage.getAll')
+        requireAction('storage.getAll')
         return toCloneableSnapshot({ ...manager.getStorage(pluginId) })
       },
     },
@@ -629,7 +645,7 @@ export function createPluginAPI(
     // ========== 网络 API ==========
     network: {
       async fetch(url: string, options: RequestInit = {}): Promise<Response> {
-        requirePermission(PluginPermission.NETWORK, 'network.fetch')
+        requireAction('network.fetch')
 
         if (!url.startsWith('https://')) {
           throw new Error('只允许 HTTPS 请求')
@@ -735,7 +751,7 @@ export function createPluginAPI(
         data: Blob | Uint8Array | string,
         options: SaveAsOptions = {},
       ): Promise<string | null> {
-        requirePermission(PluginPermission.STORAGE, 'file.saveAs')
+        requireAction('file.saveAs')
 
         try {
           const filePath = await save({
@@ -772,7 +788,7 @@ export function createPluginAPI(
         defaultName = 'image.png',
         format = 'png',
       ): Promise<string | null> {
-        requirePermission(PluginPermission.STORAGE, 'file.saveImage')
+        requireAction('file.saveImage')
 
         const mimeType = `image/${format === 'jpg' ? 'jpeg' : format}`
         let blob: Blob
@@ -803,7 +819,7 @@ export function createPluginAPI(
     // ========== 剪贴板 API ==========
     clipboard: {
       async writeImage(image: HTMLCanvasElement | Blob | string): Promise<void> {
-        requirePermission(PluginPermission.STORAGE, 'clipboard.writeImage')
+        requireAction('clipboard.writeImage')
 
         try {
           let blob: Blob
@@ -827,7 +843,7 @@ export function createPluginAPI(
       },
 
       async writeText(text: string): Promise<void> {
-        requirePermission(PluginPermission.STORAGE, 'clipboard.writeText')
+        requireAction('clipboard.writeText')
 
         try {
           await navigator.clipboard.writeText(text)

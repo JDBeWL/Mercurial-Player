@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn 白名单主机放行() {
-        assert!(assert_url_allowed("https://music.163.com/api/song/lyric?id=1").is_ok());
+        assert!(assert_url_allowed("https://music.163.com/api/song/lyric?id=3425575022").is_ok());
         assert!(assert_url_allowed("https://MUSIC.163.com/api/cloudsearch/pc").is_ok());
         assert!(assert_url_allowed("https://a.music.163.com/x").is_ok());
     }

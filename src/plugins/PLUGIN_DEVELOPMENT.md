@@ -172,15 +172,18 @@ export const myPlugin: BuiltinPluginDefinition = {
 | `lyrics:provider` | 提供歌词源     | `api.lyrics.registerProvider()`, `api.player.setLyrics()`                                                                          |
 | `ui:extend`       | 扩展用户界面   | `api.ui.registerSettingsPanel()`, `api.ui.registerMenuItem()`, `api.ui.registerActionButton()`, `api.ui.registerPlayerDecorator()`, `api.commands.register()`, `api.shortcuts.register()` |
 | `visualizer`      | 注册可视化效果 | `api.visualizer.register()`                                                                                                        |
-| `theme`           | 自定义主题颜色 | `api.theme.setColors()`                                                                                                            |
-| `storage`         | 本地数据存储   | `api.storage.*`, `api.file.*`, `api.clipboard.*`                                                                                   |
+| `theme`           | 修改主题颜色   | `api.theme.setColors()`                                                                                                            |
+| `theme:read`      | 读取主题       | `api.theme.getCurrent()`, `api.theme.getCSSVariable()`, `api.theme.getAllColors()`(仅 `--md-sys-*` 变量)                          |
+| `storage`         | 本地数据存储   | `api.storage.*`                                                                                                                    |
+| `file:write`      | 写入文件       | `api.file.saveAs()`, `api.file.saveImage()`                                                                                        |
+| `clipboard:write` | 写入剪贴板     | `api.clipboard.writeImage()`, `api.clipboard.writeText()`                                                                          |
 | `network`         | 网络请求       | `api.network.fetch()` (仅 HTTPS)                                                                                                   |
 
 **注意：** 以下 API 不需要权限：
 
 - `api.log.*` - 日志
 - `api.utils.*` - 工具函数
-- `api.theme.getCurrent()`, `api.theme.getCSSVariable()`, `api.theme.getAllColors()` - 读取主题
+- `api.file.openScreenshotsDirectory()` - 打开截图目录
 - `api.ui.showNotification()` - 显示通知
 - `api.events.emit()` / `api.events.on()`（订阅 `plugin:*` 自定义与生命周期事件）- 事件系统
 - `api.commands.execute()` - 仅能执行本插件注册的命令
@@ -459,7 +462,7 @@ const id = api.utils.generateId() // 'pluginId-1703520000000-abc123xyz'
 
 ### 文件 (api.file)
 
-需要 `storage` 权限。
+`saveAs` / `saveImage` 需要 `file:write` 权限;`openScreenshotsDirectory` 无需权限。
 
 ```javascript
 // 保存文件（弹出保存对话框）
@@ -481,7 +484,7 @@ await api.file.openScreenshotsDirectory()
 
 ### 剪贴板 (api.clipboard)
 
-需要 `storage` 权限。
+需要 `clipboard:write` 权限。
 
 ```javascript
 // 复制图片到剪贴板
