@@ -82,7 +82,22 @@ impl AppError {
     }
 }
 
-/// 抹去错误信息中的绝对路径（Windows 盘符路径与 UNC 路径）。
+/// 从错误消息中的路径段提取末尾文件名(纯文本级,不依赖宿主平台)。
+///
+/// 不能用 `std::path::Path::file_name()`:Linux/macOS 上 `\` 不是路径分隔符,
+/// `Path::new(r"D:\a\b\f.txt").file_name()` 会返回整段字符串导致脱敏失效;
+/// Windows 盘符/UNC 前缀(反斜杠或正斜杠风格)统一按 `\` `/` 双分隔符切分。
+fn file_name_in_segment(segment: &str) -> Option<&str> {
+    // 取最后一个分隔符之后的部分;以分隔符结尾(如裸盘符 `C:\`)视为无文件名
+    match segment.rfind(['\\', '/']) {
+        Some(idx) if idx + 1 < segment.len() => Some(&segment[idx + 1..]),
+        Some(_) => None,
+        // 无任何分隔符(理论不会出现,因调用方已识别盘符/UNC 前缀)
+        None => Some(segment),
+    }
+}
+
+/// 抹去错误信息中的绝对路径(Windows 盘符路径与 UNC 路径)。
 ///
 /// `Display` 文案会经 IPC 原样回传前端，用户可见的错误不应暴露本机目录
 /// 结构；完整路径仅保存在 `From` 转换处的 `log::debug!` 中。路径替换为
@@ -107,10 +122,7 @@ fn sanitize_path_in_message(msg: &str) -> String {
                 j += 1;
             }
             let path = &msg[i..j];
-            match std::path::Path::new(path)
-                .file_name()
-                .and_then(|n| n.to_str())
-            {
+            match file_name_in_segment(path) {
                 Some(name) if !name.is_empty() => out.push_str(name),
                 _ => out.push_str("<路径>"),
             }
