@@ -93,9 +93,7 @@ export type PluginAction = keyof typeof API_ACTION_PERMISSIONS
  * 查询动作所需权限。未登记的动作视为内部错误(防手抖新增动作忘登记)。
  */
 export function permissionForAction(action: string): PluginPermissionType | null {
-  const permission = (API_ACTION_PERMISSIONS as Record<string, PluginPermissionType | null>)[
-    action
-  ]
+  const permission = (API_ACTION_PERMISSIONS as Record<string, PluginPermissionType | null>)[action]
   if (permission === undefined) {
     throw new Error(`[apiRegistry] 未知的插件动作: ${action}`)
   }

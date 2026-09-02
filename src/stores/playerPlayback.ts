@@ -35,7 +35,11 @@ export function seekTrack(store: PlayerPlaybackTarget, time: number): void {
   const newTime = Math.max(0, Math.min(time, store.duration))
 
   // rethrow:true + catch(() => {}) → 仅在成功后刷新状态,失败已由 safeInvoke 记入 errorHandler
-  safeInvoke<void>('seek_track', { time: newTime }, { severity: ErrorSeverity.MEDIUM, rethrow: true })
+  safeInvoke<void>(
+    'seek_track',
+    { time: newTime },
+    { severity: ErrorSeverity.MEDIUM, rethrow: true },
+  )
     .then(() => {
       store.currentTime = newTime
       if (!wasPlaying) {

@@ -588,7 +588,12 @@ describe('ui API', () => {
     expect(() => pluginApi.ui.registerMenuItem({ id: 'm' } as never)).toThrow(/ui:extend/)
     expect(() => pluginApi.ui.registerPlayerDecorator({ id: 'd' } as never)).toThrow(/ui:extend/)
     expect(() =>
-      pluginApi.ui.registerActionButton({ id: 'b', name: 'B', icon: 'i', action: vi.fn() } as never),
+      pluginApi.ui.registerActionButton({
+        id: 'b',
+        name: 'B',
+        icon: 'i',
+        action: vi.fn(),
+      } as never),
     ).toThrow(/ui:extend/)
     expect(() => pluginApi.ui.unregisterActionButton('b')).toThrow(/ui:extend/)
   })
@@ -701,9 +706,7 @@ describe('commands API', () => {
       pluginId: 'other-plugin',
     })
 
-    await expect(
-      api(ALL_PERMISSIONS, manager).commands.execute('foreign'),
-    ).resolves.toBeUndefined()
+    await expect(api(ALL_PERMISSIONS, manager).commands.execute('foreign')).resolves.toBeUndefined()
     expect(foreignExecute).not.toHaveBeenCalled()
   })
 

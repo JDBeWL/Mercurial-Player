@@ -1,11 +1,13 @@
 //! fonts 模块单元测试(二进制解析、命名约定、提取)。
 
 use std::collections::HashSet;
+#[cfg(target_os = "windows")]
 use std::fs;
+#[cfg(target_os = "windows")]
 use std::path::PathBuf;
 
 use super::parse::{
-    CollectionMemberMeta, be_u16, be_u32, extract_collection_member, face_family_name,
+    CollectionMemberMeta, be_u16, be_u32, extract_collection_member,
     frontend_family_from_file_name, internal_font_families, member_file_name,
 };
 #[cfg(target_os = "windows")]
@@ -210,7 +212,7 @@ fn extract_real_system_ttc() {
     let out = extract_collection_member(&data, 0).expect("提取 msyh.ttc 成员 0 失败");
     let face = ttf_parser::Face::parse(&out, 0).expect("提取结果无法被 ttf-parser 解析");
     assert!(face.number_of_glyphs() > 1000, "字形数量异常");
-    let family = face_family_name(&face).expect("读取族名失败");
+    let family = super::parse::face_family_name(&face).expect("读取族名失败");
     assert!(
         family.contains("YaHei") || family.contains("雅黑"),
         "族名异常: {family}"

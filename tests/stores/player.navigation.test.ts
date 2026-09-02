@@ -45,6 +45,7 @@ vi.mock('@/stores/config', () => ({
   useConfigStore: vi.fn(() => ({
     audio: { volume: 0.5, exclusiveMode: false, fadeEnabled: true },
     saveConfigNow: vi.fn().mockResolvedValue(undefined),
+    saveConfig: vi.fn(),
   })),
 }))
 

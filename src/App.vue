@@ -120,10 +120,7 @@
                 </div>
 
                 <Transition name="fade" mode="out-in">
-                  <LyricsDisplay
-                    v-if="viewMode === 'lyrics'"
-                    class="lyrics-container"
-                  />
+                  <LyricsDisplay v-if="viewMode === 'lyrics'" class="lyrics-container" />
                   <VisualizerPanel v-else class="lyrics-container" />
                 </Transition>
               </div>
