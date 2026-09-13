@@ -19,7 +19,7 @@ export function removeTrackFromPlaylist(store: PlayerStore, path: string): void 
 
   // 如果播放列表为空，重置状态
   if (store.playlist.length === 0) {
-    store.resetPlayerState(false)
+    void store.resetPlayerState(false)
     return
   }
 

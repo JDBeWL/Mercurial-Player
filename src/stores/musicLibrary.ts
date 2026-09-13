@@ -187,6 +187,8 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
 
         // 刷新后同步更新 player.playlist 中的曲目引用
         // playlists 已重建为新对象，但 player.playlist 仍持有旧对象引用，元数据不会更新
+        // 注意：扫描走轻量模式，新对象不含 coverPath，直接整体替换会导致封面丢失，
+        // 且结构 watch 只比较 path，重新打开播放列表才会暴露，故沿用旧对象已加载的封面路径
         const playerStore = usePlayerStore()
         if (playerStore.playlist.length > 0) {
           const trackMap = new Map<string, Track>()
@@ -195,13 +197,22 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
               trackMap.set(f.path, f)
             }
           }
-          playerStore.playlist = playerStore.playlist.map((t) => trackMap.get(t.path) || t)
+          playerStore.playlist = playerStore.playlist.map((t) => {
+            const fresh = trackMap.get(t.path)
+            if (!fresh) return t
+            return t.coverPath ? { ...fresh, coverPath: t.coverPath } : fresh
+          })
+
+          // 替换前同样未加载出封面的曲目，补一次加载，避免封面永久缺失
+          const missingCovers = playerStore.playlist.filter((t) => !t.coverPath)
+          if (missingCovers.length > 0) {
+            void playerStore._loadPlaylistCovers(missingCovers)
+          }
         }
 
         // 异步缓存到 plugin-store（不阻塞当前流程）
-        this._savePlaylistsToCache().catch((err) =>
-          logger.warn('Failed to save playlists cache:', err),
-        )
+        // 失败已在 _savePlaylistsToCache 内部记录告警，这里不再重复 catch
+        void this._savePlaylistsToCache()
 
         return { success: true, message: 'Library refreshed successfully' }
       } catch (error) {

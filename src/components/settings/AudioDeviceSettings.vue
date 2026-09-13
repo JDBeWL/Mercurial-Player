@@ -284,7 +284,7 @@ const toggleFadeEnabled = async (): Promise<void> => {
 
 // 刷新设备列表
 const refreshDevices = (): void => {
-  fetchAudioDevices()
+  void fetchAudioDevices()
 }
 
 // 组件挂载时获取设备列表

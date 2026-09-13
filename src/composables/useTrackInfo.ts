@@ -178,7 +178,7 @@ export function useTrackInfo() {
 
     // 异步处理音轨信息,但不阻塞当前渲染
     if (!cached || !cached.processing) {
-      processTrackInfo(trackPath)
+      void processTrackInfo(trackPath)
     }
 
     // 优先读 store 已用元数据填充的 title 字段,避免显示原始文件名
@@ -205,7 +205,7 @@ export function useTrackInfo() {
 
     // 异步处理音轨信息,但不阻塞当前渲染
     if (!cached || !cached.processing) {
-      processTrackInfo(trackPath)
+      void processTrackInfo(trackPath)
     }
 
     // 处理中:读 store 已填充的 artist 字段
@@ -237,7 +237,7 @@ export function useTrackInfo() {
               isFromMetadata: false,
             })
           }
-          processTrackInfo(path)
+          void processTrackInfo(path)
         }
       },
       { immediate: true },

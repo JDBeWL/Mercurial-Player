@@ -80,7 +80,7 @@ export default defineConfig({
           return 'assets/[name]-[hash][extname]'
         },
       },
-      // Tree-shaking 优化 - 更激进的配置
+      // Tree-shaking 优化
       treeshake: {
         moduleSideEffects: false,
         propertyReadSideEffects: false,

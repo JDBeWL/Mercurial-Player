@@ -154,7 +154,7 @@ export function useLyricsScroll(deps: {
       }, FONT_SIZE_TRANSITION_MS)
     } else {
       // 自动跟随: 立即预估滚动 + 过渡完成后修正
-      nextTick(() => {
+      void nextTick(() => {
         // 阶段 1: 立即用当前 (过渡中) 尺寸预估
         const estimatedScroll = computeTargetScroll()
         container.style.scrollBehavior = 'smooth'

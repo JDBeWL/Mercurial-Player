@@ -142,8 +142,8 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
       if (store._cacheAbortController) {
         store._cacheAbortController.abort()
       }
-      store._cachePlaylistMetadata(store.playlist)
-      store._loadPlaylistCovers(store.playlist)
+      void store._cachePlaylistMetadata(store.playlist)
+      void store._loadPlaylistCovers(store.playlist)
 
       // 6. 设置播放状态 (currentTrack/audioInfo/duration/currentTime)
       store.currentTrack = matchedTrack

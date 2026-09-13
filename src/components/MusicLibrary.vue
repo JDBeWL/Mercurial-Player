@@ -38,13 +38,13 @@
         <h3 class="section-title">
           {{ $t('library.searchResults') }} ({{ searchResults.length }})
         </h3>
-        <div class="list">
+        <div class="list" @click="handleSearchResultsClick">
           <div
             v-for="(file, index) in searchResults"
             :key="file.path"
             v-memo="[coverFor(file), file.path, configStore.titleExtraction.hideFileExtension]"
             class="list-item"
-            @click="playFile(file)"
+            :data-path="file.path"
           >
             <div class="list-item-leading">
               <img
@@ -79,9 +79,10 @@
             </div>
             <div class="list-item-trailing">
               <button
+                type="button"
                 class="icon-button"
                 :title="$t('library.playNext')"
-                @click.stop="addFileNext(file)"
+                data-action="play-next"
               >
                 <span class="material-symbols-rounded">playlist_add</span>
               </button>
@@ -512,7 +513,7 @@ const playPlaylist = async (playlist: Playlist): Promise<void> => {
 const toggleSortOrder = (): void => {
   configStore.toggleSortOrder()
   // 重新刷新播放列表以应用新的排序
-  refreshDirectoryTrees()
+  void refreshDirectoryTrees()
 }
 
 const playFile = (file: SearchResult): void => {
@@ -520,7 +521,7 @@ const playFile = (file: SearchResult): void => {
     name: t('library.searchResults'),
     files: [file],
   }
-  playPlaylist(playlist)
+  void playPlaylist(playlist)
 }
 
 const addFileNext = (file: SearchResult): void => {
@@ -529,6 +530,27 @@ const addFileNext = (file: SearchResult): void => {
 
   // 显示成功通知
   showSuccess(getDisplayName(file), t('library.addedToPlayNext'))
+}
+
+/**
+ * 搜索结果点击委托。
+ */
+const handleSearchResultsClick = (event: MouseEvent): void => {
+  const target = event.target as HTMLElement | null
+  if (!target) return
+
+  const row = target.closest<HTMLElement>('[data-path]')
+  const path = row?.dataset.path
+  if (!path) return
+
+  const file = searchResults.value.find((item) => item.path === path)
+  if (!file) return
+
+  if (target.closest<HTMLElement>('[data-action]')?.dataset.action === 'play-next') {
+    addFileNext(file)
+    return
+  }
+  playFile(file)
 }
 </script>
 

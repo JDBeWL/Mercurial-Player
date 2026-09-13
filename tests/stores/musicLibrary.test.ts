@@ -22,7 +22,8 @@ vi.mock('@/stores/config', () => ({
 
 // Mock player store
 const mockPlayerStore = {
-  playlist: [] as Array<{ path: string }>,
+  playlist: [] as Array<{ path: string; coverPath?: string }>,
+  _loadPlaylistCovers: vi.fn(),
 }
 vi.mock('@/stores/player', () => ({
   usePlayerStore: vi.fn(() => mockPlayerStore),
@@ -274,6 +275,27 @@ describe('useMusicLibraryStore', () => {
       expect(playlist.files[0]!.name).toBe('Alice')
       expect(playlist.files[1]!.name).toBe('Charlie')
     })
+
+    it('标题完全相同时保持原有的相对顺序', () => {
+      const store = useMusicLibraryStore()
+      mockConfigStore.playlist.sortOrder = 'asc'
+      const playlist = makePlaylist('dup', [
+        makeTrack('/b.mp3', 'Same'),
+        makeTrack('/a.mp3', 'Same'),
+      ])
+
+      store.selectPlaylist(playlist)
+
+      expect(playlist.files.map((f) => f.path)).toEqual(['/b.mp3', '/a.mp3'])
+    })
+
+    it('title 与 name 都缺失时按空字符串比较', () => {
+      const store = useMusicLibraryStore()
+      const playlist = makePlaylist('blank', [{ path: '/b.mp3' }, { path: '/a.mp3' }])
+
+      expect(() => store.selectPlaylist(playlist)).not.toThrow()
+      expect(playlist.files).toHaveLength(2)
+    })
   })
 
   // ---------- removeFileFromPlaylist ----------
@@ -306,6 +328,16 @@ describe('useMusicLibraryStore', () => {
       store.removeFileFromPlaylist('/nonexistent.mp3')
       expect(playlist.files).toHaveLength(1)
       expect(playlist.totalFiles).toBe(1)
+    })
+
+    it('totalFiles 缺失时不修改计数', () => {
+      const store = useMusicLibraryStore()
+      store.currentPlaylist = { name: 'test', files: [makeTrack('/a.mp3')] }
+
+      store.removeFileFromPlaylist('/a.mp3')
+
+      expect(store.currentPlaylist.files).toHaveLength(0)
+      expect(store.currentPlaylist.totalFiles).toBeUndefined()
     })
   })
 
@@ -444,6 +476,161 @@ describe('useMusicLibraryStore', () => {
       const store = useMusicLibraryStore()
       store.playlists = [{ name: 'test', files: [] }]
       await expect(store._savePlaylistsToCache()).resolves.not.toThrow()
+    })
+  })
+
+  // ---------- setMusicFolders ----------
+
+  describe('setMusicFolders', () => {
+    it('成功设置文件夹并同步到 configStore', async () => {
+      const folders = ['/music/a', '/music/b']
+      invokeMock.mockResolvedValue(folders)
+      const store = useMusicLibraryStore()
+
+      const result = await store.setMusicFolders(folders)
+
+      expect(result.success).toBe(true)
+      expect(store.musicFolders).toEqual(folders)
+      expect(mockConfigStore.musicDirectories).toEqual(folders)
+      expect(invokeMock).toHaveBeenCalledWith('set_music_directories', { paths: folders })
+    })
+
+    it('invoke 失败时返回错误信息', async () => {
+      invokeMock.mockRejectedValue(new Error('bad path'))
+      const store = useMusicLibraryStore()
+
+      const result = await store.setMusicFolders(['/music/a'])
+
+      expect(result.success).toBe(false)
+      expect(result.message).toContain('bad path')
+    })
+  })
+
+  // ---------- refreshMusicFolders ----------
+
+  describe('refreshMusicFolders', () => {
+    /** 让 get_all_audio_files 返回指定扫描结果，resolve_data_file 仍返回数据文件路径 */
+    function mockScanResult(scanned: Playlist[]): void {
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === 'get_all_audio_files') return Promise.resolve(scanned)
+        if (cmd === 'resolve_data_file') return Promise.resolve('C:\\mock\\data\\store.json')
+        return Promise.resolve(undefined)
+      })
+    }
+
+    it('成功刷新并重置排序追踪、重绑定当前播放列表', async () => {
+      const store = useMusicLibraryStore()
+      store.musicFolders = ['/music']
+      store._sortedPlaylists.add('stale')
+      store.currentPlaylist = makePlaylist('Album', [makeTrack('/a.mp3')])
+      const scanned = [makePlaylist('Album', [makeTrack('/a.mp3'), makeTrack('/b.mp3')])]
+      mockScanResult(scanned)
+
+      const result = await store.refreshMusicFolders()
+
+      expect(result.success).toBe(true)
+      expect(store.playlists).toHaveLength(1)
+      expect(store.playlists[0]!.files).toHaveLength(2)
+      expect(store._sortedPlaylists.size).toBe(0)
+      // 重新绑定到刷新后的新对象，而非刷新前的旧引用
+      expect(store.currentPlaylist).toBe(store.playlists[0])
+      expect(invokeMock).toHaveBeenCalledWith('get_all_audio_files', { paths: ['/music'] })
+    })
+
+    it('当前播放列表在扫描结果中不存在时置为 null', async () => {
+      const store = useMusicLibraryStore()
+      store.currentPlaylist = makePlaylist('Ghost', [makeTrack('/gone.mp3')])
+      mockScanResult([makePlaylist('Other', [makeTrack('/x.mp3')])])
+
+      await store.refreshMusicFolders()
+
+      expect(store.currentPlaylist).toBeNull()
+    })
+
+    it('超过 10 个播放列表时分批写入且顺序不变', async () => {
+      const store = useMusicLibraryStore()
+      const scanned = Array.from({ length: 25 }, (_, i) =>
+        makePlaylist(`P${i}`, [makeTrack(`/t${i}.mp3`)]),
+      )
+      mockScanResult(scanned)
+
+      await store.refreshMusicFolders()
+
+      expect(store.playlists).toHaveLength(25)
+      expect(store.playlists.map((p) => p.name)).toEqual(scanned.map((p) => p.name))
+    })
+
+    it('保留 player.playlist 中已加载的 coverPath', async () => {
+      const store = useMusicLibraryStore()
+      // player.playlist 持有旧对象：a 已有封面、c 无封面、gone 已从扫描结果中消失
+      mockPlayerStore.playlist = [
+        { path: '/a.mp3', coverPath: '/cover/a.jpg' },
+        { path: '/c.mp3' },
+        { path: '/gone.mp3', coverPath: '/cover/g.jpg' },
+      ]
+      mockScanResult([makePlaylist('All', [makeTrack('/a.mp3'), makeTrack('/c.mp3')])])
+
+      await store.refreshMusicFolders()
+
+      // 扫描走轻量模式、结果不含 coverPath，刷新后必须沿用旧对象已加载的封面
+      expect(mockPlayerStore.playlist[0]).toMatchObject({
+        path: '/a.mp3',
+        coverPath: '/cover/a.jpg',
+      })
+      // 旧对象本来就没有封面时不应凭空造出
+      expect(mockPlayerStore.playlist[1]).not.toHaveProperty('coverPath')
+      // 扫描结果中已不存在的曲目按原样保留
+      expect(mockPlayerStore.playlist[2]).toMatchObject({
+        path: '/gone.mp3',
+        coverPath: '/cover/g.jpg',
+      })
+    })
+
+    it('对刷新后仍缺封面的曲目补一次封面加载', async () => {
+      const store = useMusicLibraryStore()
+      mockPlayerStore.playlist = [
+        { path: '/a.mp3' },
+        { path: '/b.mp3', coverPath: '/cover/b.jpg' },
+      ]
+      mockScanResult([makePlaylist('All', [makeTrack('/a.mp3'), makeTrack('/b.mp3')])])
+
+      await store.refreshMusicFolders()
+
+      // 只补缺封面的那首，已有封面的不重复请求
+      expect(mockPlayerStore._loadPlaylistCovers).toHaveBeenCalledTimes(1)
+      const passed = mockPlayerStore._loadPlaylistCovers.mock.calls[0]![0] as Track[]
+      expect(passed.map((t) => t.path)).toEqual(['/a.mp3'])
+    })
+
+    it('所有曲目都已有封面时不触发补加载', async () => {
+      const store = useMusicLibraryStore()
+      mockPlayerStore.playlist = [{ path: '/a.mp3', coverPath: '/cover/a.jpg' }]
+      mockScanResult([makePlaylist('All', [makeTrack('/a.mp3')])])
+
+      await store.refreshMusicFolders()
+
+      expect(mockPlayerStore._loadPlaylistCovers).not.toHaveBeenCalled()
+    })
+
+    it('player.playlist 为空时不触碰封面', async () => {
+      const store = useMusicLibraryStore()
+      mockPlayerStore.playlist = []
+      mockScanResult([makePlaylist('All', [makeTrack('/a.mp3')])])
+
+      await store.refreshMusicFolders()
+
+      expect(mockPlayerStore.playlist).toEqual([])
+      expect(mockPlayerStore._loadPlaylistCovers).not.toHaveBeenCalled()
+    })
+
+    it('扫描失败时返回错误信息', async () => {
+      invokeMock.mockRejectedValue(new Error('scan failed'))
+      const store = useMusicLibraryStore()
+
+      const result = await store.refreshMusicFolders()
+
+      expect(result.success).toBe(false)
+      expect(result.message).toContain('scan failed')
     })
   })
 

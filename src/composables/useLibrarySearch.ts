@@ -104,7 +104,7 @@ export function useLibrarySearch(
         searchResults.value.filter((f) => f.coverPath).map((f) => [f.path, f.coverPath as string]),
       )
       coverLoadGeneration++
-      loadSearchResultCovers(coverLoadGeneration)
+      void loadSearchResultCovers(coverLoadGeneration)
     }, 300)
   }
 

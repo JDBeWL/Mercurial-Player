@@ -151,8 +151,7 @@ export function useDominantColor(
 
   /** 亮度上限压缩 + 彩度等比缩放 + 色域映射，输出最终 rgb() 字符串与亮度（两种模式共用） */
   const finalizeColor = (L: number, a: number, b: number): { color: string; luminance: number } => {
-    // 亮度压缩（为了能看清歌词视觉上最好不超过 0.65，保证可读，现在暂时调高一点我感觉观感更好）
-    // const targetL = Math.min(L, 0.65)
+    // 亮度上限：早期取 0.65，实测偏暗影响歌词可读性，上调到 0.95
     const targetL = Math.min(L, 0.95)
 
     // 按亮度压缩比例缩放彩度，防止压缩后彩度不变导致偏色

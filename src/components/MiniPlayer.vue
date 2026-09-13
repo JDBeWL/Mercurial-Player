@@ -202,7 +202,7 @@ const previewTime = computed<number>(() => {
 
 // 方法
 const exitMiniMode = (): void => {
-  configStore.toggleMiniMode()
+  void configStore.toggleMiniMode()
 }
 </script>
 

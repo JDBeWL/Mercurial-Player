@@ -497,9 +497,9 @@ const clearMetadataCache = async () => {
 }
 
 onMounted(() => {
-  loadMetadataCacheStats()
-  loadFontCacheStats()
-  loadTempDirPath()
+  void loadMetadataCacheStats()
+  void loadFontCacheStats()
+  void loadTempDirPath()
 })
 </script>
 

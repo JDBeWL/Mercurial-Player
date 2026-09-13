@@ -31,14 +31,16 @@
       </div>
 
       <div v-else class="playlist-songs">
-        <div class="list">
+        <!-- 使用委托让整份列表只在容器上挂 1 个 click，而不是每行 3 个。
+             行与按钮通过 data-path / data-action 声明意图，由 handleListClick 分派。 -->
+        <div class="list" @click="handleListClick">
           <div
             v-for="(track, index) in processedPlaylist"
             :key="track.path"
-            v-memo="[track.path, track.path === currentPath, playerStore.isPlaying, track.coverUrl]"
+            v-memo="[track.path, track.path === currentPath, isTrackPlaying(track), track.coverUrl]"
             class="list-item"
             :class="{ selected: track.path === currentPath }"
-            @click="playTrack(track)"
+            :data-path="track.path"
           >
             <div v-if="track.coverUrl" class="track-cover">
               <img
@@ -62,25 +64,20 @@
             </div>
             <div class="list-item-trailing">
               <button
-                v-if="track.path !== currentPath || !playerStore.isPlaying"
+                type="button"
                 class="play-button"
-                :title="$t('playlist.play')"
-                @click.stop="playTrack(track)"
+                :title="isTrackPlaying(track) ? $t('playlist.pause') : $t('playlist.play')"
+                :data-action="isTrackPlaying(track) ? 'pause' : 'play'"
               >
-                <span class="material-symbols-rounded">play_arrow</span>
+                <span class="material-symbols-rounded">{{
+                  isTrackPlaying(track) ? 'pause' : 'play_arrow'
+                }}</span>
               </button>
               <button
-                v-if="track.path === currentPath && playerStore.isPlaying"
-                class="pause-button"
-                :title="$t('playlist.pause')"
-                @click.stop="pauseTrack"
-              >
-                <span class="material-symbols-rounded">pause</span>
-              </button>
-              <button
+                type="button"
                 class="remove-button"
                 :title="$t('playlist.remove')"
-                @click.stop="removeTrackByPath(track.path)"
+                data-action="remove"
               >
                 <span class="material-symbols-rounded">close</span>
               </button>
@@ -171,11 +168,17 @@ const handleClose = (): void => {
 // 只追踪当前曲目的 path，O(1) 而非 O(N)
 const currentPath = computed<string | null>(() => currentTrack.value?.path || null)
 
+// 该行是否为当前正在播放的曲目:决定播放按钮显示播放还是暂停。
+// 播放/暂停曾是两个互斥的 v-if 按钮,未命中的那个会在 DOM 里留下一个注释占位节点,
+// 合并为单按钮后每行少一个注释节点
+const isTrackPlaying = (track: Track): boolean =>
+  track.path === currentPath.value && playerStore.isPlaying
+
 const playTrack = (track: Track): void => {
   if (playerStore.currentTrack?.path === track.path && !playerStore.isPlaying) {
     playerStore.resume()
   } else {
-    playerStore.playTrack(track)
+    void playerStore.playTrack(track)
   }
 }
 
@@ -184,7 +187,7 @@ const pauseTrack = (): void => {
 }
 
 // 标题/艺术家显示:简单的 || 链式调用,无需缓存
-// (之前的 Map 缓存与 useTrackInfo.processedTracks 功能重叠,且 1000 条 Map 占用额外内存)
+// 组件内不再另建 Map:与 useTrackInfo.processedTracks 的共享 LRU 重叠,且大列表下是额外内存开销
 const getTrackTitle = (track: Track): string => {
   return FileUtils.getTrackDisplayName(track, configStore.titleExtraction.hideFileExtension)
 }
@@ -289,7 +292,7 @@ const scrollToCurrentTrack = (): void => {
   const currentIndex = processedPlaylist.value.findIndex((t) => t.path === currentTrack.value!.path)
   if (currentIndex === -1) return
 
-  nextTick(() => {
+  void nextTick(() => {
     if (!scrollContainer.value) return
     const items = scrollContainer.value.querySelectorAll('.list-item')
     if (items[currentIndex]) {
@@ -341,6 +344,32 @@ onUnmounted(() => {
 const removeTrackByPath = (path: string): void => {
   playerStore.removeTrack(path)
 }
+
+/**
+ * 播放列表点击委托。
+ */
+const handleListClick = (event: MouseEvent): void => {
+  const target = event.target as HTMLElement | null
+  if (!target) return
+
+  const row = target.closest<HTMLElement>('[data-path]')
+  const path = row?.dataset.path
+  if (!path) return
+
+  const action = target.closest<HTMLElement>('[data-action]')?.dataset.action
+  if (action === 'remove') {
+    removeTrackByPath(path)
+    return
+  }
+  if (action === 'pause') {
+    pauseTrack()
+    return
+  }
+
+  // 命中行本体或播放按钮:都由 path 反查 track(O(1))
+  const track = processedMap.get(path)
+  if (track) playTrack(track)
+}
 </script>
 
 <style scoped>
@@ -349,9 +378,11 @@ const removeTrackByPath = (path: string): void => {
   top: 0;
   right: 0;
   width: 400px;
+  max-width: 90vw;
   height: 100%;
   background-color: var(--md-sys-color-surface);
-  /* box-shadow: var(--md-sys-elevation-level2); */
+  /* 与 MusicLibrary 保持一致:浮层面板需要 level2 阴影与内容区分 */
+  box-shadow: var(--md-sys-elevation-level2);
   z-index: 1000;
   display: flex;
   flex-direction: column;
@@ -396,7 +427,7 @@ const removeTrackByPath = (path: string): void => {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px;
+  padding: 0 8px 16px 8px;
   contain: layout style paint;
 }
 
@@ -536,6 +567,11 @@ const removeTrackByPath = (path: string): void => {
 }
 
 @media (max-width: 480px) {
+  .playlist-view {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
   .list-item-headline {
     font-size: 14px;
   }

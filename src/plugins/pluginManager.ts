@@ -197,7 +197,7 @@ class PluginManager {
     // 强制保存所有插件存储(覆盖未在 deactivate 中处理的场景)
     for (const [pluginId, storage] of this.storage) {
       try {
-        storage.flush()
+        void storage.flush()
       } catch (e) {
         logger.warn(`强制保存插件 ${pluginId} 存储失败:`, e)
       }
@@ -371,7 +371,7 @@ class PluginManager {
     // 确保插件存储立即保存（清除 debounce 并立即保存）
     if (this.storage.has(pluginId)) {
       try {
-        this.storage.get(pluginId)!.flush()
+        void this.storage.get(pluginId)!.flush()
       } catch (e) {
         logger.warn(`插件停用时保存存储失败: ${pluginId}`, e)
       }

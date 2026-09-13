@@ -44,7 +44,7 @@ export function seekTrack(store: PlayerPlaybackTarget, time: number): void {
       store.currentTime = newTime
       if (!wasPlaying) {
         // 后端 seek 总是 play，如果之前是暂停状态需要重新暂停
-        safeInvoke('pause_track', undefined, { severity: ErrorSeverity.LOW })
+        void safeInvoke('pause_track', undefined, { severity: ErrorSeverity.LOW })
       }
     })
     .catch(() => {})
@@ -65,7 +65,7 @@ export function setPlayerVolume(store: PlayerPlaybackTarget, volume: number): vo
     store.previousVolume = newVolume
   }
 
-  safeInvoke<void>(
+  void safeInvoke<void>(
     'set_volume',
     { volume: store.isMuted ? 0 : newVolume },
     { severity: ErrorSeverity.MEDIUM },
@@ -94,13 +94,13 @@ export function togglePlayerMute(store: PlayerPlaybackTarget): void {
       .then(() => {
         const configStore = useConfigStore()
         configStore.audio.volume = volumeToRestore
-        configStore.saveConfigNow()
+        void configStore.saveConfigNow()
       })
       .catch(() => {})
   } else {
     // 静音，保存当前音量
     store.previousVolume = store.volume > 0 ? store.volume : store.previousVolume
     store.isMuted = true
-    safeInvoke('set_volume', { volume: 0 }, { severity: ErrorSeverity.MEDIUM })
+    void safeInvoke('set_volume', { volume: 0 }, { severity: ErrorSeverity.MEDIUM })
   }
 }

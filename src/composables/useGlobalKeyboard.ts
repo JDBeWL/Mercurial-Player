@@ -43,13 +43,13 @@ export function useGlobalKeyboard(): void {
       case 'ArrowLeft':
         event.preventDefault()
         if (playerStore.hasPreviousTrack) {
-          playerStore.previousTrack()
+          void playerStore.previousTrack()
         }
         break
       case 'ArrowRight':
         event.preventDefault()
         if (playerStore.hasNextTrack) {
-          playerStore.nextTrack()
+          void playerStore.nextTrack()
         }
         break
       case 'ArrowUp': {

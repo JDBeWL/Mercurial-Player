@@ -92,7 +92,7 @@ async function loadLyricsStyleCss(): Promise<void> {
     logger.error('加载歌词样式 CSS 失败:', e)
   }
 }
-loadLyricsStyleCss()
+void loadLyricsStyleCss()
 
 // 加载内置插件
 import { pluginManager } from './plugins'

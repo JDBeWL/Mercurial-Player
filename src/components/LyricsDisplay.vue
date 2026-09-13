@@ -165,12 +165,12 @@ export default {
       }
     }
     // 首次加载当前样式
-    loadLyricsStyleCss(configStore.lyrics?.lyricsStyle || 'modern')
+    void loadLyricsStyleCss(configStore.lyrics?.lyricsStyle || 'modern')
     // 监听样式切换
     watch(
       () => configStore.lyrics?.lyricsStyle,
       (newStyle) => {
-        if (newStyle) loadLyricsStyleCss(newStyle)
+        if (newStyle) void loadLyricsStyleCss(newStyle)
       },
     )
 
@@ -369,7 +369,7 @@ export default {
       if (!newVal) {
         // 歌词加载完成后，强制同步 visualTime
         visualTime.value = playerStore.currentTime
-        nextTick(() => scrollToActiveLyric(true))
+        void nextTick(() => scrollToActiveLyric(true))
       }
     })
 
@@ -400,7 +400,7 @@ export default {
       trackFrame(() => trackFrame(forceSync))
 
       // 明确传入目标 index，確保即使 DOM class 更新滞后也能正确找到元素
-      nextTick(() => scrollToActiveLyric(true, true, index))
+      void nextTick(() => scrollToActiveLyric(true, true, index))
     }
 
     // 保存 resize 处理函数引用，以便正确清理
@@ -428,7 +428,7 @@ export default {
         suppressAutoScrollOnMount = true
         updateActiveIndex(visualTime.value)
         // 避免 scrollToActiveLyric(true) 的 160ms 延迟导致淡入中途出现可见跳转
-        nextTick(() => {
+        void nextTick(() => {
           suppressAutoScrollOnMount = false
           jumpToActiveLyric()
         })

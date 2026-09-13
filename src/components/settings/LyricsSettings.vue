@@ -564,7 +564,7 @@ const setColorPreset = async (preset: DesktopLyricsConfig['colorPreset']): Promi
 }
 
 onMounted(() => {
-  loadSystemFonts()
+  void loadSystemFonts()
   // 每次打开设置页重新扫描外部字体目录，运行中放入的字体无需重启即可选择
   void loadExternalFonts()
 

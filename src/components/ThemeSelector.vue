@@ -165,7 +165,7 @@ onUnmounted(() => {
 
 // 应用主题色并按需自动保存配置到 user.json
 const applyColor = async (color: string): Promise<void> => {
-  themeStore.setPrimaryColor(color)
+  void themeStore.setPrimaryColor(color)
 
   if (configStore.general.autoSaveConfig) {
     try {

@@ -6,8 +6,8 @@ export default defineConfig({
   plugins: [vue()],
   test: {
     globals: true,
-    // 默认 node 环境(快速启动);需要 DOM 的测试文件用
-    // @vitest-environment happy-dom 控制注释覆盖
+    // 默认 node 环境(启动快);需要 DOM 的测试文件在文件顶部用
+    // @vitest-environment happy-dom 注释单独覆盖
     environment: 'node',
     include: ['src/**/*.{test,spec}.{js,ts}', 'tests/**/*.{test,spec}.{js,ts}'],
     setupFiles: ['tests/setup.ts'],
@@ -20,6 +20,7 @@ export default defineConfig({
     },
     coverage: {
       provider: 'v8',
+      // 仅统计 .ts;.vue 组件未纳入统计(加进来会让整体覆盖率明显下降)
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.d.ts', 'src/types/**', 'src/**/*.test.ts', 'src/**/*.spec.ts'],
       // 关闭运行前后的目录清理:清理会一次性删除 coverage/ 下大量报告文件,
@@ -27,8 +28,6 @@ export default defineConfig({
       // 报告文件名为固定值,重复运行时直接覆盖,不会无限累积
       clean: false,
       cleanAfterRun: false,
-      // 阈值随测试补齐逐步提升(当前实测:lines 85.3 / branches 78.6 / functions 80.5 / statements 84.0)
-      // 注意 include 仅统计 .ts,.vue 组件未纳入统计
       thresholds: {
         lines: 83,
         branches: 77,

@@ -386,9 +386,9 @@ export const usePlayerStore = defineStore('player', {
 
     play(): void {
       if (this.currentTrack) {
-        this.playTrack(this.currentTrack)
+        void this.playTrack(this.currentTrack)
       } else if (this.playlist.length > 0) {
-        this.playTrack(this.playlist[0]!)
+        void this.playTrack(this.playlist[0]!)
       }
     },
 
@@ -575,7 +575,7 @@ export const usePlayerStore = defineStore('player', {
         if (this.playlist.length > 1 && currentIdx >= 0 && currentIdx < this.playlist.length - 1) {
           const nextTrackTimeoutId = setTimeout(() => {
             if (!this._isDestroyed && this._activePlayRequestId === requestId) {
-              this.nextTrack()
+              void this.nextTrack()
             }
           }, AUTO_NEXT_TRACK_DELAY_MS)
           // 保存定时器ID以便在cleanup时清理
@@ -898,8 +898,8 @@ export const usePlayerStore = defineStore('player', {
         this.duration = 0
       }
 
-      this._cachePlaylistMetadata(playlist)
-      this._loadPlaylistCovers(playlist)
+      void this._cachePlaylistMetadata(playlist)
+      void this._loadPlaylistCovers(playlist)
     },
 
     /** 批量缓存播放列表元数据 (实现见 playerMediaCache.ts) */
@@ -1035,9 +1035,9 @@ export const usePlayerStore = defineStore('player', {
       await unregisterGlobalShortcuts()
 
       // 暂停后端播放;destroy 场景的失败仅记录,无需打扰用户
-      safeInvoke('pause_track', undefined, { severity: ErrorSeverity.LOW })
+      void safeInvoke('pause_track', undefined, { severity: ErrorSeverity.LOW })
       // 设置任务栏为停止状态
-      safeInvoke('set_taskbar_stopped', undefined, { severity: ErrorSeverity.LOW })
+      void safeInvoke('set_taskbar_stopped', undefined, { severity: ErrorSeverity.LOW })
 
       if (this._cacheAbortController) {
         this._cacheAbortController.abort()

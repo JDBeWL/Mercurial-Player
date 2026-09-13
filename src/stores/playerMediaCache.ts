@@ -54,6 +54,7 @@ export async function cachePlaylistMetadata(store: PlayerStore, playlist: Track[
       artist: track.displayArtist || track.artist || '',
       album: track.album || '',
       duration: track.duration || 0,
+      coverPath: track.coverPath,
       bitrate: track.bitrate || null,
       sampleRate: track.sampleRate || null,
       channels: track.channels || null,

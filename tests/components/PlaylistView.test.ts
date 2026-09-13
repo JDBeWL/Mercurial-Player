@@ -284,7 +284,7 @@ describe('PlaylistView.vue', () => {
       store.playlist = tracks
       wrapper = mountComponent()
       await nextTick()
-      const playButtons = wrapper.findAll('.play-button')
+      const playButtons = wrapper.findAll('[data-action="play"]')
       await playButtons[1]!.trigger('click')
       // 组件传入的是 ProcessedTrack（含 cachedTitle 等额外字段），用 path 匹配
       expect(store.playTrack).toHaveBeenCalledWith(
@@ -292,39 +292,40 @@ describe('PlaylistView.vue', () => {
       )
     })
 
-    it('当前曲目播放中显示暂停按钮', async () => {
+    it('当前曲目播放中切换为暂停态', async () => {
       const tracks = makeTracks(2)
       store.playlist = tracks
       store.currentTrack = tracks[0]!
       store.isPlaying = true
       wrapper = mountComponent()
       await nextTick()
-      // 第一项应有暂停按钮
-      const pauseButtons = wrapper.findAll('.pause-button')
-      expect(pauseButtons).toHaveLength(1)
+      // 播放/暂停已合并为单按钮，仅当前播放行处于暂停态
+      expect(wrapper.findAll('[data-action="pause"]')).toHaveLength(1)
+      expect(wrapper.findAll('[data-action="play"]')).toHaveLength(1)
     })
 
-    it('点击暂停按钮调用 pause', async () => {
+    it('点击暂停态按钮调用 pause', async () => {
       const tracks = makeTracks(2)
       store.playlist = tracks
       store.currentTrack = tracks[0]!
       store.isPlaying = true
       wrapper = mountComponent()
       await nextTick()
-      const pauseButton = wrapper.find('.pause-button')
+      const pauseButton = wrapper.find('[data-action="pause"]')
       await pauseButton.trigger('click')
       expect(store.pause).toHaveBeenCalledTimes(1)
     })
 
-    it('非当前曲目不显示暂停按钮', async () => {
+    it('非当前曲目保持播放态', async () => {
       const tracks = makeTracks(3)
       store.playlist = tracks
       store.currentTrack = tracks[0]!
       store.isPlaying = true
       wrapper = mountComponent()
       await nextTick()
-      const pauseButtons = wrapper.findAll('.pause-button')
-      expect(pauseButtons).toHaveLength(1)
+      // 仅当前播放行是暂停态，其余两行仍是播放态
+      expect(wrapper.findAll('[data-action="pause"]')).toHaveLength(1)
+      expect(wrapper.findAll('[data-action="play"]')).toHaveLength(2)
     })
   })
 

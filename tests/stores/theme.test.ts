@@ -75,7 +75,7 @@ describe('toggleDarkMode', () => {
   it('flips the mode and applies the theme', () => {
     const store = useThemeStore()
 
-    store.toggleDarkMode()
+    void store.toggleDarkMode()
 
     expect(store.isDarkMode).toBe(true)
     expect(store.isDark).toBe(true)

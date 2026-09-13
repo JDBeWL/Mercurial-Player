@@ -13,10 +13,8 @@ export default [
   js.configs.recommended,
 
   // TypeScript 推荐规则（非类型检查版本）
-  // 未使用 recommendedTypeChecked 因为：
-  // 1. 现有代码库有大量 any 使用，启用后产生 400+ 错误
-  // 2. ESLint 10 + typescript-eslint 8 的 parserServices 对配置文件有兼容性问题
-  // 后续可逐步修复类型安全问题后再升级到 recommendedTypeChecked
+  // 未整体启用 recommendedTypeChecked：代码库已无 any，但一次性接入全部类型感知规则
+  // 会带出大批报错，成本高于收益。改为按需逐条启用（见下方类型感知规则块）
   ...tseslint.configs.recommended,
 
   // Vue 推荐规则（flat config 格式）
@@ -90,6 +88,25 @@ export default [
       'no-useless-assignment': 'warn',
       // Vue: computed 属性中的副作用仅警告
       'vue/no-side-effects-in-computed-properties': 'warn',
+    },
+  },
+
+  // 类型感知规则：需要 parserServices 提供类型信息，故单独开启 projectService
+  // extraFileExtensions 是让 .vue 被 project service 识别的必要配置，缺失会一律报解析错误
+  {
+    files: ['**/*.ts', '**/*.vue'],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+        extraFileExtensions: ['.vue'],
+      },
+    },
+    rules: {
+      // 未处理的 Promise 必须显式标注：await、带 onRejected 的 .then、.catch 或 void
+      // 该规则拦的是「异步错误被静默吞掉」这类难排查的缺陷；
+      // 确属故意 fire-and-forget 时用 void 显式声明意图，不要靠忽略注释绕过
+      '@typescript-eslint/no-floating-promises': 'error',
     },
   },
 

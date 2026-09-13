@@ -17,7 +17,7 @@ export async function setupTrackEndedListener(store: PlayerStore): Promise<Unlis
     return await listen('track-ended', () => {
       if (store._isDestroyed) return
       logger.debug('Received track-ended event')
-      store._onEnded()
+      void store._onEnded()
     })
   } catch (err) {
     logger.error('Failed to setup track-ended listener:', err)
@@ -54,7 +54,7 @@ export async function setupTaskbarListeners(store: PlayerStore): Promise<Taskbar
     result.previous = await listen('taskbar-previous', () => {
       if (store._isDestroyed) return
       logger.debug('Taskbar: Previous button clicked')
-      store.previousTrack()
+      void store.previousTrack()
     })
 
     result.playPause = await listen('taskbar-play-pause', () => {
@@ -66,7 +66,7 @@ export async function setupTaskbarListeners(store: PlayerStore): Promise<Taskbar
     result.next = await listen('taskbar-next', () => {
       if (store._isDestroyed) return
       logger.debug('Taskbar: Next button clicked')
-      store.nextTrack()
+      void store.nextTrack()
     })
 
     logger.info('Taskbar listeners setup complete')

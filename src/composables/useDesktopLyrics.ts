@@ -305,7 +305,7 @@ export function useDesktopLyrics() {
     listenersDisposed = false
 
     const registerListener = (promise: Promise<() => void>) => {
-      promise.then((unlisten) => {
+      void promise.then((unlisten) => {
         if (listenersDisposed) {
           unlisten()
         } else {
@@ -354,16 +354,16 @@ export function useDesktopLyrics() {
       () => configStore.lyrics?.desktopLyrics?.enabled,
       (enabled) => {
         if (enabled) {
-          showDesktopLyrics()
-          syncLockState()
-          syncFontSize()
-          syncFontFamily()
-          syncColorPreset()
+          void showDesktopLyrics()
+          void syncLockState()
+          void syncFontSize()
+          void syncFontFamily()
+          void syncColorPreset()
           startDesktopLyricsPolling()
           scheduleDesktopLyricsUpdate()
         } else {
           stopDesktopLyricsPolling()
-          hideDesktopLyrics()
+          void hideDesktopLyrics()
         }
       },
     )
@@ -377,9 +377,9 @@ export function useDesktopLyrics() {
         () => configStore.lyrics?.desktopLyrics?.colorPreset,
       ],
       ([locked, fontSize, colorPreset], [prevLocked, prevFontSize, prevColorPreset]) => {
-        if (locked !== prevLocked) syncLockState()
-        if (fontSize !== prevFontSize) syncFontSize()
-        if (colorPreset !== prevColorPreset) syncColorPreset()
+        if (locked !== prevLocked) void syncLockState()
+        if (fontSize !== prevFontSize) void syncFontSize()
+        if (colorPreset !== prevColorPreset) void syncColorPreset()
       },
     )
     stopFns.push(stopWatchDesktopSettings)
@@ -394,11 +394,11 @@ export function useDesktopLyrics() {
 
   onMounted(() => {
     if (configStore.lyrics?.desktopLyrics?.enabled) {
-      showDesktopLyrics()
-      syncLockState()
-      syncFontSize()
-      syncFontFamily()
-      syncColorPreset()
+      void showDesktopLyrics()
+      void syncLockState()
+      void syncFontSize()
+      void syncFontFamily()
+      void syncColorPreset()
       startDesktopLyricsPolling()
       scheduleDesktopLyricsUpdate()
     }
