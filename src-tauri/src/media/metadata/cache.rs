@@ -131,26 +131,83 @@ pub fn save_metadata_to_cache(path: &str, metadata: &TrackMetadata) {
     log::debug!("元数据已缓存: {path}");
 }
 
+/// 构造一个空的元数据缓存
+fn empty_metadata_cache() -> MetadataCache {
+    MetadataCache {
+        version: CACHE_VERSION,
+        entries: std::collections::HashMap::new(),
+    }
+}
+
+/// 清空内存缓存
+///
+/// 内存缓存是写盘的权威来源:只删磁盘文件而不清内存,下一次 flush 会把旧条目写回。
+/// 用 `lock_or_log!` 而非 `if let Ok`,锁中毒时也要真的清掉并留日志。
+fn clear_memory_cache() {
+    let mut lock = lock_or_log!(MEMORY_CACHE.write());
+    *lock = Some(empty_metadata_cache());
+}
+
 /// 清理元数据缓存中不存在的文件
 pub fn clean_metadata_cache() -> Result<usize, AppError> {
-    let mut cache = load_metadata_cache();
-    let original_count = cache.entries.len();
+    // 以内存缓存为准(它是权威来源);锁内只取 key,exists() 是文件 I/O,不放锁内
+    let cached_keys = {
+        let lock = lock_or_log!(MEMORY_CACHE.read());
+        lock.as_ref()
+            .map(|cache| cache.entries.keys().cloned().collect::<Vec<String>>())
+    };
+    let keys =
+        cached_keys.unwrap_or_else(|| load_metadata_cache().entries.keys().cloned().collect());
 
-    // 移除不存在的文件
-    cache.entries.retain(|path, _| Path::new(path).exists());
+    let stale: Vec<String> = keys
+        .into_iter()
+        .filter(|path| !Path::new(path).exists())
+        .collect();
 
-    let removed_count = original_count - cache.entries.len();
-
-    if removed_count > 0 {
-        save_metadata_cache(&cache)?;
-        log::info!("清理了 {removed_count} 个无效的元数据缓存条目");
+    if stale.is_empty() {
+        return Ok(0);
     }
+
+    let removed_count = stale.len();
+
+    // 写盘基底取内存快照(克隆在锁外);期间新增的条目仍留在内存,由后续 flush 落盘
+    let snapshot = {
+        let cached = lock_or_log!(MEMORY_CACHE.read()).clone();
+        if let Some(mut cache) = cached {
+            // 内存与磁盘一致地删除,否则下一次 flush 会把旧条目写回
+            for path in &stale {
+                cache.entries.remove(path);
+            }
+            {
+                let mut guard = lock_or_log!(MEMORY_CACHE.write());
+                if let Some(mem) = guard.as_mut() {
+                    for path in &stale {
+                        mem.entries.remove(path);
+                    }
+                }
+            }
+            cache
+        } else {
+            // 内存缓存未初始化:以磁盘内容为基底,不在这里初始化它
+            let mut from_disk = load_metadata_cache();
+            for path in &stale {
+                from_disk.entries.remove(path);
+            }
+            from_disk
+        }
+    };
+    save_metadata_cache(&snapshot)?;
+
+    log::info!("清理了 {removed_count} 个无效的元数据缓存条目");
 
     Ok(removed_count)
 }
 
 /// 清除所有元数据缓存
 pub fn clear_metadata_cache() -> Result<(), AppError> {
+    // 先清内存:避免清理期间并发写入的条目在清完磁盘后又把旧数据 flush 回去
+    clear_memory_cache();
+
     let cache_path = metadata_cache_path();
     if cache_path.exists() {
         fs::remove_file(&cache_path).map_err(|e| format!("删除缓存文件失败: {e}"))?;
@@ -159,16 +216,13 @@ pub fn clear_metadata_cache() -> Result<(), AppError> {
     Ok(())
 }
 
-/// 获取缓存统计信息
+/// 获取缓存统计信息(以磁盘缓存文件为准,与清理操作的目标一致)
+///
+/// 占用取文件字节数:前端按 KB/MB 展示,不能只统计结构体在栈上的大小。
 pub fn get_metadata_cache_stats() -> (usize, u64) {
-    let cache = load_metadata_cache();
-    let entry_count = cache.entries.len();
-
-    let total_size = cache
-        .entries
-        .values()
-        .map(|e| size_of_val(&e.metadata) as u64)
-        .sum();
+    let cache_path = metadata_cache_path();
+    let total_size = fs::metadata(&cache_path).map(|m| m.len()).unwrap_or(0);
+    let entry_count = load_metadata_cache().entries.len();
 
     (entry_count, total_size)
 }
@@ -384,12 +438,15 @@ fn get_cache_files_sorted() -> Result<Vec<CacheFileInfo>, AppError> {
 /// 清理超出大小限制的缓存文件
 fn clean_cache_by_size(max_cache_size_mb: u64) -> Result<usize, AppError> {
     let max_cache_size_bytes = max_cache_size_mb * 1024 * 1024;
-    let mut files = get_cache_files_sorted()?;
+    // 已按最后访问时间升序,顺序消费即可(remove(0) 每次搬移整个 Vec)
+    let files = get_cache_files_sorted()?;
     let mut total_size: u64 = files.iter().map(|f| f.size).sum();
     let mut cleaned_count = 0;
 
-    while total_size > max_cache_size_bytes && !files.is_empty() {
-        let file = files.remove(0);
+    for file in files {
+        if total_size <= max_cache_size_bytes {
+            break;
+        }
         if fs::remove_file(&file.path).is_ok() {
             total_size = total_size.saturating_sub(file.size);
             cleaned_count += 1;

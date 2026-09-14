@@ -71,11 +71,11 @@ const API_CALL_POLICY: ReadonlyMap<string, PluginPermissionType | null> = new Ma
   ['events.emit', null],
   ['network.fetch', PluginPermission.NETWORK],
   ['utils.loadImage', null],
-  ['file.saveAs', PluginPermission.STORAGE],
-  ['file.saveImage', PluginPermission.STORAGE],
+  ['file.saveAs', PluginPermission.FILE_WRITE],
+  ['file.saveImage', PluginPermission.FILE_WRITE],
   ['file.openScreenshotsDirectory', null],
-  ['clipboard.writeImage', PluginPermission.STORAGE],
-  ['clipboard.writeText', PluginPermission.STORAGE],
+  ['clipboard.writeImage', PluginPermission.CLIPBOARD_WRITE],
+  ['clipboard.writeText', PluginPermission.CLIPBOARD_WRITE],
 ])
 
 /**

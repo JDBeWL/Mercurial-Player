@@ -5,7 +5,7 @@ import { resolveDataFile } from '../services/appService'
 import { useConfigStore } from './config'
 import { usePlayerStore } from './player'
 import logger from '../utils/logger'
-import type { Track, Playlist } from '@/types'
+import type { Track, Playlist, SortOrder } from '@/types'
 
 // plugin-store 实例（懒加载单例）
 let _libraryStoreInstance: Store | null = null
@@ -41,6 +41,10 @@ interface MusicLibraryState {
   error: string | null
   /** 记录已排序的播放列表名称，用于惰性排序 */
   _sortedPlaylists: Set<string>
+  /** 上次排序使用的顺序，与配置不一致时作废惰性排序结果 */
+  _sortedSortOrder: SortOrder | ''
+  /** 刷新代际，并发调用时只让最后一次的结果生效 */
+  _refreshEpoch: number
   /** 是否已从缓存加载 */
   _loadedFromCache: boolean
 }
@@ -60,6 +64,8 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
 
     // 惰性排序追踪
     _sortedPlaylists: new Set<string>(),
+    _sortedSortOrder: '',
+    _refreshEpoch: 0,
 
     // 缓存标记
     _loadedFromCache: false,
@@ -154,6 +160,9 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
      * 扫描完成后自动将播放列表缓存到 plugin-store 以加速下次启动
      */
     async refreshMusicFolders(): Promise<{ success: boolean; message: string }> {
+      // 并发刷新会让「清空 → 分批 push」交错叠加,用代际只让最后一次生效
+      const epoch = ++this._refreshEpoch
+      const superseded = { success: false, message: 'Superseded by a newer refresh' }
       try {
         // 先记录当前选中状态，刷新后重新绑定到新对象，避免封面/元数据显示不更新
         const currentPlaylistName = this.currentPlaylist?.name ?? null
@@ -162,12 +171,14 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         const newPlaylists = await invoke<Playlist[]>('get_all_audio_files', {
           paths: this.musicFolders,
         })
+        if (epoch !== this._refreshEpoch) return superseded
 
         // 分批更新，避免一次性替换导致响应式风暴
         const BATCH_SIZE = 10 // 每批处理 10 个播放列表
         this.playlists = [] // 先清空
 
         for (let i = 0; i < newPlaylists.length; i += BATCH_SIZE) {
+          if (epoch !== this._refreshEpoch) return superseded
           const batch = newPlaylists.slice(i, i + BATCH_SIZE)
           this.playlists.push(...batch)
 
@@ -179,6 +190,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
 
         // 重置惰性排序追踪，让下次选择播放列表时重新排序
         this._sortedPlaylists = new Set<string>()
+        this._sortedSortOrder = ''
 
         // 重新绑定当前播放列表（指向刷新后的新对象）
         if (currentPlaylistName) {
@@ -197,11 +209,13 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
               trackMap.set(f.path, f)
             }
           }
-          playerStore.playlist = playerStore.playlist.map((t) => {
-            const fresh = trackMap.get(t.path)
-            if (!fresh) return t
-            return t.coverPath ? { ...fresh, coverPath: t.coverPath } : fresh
-          })
+          playerStore._setPlaylist(
+            playerStore.playlist.map((t) => {
+              const fresh = trackMap.get(t.path)
+              if (!fresh) return t
+              return t.coverPath ? { ...fresh, coverPath: t.coverPath } : fresh
+            }),
+          )
 
           // 替换前同样未加载出封面的曲目，补一次加载，避免封面永久缺失
           const missingCovers = playerStore.playlist.filter((t) => !t.coverPath)
@@ -246,6 +260,9 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         this.playlists = cached.playlists as Playlist[]
         this._loadedFromCache = true
         this._sortedPlaylists = new Set<string>()
+        this._sortedSortOrder = ''
+        // 缓存是权威内容,让仍在进行中的刷新作废
+        this._refreshEpoch++
         logger.info(`Loaded ${cached.playlists.length} playlists from cache`)
         return true
       } catch (err) {
@@ -282,14 +299,22 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
      * 对播放列表进行惰性排序（只在首次访问时排序一次）
      */
     _ensureSorted(playlist: Playlist): void {
+      const configStore = useConfigStore()
+      const sortOrder = configStore.playlist.sortOrder
+
+      // 排序顺序变了就作废旧结果:改顺序的入口不止 refresh(设置页直接改配置也算)
+      if (this._sortedSortOrder !== sortOrder) {
+        this._sortedPlaylists.clear()
+        this._sortedSortOrder = sortOrder
+      }
+
       if (this._sortedPlaylists.has(playlist.name)) return
       if (!playlist.files || playlist.files.length === 0) {
         this._sortedPlaylists.add(playlist.name)
         return
       }
 
-      const configStore = useConfigStore()
-      const isAscOrder = configStore.playlist.sortOrder === 'asc'
+      const isAscOrder = sortOrder === 'asc'
 
       playlist.files.sort((a, b) => {
         const titleA = (a.title || a.name || '').toLowerCase()
@@ -336,7 +361,9 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       this.currentPlaylist = null
       this.playlists = []
       this._sortedPlaylists = new Set<string>()
+      this._sortedSortOrder = ''
       this._loadedFromCache = false
+      this._refreshEpoch++
     },
   },
 })

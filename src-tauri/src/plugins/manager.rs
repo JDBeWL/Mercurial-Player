@@ -72,6 +72,9 @@ pub fn list_plugin_dirs() -> Result<Vec<String>, AppError> {
 }
 
 /// 读取插件清单
+///
+/// 目录名必须与清单 id 一致:插件身份(卸载、权限、存储归属)按 id 认定,
+/// 不一致会让恶意插件顶替他人身份。
 pub fn read_manifest(plugin_name: &str) -> Result<PluginManifest, AppError> {
     if !is_simple_filename(plugin_name) {
         return Err(AppError::Plugin("非法的插件目录名".to_string()));
@@ -85,6 +88,13 @@ pub fn read_manifest(plugin_name: &str) -> Result<PluginManifest, AppError> {
 
     let manifest: PluginManifest = serde_json::from_str(&content)
         .map_err(|e| AppError::Plugin(format!("无法解析插件清单: {e}")))?;
+
+    if manifest.id != plugin_name {
+        return Err(AppError::Plugin(format!(
+            "插件目录名与清单 id 不一致,拒绝加载: {plugin_name} != {}",
+            manifest.id
+        )));
+    }
 
     Ok(manifest)
 }
@@ -119,10 +129,15 @@ pub fn uninstall_plugin(plugin_id: &str) -> Result<(), AppError> {
     let plugins_dir = get_plugins_dir()?;
     let target_dir = plugins_dir.join(plugin_id);
 
-    if target_dir.exists() {
-        fs::remove_dir_all(&target_dir)
-            .map_err(|e| AppError::Plugin(format!("无法删除插件: {e}")))?;
+    if !target_dir.exists() {
+        return Ok(());
     }
+
+    // 删除前先让目录自证身份:清单 id 与目录名不一致(或清单读不出)时拒绝,
+    // 否则声明他人 id 的插件能让"卸载"删掉别人的目录
+    read_manifest(plugin_id)?;
+
+    fs::remove_dir_all(&target_dir).map_err(|e| AppError::Plugin(format!("无法删除插件: {e}")))?;
 
     Ok(())
 }

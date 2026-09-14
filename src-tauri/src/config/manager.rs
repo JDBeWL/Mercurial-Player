@@ -501,11 +501,52 @@ impl ConfigManager {
     ///
     /// 必须显式识别包装格式:serde 默认忽略未知字段,直接反序列化
     /// 包装文件会得到全默认值,导致用户配置被静默清空。
-    fn read_config_file(file_path: &str) -> Option<AppConfig> {
-        let text = std::fs::read_to_string(file_path).ok()?;
-        let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    ///
+    /// 返回值区分三种情况,不可把「文件损坏」当成「文件不存在」:
+    /// - `Ok(None)`:文件不存在(首次运行)
+    /// - `Ok(Some(config))`:读取并解析成功
+    /// - `Err(..)`:文件存在但读取/解析失败
+    ///
+    /// 折叠成 `Option` 会让损坏文件被当成"没有配置文件"而回退默认值,并落盘覆盖用户配置。
+    fn read_config_file(file_path: &str) -> Result<Option<AppConfig>, AppError> {
+        if !Path::new(file_path).exists() {
+            return Ok(None);
+        }
+        let text = std::fs::read_to_string(file_path)
+            .map_err(|e| AppError::Config(format!("读取配置文件失败: {e}")))?;
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| AppError::Config(format!("配置文件不是合法 JSON(可能已损坏): {e}")))?;
         let target = value.get("appConfig").unwrap_or(&value);
-        serde_json::from_value::<AppConfig>(target.clone()).ok()
+        serde_json::from_value::<AppConfig>(target.clone())
+            .map(Some)
+            .map_err(|e| AppError::Config(format!("配置文件字段不符合预期(可能已损坏): {e}")))
+    }
+
+    /// 把无法解析的配置文件改名备份
+    ///
+    /// 备份后原路径不再存在,后续 `save_config` 会写成新文件,
+    /// 用户原始配置仍可从 `<config>.corrupt-<时间戳>` 手工恢复。
+    /// 备份失败时必须留日志:原文件仍在原路径,后续保存会把它覆盖掉。
+    fn backup_corrupt_config(&self) {
+        let config_path = self.get_config_path();
+        // 毫秒时间戳 + 同名避让,反复启动时不会因目标名已存在而 rename 失败
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or_default();
+        let mut backup_path = format!("{config_path}.corrupt-{timestamp}");
+        let mut suffix = 1;
+        while Path::new(&backup_path).exists() {
+            backup_path = format!("{config_path}.corrupt-{timestamp}-{suffix}");
+            suffix += 1;
+        }
+        match std::fs::rename(&config_path, &backup_path) {
+            Ok(()) => log::error!("配置文件无法解析,已备份为 {backup_path},将以默认配置启动"),
+            Err(e) => log::error!(
+                "配置文件无法解析,且备份失败({e});原文件仍在 {config_path},\
+                 请手工移走后重启,否则它会被后续保存覆盖"
+            ),
+        }
     }
 
     /// 判断文件是否为旧版 plugin-store 包装格式(顶层含 "appConfig" 键)
@@ -536,18 +577,27 @@ impl ConfigManager {
         let config_path = self.get_config_path();
         let legacy_dir = Self::get_legacy_config_dir();
 
-        if let Some(config) = Self::read_config_file(&config_path) {
-            if Self::is_plugin_store_wrapped(&config_path) {
-                log::info!("检测到旧 plugin-store 包装格式,重写为裸格式: {config_path}");
-                let _ = Self::save_config_to_file(&config, &config_path);
+        match Self::read_config_file(&config_path) {
+            Ok(Some(config)) => {
+                if Self::is_plugin_store_wrapped(&config_path) {
+                    log::info!("检测到旧 plugin-store 包装格式,重写为裸格式: {config_path}");
+                    let _ = Self::save_config_to_file(&config, &config_path);
+                }
+                Self::remove_legacy_config_dir(legacy_dir);
+                return;
             }
-            Self::remove_legacy_config_dir(legacy_dir);
-            return;
+            Ok(None) => {}
+            Err(e) => {
+                // 配置已损坏:不覆盖、也不删旧目录(那是最后一份可用副本),
+                // 备份与回退交给 load_config
+                log::warn!("配置文件已损坏,跳过旧版迁移以免覆盖: {e}");
+                return;
+            }
         }
 
         if let Some(dir) = &legacy_dir {
             let legacy_user = format!("{dir}/user.json");
-            if let Some(config) = Self::read_config_file(&legacy_user) {
+            if let Ok(Some(config)) = Self::read_config_file(&legacy_user) {
                 log::info!("迁移旧配置文件: {legacy_user} -> {config_path}");
                 if Self::save_config_to_file(&config, &config_path).is_ok() {
                     Self::remove_legacy_config_dir(legacy_dir);
@@ -622,14 +672,23 @@ impl ConfigManager {
         self.initialize_config_files()?;
 
         let config_path = self.get_config_path();
-        if let Some(config) = Self::read_config_file(&config_path) {
-            log::info!("Loaded user configuration from: {config_path}");
-            let config = Self::with_default_allowed_hosts(config);
-            self.store_cache(&config);
-            return Ok(config);
+        match Self::read_config_file(&config_path) {
+            Ok(Some(config)) => {
+                log::info!("Loaded user configuration from: {config_path}");
+                let config = Self::with_default_allowed_hosts(config);
+                self.store_cache(&config);
+                return Ok(config);
+            }
+            Ok(None) => {
+                log::info!("No configuration file yet, using compiled-in defaults");
+            }
+            Err(e) => {
+                // 读不出来先备份再回退默认值,备份后原路径空出,后续保存不会覆盖用户配置
+                log::error!("配置文件损坏,无法加载: {e}");
+                self.backup_corrupt_config();
+            }
         }
 
-        log::info!("No valid configuration file, using compiled-in defaults");
         let default_config = AppConfig::default();
         self.store_cache(&default_config);
         Ok(default_config)

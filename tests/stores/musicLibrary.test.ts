@@ -24,6 +24,10 @@ vi.mock('@/stores/config', () => ({
 const mockPlayerStore = {
   playlist: [] as Array<{ path: string; coverPath?: string }>,
   _loadPlaylistCovers: vi.fn(),
+  /** player.playlist 已 markRaw,替换统一走 _setPlaylist */
+  _setPlaylist(tracks: Array<{ path: string; coverPath?: string }>): void {
+    mockPlayerStore.playlist = tracks
+  },
 }
 vi.mock('@/stores/player', () => ({
   usePlayerStore: vi.fn(() => mockPlayerStore),

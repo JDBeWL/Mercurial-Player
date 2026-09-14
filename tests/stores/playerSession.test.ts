@@ -69,6 +69,10 @@ function makeStore(
     _cachePlaylistMetadata: vi.fn(),
     _loadPlaylistCovers: vi.fn(),
     _updateTaskbarState: vi.fn(),
+    /** player.playlist 已 markRaw,替换统一走 _setPlaylist */
+    _setPlaylist(this: { playlist: Track[] }, newTracks: Track[]): void {
+      this.playlist = newTracks
+    },
     ...overrides,
   } as unknown as FakeStore & Record<string, unknown>
 }

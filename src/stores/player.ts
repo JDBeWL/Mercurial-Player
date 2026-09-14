@@ -704,7 +704,7 @@ export const usePlayerStore = defineStore('player', {
 
       this.currentTrack = null
       if (clearPlaylist) {
-        this.playlist = []
+        this._setPlaylist([])
       }
       this.currentTime = 0
       this.duration = 0
@@ -869,13 +869,24 @@ export const usePlayerStore = defineStore('player', {
 
     // --- 数据加载 ---
 
+    /**
+     * 整体替换播放列表。
+     * markRaw:上万首 Track 全量深度代理代价极高,列表内改动一律重新赋值(见
+     * playerPlaylist / playerSession),不依赖数组原地变异触发更新。
+     * 复制一份再 markRaw:直接标记入参会连带让调用方的数组(如 musicLibrary
+     * 的 playlist.files)失去响应式能力。
+     */
+    _setPlaylist(tracks: Track[]): void {
+      this.playlist = markRaw([...tracks])
+    },
+
     loadPlaylist(playlist: Track[]): void {
       // 取消上一次正在进行的缓存任务
       if (this._cacheAbortController) {
         this._cacheAbortController.abort()
       }
 
-      this.playlist = playlist
+      this._setPlaylist(playlist)
       // playlist 变化,作废 shuffle 顺序与历史栈
       this._shuffleOrder = []
       this._shufflePosition = -1

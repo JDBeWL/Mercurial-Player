@@ -60,7 +60,7 @@ export interface Playlist {
 }
 
 export type RepeatMode = 'none' | 'track' | 'list'
-type SortOrder = 'asc' | 'desc'
+export type SortOrder = 'asc' | 'desc'
 
 /* 沉浸式封面背景取色风格 */
 export type ImmersiveColorScheme = 'album' | 'fusion'

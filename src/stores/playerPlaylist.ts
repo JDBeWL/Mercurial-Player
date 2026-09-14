@@ -14,8 +14,8 @@ export function removeTrackFromPlaylist(store: PlayerStore, path: string): void 
   const index = store.playlist.findIndex((t) => t.path === path)
   if (index === -1) return
 
-  // 先从播放列表中移除
-  store.playlist.splice(index, 1)
+  // 重新赋值而非 splice:playlist 已 markRaw,原地变异不会触发更新
+  store._setPlaylist(store.playlist.filter((_, i) => i !== index))
 
   // 如果播放列表为空，重置状态
   if (store.playlist.length === 0) {
@@ -69,7 +69,7 @@ export function addTrackNextInPlaylist(store: PlayerStore, track: Track): void {
 
   // 如果没有当前曲目或播放列表为空，直接添加到开头
   if (currentIndex === -1 || store.playlist.length === 0) {
-    store.playlist.unshift(track)
+    store._setPlaylist([track, ...store.playlist])
     logger.info('Added track to beginning of playlist:', track.path)
     return
   }
@@ -78,18 +78,18 @@ export function addTrackNextInPlaylist(store: PlayerStore, track: Track): void {
   const existingIndex = store.playlist.findIndex((t) => t.path === track.path)
 
   if (existingIndex !== -1) {
-    // 如果曲目已存在，先移除它
-    store.playlist.splice(existingIndex, 1)
+    // 已在列表中:先摘出,再插到当前曲目之后
+    const rest = store.playlist.filter((_, i) => i !== existingIndex)
 
     // 移除后当前曲目的实际索引可能已偏移，需要重新计算
     const adjustedCurrentIndex = existingIndex < currentIndex ? currentIndex - 1 : currentIndex
-    // 插入到当前曲目之后
-    const adjustedIndex = adjustedCurrentIndex + 1
-    store.playlist.splice(adjustedIndex, 0, track)
+    const at = adjustedCurrentIndex + 1
+    store._setPlaylist([...rest.slice(0, at), track, ...rest.slice(at)])
     logger.info('Moved existing track to next position:', track.path)
   } else {
     // 如果曲目不存在，直接插入到当前曲目后面
-    store.playlist.splice(currentIndex + 1, 0, track)
+    const at = currentIndex + 1
+    store._setPlaylist([...store.playlist.slice(0, at), track, ...store.playlist.slice(at)])
     logger.info('Added new track to next position:', track.path)
   }
 }

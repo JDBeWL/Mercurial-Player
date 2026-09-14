@@ -126,6 +126,71 @@ pub(super) fn decode_and_push_to_wasapi(
         }
     };
 
+    // EOF 收尾:等缓冲排空后停止播放并发出 track-ended。
+    // 整数倍 chunk 长度的曲目最后一轮读满块,下一轮首样本即 EOF,只能在此收尾;
+    // 遗漏会让这类曲目放完不发 track-ended(独占模式表现为不自动切下一首)。
+    let finish_eof = |my_gen: u64, my_tid: u64| {
+        use super::wasapi::PlaybackState;
+
+        // 排空等待上限:设备异常时缓冲可能永不排空
+        const MAX_DRAIN_WAIT: Duration = Duration::from_secs(5);
+        let mut drain_deadline = std::time::Instant::now() + MAX_DRAIN_WAIT;
+        // 只有排空才算播完;代际变化与 player 被取走属于外部取消,不发事件
+        let mut drained = true;
+        loop {
+            if generation.load(Ordering::SeqCst) != my_gen
+                || thread_id_ref.load(Ordering::SeqCst) != my_tid
+            {
+                drained = false;
+                break;
+            }
+            let status = {
+                let guard = lock_or_log!(wasapi.lock());
+                guard.as_ref().map(|p| {
+                    (
+                        p.buffer_size(),
+                        matches!(p.state(), PlaybackState::Paused | PlaybackState::Pausing),
+                    )
+                })
+            };
+            let Some((buf_size, paused)) = status else {
+                drained = false;
+                break;
+            };
+            if buf_size == 0 {
+                break;
+            }
+            if std::time::Instant::now() >= drain_deadline {
+                // 暂停时缓冲不会排空,不算停滞:延后截止时间继续等
+                if !paused {
+                    break;
+                }
+                drain_deadline = std::time::Instant::now() + MAX_DRAIN_WAIT;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        if !drained
+            || generation.load(Ordering::SeqCst) != my_gen
+            || thread_id_ref.load(Ordering::SeqCst) != my_tid
+        {
+            return;
+        }
+        // stop 持锁,emit 放锁外
+        let stopped = {
+            let guard = lock_or_log!(wasapi.lock());
+            match guard.as_ref() {
+                Some(p) => {
+                    let _ = p.stop();
+                    true
+                }
+                None => false,
+            }
+        };
+        if stopped {
+            let _ = emit_track_ended(&app);
+        }
+    };
+
     loop {
         if generation.load(Ordering::SeqCst) != my_generation
             || thread_id_ref.load(Ordering::SeqCst) != my_id
@@ -149,6 +214,10 @@ pub(super) fn decode_and_push_to_wasapi(
             }
         }
         if interleaved.is_empty() {
+            // 本轮没读到采样:eof 说明源已耗尽(整数倍长度走这里),空读异常则直接退出
+            if eof {
+                finish_eof(my_generation, my_id);
+            }
             break;
         }
 
@@ -328,28 +397,7 @@ pub(super) fn decode_and_push_to_wasapi(
         }
 
         if eof && interleaved.len() < samples_needed {
-            loop {
-                if generation.load(Ordering::SeqCst) != my_generation
-                    || thread_id_ref.load(Ordering::SeqCst) != my_id
-                {
-                    break;
-                }
-                let buf_size = lock_or_log!(wasapi.lock())
-                    .as_ref()
-                    .map_or(0, |p| p.buffer_size());
-                if buf_size == 0 {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            if generation.load(Ordering::SeqCst) == my_generation
-                && thread_id_ref.load(Ordering::SeqCst) == my_id
-            {
-                if let Some(ref p) = *lock_or_log!(wasapi.lock()) {
-                    let _ = p.stop();
-                }
-                let _ = emit_track_ended(&app);
-            }
+            finish_eof(my_generation, my_id);
             break;
         }
         // 让出 CPU 给其他线程 (主要给消费线程),避免 100% 占用

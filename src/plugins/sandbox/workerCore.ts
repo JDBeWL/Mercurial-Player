@@ -132,6 +132,9 @@ const MAX_REGISTERED_CALLBACKS = 10_000
  * - 网络类:插件的全部网络访问必须经 api.network.fetch 的权限代理走后端 HTTP
  * - 逃逸/外传类:postMessage (伪造沙箱协议消息)、close (自杀 Worker)、
  *   indexedDB (本地持久化外传)、importScripts (经典脚本加载)
+ * - 新 realm 类:Worker/SharedWorker (嵌套 Worker 的全局是全新的,中和全部失效)、
+ *   BroadcastChannel/caches (跨上下文通信与本地持久化)
+ * - RTCPeerConnection:WebRTC 的 ICE 出站不受 CSP connect-src 约束
  * - 事件类:addEventListener/removeEventListener/dispatchEvent
  *   (窃听宿主下行消息、以合成 MessageEvent 向运行时注入伪造消息;
  *   运行时自身的 unhandledrejection 监听在中和前捕获原生引用,见 workerBootstrap)
@@ -142,9 +145,14 @@ const SANDBOX_BLOCKED_GLOBAL_KEYS = [
   'WebSocket',
   'EventSource',
   'WebSocketStream',
+  'RTCPeerConnection',
   'postMessage',
   'close',
   'indexedDB',
+  'caches',
+  'Worker',
+  'SharedWorker',
+  'BroadcastChannel',
   'importScripts',
   'addEventListener',
   'removeEventListener',

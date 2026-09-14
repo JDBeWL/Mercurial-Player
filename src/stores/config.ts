@@ -24,6 +24,9 @@ import type {
   AppConfig,
 } from '@/types'
 
+/** 初始化完成的延迟句柄(重新 loadConfig 时需取消旧的) */
+let initCompleteTimer: ReturnType<typeof setTimeout> | null = null
+
 interface ConfigState {
   musicDirectories: string[]
   directoryScan: DirectoryScanConfig
@@ -151,10 +154,10 @@ export const useConfigStore = defineStore('config', {
     },
 
     // 标记配置已更改
+    // 初始化期间置位同样有效:此时只跳过自动保存(见 _patchSection),
+    // 落盘由 markInitializationComplete 补一次
     _markDirty(): void {
-      if (!this._isInitializing) {
-        this._isDirty = true
-      }
+      this._isDirty = true
     },
 
     // 检查配置是否真的有变化
@@ -235,7 +238,11 @@ export const useConfigStore = defineStore('config', {
         this.musicDirectories = []
       }
 
-      setTimeout(() => {
+      if (initCompleteTimer !== null) {
+        clearTimeout(initCompleteTimer)
+      }
+      initCompleteTimer = setTimeout(() => {
+        initCompleteTimer = null
         this.markInitializationComplete()
       }, 1000)
     },
@@ -243,6 +250,8 @@ export const useConfigStore = defineStore('config', {
     async saveConfigNow(): Promise<void> {
       // 检查是否真的有变化
       if (!this._hasRealChanges()) {
+        // 无实际变化(如仅迁移了配置字段):顺手清掉脏标记,保持与状态一致
+        this._isDirty = false
         logger.debug('No config changes to save')
         return
       }
@@ -389,7 +398,10 @@ export const useConfigStore = defineStore('config', {
 
     markInitializationComplete(): void {
       this._isInitializing = false
-      this._isDirty = false
+      // 初始化窗口内的改动被跳过了自动保存,这里补一次(无实际变化时内部会提前返回)
+      if (this._isDirty && this.general.autoSaveConfig) {
+        this.saveConfig()
+      }
     },
 
     // UI 相关

@@ -6,6 +6,7 @@
         <button
           class="icon-button"
           :title="$t('library.refreshLibrary')"
+          :disabled="isLoading"
           @click="refreshDirectoryTrees"
         >
           <span class="material-symbols-rounded">refresh</span>
@@ -395,6 +396,8 @@ onMounted(async () => {
 
 // 目录树管理
 const refreshDirectoryTrees = async (): Promise<void> => {
+  // 避免并发刷新让 playlists 分批 push 交错
+  if (isLoading.value) return
   isLoading.value = true
   try {
     await musicLibraryStore.refreshMusicFolders()

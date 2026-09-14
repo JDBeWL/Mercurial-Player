@@ -21,6 +21,10 @@ type PlaylistStoreParam = Parameters<typeof removeTrackFromPlaylist>[0]
 function makeStore(tracks: Track[], currentIndex = 0): PlaylistStoreParam {
   return {
     playlist: tracks,
+    /** player.playlist 已 markRaw,替换统一走 _setPlaylist */
+    _setPlaylist(this: { playlist: Track[] }, newTracks: Track[]): void {
+      this.playlist = newTracks
+    },
     currentTrackIndex: currentIndex,
     currentTrack: tracks[currentIndex] ?? null,
     isPlaying: false,

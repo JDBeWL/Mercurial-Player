@@ -44,6 +44,7 @@ pub mod dsp;
 pub mod device;
 pub mod device_monitor;
 pub mod playback;
+pub mod sample_ring;
 pub mod session;
 pub mod spectrum;
 

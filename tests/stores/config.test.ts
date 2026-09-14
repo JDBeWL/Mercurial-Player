@@ -370,22 +370,33 @@ describe('useConfigStore', () => {
   // ---------- markInitializationComplete / _markDirty ----------
 
   describe('markInitializationComplete', () => {
-    it('clears _isInitializing and _isDirty', () => {
+    it('ends the init window and defers the pending change to a save', () => {
       const store = useConfigStore()
+      const saveSpy = vi.spyOn(store, 'saveConfig').mockImplementation(() => {})
       store._isInitializing = true
-      store._isDirty = true
+      store._markDirty()
       store.markInitializationComplete()
       expect(store._isInitializing).toBe(false)
-      expect(store._isDirty).toBe(false)
+      // 初始化窗口内跳过的是自动保存,不是脏标记:改动不能丢
+      expect(store._isDirty).toBe(true)
+      expect(saveSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not save when nothing is dirty', () => {
+      const store = useConfigStore()
+      const saveSpy = vi.spyOn(store, 'saveConfig').mockImplementation(() => {})
+      store.markInitializationComplete()
+      expect(store._isInitializing).toBe(false)
+      expect(saveSpy).not.toHaveBeenCalled()
     })
   })
 
   describe('_markDirty', () => {
-    it('does not mark dirty while initializing', () => {
+    it('marks dirty even while initializing (save is deferred, not dropped)', () => {
       const store = useConfigStore()
       store._isInitializing = true
       store._markDirty()
-      expect(store._isDirty).toBe(false)
+      expect(store._isDirty).toBe(true)
     })
 
     it('marks dirty when not initializing', () => {

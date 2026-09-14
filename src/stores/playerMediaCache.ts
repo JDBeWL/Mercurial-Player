@@ -95,16 +95,18 @@ export async function loadPlaylistCovers(store: PlayerStore, playlist: Track[]):
               path: track.path,
             })
             if (coverPath) {
+              // 先同步当前曲目,再写列表条目(顺序不能反):
+              // playlist 已 markRaw,元素不再是响应式代理,就地写 track.coverPath 不会触发渲染;
+              // 若先写它,再从 store 代理写同一字段时目标值已更新 → 同样不触发,
+              // 播放器大封面会一直停在占位图(恢复会话时 currentTrack 与列表条目常是同一对象)。
+              // 因此这里整体重新赋值,让 currentTrack 属性本身发生变化。
+              const current = store.currentTrack
+              if (current?.path === track.path && current.coverPath !== coverPath) {
+                store.currentTrack = { ...current, coverPath }
+              }
               track.coverPath = coverPath
               pendingCoverUpdates.set(track.path, coverPath)
               foundInBatch++
-              // 同步 currentTrack: playTrack 会创建 resolvedTrack 浅拷贝,
-              // 导致 currentTrack 与 playlist 内对象脱钩,
-              // 主界面/MiniPlayer 封面基于 currentTrack.coverPath,
-              // 不同步会导致切歌时封面丢失
-              if (store.currentTrack?.path === track.path) {
-                store.currentTrack.coverPath = coverPath
-              }
               // 同时更新元数据缓存中的封面路径
               const cachedMetadata = metadataCache.get(track.path)
               if (cachedMetadata) {

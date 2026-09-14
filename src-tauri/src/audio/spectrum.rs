@@ -50,8 +50,7 @@ pub(super) const fn calculate_fft_size(sample_rate: u32) -> usize {
 }
 
 /// 当前 Unix 时间戳(毫秒)
-#[cfg(windows)]
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -91,18 +90,29 @@ impl SpectrumAnalyzer {
         }
     }
 
-    pub const fn fft_size(&self) -> usize {
-        self.fft_size
+    /// 追加一批交错采样(分析线程按块驱动)
+    pub fn extend_buffer(&mut self, samples: &[f32]) {
+        self.buffer.extend_from_slice(samples);
     }
 
-    /// 当前滚动缓冲中的采样数
-    pub fn buffer_len(&self) -> usize {
-        self.buffer.len()
-    }
-
-    /// 追加单个采样(共享模式逐采样驱动)
-    pub fn push_sample(&mut self, sample: f32) {
-        self.buffer.push(sample);
+    /// 缓冲满且到达目标帧率间隔时计算并发送频谱,否则什么都不做
+    /// (分析线程按固定节奏轮询,未到间隔时保留完整窗口,不提前 retain_half)
+    pub fn compute_if_ready(
+        &mut self,
+        now: u64,
+        spectrum_data: &Arc<Mutex<Vec<f32>>>,
+        target_fps: &AtomicU64,
+        app: Option<&AppHandle>,
+    ) {
+        if self.buffer.len() < self.fft_size {
+            return;
+        }
+        if !self.should_compute(now, target_fps) {
+            return;
+        }
+        self.compute_and_emit(now, spectrum_data, app);
+        // 保留后半部分数据用于重叠分析
+        self.retain_half();
     }
 
     /// 追加一批交错采样;缓冲满且到达目标帧率间隔时计算并发射频谱
@@ -142,7 +152,7 @@ impl SpectrumAnalyzer {
     }
 
     /// 计算频谱:更新共享 `spectrum_data` 并发送 `spectrum-update` 事件。
-    /// 要求 `buffer_len() >= fft_size()`。
+    /// 要求缓冲中至少有 `fft_size` 个采样。
     #[inline(never)]
     pub fn compute_and_emit(
         &mut self,

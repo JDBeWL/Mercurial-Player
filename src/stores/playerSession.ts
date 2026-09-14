@@ -98,7 +98,7 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
         bitDepth: s.bitDepth ?? null,
         format: s.format ?? null,
       }))
-      store.playlist = playlist
+      store._setPlaylist(playlist)
 
       // 2. 在 playlist 中查找当前曲目 (含完整元数据: bitrate/sampleRate 等)
       let matchedTrack: Track | null = playlist.find((t) => t.path === trackPath) ?? null
@@ -114,7 +114,7 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
           duration: result.durationSecs ?? undefined,
         }
         // 当前曲目不在 playlistTracks 中,把它加到 playlist 末尾
-        store.playlist.push(matchedTrack)
+        store._setPlaylist([...store.playlist, matchedTrack])
       }
 
       // 4. 尝试同步 musicLibrary 的 currentPlaylist (让 UI 高亮,但不依赖它)
@@ -169,8 +169,11 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
         .then((coverPath) => {
           // 守卫:应用关闭后不再修改已销毁的 store state
           if (store._isDestroyed) return
-          if (store.currentTrack && store.currentTrack.path === trackPath && coverPath) {
-            store.currentTrack.coverPath = coverPath
+          const current = store.currentTrack
+          // 整体重新赋值:封面回填可能已写过同一个对象(markRaw 后元素不再是代理),
+          // 就地写不会触发渲染,大封面会停在占位图
+          if (current && current.path === trackPath && coverPath && current.coverPath !== coverPath) {
+            store.currentTrack = { ...current, coverPath }
           }
         })
         .catch((err) => logger.debug('Failed to load cover for resumed track:', err))
@@ -178,7 +181,7 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
       // 静默处理:从当前播放列表移除该文件 (用户选择)
       const idx = store.playlist.findIndex((t) => t.path === result.trackPath)
       if (idx >= 0) {
-        store.playlist.splice(idx, 1)
+        store._setPlaylist(store.playlist.filter((_, i) => i !== idx))
         logger.info(`Removed missing track from playlist: ${result.trackPath}`)
       }
     }
