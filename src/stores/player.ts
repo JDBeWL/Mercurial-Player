@@ -458,6 +458,9 @@ export const usePlayerStore = defineStore('player', {
         }
       }
 
+      // 是否「同一首歌重新播放」(单曲循环、重复点击当前曲目),决定后面是否重置歌词
+      const isSameTrackReplay = this.currentTrack?.path === resolvedPath
+
       const resolvedTrack: Track = {
         ...track,
         path: resolvedPath,
@@ -506,8 +509,12 @@ export const usePlayerStore = defineStore('player', {
       }
       this.duration = metadata.duration || 0
       this.currentTime = 0
-      this.lyrics = null
-      this.currentLyricIndex = -1
+      // 同一首歌重新播放时 path 未变,useLyrics 的 watcher 不会重新触发,
+      // 在这里清空就再也补不回来(表现为重播后歌词消失)
+      if (!isSameTrackReplay) {
+        this.lyrics = null
+        this.currentLyricIndex = -1
+      }
       this.audioInfo = {
         bitrate: metadata.bitrate || null,
         sampleRate: metadata.sampleRate || null,
