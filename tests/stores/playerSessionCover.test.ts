@@ -128,7 +128,11 @@ describe('恢复会话后的当前曲目封面', () => {
     const store = usePlayerStore()
     // watch 只在依赖真正触发时回调;computed 的惰性重算是掩盖不了漏触发的
     const seen: Array<string | undefined> = []
-    const stop = watch(() => store.currentTrack?.coverPath, (v) => seen.push(v), { flush: 'sync' })
+    const stop = watch(
+      () => store.currentTrack?.coverPath,
+      (v) => seen.push(v),
+      { flush: 'sync' },
+    )
 
     await resumeLastSession(store)
     await vi.waitFor(() => expect(store.currentTrack?.coverPath).toBe(COVER))

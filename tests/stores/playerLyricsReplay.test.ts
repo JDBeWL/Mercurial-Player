@@ -39,7 +39,10 @@ const { findLyricsFile, fileUtilsMock } = vi.hoisted(() => {
 
 vi.mock('@/utils/fileUtils', () => ({ FileUtils: fileUtilsMock, default: fileUtilsMock }))
 
-const PARSED_LYRICS = [{ time: 0, text: 'line one' }, { time: 10, text: 'line two' }]
+const PARSED_LYRICS = [
+  { time: 0, text: 'line one' },
+  { time: 10, text: 'line two' },
+]
 vi.mock('@/utils/lyricsParser', () => ({
   LyricsParser: { parseAsync: vi.fn(async () => PARSED_LYRICS) },
   findLyricIndex: vi.fn(() => 0),

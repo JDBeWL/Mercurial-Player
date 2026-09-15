@@ -172,7 +172,12 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
           const current = store.currentTrack
           // 整体重新赋值:封面回填可能已写过同一个对象(markRaw 后元素不再是代理),
           // 就地写不会触发渲染,大封面会停在占位图
-          if (current && current.path === trackPath && coverPath && current.coverPath !== coverPath) {
+          if (
+            current &&
+            current.path === trackPath &&
+            coverPath &&
+            current.coverPath !== coverPath
+          ) {
             store.currentTrack = { ...current, coverPath }
           }
         })

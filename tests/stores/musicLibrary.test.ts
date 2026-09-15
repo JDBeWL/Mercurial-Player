@@ -592,10 +592,7 @@ describe('useMusicLibraryStore', () => {
 
     it('对刷新后仍缺封面的曲目补一次封面加载', async () => {
       const store = useMusicLibraryStore()
-      mockPlayerStore.playlist = [
-        { path: '/a.mp3' },
-        { path: '/b.mp3', coverPath: '/cover/b.jpg' },
-      ]
+      mockPlayerStore.playlist = [{ path: '/a.mp3' }, { path: '/b.mp3', coverPath: '/cover/b.jpg' }]
       mockScanResult([makePlaylist('All', [makeTrack('/a.mp3'), makeTrack('/b.mp3')])])
 
       await store.refreshMusicFolders()
