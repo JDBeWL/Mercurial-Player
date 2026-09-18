@@ -10,7 +10,6 @@ use std::fmt::Write as _;
 use std::io::Read;
 use tauri_plugin_http::reqwest::header::{HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 
-
 const KRC_KEY: &[u8; 16] = b"@Gaw^2tGQ61-\xce\xd2ni";
 const SIGN_SALT: &str = "LnT6xpN3khm36zse0QzvmgTZ3waWdRSA";
 const APP_ID: &str = "3116";
