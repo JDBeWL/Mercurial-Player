@@ -2,6 +2,7 @@
 //!
 //! 提供应用程序配置的加载、保存和管理功能。
 use crate::error::AppError;
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -251,9 +252,30 @@ pub struct LyricsConfig {
     pub show_fetch_lyrics_button: bool,
     #[serde(default = "default_lyrics_style")]
     pub lyrics_style: String,
+    /// 点击"获取歌词"时是否自动择优(true = 无感自动写盘,false = 打开候选挑选弹窗)
+    #[serde(default = "default_true")]
+    pub auto_select_best_lyrics: bool,
+    /// 启用的歌词来源 id 有序列表(= 顺延优先级),须包含 onlineSource
+    #[serde(default = "default_lyric_provider_order")]
+    pub lyric_provider_order: Vec<String>,
+    /// 每个来源的算法 / 文本类型偏好
+    #[serde(default)]
+    pub lyric_provider_settings: HashMap<String, ProviderLyricSetting>,
     /// 桌面歌词设置
     #[serde(default)]
     pub desktop_lyrics: DesktopLyricsConfig,
+}
+
+/// 单个歌词来源的偏好(与前端 `ProviderLyricSetting` 对应)；字段为空表示跟随来源/全局默认
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderLyricSetting {
+    /// 该来源选用的算法 id;None = 用来源默认算法
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    /// 该来源的最终文本类型(original / translation / roman / auto);None = 跟随全局 preferTranslation
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefer_kind: Option<String>,
 }
 
 /// 桌面歌词设置
@@ -289,6 +311,11 @@ const fn default_true() -> bool {
 
 fn default_online_source() -> String {
     "netease".to_string()
+}
+
+/// 歌词来源顺序的默认值:与 `default_online_source` 保持一致
+fn default_lyric_provider_order() -> Vec<String> {
+    vec!["netease".to_string()]
 }
 
 fn default_lyrics_alignment() -> String {
@@ -409,6 +436,9 @@ impl Default for LyricsConfig {
             show_no_lyrics_hint: true,
             show_fetch_lyrics_button: true,
             lyrics_style: default_lyrics_style(),
+            auto_select_best_lyrics: true,
+            lyric_provider_order: default_lyric_provider_order(),
+            lyric_provider_settings: HashMap::new(),
             desktop_lyrics: DesktopLyricsConfig::default(),
         }
     }
@@ -1031,5 +1061,66 @@ mod tests {
         assert!(snapshot.channels.is_none());
         assert!(snapshot.bit_depth.is_none());
         assert!(snapshot.format.is_none());
+    }
+
+    /// 前端 `LyricsConfig` 里的歌词来源相关字段必须能在后端结构体里往返,
+    /// 否则 serde 会静默丢弃未知字段 —— 表现为"设置每次都被重置为默认值"。
+    #[test]
+    fn test_lyrics_provider_settings_roundtrip() {
+        let raw = r#"{
+            "enableOnlineFetch": false,
+            "autoSaveOnlineLyrics": true,
+            "preferTranslation": true,
+            "onlineSource": "qq",
+            "autoSelectBestLyrics": false,
+            "lyricProviderOrder": ["qq", "netease", "lrclib"],
+            "lyricProviderSettings": {
+                "qq": { "method": "web", "preferKind": "translation" },
+                "lrclib": { "method": "search" }
+            }
+        }"#;
+
+        let parsed: LyricsConfig = serde_json::from_str(raw).expect("应能解析前端配置");
+        assert!(!parsed.auto_select_best_lyrics);
+        assert_eq!(
+            parsed.lyric_provider_order,
+            vec![
+                "qq".to_string(),
+                "netease".to_string(),
+                "lrclib".to_string()
+            ]
+        );
+        assert_eq!(
+            parsed
+                .lyric_provider_settings
+                .get("qq")
+                .and_then(|s| s.prefer_kind.as_deref()),
+            Some("translation")
+        );
+
+        // 再序列化回去,三个字段都要在(不被丢弃),且空字段被省略
+        let json = serde_json::to_string(&parsed).expect("应能序列化");
+        assert!(json.contains("\"autoSelectBestLyrics\":false"));
+        assert!(json.contains("\"lyricProviderOrder\":[\"qq\",\"netease\",\"lrclib\"]"));
+        assert!(json.contains("\"lyricProviderSettings\""));
+        assert!(json.contains("\"preferKind\":\"translation\""));
+        // lrclib 只设置了 method,序列化不应冒出空的 preferKind
+        let round_tripped: LyricsConfig = serde_json::from_str(&json).expect("应能往返");
+        let lrclib = round_tripped
+            .lyric_provider_settings
+            .get("lrclib")
+            .expect("lrclib 偏好应保留");
+        assert_eq!(lrclib.method.as_deref(), Some("search"));
+        assert!(lrclib.prefer_kind.is_none());
+    }
+
+    /// 老配置文件没有这几个字段时应落到默认值(自动择优 + netease)
+    #[test]
+    fn test_lyrics_provider_settings_defaults() {
+        let legacy: LyricsConfig =
+            serde_json::from_str(r#"{"onlineSource":"lrclib"}"#).expect("旧配置应能解析");
+        assert!(legacy.auto_select_best_lyrics);
+        assert_eq!(legacy.lyric_provider_order, vec!["netease".to_string()]);
+        assert!(legacy.lyric_provider_settings.is_empty());
     }
 }

@@ -421,3 +421,37 @@ describe('saveThemeToConfig', () => {
     expect(logger.error).toHaveBeenCalledWith('Failed to save theme to config:', expect.any(Error))
   })
 })
+
+describe('换主题时的统一过渡', () => {
+  it('换色期间挂上 theme-fading，过渡结束后摘掉', () => {
+    vi.useFakeTimers()
+    const store = useThemeStore()
+    const root = document.documentElement
+
+    // 第一次调用可能是本次进程的首次应用（首次刻意不加，避免启动时从默认色淡入），
+    // 因此这里推进两次，保证稳定走到"需要加类"的分支。
+    store.applyTheme()
+    store.applyTheme()
+    expect(root.classList.contains('theme-fading')).toBe(true)
+
+    vi.advanceTimersByTime(300)
+    expect(root.classList.contains('theme-fading')).toBe(false)
+  })
+
+  it('连续换色时不会提前摘掉正在生效的过渡类', () => {
+    vi.useFakeTimers()
+    const store = useThemeStore()
+    const root = document.documentElement
+
+    store.applyTheme()
+    vi.advanceTimersByTime(200)
+    store.applyTheme()
+    vi.advanceTimersByTime(200)
+
+    // 第二次换色重新计时：此时距第二次只有 200ms，类必须还在
+    expect(root.classList.contains('theme-fading')).toBe(true)
+
+    vi.advanceTimersByTime(100)
+    expect(root.classList.contains('theme-fading')).toBe(false)
+  })
+})

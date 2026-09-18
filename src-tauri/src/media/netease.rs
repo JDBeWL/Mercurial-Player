@@ -3,46 +3,13 @@
 //! 提供从网易云音乐搜索和获取歌词的功能
 
 use crate::error::AppError;
-use crate::media::http_client::{get, post};
+use crate::media::http_client::{get, post, read_response_text, send_with_retry};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
-use tauri_plugin_http::reqwest::Response;
 use tauri_plugin_http::reqwest::header::{
     ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, HeaderMap, HeaderValue, REFERER, USER_AGENT,
 };
 
-/// 最大重试次数
-const MAX_RETRIES: u32 = 3;
-
-/// 带指数退避的请求重试
-/// 对网络错误（连接超时、DNS 失败等）重试，对 HTTP 错误状态码不重试
-async fn send_with_retry(
-    request_builder: tauri_plugin_http::reqwest::RequestBuilder,
-) -> Result<Response, AppError> {
-    let mut last_err = String::new();
-    for attempt in 0..MAX_RETRIES {
-        if attempt > 0 {
-            let delay = Duration::from_millis(500 * 2u64.pow(attempt - 1));
-            tokio::time::sleep(delay).await;
-            log::debug!("重试请求 (第 {attempt} 次)...");
-        }
-        match request_builder
-            .try_clone()
-            .ok_or("请求不可重试")?
-            .send()
-            .await
-        {
-            Ok(resp) => return Ok(resp),
-            Err(e) => {
-                last_err = format!("{e}");
-                log::warn!("请求失败 (第 {} 次): {e}", attempt + 1);
-            }
-        }
-    }
-    Err(format!("请求失败，已重试 {MAX_RETRIES} 次: {last_err}").into())
-}
-
-/// 搜索结果中的歌曲信息
+/// 搜索/获取歌词中的歌曲信息
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct ArtistInfo {
     #[serde(default)]
@@ -70,11 +37,14 @@ struct LyricContent {
 }
 
 /// 返回给前端的歌词数据
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct LyricsData {
     pub lrc: String,
     pub tlyric: String,
     pub romalrc: String,
+    /// ASS 逐字歌词（原文逐字 + 译文/罗马音普通行），空表示无逐字
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub karaoke: String,
 }
 
 /// 返回给前端的搜索结果
@@ -137,33 +107,6 @@ fn build_headers() -> HeaderMap {
     );
 
     headers
-}
-
-/// 响应体最大大小（5MB），防止异常大响应导致内存耗尽
-const MAX_RESPONSE_SIZE: usize = 5 * 1024 * 1024;
-
-/// 读取响应体文本，带大小限制
-async fn read_response_text(mut response: Response) -> Result<String, AppError> {
-    // 优先根据 Content-Length 拒绝过大响应
-    if let Some(len) = response.content_length()
-        && len as usize > MAX_RESPONSE_SIZE
-    {
-        return Err(format!("响应过大: {len} 字节（上限 {MAX_RESPONSE_SIZE}）").into());
-    }
-
-    let mut body = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|e| format!("Read response failed: {e}"))?
-    {
-        body.extend_from_slice(&chunk);
-        if body.len() > MAX_RESPONSE_SIZE {
-            return Err(format!("响应超过大小限制（{MAX_RESPONSE_SIZE} 字节）").into());
-        }
-    }
-
-    Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
 /// 搜索歌曲 - 使用 Web API
@@ -258,5 +201,6 @@ pub async fn get_lyrics(song_id: &str) -> Result<LyricsData, AppError> {
         lrc: data.lrc.and_then(|l| l.lyric).unwrap_or_default(),
         tlyric: data.tlyric.and_then(|l| l.lyric).unwrap_or_default(),
         romalrc: data.romalrc.and_then(|l| l.lyric).unwrap_or_default(),
+        karaoke: String::new(),
     })
 }

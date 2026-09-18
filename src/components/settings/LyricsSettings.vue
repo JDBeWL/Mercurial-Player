@@ -42,6 +42,72 @@
     </div>
 
     <div class="settings-section">
+      <h4 class="section-title">{{ $t('config.lyricsSources') }}</h4>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.autoSelectBestLyrics') }}</span>
+          <span class="setting-description">{{ $t('config.autoSelectBestLyricsDesc') }}</span>
+        </div>
+        <SettingSwitch
+          :model-value="configStore.lyrics?.autoSelectBestLyrics !== false"
+          @update:model-value="toggleSetting('autoSelectBestLyrics')"
+        />
+      </div>
+
+      <div class="setting-item info-item">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.enabledLyricsProviders') }}</span>
+          <span class="setting-description">{{ $t('config.enabledLyricsProvidersDesc') }}</span>
+        </div>
+      </div>
+
+      <div v-for="provider in enabledProviders" :key="provider.id" class="provider-row">
+        <SettingSwitch
+          :model-value="true"
+          @update:model-value="toggleProvider(provider.id, $event)"
+        />
+        <span class="provider-name">{{ t(provider.nameKey) }}</span>
+        <div class="provider-controls">
+          <button
+            class="icon-button"
+            :title="$t('config.moveUp')"
+            @click="moveProvider(provider.id, -1)"
+          >
+            <span class="material-symbols-rounded">arrow_upward</span>
+          </button>
+          <button
+            class="icon-button"
+            :title="$t('config.moveDown')"
+            @click="moveProvider(provider.id, 1)"
+          >
+            <span class="material-symbols-rounded">arrow_downward</span>
+          </button>
+        </div>
+        <div class="provider-selects" @click.stop>
+          <MD3Select
+            :model-value="methodValue(provider.id)"
+            :options="methodOptions(provider)"
+            @update:model-value="setProviderMethod(provider.id, $event)"
+          />
+          <MD3Select
+            :model-value="providerSettings(provider.id).preferKind ?? 'auto'"
+            :options="kindOptions"
+            @update:model-value="setProviderKind(provider.id, $event)"
+          />
+        </div>
+      </div>
+
+      <div v-for="provider in disabledProviders" :key="provider.id" class="provider-row">
+        <SettingSwitch
+          :model-value="false"
+          @update:model-value="toggleProvider(provider.id, $event)"
+        />
+        <span class="provider-name">{{ t(provider.nameKey) }}</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
       <h4 class="section-title">{{ $t('config.display') }}</h4>
 
       <div class="setting-item">
@@ -295,7 +361,9 @@ import {
 } from '../../utils/bundledFonts'
 import MD3Select from '../MD3Select.vue'
 import SettingSwitch from './SettingSwitch.vue'
-import type { LyricsConfig, DesktopLyricsConfig, VisualizerConfig } from '@/types'
+import { LYRIC_PROVIDERS, resolveMethod } from '@/utils/lyricProviders'
+import type { LyricProviderDescriptor } from '@/utils/lyricProviders'
+import type { LyricsConfig, LyricsProviderId, DesktopLyricsConfig, VisualizerConfig } from '@/types'
 
 // 歌词默认配置：store 缺省时初始化与字段补全共用（与 config store 中的默认值保持一致）
 const DEFAULT_LYRICS_CONFIG: LyricsConfig = {
@@ -482,12 +550,103 @@ if (!configStore.lyrics) {
   }
 }
 
+// 确保来源配置字段存在（旧配置兼容）
+if (!String(configStore.lyrics.onlineSource)) {
+  configStore.lyrics.onlineSource = 'netease'
+}
+if (!configStore.lyrics.lyricProviderOrder) {
+  configStore.lyrics.lyricProviderOrder = [configStore.lyrics.onlineSource || 'netease']
+}
+if (!configStore.lyrics.lyricProviderSettings) {
+  configStore.lyrics.lyricProviderSettings = {}
+}
+
 const lyricsConfig = computed<LyricsConfig>({
   get: () => configStore.lyrics,
   set: (value: LyricsConfig) => {
     configStore.lyrics = value
   },
 })
+
+// ---------- 歌词来源设置 ----------
+const providerOrder = computed<string[]>(() => {
+  const order = configStore.lyrics.lyricProviderOrder ?? []
+  const known = LYRIC_PROVIDERS.map((p) => p.id)
+  return order.filter((id) => known.includes(id as LyricsProviderId))
+})
+
+const enabledProviders = computed(() =>
+  providerOrder.value
+    .map((id) => LYRIC_PROVIDERS.find((p) => p.id === id))
+    .filter((p): p is LyricProviderDescriptor => !!p),
+)
+
+const disabledProviders = computed(() =>
+  LYRIC_PROVIDERS.filter((p) => !providerOrder.value.includes(p.id)),
+)
+
+const providerSettings = (id: LyricsProviderId): { method?: string; preferKind?: string } => {
+  if (!configStore.lyrics.lyricProviderSettings) configStore.lyrics.lyricProviderSettings = {}
+  if (!configStore.lyrics.lyricProviderSettings[id]) {
+    configStore.lyrics.lyricProviderSettings[id] = {}
+  }
+  return configStore.lyrics.lyricProviderSettings[id]!
+}
+
+const methodOptions = (provider: LyricProviderDescriptor) =>
+  provider.methods.map((m) => ({ value: m.id, label: t(m.nameKey) }))
+
+// 每个平台"获取算法"下拉始终显示有效值：未配置时回落到该平台默认算法
+const methodValue = (id: LyricsProviderId): string =>
+  resolveMethod(id, providerSettings(id).method ?? '')
+
+const kindOptions = [
+  { value: 'auto', label: t('config.providerKindAuto') },
+  { value: 'original', label: t('config.providerKindOriginal') },
+  { value: 'translation', label: t('config.providerKindTranslation') },
+  { value: 'roman', label: t('config.providerKindRoman') },
+]
+
+const toggleProvider = async (id: LyricsProviderId, enabled: boolean): Promise<void> => {
+  const order = [...(configStore.lyrics.lyricProviderOrder ?? [])]
+  if (enabled) {
+    if (!order.includes(id)) order.push(id)
+  } else {
+    const idx = order.indexOf(id)
+    if (idx >= 0) order.splice(idx, 1)
+  }
+  const finalOrder = order.length ? order : ['netease']
+  configStore.lyrics.lyricProviderOrder = finalOrder
+  // 默认来源 = 列表第一项
+  configStore.lyrics.onlineSource = finalOrder[0] as LyricsProviderId
+  configStore._markDirty()
+  await saveConfig()
+}
+
+const moveProvider = async (id: LyricsProviderId, dir: -1 | 1): Promise<void> => {
+  const order = [...(configStore.lyrics.lyricProviderOrder ?? [])]
+  const idx = order.indexOf(id)
+  const target = idx + dir
+  if (idx < 0 || target < 0 || target >= order.length) return
+  ;[order[idx], order[target]] = [order[target]!, order[idx]!]
+  configStore.lyrics.lyricProviderOrder = order
+  // 上移/下移后默认来源跟随第一项
+  configStore.lyrics.onlineSource = order[0] as LyricsProviderId
+  configStore._markDirty()
+  await saveConfig()
+}
+
+const setProviderMethod = async (id: LyricsProviderId, value: string | number): Promise<void> => {
+  providerSettings(id).method = String(value)
+  configStore._markDirty()
+  await saveConfig()
+}
+
+const setProviderKind = async (id: LyricsProviderId, value: string | number): Promise<void> => {
+  providerSettings(id).preferKind = String(value)
+  configStore._markDirty()
+  await saveConfig()
+}
 
 const loadSystemFonts = async (): Promise<void> => {
   try {
@@ -511,7 +670,8 @@ const toggleSetting = async (
     | 'autoSaveOnlineLyrics'
     | 'preferTranslation'
     | 'showNoLyricsHint'
-    | 'showFetchLyricsButton',
+    | 'showFetchLyricsButton'
+    | 'autoSelectBestLyrics',
 ): Promise<void> => {
   // 确保 lyrics 配置存在
   if (!configStore.lyrics) {
@@ -814,5 +974,48 @@ onMounted(() => {
 
 .preset-label {
   font-size: 12px;
+}
+
+.provider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  margin-bottom: 2px;
+  border-radius: 12px;
+  transition: background-color 0.2s ease;
+}
+
+.provider-row:hover {
+  background-color: var(--md-sys-color-surface-container);
+}
+
+.provider-name {
+  flex: 0 0 auto;
+  min-width: 110px;
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface);
+}
+
+.provider-controls {
+  display: flex;
+  gap: 2px;
+}
+
+.provider-controls .icon-button {
+  width: 32px;
+  height: 32px;
+}
+
+.provider-selects {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex: 1;
+}
+
+.provider-selects :deep(.md3-select-wrapper) {
+  min-width: 130px;
 }
 </style>

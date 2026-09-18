@@ -159,6 +159,8 @@ fn main() {
             // 网易云音乐API命令
             media::commands::netease_search_songs,
             media::commands::netease_get_lyrics,
+            // 多来源歌词获取命令
+            media::commands::lyrics_search_candidates,
             // 播放命令
             audio::commands::play_track,
             audio::commands::pause_track,

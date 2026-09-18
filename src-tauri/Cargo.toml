@@ -1,7 +1,7 @@
 [package]
 name = "mercurial-player"
 # 运行`pnpm run version:sync`以同步
-version = "1.5.0"
+version = "1.5.1"
 description = "A music player by JDBeWL"
 authors = ["jdbEwl"]
 license = "GPL-3.0"
@@ -49,6 +49,8 @@ ttf-parser = "0.25.1"
 futures-util = "0.3"
 minisign-verify = "0.2"
 base64 = "0.22"
+flate2 = "1"
+md-5 = "0.10"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

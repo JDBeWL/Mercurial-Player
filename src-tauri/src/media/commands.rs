@@ -93,6 +93,24 @@ pub async fn netease_get_lyrics(song_id: String) -> Result<netease::LyricsData, 
     netease::get_lyrics(&song_id).await
 }
 
+/// 按来源+方法获取候选歌词（多来源系统统一入口）
+#[command]
+pub async fn lyrics_search_candidates(
+    provider: String,
+    _method: String,
+    title: String,
+    artist: String,
+    duration: i64,
+    limit: Option<u32>,
+) -> Result<Vec<crate::lyrics::LyricCandidate>, AppError> {
+    let query = crate::lyrics::LyricQuery {
+        title,
+        artist,
+        duration_ms: duration,
+    };
+    crate::lyrics::search_candidates(&provider, &_method, &query, limit.unwrap_or(5)).await
+}
+
 /// 提取音频文件的封面并保存到指定路径
 #[command]
 pub fn extract_cover(audio_path: String, output_path: String) -> Result<String, AppError> {

@@ -13,12 +13,15 @@ export function createDefaultLyricsConfig(): LyricsConfig {
     autoSaveOnlineLyrics: true,
     preferTranslation: true,
     onlineSource: 'netease',
+    lyricProviderOrder: ['netease'],
+    lyricProviderSettings: {},
     lyricsAlignment: 'center',
     lyricsFontFamily: 'Noto Sans SC',
     translationFontFamily: '',
     lyricsStyle: 'modern',
     showNoLyricsHint: true,
     showFetchLyricsButton: true,
+    autoSelectBestLyrics: true,
     desktopLyrics: {
       enabled: false,
       locked: true,
@@ -37,8 +40,13 @@ export function ensureLyricsConfigDefaults(lyrics: LyricsConfig): LyricsConfig {
   if (lyrics.translationFontFamily === undefined) lyrics.translationFontFamily = ''
   if (!lyrics.lyricsStyle) lyrics.lyricsStyle = 'modern'
   if (lyrics.onlineSource === undefined) lyrics.onlineSource = 'netease'
+  if (lyrics.lyricProviderOrder === undefined) {
+    lyrics.lyricProviderOrder = [lyrics.onlineSource || 'netease']
+  }
+  if (lyrics.lyricProviderSettings === undefined) lyrics.lyricProviderSettings = {}
   if (lyrics.showNoLyricsHint === undefined) lyrics.showNoLyricsHint = true
   if (lyrics.showFetchLyricsButton === undefined) lyrics.showFetchLyricsButton = true
+  if (lyrics.autoSelectBestLyrics === undefined) lyrics.autoSelectBestLyrics = true
   if (!lyrics.desktopLyrics) lyrics.desktopLyrics = createDefaultLyricsConfig().desktopLyrics
   return lyrics
 }

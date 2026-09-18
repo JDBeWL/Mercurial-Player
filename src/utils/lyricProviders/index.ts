@@ -1,0 +1,5 @@
+export * from './types'
+export * from './registry'
+export * from './builder'
+export * from './fetchLyrics'
+export { LYRIC_PROVIDERS } from './registry'

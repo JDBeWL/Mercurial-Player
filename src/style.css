@@ -93,6 +93,19 @@ body {
     color var(--transition-normal) var(--ease-in-out);
 }
 
+/* 换主题期间所有元素统一走这份过渡，否则各元素各写各的、中间帧会出现区域间色差。
+   由 theme store 在换色前置上、过渡跑完摘掉（见 scheduleThemeFade）；只过渡颜色属性。 */
+html.theme-fading,
+html.theme-fading *,
+html.theme-fading *::before,
+html.theme-fading *::after {
+  transition:
+    background-color var(--transition-normal) var(--ease-in-out),
+    color var(--transition-normal) var(--ease-in-out),
+    border-color var(--transition-normal) var(--ease-in-out),
+    outline-color var(--transition-normal) var(--ease-in-out) !important;
+}
+
 #app {
   height: 100vh;
   display: flex;

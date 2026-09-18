@@ -40,7 +40,8 @@ defineEmits<{
 .settings-nav {
   width: 280px;
   min-width: 240px;
-  background-color: var(--md-sys-color-surface);
+  /* 不画底色：surface 恒等于 background，画上去只会让左栏成为独立的不透明层，换色时与周围对不齐 */
+  background-color: transparent;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--md-sys-color-outline-variant);
@@ -89,8 +90,9 @@ defineEmits<{
   transition: all 0.2s ease;
 }
 
+/* 原为 surface-container-highest：主题不输出该角色，声明静默失效、等于无反馈 */
 .nav-item:hover {
-  background-color: var(--md-sys-color-surface-container-highest);
+  background-color: var(--md-sys-color-hover-overlay);
 }
 
 .nav-item.active {

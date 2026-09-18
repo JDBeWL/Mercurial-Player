@@ -242,8 +242,11 @@ const exitMiniMode = (): void => {
   height: 100%;
   background: linear-gradient(
     135deg,
-    rgba(var(--md-sys-color-surface-rgb, 0, 0, 0), 0.6) 0%,
-    rgba(var(--md-sys-color-surface-rgb, 0, 0, 0), 0.3) 100%
+    /* 主题只输出十六进制角色色,没有 *-rgb 三元组变量,原先的
+       rgba(var(--md-sys-color-surface-rgb, 0, 0, 0), .6) 会一直命中黑色兜底值,
+       浅色模式下这里是一层黑影;改用 color-mix 直接对 surface 做透明度混合 */
+    color-mix(in srgb, var(--md-sys-color-surface) 60%, transparent) 0%,
+    color-mix(in srgb, var(--md-sys-color-surface) 30%, transparent) 100%
   );
   z-index: 1;
 }

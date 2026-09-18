@@ -12,6 +12,11 @@ describe('createDefaultLyricsConfig', () => {
     expect(config.autoSaveOnlineLyrics).toBe(true)
     expect(config.desktopLyrics?.colorPreset).toBe('auto')
     expect(config.desktopLyrics?.fontSize).toBe(28)
+    // 多来源字段默认值
+    expect(config.onlineSource).toBe('netease')
+    expect(config.autoSelectBestLyrics).toBe(true)
+    expect(config.lyricProviderOrder).toEqual(['netease'])
+    expect(config.lyricProviderSettings).toEqual({})
   })
 })
 
@@ -28,6 +33,8 @@ describe('ensureLyricsConfigDefaults', () => {
     expect(lyrics.translationFontFamily).toBe('')
     expect(lyrics.lyricsStyle).toBe('modern')
     expect(lyrics.onlineSource).toBe('netease')
+    expect(lyrics.lyricProviderOrder).toEqual(['netease'])
+    expect(lyrics.lyricProviderSettings).toEqual({})
     expect(lyrics.showNoLyricsHint).toBe(true)
     expect(lyrics.showFetchLyricsButton).toBe(true)
     expect(lyrics.desktopLyrics?.enabled).toBe(false)

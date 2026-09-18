@@ -2,19 +2,22 @@ import { ref, watch, markRaw, type Ref } from 'vue'
 import { usePlayerStore } from '@/stores/player'
 import { useConfigStore } from '@/stores/config'
 import { FileUtils } from '@/utils/fileUtils'
-import { neteaseApi } from '@/utils/neteaseApi'
+import { fetchBestLyrics, collectCandidates, buildFinalLyric } from '@/utils/lyricProviders'
+import type { LyricCandidate, LyricKind } from '@/utils/lyricProviders'
 import { LyricsParser, findLyricIndex } from '@/utils/lyricsParser'
 import { LRUCache } from '@/utils/lruCache'
 import { invoke } from '@tauri-apps/api/core'
 import logger from '@/utils/logger'
-import type { LyricLine, Track } from '@/types'
+import type { LyricLine, LyricsConfig, Track } from '@/types'
 
 // 模块级别的在线歌词缓存，限制最多50首，避免内存泄漏。
 // 复用通用 LRU 实现;TTL 传 Infinity 表示本会话内不过期(歌词内容不可变)。
-const onlineLyricsCache = new LRUCache<{ lrc: string; parsed: LyricLine[]; source: string }>(
-  50,
-  Infinity,
-)
+const onlineLyricsCache = new LRUCache<{
+  content: string
+  format: 'lrc' | 'ass'
+  parsed: LyricLine[]
+  source: string
+}>(50, Infinity)
 
 // 模块级别的共享状态：
 // 所有 useLyrics 实例共享同一份 lyrics / loading / activeIndex / lyricsSource / onlineLyricsError,
@@ -40,25 +43,46 @@ let _playerStore: ReturnType<typeof usePlayerStore> | null = null
 let _configStore: ReturnType<typeof useConfigStore> | null = null
 
 /**
- * 获取在线歌词
+ * 兜底歌词配置（store 歌词配置为空时使用），保证多来源流程不因缺字段而崩溃
  */
-async function fetchOnlineLyrics(track: Track | null): Promise<string | null> {
+function safeLyricsConfig(): LyricsConfig {
+  return (
+    _configStore?.lyrics ?? {
+      enableOnlineFetch: false,
+      autoSaveOnlineLyrics: true,
+      preferTranslation: true,
+      onlineSource: 'netease',
+      lyricsAlignment: 'center',
+      lyricsFontFamily: 'Noto Sans SC',
+      lyricsStyle: 'modern',
+      lyricProviderOrder: ['netease'],
+      lyricProviderSettings: {},
+    }
+  )
+}
+
+/** 从当前曲目构造歌词查询参数 */
+function buildQuery(track: Track | null): { title: string; artist: string; duration_ms: number } {
+  const title =
+    track?.title || track?.name || FileUtils.getFileNameWithoutExtension(track?.path || '')
+  const artist = track?.artist || ''
+  const duration_ms = track?.duration ? track.duration * 1000 : 0
+  return { title, artist, duration_ms }
+}
+
+/** 获取在线歌词（按配置的来源顺延自动择优，best-effort） */
+async function fetchOnlineLyrics(
+  track: Track | null,
+): Promise<{ content: string; format: 'lrc' | 'ass' } | null> {
   if (!track || !_configStore) return null
   try {
-    const title = track.title || track.name || FileUtils.getFileNameWithoutExtension(track.path)
-    const artist = track.artist || ''
-    const duration = track.duration ? track.duration * 1000 : 0
-    logger.debug('Fetching online lyrics for: ' + title + ' - ' + artist)
-    const lyricsData = await neteaseApi.searchAndGetLyrics(title, artist, duration)
-    if (!lyricsData || !lyricsData.lrc) {
+    logger.debug('Fetching online lyrics for: ' + track.title + ' - ' + track.artist)
+    const result = await fetchBestLyrics(safeLyricsConfig(), buildQuery(track))
+    if (!result || !result.content) {
       logger.debug('No online lyrics found')
       return null
     }
-    let lrcContent = lyricsData.lrc
-    if (_configStore.lyrics?.preferTranslation && lyricsData.tlyric) {
-      lrcContent = neteaseApi.mergeLyrics(lyricsData.lrc, lyricsData.tlyric)
-    }
-    return lrcContent
+    return { content: result.content, format: result.format }
   } catch (error) {
     logger.error('Failed to fetch online lyrics:', error)
     sharedOnlineLyricsError.value = (error as Error).message
@@ -67,15 +91,20 @@ async function fetchOnlineLyrics(track: Track | null): Promise<string | null> {
 }
 
 /**
- * 保存歌词到本地
+ * 保存歌词到本地（按格式选扩展名：ASS 逐字 / LRC）
  */
-async function saveLyricsToLocal(trackPath: string, lrcContent: string): Promise<boolean> {
-  if (!trackPath || !lrcContent) return false
+async function saveLyricsToLocal(
+  trackPath: string,
+  content: string,
+  format: 'lrc' | 'ass',
+): Promise<boolean> {
+  if (!trackPath || !content) return false
   try {
     const baseName = FileUtils.getFileNameWithoutExtension(trackPath)
     const directory = FileUtils.getDirectoryPath(trackPath)
-    const lyricsPath = FileUtils.joinPath(directory, `${baseName}.lrc`)
-    await invoke('write_lyrics_file', { path: lyricsPath, content: lrcContent })
+    const ext = format === 'ass' ? 'ass' : 'lrc'
+    const lyricsPath = FileUtils.joinPath(directory, `${baseName}.${ext}`)
+    await invoke('write_lyrics_file', { path: lyricsPath, content })
     logger.info('Lyrics saved to: ' + lyricsPath)
     return true
   } catch (error) {
@@ -130,24 +159,31 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
     } else if (_configStore.lyrics?.enableOnlineFetch) {
       logger.debug('No local lyrics found, trying online fetch...')
       const track = _playerStore.currentTrack
-      const onlineLrc = await fetchOnlineLyrics(track)
+      const onlineLyrics = await fetchOnlineLyrics(track)
       if (!_playerStore.isLyricsRequestCurrent(seq)) return
-      if (onlineLrc) {
+      if (onlineLyrics) {
         // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
-        const parsed = markRaw(await LyricsParser.parseAsync(onlineLrc, 'lrc'))
+        const parsed = markRaw(
+          await LyricsParser.parseAsync(onlineLyrics.content, onlineLyrics.format),
+        )
         if (!_playerStore.isLyricsRequestCurrent(seq)) return
         _playerStore.lyrics = parsed
         sharedLyricsSource.value = 'online'
 
         // 缓存在线歌词
         onlineLyricsCache.set(trackPath, {
-          lrc: onlineLrc,
+          content: onlineLyrics.content,
+          format: onlineLyrics.format,
           parsed,
           source: 'online',
         })
 
         if (_configStore.lyrics?.autoSaveOnlineLyrics) {
-          const saved = await saveLyricsToLocal(trackPath, onlineLrc)
+          const saved = await saveLyricsToLocal(
+            trackPath,
+            onlineLyrics.content,
+            onlineLyrics.format,
+          )
           if (saved && _playerStore.isLyricsRequestCurrent(seq)) {
             sharedLyricsSource.value = 'local'
             // 保存成功后从缓存中移除，下次会从本地加载
@@ -252,25 +288,32 @@ export function useLyrics() {
     sharedLoading.value = true
     sharedOnlineLyricsError.value = null
     try {
-      const onlineLrc = await fetchOnlineLyrics(track)
+      const onlineLyrics = await fetchOnlineLyrics(track)
       if (!playerStore.isLyricsRequestCurrent(seq)) return false
-      if (onlineLrc) {
+      if (onlineLyrics) {
         // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
-        const parsed = markRaw(await LyricsParser.parseAsync(onlineLrc, 'lrc'))
+        const parsed = markRaw(
+          await LyricsParser.parseAsync(onlineLyrics.content, onlineLyrics.format),
+        )
         if (!playerStore.isLyricsRequestCurrent(seq)) return false
         playerStore.lyrics = parsed
         sharedLyricsSource.value = 'online'
 
         // 缓存在线歌词
         onlineLyricsCache.set(track.path, {
-          lrc: onlineLrc,
+          content: onlineLyrics.content,
+          format: onlineLyrics.format,
           parsed,
           source: 'online',
         })
 
         // 只有在启用自动保存时才保存到本地
         if (configStore.lyrics?.autoSaveOnlineLyrics) {
-          const saved = await saveLyricsToLocal(track.path, onlineLrc)
+          const saved = await saveLyricsToLocal(
+            track.path,
+            onlineLyrics.content,
+            onlineLyrics.format,
+          )
           if (saved && playerStore.isLyricsRequestCurrent(seq)) {
             sharedLyricsSource.value = 'local'
             // 保存成功后从缓存中移除
@@ -290,6 +333,65 @@ export function useLyrics() {
       if (playerStore.isLyricsRequestCurrent(seq)) {
         sharedLoading.value = false
       }
+    }
+  }
+
+  // 聚合各启用来源的候选歌词（供手动挑选弹窗使用）
+  const fetchCandidates = async (): Promise<LyricCandidate[]> => {
+    const track = playerStore.currentTrack
+    if (!track) return []
+    const seq = playerStore.beginLyricsRequest()
+    sharedLoading.value = true
+    sharedOnlineLyricsError.value = null
+    try {
+      const candidates = await collectCandidates(safeLyricsConfig(), buildQuery(track))
+      if (!playerStore.isLyricsRequestCurrent(seq)) return []
+      return candidates
+    } catch (e) {
+      logger.error('Error collecting lyric candidates:', e)
+      return []
+    } finally {
+      if (playerStore.isLyricsRequestCurrent(seq)) {
+        sharedLoading.value = false
+      }
+    }
+  }
+
+  // 应用用户挑选的候选歌词：显示 + 可选写入本地文件
+  const applyCandidate = async (candidate: LyricCandidate, kind: LyricKind): Promise<boolean> => {
+    const track = playerStore.currentTrack
+    if (!track || !configStore) return false
+    const seq = playerStore.beginLyricsRequest()
+    try {
+      const final = buildFinalLyric(
+        candidate.bundle,
+        kind,
+        configStore.lyrics?.preferTranslation ?? true,
+      )
+      if (!final.content) return false
+      const parsed = markRaw(await LyricsParser.parseAsync(final.content, final.format))
+      if (!playerStore.isLyricsRequestCurrent(seq)) return false
+      playerStore.lyrics = parsed
+      sharedLyricsSource.value = 'online'
+
+      onlineLyricsCache.set(track.path, {
+        content: final.content,
+        format: final.format,
+        parsed,
+        source: 'online',
+      })
+
+      if (configStore.lyrics?.autoSaveOnlineLyrics) {
+        const saved = await saveLyricsToLocal(track.path, final.content, final.format)
+        if (saved && playerStore.isLyricsRequestCurrent(seq)) {
+          sharedLyricsSource.value = 'local'
+          onlineLyricsCache.delete(track.path)
+        }
+      }
+      return true
+    } catch (e) {
+      logger.error('Error applying lyric candidate:', e)
+      return false
     }
   }
 
@@ -324,6 +426,8 @@ export function useLyrics() {
     lyricsSource: sharedLyricsSource,
     onlineLyricsError: sharedOnlineLyricsError,
     fetchAndSaveLyrics,
+    fetchCandidates,
+    applyCandidate,
     loadLyrics,
     cleanup,
   }

@@ -26,6 +26,24 @@ function scheduleContrastValidation(isDark: boolean): void {
 import { useConfigStore } from './config'
 import type { TonalVariants, HarmonyColors, ThemePreference } from '@/types'
 
+// 换主题时的统一过渡（配合 style.css 的 html.theme-fading）
+// 须 ≥ 那份过渡的时长（--transition-normal），否则会在跑完前摘掉类、把它截断成瞬变
+const THEME_FADE_MS = 300
+let themeFadeTimer: ReturnType<typeof setTimeout> | null = null
+let themeAppliedOnce = false
+
+/** 换主题时给 `<html>` 挂 `theme-fading`，让所有元素用同一份过渡换色（见 style.css）；
+ *  否则中间帧会出现区域间色差。过渡跑完摘掉。 */
+function scheduleThemeFade(): void {
+  const root = document.documentElement
+  root.classList.add('theme-fading')
+  if (themeFadeTimer) clearTimeout(themeFadeTimer)
+  themeFadeTimer = setTimeout(() => {
+    themeFadeTimer = null
+    root.classList.remove('theme-fading')
+  }, THEME_FADE_MS)
+}
+
 // 缓存已生成的主题样式
 // 复用通用 LRU 实现(上限 20 条);TTL Infinity 表示 CSS 文本不过期
 const customStyleCache = new LRUCache<string>(20, Infinity)
@@ -330,15 +348,21 @@ export const useThemeStore = defineStore('theme', {
 
     applyTheme(): void {
       const isGray = isNeutralGray(this.primaryColor)
+      const root = document.documentElement
+
+      // 换主题时先开统一过渡；首次应用不加，否则启动瞬间会从默认色淡入一次
+      if (themeAppliedOnce) {
+        scheduleThemeFade()
+      }
+      themeAppliedOnce = true
 
       // 1. 使用 MD3 库设置基础颜色
       const theme = themeFromSourceColor(argbFromHex(this.primaryColor))
-      applyTheme(theme, { target: document.documentElement, dark: this.isDarkMode })
+      applyTheme(theme, { target: root, dark: this.isDarkMode })
 
       // 2. 如果是灰色，覆盖 MD3 生成的彩色为真正的灰色
       if (isGray) {
         const grayColors = generateGrayThemeColors(this.primaryColor, this.isDarkMode)
-        const root = document.documentElement
 
         root.style.setProperty('--md-sys-color-primary', grayColors.primary)
         root.style.setProperty('--md-sys-color-on-primary', grayColors.onPrimary)
@@ -396,7 +420,7 @@ export const useThemeStore = defineStore('theme', {
         overrideStyle.remove()
       }
 
-      document.documentElement.setAttribute('data-theme', this.isDarkMode ? 'dark' : 'light')
+      root.setAttribute('data-theme', this.isDarkMode ? 'dark' : 'light')
 
       logger.debug('Theme applied:', cacheKey, isGray ? '(gray mode)' : '')
 

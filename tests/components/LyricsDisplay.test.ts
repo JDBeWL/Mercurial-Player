@@ -47,6 +47,11 @@ vi.mock('@/utils/logger', () => ({
 vi.mock('@/assets/css/lyrics-modern.css', () => ({}))
 vi.mock('@/assets/css/lyrics-classic.css', () => ({}))
 
+// stub 候选弹窗组件（其内部使用 useI18n，本测试环境未安装 i18n 插件）
+vi.mock('@/components/lyrics/LyricsCandidatePicker.vue', () => ({
+  default: { name: 'LyricsCandidatePicker', template: '<div class="picker-stub" />' },
+}))
+
 /** 创建测试用歌词数据 */
 function makeLyrics(): LyricLine[] {
   return [
@@ -103,6 +108,8 @@ function setupMocks(
     loading: loadingRef,
     lyricsSource: ref('local'),
     fetchAndSaveLyrics: vi.fn(),
+    fetchCandidates: vi.fn(() => Promise.resolve([])),
+    applyCandidate: vi.fn(() => Promise.resolve(false)),
   }
 
   return { lyricsRef, loadingRef }
@@ -226,12 +233,27 @@ describe('LyricsDisplay.vue', () => {
       expect(wrapper.find('.fetch-lyrics-btn').exists()).toBe(true)
     })
 
-    it('点击获取歌词按钮调用 fetchAndSaveLyrics', async () => {
+    it('默认自动选择最优歌词：点击获取歌词调用自动获取', async () => {
       setupMocks({ currentTrack: makeTrack(), lyrics: [], loading: false })
       wrapper = mountComponent()
       await nextTick()
       await wrapper.find('.fetch-lyrics-btn').trigger('click')
       expect(mocks.lyricsState.fetchAndSaveLyrics).toHaveBeenCalledTimes(1)
+      expect(mocks.lyricsState.fetchCandidates).not.toHaveBeenCalled()
+    })
+
+    it('关闭自动选择后点击获取歌词打开候选挑选弹窗', async () => {
+      setupMocks({
+        currentTrack: makeTrack(),
+        lyrics: [],
+        loading: false,
+        lyricsConfig: { autoSelectBestLyrics: false },
+      })
+      wrapper = mountComponent()
+      await nextTick()
+      await wrapper.find('.fetch-lyrics-btn').trigger('click')
+      expect(mocks.lyricsState.fetchCandidates).toHaveBeenCalledTimes(1)
+      expect(mocks.lyricsState.fetchAndSaveLyrics).not.toHaveBeenCalled()
     })
   })
 

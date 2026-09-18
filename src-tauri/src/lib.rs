@@ -22,6 +22,7 @@ pub mod audio;
 pub mod config;
 pub mod equalizer;
 pub mod error;
+pub mod lyrics;
 pub mod media;
 pub mod plugins;
 pub mod security;

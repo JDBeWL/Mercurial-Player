@@ -125,7 +125,25 @@ export interface LyricsConfig {
   showNoLyricsHint?: boolean
   /* 无歌词时是否显示"获取歌词"按钮（默认显示） */
   showFetchLyricsButton?: boolean
+  /* 点击"获取歌词"时是否自动选择最优歌词并写盘（true=无感自动，false=打开挑选弹窗） */
+  autoSelectBestLyrics?: boolean
+  /* 启用的歌词来源 id 有序列表（= 顺延优先级），须含 onlineSource */
+  lyricProviderOrder?: string[]
+  /* 每来源的算法(method)与文本类型(preferKind)偏好 */
+  lyricProviderSettings?: Record<string, ProviderLyricSetting>
   desktopLyrics?: DesktopLyricsConfig
+}
+
+/* 歌词来源（平台）id */
+export type LyricsProviderId = 'netease' | 'lrclib' | 'qq' | 'kugou'
+/* 最终文本类型：original 仅原文 / translation 原文+翻译 / roman 原文+罗马音 / auto 跟随全局 preferTranslation */
+export type LyricKind = 'auto' | 'original' | 'translation' | 'roman'
+
+export interface ProviderLyricSetting {
+  /* 该平台选用的算法(id)；空 = provider 默认(auto/首个) */
+  method?: string
+  /* 该平台最终文本偏好；空/auto = 跟随全局 preferTranslation */
+  preferKind?: LyricKind
 }
 
 export interface DesktopLyricsConfig {

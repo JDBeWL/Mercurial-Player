@@ -109,6 +109,15 @@
         </button>
       </div>
     </div>
+
+    <LyricsCandidatePicker
+      :visible="showPicker"
+      :loading="pickerLoading || fetchingLyrics"
+      :candidates="pickerCandidates"
+      @close="showPicker = false"
+      @apply="handleApplyCandidate"
+      @auto-fetch="handleAutoFetchFromPicker"
+    />
   </div>
 </template>
 
@@ -134,11 +143,13 @@ import { pluginManager } from '@/plugins'
 import type { ActionButton } from '@/plugins/pluginManager'
 import logger from '@/utils/logger'
 import KaraokeLine from './KaraokeLine.vue'
+import LyricsCandidatePicker from './lyrics/LyricsCandidatePicker.vue'
+import type { LyricCandidate, LyricKind } from '@/utils/lyricProviders'
 import { detectLyricLanguage, type LyricLanguage } from '@/utils/languageDetect'
 
 export default {
   name: 'LyricsDisplay',
-  components: { KaraokeLine },
+  components: { KaraokeLine, LyricsCandidatePicker },
   setup() {
     const playerStore = usePlayerStore()
     const configStore = useConfigStore()
@@ -207,14 +218,58 @@ export default {
     // 手动获取歌词状态
     const fetchingLyrics = ref(false)
 
+    // 手动挑选弹窗状态
+    const showPicker = ref(false)
+    const pickerCandidates = ref<LyricCandidate[]>([])
+    const pickerLoading = ref(false)
+
+    // 是否自动选择最优歌词（跳过手动挑选弹窗）
+    const autoSelectBestLyrics = computed(() => configStore.lyrics?.autoSelectBestLyrics !== false)
+
     const handleFetchLyrics = async (): Promise<void> => {
+      // 设置开启"自动选择最优歌词"时无感自动获取，否则弹出多来源候选挑选窗口
+      if (autoSelectBestLyrics.value) {
+        fetchingLyrics.value = true
+        try {
+          await lyricsComposable.fetchAndSaveLyrics()
+        } finally {
+          fetchingLyrics.value = false
+        }
+        return
+      }
+      showPicker.value = true
+      pickerLoading.value = true
+      pickerCandidates.value = []
+      try {
+        if (typeof lyricsComposable.fetchCandidates === 'function') {
+          pickerCandidates.value = await lyricsComposable.fetchCandidates()
+        }
+      } catch (error) {
+        logger.error('Failed to collect lyric candidates:', error)
+        pickerCandidates.value = []
+      } finally {
+        pickerLoading.value = false
+      }
+    }
+
+    const handleApplyCandidate = async (
+      candidate: LyricCandidate,
+      kind: LyricKind,
+    ): Promise<void> => {
       fetchingLyrics.value = true
       try {
-        if (typeof lyricsComposable.fetchAndSaveLyrics === 'function') {
-          await lyricsComposable.fetchAndSaveLyrics()
-        } else {
-          logger.error('fetchAndSaveLyrics is not a function')
-        }
+        const ok = await lyricsComposable.applyCandidate(candidate, kind)
+        if (ok) showPicker.value = false
+      } finally {
+        fetchingLyrics.value = false
+      }
+    }
+
+    const handleAutoFetchFromPicker = async (): Promise<void> => {
+      fetchingLyrics.value = true
+      try {
+        await lyricsComposable.fetchAndSaveLyrics()
+        showPicker.value = false
       } finally {
         fetchingLyrics.value = false
       }
@@ -464,6 +519,11 @@ export default {
       isHovering,
       fetchingLyrics,
       handleFetchLyrics,
+      showPicker,
+      pickerCandidates,
+      pickerLoading,
+      handleApplyCandidate,
+      handleAutoFetchFromPicker,
       adjustOffset,
       resetOffset,
       formatOffset,
