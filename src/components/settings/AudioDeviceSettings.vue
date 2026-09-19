@@ -350,10 +350,6 @@ watch(useExclusiveMode, (newValue: boolean) => {
 </script>
 
 <style scoped>
-.audio-device-settings {
-  max-width: 720px;
-}
-
 .content-header {
   display: flex;
   justify-content: space-between;

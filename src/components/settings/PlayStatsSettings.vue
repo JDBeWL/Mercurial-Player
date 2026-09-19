@@ -236,15 +236,15 @@
                 <div class="completion-fill" :style="{ width: `${item.completionRate * 100}%` }" />
               </div>
             </div>
+            <!-- 恒为 play_arrow：播放中的状态已由标题旁的 now-playing 跳动条表达，
+                 这里再切成 graphic_eq 是重复表达 -->
+            <span class="row-icon material-symbols-rounded">play_arrow</span>
             <div class="track-metrics">
               <span class="play-count">{{
                 $t('config.playCountTimes', { count: item.plays })
               }}</span>
               <span class="play-time">{{ item.secondsFormatted }}</span>
             </div>
-            <span class="row-icon material-symbols-rounded">
-              {{ isCurrent(item.path) && playerIsPlaying ? 'graphic_eq' : 'play_arrow' }}
-            </span>
           </div>
         </div>
 
@@ -545,7 +545,6 @@ const playlistIndex = computed(() => {
   return { tracks, covers, coverVersion: playerStore.playlistCoverVersion }
 })
 
-const playerIsPlaying = computed(() => playerStore.isPlaying)
 const currentPath = computed(() => playerStore.currentTrack?.path ?? '')
 
 // ============ 曲目封面 ============
@@ -895,10 +894,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.tab-content {
-  max-width: 800px;
-}
-
 /* ---------- 头部 ---------- */
 .content-header {
   display: flex;
@@ -1321,8 +1316,10 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-.track-item.playable:hover,
-.track-item.playable:focus-visible {
+/* 悬浮/聚焦的底色只给非当前播放的行：正在播放的行已经是 primary-container 高亮态，
+   再叠一层 hover 底色会把"正在播放"这个状态盖掉、看着像在变色 */
+.track-item.playable:hover:not(.is-current),
+.track-item.playable:focus-visible:not(.is-current) {
   background-color: var(--md-sys-color-surface-container-high);
   border-color: var(--md-sys-color-outline-variant);
 }
@@ -1471,13 +1468,15 @@ onUnmounted(() => {
 }
 
 .track-item.playable:hover .row-icon,
-.track-item.playable:focus-visible .row-icon,
-.track-item.is-current .row-icon {
+.track-item.playable:focus-visible .row-icon {
   opacity: 1;
 }
 
+/* 正在播放的那一行整颗按钮都不出现：播放中状态已由标题旁的 now-playing 跳动条表达，
+   再来一颗 play_arrow 属于重复表达，所以连悬浮也不显示。
+   用 visibility 而不是 display：保留占位，各行右侧的统计列才能对齐 */
 .track-item.is-current .row-icon {
-  color: var(--md-sys-color-primary);
+  visibility: hidden;
 }
 
 /* "正在播放"的跳动条 */

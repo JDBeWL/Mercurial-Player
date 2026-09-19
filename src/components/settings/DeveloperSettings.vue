@@ -216,10 +216,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.tab-content {
-  max-width: 720px;
-}
-
 .content-header {
   display: flex;
   justify-content: space-between;

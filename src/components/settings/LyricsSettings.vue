@@ -143,7 +143,7 @@
         />
       </div>
 
-      <div class="setting-item select">
+      <div class="setting-item select lyrics-font-select">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.lyricsFontFamily') }}</span>
           <span class="setting-description">{{ $t('config.lyricsFontFamilyDesc') }}</span>
@@ -739,10 +739,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.tab-content {
-  max-width: 720px;
-}
-
 .content-header {
   display: flex;
   justify-content: space-between;
@@ -1017,5 +1013,13 @@ onMounted(() => {
 
 .provider-selects :deep(.md3-select-wrapper) {
   min-width: 130px;
+}
+
+/* 字体名普遍偏长（Noto Sans SC、系统字体全名等），
+   单独加宽歌词字体这一行的下拉框。
+   触发器宽度即下拉列表宽度（.md3-select-dropdown 用 left/right: 0 对齐），
+   所以加宽后展开的字体列表也能少截断一些 */
+.setting-item.lyrics-font-select :deep(.md3-select-wrapper) {
+  min-width: 240px;
 }
 </style>

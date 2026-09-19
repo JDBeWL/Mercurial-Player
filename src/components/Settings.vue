@@ -89,18 +89,36 @@ const visibleTabs = computed<SettingsTab[]>(() => {
   display: flex;
   overflow: hidden;
   background-color: var(--md-sys-color-surface-container-low);
+  /* 左侧 6vw 对齐播放器主界面的左边距。
+     右侧刻意不在面板上留白：右侧留白改由 .settings-content 的 padding-right 承担，
+     这样 .settings-content 本身能一直延伸到窗口右缘，它的滚动条才贴得住右边 */
   padding-left: 6vw;
 }
 
 .settings-content {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 32px;
+  /* 左 32px 与导航栏拉开距离；右侧 = 32px + 5vw。
+     滚动容器的 padding 渲染在滚动条内侧，滚动条落在窗口最右缘，
+     5vw 加上 8px 滚动条后视觉上与左侧的 6vw 基本齐平 */
+  padding: 24px calc(32px + 5vw) 24px 32px;
+}
+
+/* 各设置页的根容器不做宽度限制，铺满右侧可用宽度：
+   设置项靠 justify-content: space-between 把控件推到右边缘，
+   窗口变宽时刻度和控件之间的间距自然拉伸。 */
+.settings-content :deep(.tab-content),
+.settings-content :deep(.audio-device-settings),
+.settings-content :deep(.equalizer-settings) {
+  width: 100%;
 }
 
 @media (max-width: 768px) {
   .settings-panel {
     flex-direction: column;
+    /* 纵向堆叠时导航栏横跨整行，右侧留白要回到面板上，
+       否则导航栏会顶到窗口右缘；内容区的右内边距随之恢复常规值 */
+    padding-right: 6vw;
   }
 
   .settings-content {

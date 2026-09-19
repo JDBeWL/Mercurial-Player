@@ -241,7 +241,7 @@ const toCompletionRate = (completed: number, judged: number): number | null =>
 export const playCountPlugin: BuiltinPluginDefinition = {
   id: 'builtin-play-count',
   name: i18n.global.t('plugin.playCountName'),
-  version: '1.2.0',
+  version: '1.2.1',
   author: 'Mercurial Player',
   description: i18n.global.t('plugin.playCountDescription'),
   permissions: [PluginPermission.PLAYER_READ, PluginPermission.STORAGE],
