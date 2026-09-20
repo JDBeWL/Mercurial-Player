@@ -227,7 +227,7 @@ pub async fn try_resume_last_session(
     };
 
     let play_result = if exclusive_mode {
-        crate::audio::playback::play_track_exclusive(app, state, &path, position).await
+        crate::audio::playback::play_track_exclusive(app, state, &path, position, true).await
     } else {
         crate::audio::playback::play_track_shared(app, state, &path, position)
     };

@@ -527,12 +527,17 @@ pub fn play_track_shared(
 /// 异步实现：等待淡出/解码线程启动/缓冲区填充的 sleep 改用 `tokio::time::sleep`,
 /// 避免阻塞 Tauri 命令线程导致前端 UI 卡顿（原本最坏阻塞 ~600ms）。
 /// 解码推送线程内部仍有自己的 sleep，那是后台线程内的等待，不在此处理。
+///
+/// `start_playback`：是否在预填充后立即启动音频流。为 `false` 时仅加载并
+/// 预缓冲解码数据而不 start（解码线程持续填充），用于热切换时保持暂停状态；
+/// 之后用户点击 resume 会走 `wasapi.resume()` 从缓冲处开始播放。
 #[cfg(windows)]
 pub async fn play_track_exclusive(
     app: &AppHandle,
     state: &State<'_, AppState>,
     path: &str,
     position: Option<f32>,
+    start_playback: bool,
 ) -> Result<(), AppError> {
     let player = &state.player;
     // 递增代际计数器取消旧解码推送线程(替代 stop 布尔标志,避免 70ms 窗口内状态不一致)
@@ -652,12 +657,15 @@ pub async fn play_track_exclusive(
         }
         // 额外等待一小段时间确保数据稳定
         tokio::time::sleep(Duration::from_millis(20)).await;
-        // 启动播放(重新获取锁,不跨 await)
-        let g = lock_or_log!(player.output.wasapi_player.lock());
-        if let Some(ref wasapi) = *g {
-            wasapi
-                .start()
-                .map_err(|e| format!("Failed to start WASAPI: {e:?}"))?;
+        // 仅在需要时启动播放(重新获取锁,不跨 await)
+        // 保持暂停时(start_playback=false)不启动,解码线程持续预缓冲,resume 随时可用
+        if start_playback {
+            let g = lock_or_log!(player.output.wasapi_player.lock());
+            if let Some(ref wasapi) = *g {
+                wasapi
+                    .start()
+                    .map_err(|e| format!("Failed to start WASAPI: {e:?}"))?;
+            }
         }
     }
     Ok(())
@@ -670,6 +678,7 @@ pub async fn play_track_exclusive(
     _state: &State<'_, AppState>,
     _path: &str,
     _position: Option<f32>,
+    _start_playback: bool,
 ) -> Result<(), AppError> {
     Err(AppError::Audio(
         "Exclusive mode is only supported on Windows".to_string(),

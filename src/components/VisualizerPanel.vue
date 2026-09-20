@@ -99,6 +99,42 @@ export default {
       return cachedGradient
     }
 
+    // 把每帧 128 次独立的 beginPath/fill(draw call) 降为 1 次,显著降低 CPU 绘制开销
+    const renderBars = (
+      ctx: CanvasRenderingContext2D,
+      width: number,
+      height: number,
+      drawData: Float32Array,
+    ) => {
+      const bufferLength = SPECTRUM_SIZE
+      const barWidth = (width / bufferLength) * 0.8
+      const gap = (width / bufferLength) * 0.2
+      let x = 0
+
+      ctx.fillStyle = getOrCreateGradient(ctx, height)
+      ctx.shadowBlur = 0
+
+      ctx.beginPath()
+      const useRoundRect = !!ctx.roundRect
+      for (let i = 0; i < bufferLength; i++) {
+        const value = drawData[i]!
+        let barHeight = Math.pow(value, 0.9) * height * 0.9
+
+        if (barHeight > height) barHeight = height
+        if (barHeight < 2) barHeight = 2
+
+        if (useRoundRect) {
+          ctx.roundRect(x, height - barHeight, barWidth, barHeight, [5, 5, 0, 0])
+        } else {
+          ctx.rect(x, height - barHeight, barWidth, barHeight)
+        }
+
+        x += barWidth + gap
+      }
+      ctx.fill()
+      ctx.shadowBlur = 0
+    }
+
     const smoothDataInPlace = (
       currentData: Float32Array,
       targetData: Float32Array,
@@ -197,31 +233,7 @@ export default {
       const drawData = smoothedAudioData
       if (!drawData || drawData.length === 0) return
 
-      const bufferLength = SPECTRUM_SIZE
-      const barWidth = (width / bufferLength) * 0.8
-      const gap = (width / bufferLength) * 0.2
-      let x = 0
-
-      ctx.fillStyle = getOrCreateGradient(ctx, height)
-      ctx.shadowBlur = 0
-
-      for (let i = 0; i < bufferLength; i++) {
-        const value = drawData[i]!
-        let barHeight = Math.pow(value, 0.9) * height * 0.9
-
-        if (barHeight > height) barHeight = height
-        if (barHeight < 2) barHeight = 2
-
-        if (ctx.roundRect) {
-          ctx.beginPath()
-          ctx.roundRect(x, height - barHeight, barWidth, barHeight, [5, 5, 0, 0])
-          ctx.fill()
-        } else {
-          ctx.fillRect(x, height - barHeight, barWidth, barHeight)
-        }
-
-        x += barWidth + gap
-      }
+      renderBars(ctx, width, height, drawData)
     }
 
     // --- 可视化绘制 ---
@@ -265,31 +277,7 @@ export default {
         return
       }
 
-      const bufferLength = SPECTRUM_SIZE
-      const barWidth = (width / bufferLength) * 0.8
-      const gap = (width / bufferLength) * 0.2
-      let x = 0
-
-      ctx.fillStyle = getOrCreateGradient(ctx, height)
-      ctx.shadowBlur = 0
-
-      for (let i = 0; i < bufferLength; i++) {
-        const value = drawData[i]!
-        let barHeight = Math.pow(value, 0.9) * height * 0.9
-
-        if (barHeight > height) barHeight = height
-        if (barHeight < 2) barHeight = 2
-
-        if (ctx.roundRect) {
-          ctx.beginPath()
-          ctx.roundRect(x, height - barHeight, barWidth, barHeight, [5, 5, 0, 0])
-          ctx.fill()
-        } else {
-          ctx.fillRect(x, height - barHeight, barWidth, barHeight)
-        }
-
-        x += barWidth + gap
-      }
+      renderBars(ctx, width, height, drawData)
 
       ctx.shadowBlur = 0
 

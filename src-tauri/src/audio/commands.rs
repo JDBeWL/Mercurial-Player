@@ -90,7 +90,7 @@ pub async fn play_track(
         .map(|g| *g)?;
 
     if exclusive_mode {
-        play_track_exclusive(&app, &state, &path, position).await
+        play_track_exclusive(&app, &state, &path, position, true).await
     } else {
         play_track_shared(&app, &state, &path, position)
     }
@@ -322,7 +322,7 @@ pub async fn seek_track(
         .map(|g| *g)?;
 
     if exclusive_mode {
-        play_track_exclusive(&app, &state, &path, Some(time)).await
+        play_track_exclusive(&app, &state, &path, Some(time), true).await
     } else {
         seek_track_shared(&app, &state, &path, time)
     }
@@ -413,21 +413,24 @@ async fn switch_to_wasapi_exclusive(
 ) -> Result<(), AppError> {
     log::info!("Switching to WASAPI exclusive mode for device: {device_name}");
 
-    // 1. 停止并清理旧的 cpal sink,同时记录当前播放路径
+    // 1. 停止并清理旧的 cpal sink,同时记录当前播放路径与是否在播放
     // 用 lock() 阻塞等待:播放期间解码线程会周期性持有这些锁
-    let current_path = {
-        {
+    let (is_playing, current_path) = {
+        let is_playing = {
             let old_player = state.player.output.sink.lock().lock_or_err("player")?;
+            let playing = !old_player.is_paused();
             old_player.stop();
             old_player.clear();
-        } // 先释放 sink 锁,再取 current_path,避免嵌套持锁
-        state
+            playing
+        }; // 先释放 sink 锁,再取 current_path,避免嵌套持锁
+        let current_path = state
             .player
             .track
             .current_path
             .lock()
             .lock_or_err("current path")?
-            .clone()
+            .clone();
+        (is_playing, current_path)
     };
 
     // 3. 确保旧的 WASAPI 播放器被正确清理
@@ -484,8 +487,10 @@ async fn switch_to_wasapi_exclusive(
             // 直接调用 play_track_exclusive,不通过 play_track 派发
             // 因为此时 exclusive_mode 标志尚未更新 (仍为旧值 false),
             // 若用 play_track 会错误路由到 play_track_shared
+            // 若切换前为暂停状态,传 start_playback=false,仅加载并预缓冲而不启动,
+            // 保持暂停;之后点击 resume 会走 wasapi.resume() 从缓冲处继续播放
             if let Some(path) = current_path {
-                play_track_exclusive(app, state, &path, current_time).await?;
+                play_track_exclusive(app, state, &path, current_time, is_playing).await?;
                 // play_track_exclusive 不会读 target_volume,需要手动同步音量
                 let vol = *state
                     .player
@@ -543,7 +548,21 @@ async fn switch_to_shared_mode(
     // 1. 先记录当前播放状态和路径 (在停止旧播放器前)
     // 用 lock() 阻塞等待:播放期间解码线程会周期性持有这些锁,try_lock 会失败
     let (is_playing, volume, current_path) = {
-        let (playing, vol) = {
+        // 独占模式在播的其实是 WASAPI 播放器,旧的 cpal sink 在切换到独占时已被
+        // stop/clear,其 is_paused() 不代表当前真实播放状态。因此只要 wasapi 存在,
+        // 播放状态以 wasapi.player.state() 为准;只有纯共享模式换设备(wasapi 为
+        // None)时才回退用 cpal sink 判断。
+        let wasapi_playing = {
+            let g = state
+                .player
+                .output
+                .wasapi_player
+                .lock()
+                .lock_or_err("WASAPI player")?;
+            g.as_ref()
+                .map(|w| w.state() == super::wasapi::PlaybackState::Playing)
+        };
+        let (sink_playing, vol) = {
             let old_player = state.player.output.sink.lock().lock_or_err("player")?;
             let playing = !old_player.is_paused();
             let vol = old_player.volume();
@@ -551,6 +570,7 @@ async fn switch_to_shared_mode(
             drop(old_player);
             (playing, vol)
         }; // 先释放 sink 锁,再取 current_path,避免嵌套持锁
+        let playing = wasapi_playing.unwrap_or(sink_playing);
         let current_path = state
             .player
             .track
@@ -676,6 +696,13 @@ async fn switch_to_shared_mode(
         // 若用 play_track 会错误路由到 play_track_exclusive,
         // 而 WASAPI 播放器已被 take() 走,导致 "WASAPI player not initialized"
         play_track_shared(app, state, &path, current_time)?;
+        // play_track_shared 末尾总是 play();若切换前为暂停状态需重新暂停,
+        // 保持暂停,点击恢复时才从该位置继续播放(音源 fade_in 从 0 开始,不会爆音)
+        if !is_playing {
+            state.player.fade.generation.fetch_add(1, Ordering::SeqCst);
+            let player_lock = state.player.output.sink.lock().lock_or_err("player")?;
+            player_lock.pause();
+        }
     }
 
     log::info!("Successfully switched to shared mode");

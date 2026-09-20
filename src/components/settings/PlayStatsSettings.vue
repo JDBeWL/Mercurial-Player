@@ -98,7 +98,7 @@
         <div class="trend-panel">
           <div class="trend-chart">
             <div
-              v-for="(point, index) in trendPoints"
+              v-for="point in trendPoints"
               :key="point.date"
               class="trend-col"
               :title="trendTooltip(point)"
@@ -111,7 +111,7 @@
                 />
               </div>
               <span class="trend-label">{{
-                showTrendLabel(index) ? formatDateLabel(point.date) : ''
+                showTrendLabel() ? formatDateLabel(point.date) : ''
               }}</span>
             </div>
           </div>
@@ -526,7 +526,8 @@ const dailySeries = computed<DailyPoint[]>(() => {
   }
 })
 
-const trendDays = computed(() => Math.min(range.value ?? TREND_DEFAULT_DAYS, TREND_MAX_BARS))
+// 趋势取完整范围的天数,不再在此裁剪;超出可容纳柱数时由 trendPoints 聚合成桶
+const trendDays = computed(() => range.value ?? TREND_DEFAULT_DAYS)
 
 /**
  * 当前播放列表索引 + 封面映射，可播判断/标题兜底/封面都从这里取。
@@ -753,12 +754,40 @@ const metricOptions = computed<Array<{ value: 'plays' | 'seconds'; label: string
 
 // ============ 趋势图 ============
 
-const trendPoints = computed(() =>
-  dailySeries.value.map((point) => ({
-    ...point,
-    value: trendMetric.value === 'plays' ? point.plays : point.seconds,
-  })),
-)
+/** 天数超过可容纳柱数时,把若干天聚合到一个桶,保证趋势图覆盖完整天数范围 */
+const downsampleDailySeries = (
+  points: DailyPoint[],
+  maxBars = TREND_MAX_BARS,
+): Array<DailyPoint & { value: number }> => {
+  const n = points.length
+  const metric = trendMetric.value
+  const toBar = (p: DailyPoint): DailyPoint & { value: number } => ({
+    ...p,
+    value: metric === 'plays' ? p.plays : p.seconds,
+  })
+  if (n <= maxBars) {
+    return points.map(toBar)
+  }
+  const buckets: Array<DailyPoint & { value: number }> = []
+  for (let i = 0; i < maxBars; i++) {
+    const start = Math.floor((i * n) / maxBars)
+    const end = Math.floor(((i + 1) * n) / maxBars)
+    const slice = points.slice(start, end)
+    if (slice.length === 0) continue
+    const plays = slice.reduce((sum, p) => sum + p.plays, 0)
+    const seconds = slice.reduce((sum, p) => sum + p.seconds, 0)
+    buckets.push({
+      date: slice[0]!.date,
+      plays,
+      seconds,
+      completed: slice.reduce((sum, p) => sum + p.completed, 0),
+      value: metric === 'plays' ? plays : seconds,
+    })
+  }
+  return buckets
+}
+
+const trendPoints = computed(() => downsampleDailySeries(dailySeries.value))
 
 const trendMax = computed(() => Math.max(1, ...trendPoints.value.map((point) => point.value)))
 
@@ -767,15 +796,17 @@ const barHeight = (value: number): string => {
   return `${Math.max(6, (value / trendMax.value) * 100)}%`
 }
 
-const showTrendLabel = (index: number): boolean => {
-  const last = trendPoints.value.length - 1
-  return index === 0 || index === last || index % 3 === 0
-}
+// 每根柱子都显示日期(列宽经 CSS 兜底保证标签不重叠/不裁剪)
+const showTrendLabel = (): boolean => true
 
 const trendAverageLabel = computed(() => {
-  const points = trendPoints.value
+  // 日均值按原始天粒度计算,避免聚合桶把分母缩小(90 天聚合到 30 桶仍按天数取均值)
+  const points = dailySeries.value
   if (points.length === 0) return '--'
-  const total = points.reduce((sum, point) => sum + point.value, 0)
+  const addend = trendMetric.value === 'plays'
+    ? (point: DailyPoint) => point.plays
+    : (point: DailyPoint) => point.seconds
+  const total = points.reduce((sum, point) => sum + addend(point), 0)
   const average = total / points.length
   return trendMetric.value === 'seconds' ? formatDuration(average) : formatPercentValue(average)
 })
@@ -1234,13 +1265,16 @@ onUnmounted(() => {
 .trend-chart {
   display: flex;
   align-items: flex-end;
-  gap: 4px;
+  gap: 2px;
   height: 140px;
+  /* 柱子过密(期窄面板)时横向滚动,避免日期标签被裁剪 */
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .trend-col {
-  flex: 1;
-  min-width: 0;
+  flex: 1 0 30px;
+  min-width: 30px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -1273,11 +1307,13 @@ onUnmounted(() => {
 
 .trend-label {
   height: 12px;
-  font-size: 10px;
+  font-size: 8.5px;
   line-height: 12px;
   color: var(--md-sys-color-on-surface-variant);
   text-align: center;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 .trend-summary {
