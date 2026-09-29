@@ -1,11 +1,6 @@
-//! 文件系统操作模块
-//!
-//! 提供目录读取、文件检查等功能。
-//!
-//! 路径模式双支持：
-//! - 桌面端：本地绝对路径；
-//! - Android：SAF `content://` URI（分区存储下无法访问绝对路径），
-//!   文件打开通过 [`crate::android_saf`] 的 fd 桥完成。
+//! 文件系统操作模块：目录读取、文件检查等。
+//! 路径双形态：桌面端为本地绝对路径；Android 为 SAF `content://` URI（分区存储下绝对路径不可用），
+//! 打开文件经 [`crate::android_saf`] 的 fd 桥完成。
 
 use super::metadata::{Playlist, TrackMetadata, flush_metadata_cache, get_track_metadata_internal};
 use crate::android_saf;
@@ -39,12 +34,8 @@ fn validate_lyrics_path(path: &str) -> Result<(), AppError> {
 /// 单次目录扫描的最大递归深度（防止对深层目录树的 DoS 式扫描）
 const MAX_SCAN_DEPTH: usize = 10;
 
-/// 校验媒体路径：词法敏感目录检查 + canonicalize 复查（防 symlink/junction 逃逸）
-///
-/// 适用于所有接受前端传入 path 的媒体命令入口（目录枚举、扫描、元数据读取）。
-/// canonicalize 失败（路径不存在）视为不安全，与 [`super::super::config`] 的
-/// `is_path_safe` 模式一致。
-///
+/// 校验媒体路径：词法敏感目录检查 + canonicalize 复查（防 symlink/junction 逃逸），用于所有
+/// 接受前端 path 的媒体命令入口；canonicalize 失败（路径不存在）视为不安全。
 /// Android SAF 的 `content://` URI 不做本地文件系统校验，直接放行。
 pub fn validate_media_path(path: &str) -> Result<(), AppError> {
     if android_saf::is_content_uri(path) {
@@ -189,13 +180,8 @@ pub fn get_all_audio_files_from_dirs(
     Ok(all_playlists)
 }
 
-/// 扫描单个 SAF content 树
-///
-/// 与桌面端对齐：
-/// - 元数据提取走 rayon 并行（原先是串行 for 循环，配合 fd 桥的 JNI 打开，大目录很慢）；
-/// - 按**相对树根的目录路径**分组生成多个播放列表（原实现把 Kotlin 返回的 folder
-///   直接丢弃，所有曲目塞进一个以 URI 末段命名的列表）；
-/// - 列表名用可读名（`primary%3AMusic` → `Music`）。
+/// 扫描单个 SAF content 树，与桌面端行为对齐：元数据用 rayon 并行提取（fd 桥要经 JNI，串行很慢），
+/// 按相对树根的目录路径分组生成多个播放列表，列表名用可读名（`primary%3AMusic` → `Music`）。
 fn scan_content_tree(tree_uri: &str, folder_based: bool) -> Result<Vec<Playlist>, AppError> {
     let entries = android_saf::list_audio_files(tree_uri)?;
     if entries.is_empty() {

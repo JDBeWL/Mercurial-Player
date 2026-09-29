@@ -11,11 +11,9 @@
       @select="onTabSelect"
     />
 
-    <!-- 手机竖屏：详情页头（返回 + 当前页名）。
-         放在滚动容器**外面**：这样它天然不随内容滚动，既不需要 sticky、
-         也不需要给自己铺一层不透明底色（本项目 surface-container-* 全族缺失，
-         铺了也是透明，滚动时内容会从下面透出来）。
-         桌面/横屏不渲染这块（v-if），左右并排的导航栏本身就是"返回"路径 -->
+    <!-- 手机竖屏：详情页头（返回 + 当前页名）。放在滚动容器外面，这样它天然不随内容滚动，既不需要
+         sticky，也不需要给自己铺一层不透明底色（本项目 surface-container-* 全族缺失，铺了也是透明，
+         滚动时内容会从下面透出来）。桌面/横屏不渲染这块（v-if），并排的导航栏本身就是返回路径。 -->
     <div v-if="isMobilePortrait" class="mobile-detail-header">
       <button class="mobile-back-btn" :title="$t('common.back')" @click="backToList">
         <span class="material-symbols-rounded">arrow_back</span>
@@ -196,7 +194,7 @@ const currentTabLabel = computed<string>(
    10 个 tab 各撑满整行 → 排成 10 屏宽，用户只看得到一个空胶囊（实测截图）。
    这里换成手机上标准的「整屏列表 → 详情」，导航的列表形态见 SettingsNav。
 
-   ⚠️ 用 [data-mobile='true'] 守卫：@media (orientation: portrait) 在桌面把窗口
+   用 [data-mobile='true'] 守卫：@media (orientation: portrait) 在桌面把窗口
    拉成窄高时同样会命中，不加守卫会把桌面端的并排布局一起改掉。 */
 @media (orientation: portrait) {
   .settings-panel[data-mobile='true'] {

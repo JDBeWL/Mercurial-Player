@@ -4,7 +4,6 @@ use crate::error::AppError;
 use crate::security::{has_allowed_extension, is_sensitive_path};
 use lofty::picture::Picture;
 use lofty::prelude::TaggedFileExt;
-use lofty::probe::Probe;
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -12,22 +11,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::cache::cover_cache_dir;
+use super::extractor::open_tagged_file;
 
 const COVER_OUTPUT_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-
-/// 打开媒体文件并探测格式（lofty 0.24+ 需显式 guess_file_type）
-fn open_tagged_file(path: &str) -> Result<lofty::file::TaggedFile, AppError> {
-    use std::io::BufReader;
-    crate::android_saf::open_media_file(path)
-        .and_then(|f| {
-            Probe::new(BufReader::new(f))
-                .guess_file_type()
-                .map_err(|e| AppError::msg(e.to_string()))?
-                .read()
-                .map_err(|e| AppError::msg(e.to_string()))
-        })
-        .map_err(|e: AppError| format!("无法读取文件: {e}").into())
-}
 
 fn cover_extension_from_mime(mime: Option<&str>) -> &'static str {
     match mime {
@@ -101,13 +87,8 @@ pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, AppEr
 }
 
 /// 提取音频文件的封面并保存到指定路径
-///
-/// `output_path` 有两种形态：
-/// - 桌面端：保存对话框给的**本地绝对路径**（下方走扩展名白名单 + 敏感目录检查）；
-/// - Android：SAF 保存对话框给的是 `content://` URI，只能经 ContentResolver 拿 fd
-///   写入。URI 本身没有扩展名（document id 可能长成 `msf:1000000021`），
-///   所以白名单校验改为回查它的**显示名** —— 否则这里会直接把安卓端的
-///   "提取封面"判成非法路径，用户点了没反应。
+/// `output_path` 有两种形态：桌面端是保存对话框给的本地绝对路径（走扩展名白名单 + 敏感目录检查）；
+/// Android 的 SAF 给的是 `content://` URI，只能经 ContentResolver 拿 fd 写入，校验改用其显示名。
 pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<String, AppError> {
     if is_sensitive_path(audio_path) {
         return Err("安全限制：不允许访问敏感目录".to_string().into());
@@ -116,9 +97,8 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
     let is_uri = crate::android_saf::is_content_uri(output_path);
 
     if is_uri {
-        // content URI 分支：它是一段 URI 而不是文件路径，`is_sensitive_path` 那类
-        // "路径前缀"检查对它无从谈起；扩展名这一关改为回查它的**显示名**。
-        // 保存位置的授权范围由用户在系统选择器里亲自圈定。
+        // content URI 不是文件路径：`is_sensitive_path` 那类前缀检查对它无从谈起，
+        // 扩展名这一关改为回查它的显示名（保存位置由用户在系统选择器里亲自圈定）。
         let display_name = crate::android_saf::content_uri_display_name(output_path)
             .ok_or_else(|| AppError::msg("无法确认保存目标的文件名，请换一个位置再试"))?;
         if !has_allowed_extension(&display_name, &COVER_OUTPUT_EXTENSIONS) {
@@ -130,11 +110,8 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
         }
     } else {
         // 校验输出路径：必须是图片扩展名，且不允许写入敏感目录。
-        //
-        // 这里不能写成「有扩展名才校验白名单」——那样无扩展名的路径会整体跳过
-        // 扩展名检查，只剩 is_sensitive_path 兜底，仍可向用户目录写入任意字节
-        // （例如把音频标签里的图片数据写到 AppData 下的无扩展名文件）。
-        // has_allowed_extension 对无扩展名返回 false，因此可直接作为闸门。
+        // 不能写成「有扩展名才校验白名单」——无扩展名的路径会整体跳过检查，只剩
+        // is_sensitive_path 兜底，仍可向用户目录写任意字节；has_allowed_extension 对其返回 false。
         if !has_allowed_extension(output_path, &COVER_OUTPUT_EXTENSIONS) {
             return Err(format!(
                 "封面输出路径必须是图片文件 ({})",

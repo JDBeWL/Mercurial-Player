@@ -1,15 +1,6 @@
 //! Android SAF（Storage Access Framework）适配层。
-//!
-//! 桌面端媒体路径为绝对路径，Android 分区存储下为 `content://` URI。
-//! 本模块提供两份能力：
-//! - **识别**：`is_content_uri()` 标记 URI 模式路径；
-//! - **桥接**：通过 JNI 调用 Kotlin `SafBridge`，把 content URI 转成 native
-//!   fd（`ContentResolver.openFileDescriptor().detachFd()`），Rust 侧用
-//!   `File::from_raw_fd` 包装——lofty 的 `Probe::new(reader)` 与 symphonia 的解码
-//!   入口均只需要 `Read + Seek`，因此音频解码、元数据提取、封面提取全部复用
-//!   现有桌面代码，无需为 URI 单独实现解析逻辑。
-//!
-//! 仅在 Android 目标编译；桌面端不引入任何改动。
+//! 桌面端媒体路径为绝对路径，Android 分区存储下为 `content://` URI；本模块经 JNI 调 Kotlin
+//! `SafBridge` 把 URI 转成 native fd 再包成 `File`，解码/元数据/封面因此复用桌面代码。
 
 use crate::error::AppError;
 
@@ -152,7 +143,7 @@ mod android_impl {
         Ok(unsafe { File::from_raw_fd(fd) })
     }
 
-    // ==================== JNI 封装 ====================
+    // JNI 封装
 
     // 共享 JNI 封装：with_jni / app_class 见 crate::android_jni
     use crate::android_jni::{app_class, with_jni};
@@ -244,10 +235,7 @@ pub fn open_media_file(path: &str) -> Result<std::fs::File, AppError> {
 }
 
 /// Android 下的统一**写文件**入口：content URI 走 JNI fd 桥，其余走本地路径。
-///
-/// 目前唯一的调用点是「提取封面」—— 桌面端保存对话框返回本地路径，安卓端走 SAF，
-/// 返回的是 `content://`。没有这条通道的话，安卓上按路径 `fs::write` 必然失败，
-/// 而用户侧完全看不出所以然（点了没反应）。
+/// 存在的理由：安卓端「提取封面」拿到的是 `content://`，按路径 `fs::write` 必然失败且用户无感知。
 #[cfg(target_os = "android")]
 pub fn open_write_file(path: &str) -> Result<std::fs::File, AppError> {
     if is_content_uri(path) {
@@ -264,9 +252,7 @@ pub fn open_write_file(path: &str) -> Result<std::fs::File, AppError> {
 }
 
 /// content URI 的显示名（非 Android 或无名字时返回 `None`）。
-///
-/// URI 本身看不出文件名（SAF 的 document id 可能是 `msf:1000000021` 这种），
-/// 只能回查 provider。调用方用它守住"输出必须是图片文件"的校验。
+/// URI 本身看不出文件名（document id 可能是 `msf:1000000021` 这种），只能回查 provider。
 #[cfg(target_os = "android")]
 pub fn content_uri_display_name(uri: &str) -> Option<String> {
     android_impl::jni_call_string("getDisplayName", &[uri])
@@ -317,7 +303,6 @@ pub fn get_app_data_dir() -> Result<Option<String>, AppError> {
     }
 }
 
-/// 枚举已授权树下的音频文件（仅 Android 的 content URI；桌面端返回空）
 /// SAF 树枚举出的单个音频条目
 ///
 /// `folder` 是直接父目录的显示名，`folder_path` 是相对树根的目录路径（可多级）。
@@ -398,10 +383,8 @@ pub fn get_saved_tree_display_name() -> Result<Option<String>, AppError> {
     }
 }
 
-/// 把 URL 编码的百分号序列解成原始字符
-///
-/// `document id` 常把分隔符编码（`primary%3AMusic%2FSong.mp3`），
-/// 直接把 URI 末段当文件名会显示成一串编码，必须先解码。
+/// 把 URL 编码的百分号序列解成原始字符。
+/// `document id` 常把分隔符编码（`primary%3AMusic%2FSong.mp3`），不解码就会显示成一串编码。
 #[must_use]
 pub fn percent_decode(input: &str) -> String {
     let bytes = input.as_bytes();

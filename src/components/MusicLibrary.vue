@@ -597,7 +597,7 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
    手机上看起来像"没铺满的浮层"，而整屏列表才是手机上的正常形态。
    与上面的 480px 规则分开写：那是按宽度收窄，这里是按方向。 */
 @media (orientation: portrait) {
-  .music-library {
+  .music-library[data-mobile='true'] {
     width: 100vw;
     max-width: 100vw;
   }
@@ -749,13 +749,9 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   min-height: 44px;
 }
 
-/* ⚠️ 这两条曾各有一个 `max-height: 1.4em`（注释写"约 1 行的高度"），
-   Android 上它会把 g / y / p 这些带下伸部的字母连下半截一起切掉。
-   原因：ANDROID 系统字号设置会被 WebView 放大到网页文字上（本机 font_scale=1.17，
-   16px 实际按 18.56px 排），行高跟着变成 26px，而 `1.4em` 是按未放大的 16px 算的
-   22.4px —— 于是盒子比文字矮 4px，正好切掉下伸部（实测 clientHeight 22 / scrollHeight 26）。
-   两行既然都是 `white-space: nowrap`，盒子高度天然就是 1 行，这个 max-height 从来是多余的，
-   直接删掉即可（留着它只是给"字号被外部放大"埋雷）。 */
+/* 这两条不要再加 `max-height: 1.4em`：Android 的系统字号设置会被 WebView 放大到网页文字上，行高跟着变
+   大，而 1.4em 是按未放大的字号算的，盒子会比文字矮一截，正好切掉 g / y / p 的下伸部。两行都是
+   white-space: nowrap，盒子高度天然就是一行，这个 max-height 本来就是多余的。 */
 .list-item-headline {
   font-size: 16px;
   font-weight: 400;

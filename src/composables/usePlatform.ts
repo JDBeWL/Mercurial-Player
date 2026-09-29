@@ -2,12 +2,8 @@ import { computed, ref, type ComputedRef } from 'vue'
 import { getPlatform } from '@/services/appService'
 import logger from '@/utils/logger'
 
-/**
- * 运行平台（windows / macos / linux / android）。
- *
- * 做成模块级单例：后端 `get_platform` 的结果在一次运行里不会变，
- * 让每个组件各自 await 一遍只会制造重复 IPC 和"首帧未知"的闪烁。
- */
+/** 运行平台（windows / macos / linux / android）。模块级单例：`get_platform` 一次运行里不
+ *  会变，让每个组件各自 await 只会重复 IPC，还会带来"首帧未知"的闪烁。 */
 const platformRef = ref<string | null>(null)
 let pending: Promise<string> | null = null
 
@@ -34,12 +30,8 @@ export interface PlatformInfo {
   isWindows: ComputedRef<boolean>
 }
 
-/**
- * 平台信息。
- *
- * 桌面专属功能（窗口控制按钮、拖拽标题栏、迷你模式、桌面歌词……）在 Android 上
- * 没有意义，需要按平台隐藏或降级。首次调用会自动发起一次平台查询。
- */
+/** 平台信息。桌面专属功能（窗口控制按钮、拖拽标题栏、迷你模式、桌面歌词）在 Android 上没有
+ *  意义，需按平台隐藏或降级。首次调用会自动发起一次平台查询。 */
 export function usePlatform(): PlatformInfo {
   void ensurePlatform()
 

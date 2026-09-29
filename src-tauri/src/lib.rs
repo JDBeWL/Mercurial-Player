@@ -39,8 +39,8 @@ mod android;
 #[cfg(target_os = "android")]
 mod android_jni;
 
-// 应用更新模块依赖 tauri-plugin-updater 的桌面安装流程，移动端（Android/iOS）在
-// 阶段 5 验证其安装路径前不参与编译，避免未经验证的移动端注册/安装行为
+// 应用更新模块依赖 tauri-plugin-updater 的桌面安装流程；移动端的安装路径未经验证前不参与编译，
+// 避免未验证的移动端注册/安装行为
 #[cfg(desktop)]
 pub mod updater;
 
@@ -64,7 +64,7 @@ pub struct Placeholder;
 
 #[cfg(not(any(windows, target_os = "android")))]
 impl Placeholder {
-    /// 占位方法,非 Windows 平台调用 WASAPI 方法时返回错误
+    /// 占位方法：没有独占能力的平台上调用独占接口时返回错误
     pub fn stop(&self) -> Result<(), String> {
         Err("WASAPI not available on non-Windows".to_string())
     }
@@ -116,11 +116,9 @@ pub struct AudioOutputState {
     pub current_device_name: Arc<Mutex<String>>,
     /// 是否启用独占模式
     pub exclusive_mode: Arc<Mutex<bool>>,
-    /// 独占/直出播放器：Windows = WASAPI 独占，Android = AAudio 独占（USB DAC 位完美），
-    /// 其它平台为占位实现（见 [`crate::app_state::PlatformPlayer`]）。
-    ///
-    /// 字段名沿用了最早只有 WASAPI 时的叫法，改一次要动太多调用点，
-    /// 但它现在装的是"当前平台的独占播放器"。
+    /// 独占/直出播放器：Windows = WASAPI 独占，Android = AAudio 独占（USB DAC 位完美），其余为占位实现
+    /// （见 [`crate::app_state::PlatformPlayer`]）。字段名沿用最早只有 WASAPI 时的叫法，
+    /// 但它装的是「当前平台的独占播放器」。
     pub wasapi_player: Arc<Mutex<Option<PlatformPlayer>>>,
 }
 
@@ -163,7 +161,7 @@ pub struct FadeControl {
 ///
 /// 按职责域拆分为子结构体,每个子结构体负责一组内聚的字段
 pub struct PlayerState {
-    /// 音频输出 (sink/流/音量/设备/独占模式/WASAPI)
+    /// 音频输出 (sink/流/音量/设备/独占模式/独占播放器)
     pub output: AudioOutputState,
     /// 当前曲目 (source/path)
     pub track: TrackState,
@@ -173,7 +171,7 @@ pub struct PlayerState {
     pub decode: DecodeThreadState,
     /// 设备监听器
     pub device_monitor: Arc<Mutex<DeviceMonitor>>,
-    /// 播放队列（阶段 3.0：Android 后台自动切歌；桌面端不启用自动推进）
+    /// 播放队列（Android 后台自动切歌；桌面端不启用自动推进）
     pub queue: Arc<Mutex<PlaybackQueue>>,
     /// 淡入淡出控制
     pub fade: FadeControl,
@@ -390,11 +388,6 @@ pub fn run() {
             config::commands::save_config,
             config::commands::export_config,
             config::commands::import_config,
-            // 音乐目录命令
-            config::commands::add_music_directory,
-            config::commands::remove_music_directory,
-            config::commands::set_music_directories,
-            config::commands::get_music_directories,
             // 系统命令
             system::commands::get_system_info,
             system::commands::get_system_fonts,
@@ -404,6 +397,7 @@ pub fn run() {
             system::commands::get_platform,
             // 应用内界面字号（Android 走 WebView textZoom；桌面端 no-op）
             system::commands::set_app_font_scale,
+            system::commands::set_system_ui_hidden,
             // 显示器刷新率查询依赖 display-info（经 wayland 依赖链），仅桌面端可用
             #[cfg(desktop)]
             system::commands::get_screen_refresh_rate,

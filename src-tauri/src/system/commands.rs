@@ -227,6 +227,33 @@ pub fn set_app_font_scale(scale: f32) -> Result<(), AppError> {
     crate::app_font_scale::set_app_font_scale(scale)
 }
 
+/// 隐藏/恢复 Android 系统栏（状态栏、导航栏）。桌面端 no-op。
+///
+/// tao 在 Android 上没实现 `set_fullscreen`（源码里直接 warn 后返回），
+/// 所以只能自己经 JNI 交给 `WindowInsetsControllerCompat`。
+#[command]
+#[cfg(target_os = "android")]
+pub fn set_system_ui_hidden(
+    hide_status_bars: bool,
+    hide_navigation_bars: bool,
+) -> Result<(), AppError> {
+    crate::android_jni::jni_call_void_two_bools(
+        "com/jdbewl/mercurial_player/MainActivity",
+        "setSystemUiHidden",
+        hide_status_bars,
+        hide_navigation_bars,
+    )
+}
+
+#[command]
+#[cfg(not(target_os = "android"))]
+pub fn set_system_ui_hidden(
+    _hide_status_bars: bool,
+    _hide_navigation_bars: bool,
+) -> Result<(), AppError> {
+    Ok(())
+}
+
 /// 显示器刷新率信息
 #[cfg(desktop)]
 #[derive(Debug, serde::Serialize)]

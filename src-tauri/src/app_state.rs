@@ -62,8 +62,7 @@ pub fn build_app_state(
     // 均衡器设置独立落盘到 data/eq.json(与 config.json 分开,高频低频写互不干扰)
     let equalizer = GlobalEqualizer::with_persistence(config_manager.get_config_directory());
 
-    // wasapi_player 在非 Windows 平台恒为 None(两个构造函数都不产生独占播放器),
-    // 因此直接传值即可: is_some() 在 Linux 上为 false,与旧的条件编译分支等价
+    // 其它平台根本建不出独占播放器，is_some() 恒为 false，直接传值即可
     AppState {
         player: PlayerState {
             output: AudioOutputState {

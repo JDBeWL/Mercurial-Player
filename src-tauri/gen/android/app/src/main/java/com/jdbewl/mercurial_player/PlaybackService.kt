@@ -27,14 +27,9 @@ import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media.session.MediaButtonReceiver
 
 /**
- * 后台播放前台服务（阶段 3.1 / 3.2 / 3.4 / 3.5）。
- *
- * 职责边界：**只保活进程 + 托管 MediaSession/通知**，不持有任何音频句柄 ——
- * 解码与输出由 Rust 侧的 rodio/AAudio 线程负责（见计划书的阶段 3 修正说明）。
- *
- * - 播放中：以 `mediaPlayback` 类型常驻前台，通知栏可控制；
- * - 暂停：保留通知（用户仍可恢复），但不强占前台；
- * - 无曲目：[stop] 停止服务并释放 MediaSession。
+ * 后台播放前台服务：只保活进程 + 托管 MediaSession/通知，不持有任何音频句柄（解码与输出都在 Rust 侧）。
+ * 播放中以 `mediaPlayback` 类型常驻前台；暂停时保留通知但退出前台，用户仍可从通知恢复；
+ * 无曲目时由 [MediaBridge] 调 [stop] 停止服务并释放 MediaSession。
  */
 class PlaybackService : Service() {
   companion object {
@@ -74,8 +69,9 @@ class PlaybackService : Service() {
           putExtra("coverPath", coverPath)
         }
       if (running) {
-        // 已在前台：走 onStartCommand 更新通知与 MediaSession
-        ContextCompat.startForegroundService(context, intent)
+        // 服务已在跑：仍走 onStartCommand 更新通知与 MediaSession
+        runCatching { ContextCompat.startForegroundService(context, intent) }
+          .onFailure { e -> android.util.Log.w(TAG, "startForegroundService 被拒绝: ${e.message}") }
         return
       }
       runCatching {
@@ -105,7 +101,7 @@ class PlaybackService : Service() {
   private var hasTrack = false
   private var coverPath = ""
 
-  /** 耳机/蓝牙断开 → 暂停（阶段 2.5 设备监听降级后的补偿路径） */
+  /** 耳机/蓝牙断开 → 暂停 */
   private val noisyReceiver =
     object : BroadcastReceiver() {
       override fun onReceive(context: Context?, intent: Intent?) {
@@ -169,16 +165,18 @@ class PlaybackService : Service() {
     }
 
     val notification = buildNotification()
+    // 每次 startForegroundService 都必须在 5 秒内 startForeground，暂停态也不例外；
+    // 先入前台兑现契约，再按状态决定是否退出。
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      startForeground(
+        NOTIFICATION_ID,
+        notification,
+        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+      )
+    } else {
+      startForeground(NOTIFICATION_ID, notification)
+    }
     if (playing) {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        startForeground(
-          NOTIFICATION_ID,
-          notification,
-          android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
-        )
-      } else {
-        startForeground(NOTIFICATION_ID, notification)
-      }
       requestAudioFocus()
     } else {
       // 暂停时保留通知但退出前台，用户仍可从通知恢复播放
@@ -238,10 +236,9 @@ class PlaybackService : Service() {
             override fun onSeekTo(pos: Long) = dispatchToRust("seek", pos)
           },
         )
-        // 这里刻意不调用 setFlags(FLAG_HANDLES_MEDIA_BUTTONS | FLAG_HANDLES_TRANSPORT_CONTROLS)：
-        // 这两个 flag 自 API 21 起已废弃——媒体按钮与传输控制由框架自动路由到当前活跃的
-        // MediaSession，无需再手工声明。本项目 minSdk=26，传了也是 no-op，只会刷两条
-        // deprecation 警告。
+        // 刻意不调用 setFlags(FLAG_HANDLES_MEDIA_BUTTONS | FLAG_HANDLES_TRANSPORT_CONTROLS)：
+        // 两个 flag 自 API 21 起已废弃，媒体按钮与传输控制由框架自动路由到活跃的 MediaSession；
+        // 本项目 minSdk=26，传了也只是 no-op 外加两条 deprecation 警告。
         isActive = true
       }
     mediaSession = session
@@ -310,8 +307,7 @@ class PlaybackService : Service() {
     }
     addAction(builder, ACTION_NEXT, "下一首", R.drawable.ic_action_next)
 
-    // 通知封面：Binder 事务上限 1MB，大图会抛 TransactionTooLargeException，
-    // 这里统一降采样到 256px 再设置（封面路径由前端 asset 协议提供）
+    // 通知封面：统一降采样后再设置，约束见 loadCoverBitmap
     loadCoverBitmap()?.let { builder.setLargeIcon(it) }
     return builder.build()
   }
@@ -336,8 +332,8 @@ class PlaybackService : Service() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
 
   /**
-   * 通知大图：封面路径由 Rust 侧 `get_track_cover_path` 给出；Binder 事务上限 1MB，
-   * 必须降采样（≤256px）后再 `setLargeIcon`，否则会抛 TransactionTooLargeException。
+   * 通知大图：封面路径由 Rust 侧 `get_track_cover_path` 给出（本地路径或 content://）。
+   * Binder 事务上限 1MB，必须降采样到 ≤256px 再 `setLargeIcon`，否则抛 TransactionTooLargeException。
    */
   private fun loadCoverBitmap(): Bitmap? {
     if (coverPath.isBlank()) return null

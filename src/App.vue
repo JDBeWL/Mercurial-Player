@@ -39,11 +39,14 @@
       <Transition name="fade" mode="out-in">
         <Settings v-if="configStore.ui.showConfigPanel" key="settings" />
         <div v-else key="player" class="player-container">
-          <!-- data-upper-view 挂在 .player-main 上而不是 .player-upper 上：
-               竖屏的布局规则现在要同时管到 .player-upper（面板互斥）和
-               .player-lower（曲目信息只有封面态才贴着进度条），
+          <!-- data-upper-view 挂在 .player-main 上而不是 .player-upper 上：竖屏的布局规则现在要同时
+               管到 .player-upper（面板互斥）和 .player-lower（曲目信息只有封面态才贴着进度条），
                .player-main 是这两块最近的共同祖先。 -->
-          <div class="player-main" :data-upper-view="upperView">
+          <div
+            class="player-main"
+            :data-upper-view="upperView"
+            :data-mobile="isAndroid ? 'true' : undefined"
+          >
             <!-- 上方区域：横屏是"左封面 + 右歌词"双栏；竖屏收成单面板，
                  由 upperView 决定显示封面 / 歌词中的哪一个 -->
             <div class="player-upper">
@@ -51,9 +54,8 @@
                    竖屏切到封面时 .player-right 整体隐藏，按钮跟着一起消失的话
                    就再也切不回歌词/波形了。 -->
               <div class="view-controls-container">
-                <!-- 在线歌词指示图标：只在桌面端显示。
-                     手机上它绝对定位在上部区域右上角，正好压在歌词面板的第一行上，
-                     而"这句歌词来自在线歌词库"在手机上并没有可操作的后续动作，
+                <!-- 在线歌词指示图标：只在桌面端显示。手机上它绝对定位在上部区域右上角，正好压在歌词
+                     面板的第一行上，而"这句歌词来自在线歌词库"在手机上并没有可操作的后续动作，
                      所以按最小代价直接不渲染。 -->
                 <div
                   v-if="lyricsSource === 'online' && !isAndroid"
@@ -65,13 +67,9 @@
                 <!-- 沉浸封面没有独立的"退出"按钮：点左半区、按 Esc 都能退出
                      （见 handlePlayerLeftClick / handleCoverKeydown），
                      而手机竖屏下沉浸封面本来就不可达（点封面是"翻到歌词"）。 -->
-                <!-- 视图切换：只在桌面端出现。
-                     手机上（横竖都一样）没有波形这一态 —— 竖屏是 封面 ⇄ 歌词 靠点击驱动，
-                     横屏本来就是"左封面 + 右歌词"双栏，不需要切换；顶栏空间在手机上很宝贵，
-                     能用手势覆盖的动作就不再占一个图标。
-                     ⚠️ 判据必须用平台（isAndroid）而不是方向（isPortrait）：
-                     桌面窗口绝大多数时候也是"横屏"，用方向判据会把桌面端一起改掉。
-                     isAndroid=false 时与改动前完全一致（含桌面窄高窗口）。 -->
+                <!-- 视图切换：只在桌面端出现。手机上没有波形这一态，横屏本来就是"左封面 + 右歌词"双栏
+                     不需要切换，竖屏靠点封面/点歌词空白处切换，顶栏空间宝贵。判据必须用平台（isAndroid）
+                     而不是方向：桌面窗口绝大多数时候也是横屏，用方向判据会把桌面端一起改掉。 -->
                 <button
                   v-if="!isAndroid"
                   class="icon-button view-toggle-btn"
@@ -103,6 +101,7 @@
                       @mousemove="handleAlbumArtMouseMove"
                       @mouseleave="handleAlbumArtMouseLeave"
                       @pointerdown="handleCoverPointerDown"
+                      @pointermove="handleCoverPointerMove"
                       @pointerup="handleCoverPointerUp"
                       @pointercancel="handleCoverPointerUp"
                       @pointerleave="handleCoverPointerUp"
@@ -182,7 +181,6 @@
                   <VisualizerPanel v-else class="lyrics-container" />
                 </Transition>
               </div>
-
             </div>
 
             <!-- 下方区域：进度条 + 控制按钮 -->
@@ -190,7 +188,10 @@
               <!-- 音频信息走 time-middle 插槽：竖屏下它与"已播 / 总时长"
                    同处一行（时间行只在竖屏常显）。横屏这一行整行 display:none，
                    音频信息仍在左下角 .audio-info-corner 里，不受影响。 -->
-              <ProgressBar class="global-progress-bar">
+              <ProgressBar
+                class="global-progress-bar"
+                :data-mobile="isAndroid ? 'true' : undefined"
+              >
                 <template #time-middle>
                   <span
                     v-if="currentTrack && formattedAudioInfo && configStore.general.showAudioInfo"
@@ -214,11 +215,9 @@
                 <PlayerControls />
                 <!-- 右下角：播放列表开关、桌面歌词与音量控制 -->
                 <div class="side-controls">
-                  <!-- 播放列表入口常显（用户要求）：刚装完还没有任何曲目时也要在，
-                     否则底部这一行的右侧是空的，用户不知道有这个功能。
-                     列表为空时抽屉里显示 playlist.empty（"播放列表为空"）。
-                     另外这也让底部一行的按钮数量恒定（竖屏 5 颗），
-                     不会因为列表有无而忽多忽少、把整行的间距改掉。 -->
+                  <!-- 播放列表入口常显（用户要求）：刚装完还没有任何曲目时也要在，否则底部一行的右侧是
+                       空的，用户不知道有这个功能；列表为空时抽屉里显示 playlist.empty。这也让底部一行的
+                       按钮数量恒定，不会因为列表有无而把整行的间距改掉。 -->
                   <button
                     class="icon-button"
                     :class="{ active: showPlaylist }"
@@ -250,11 +249,19 @@
     </main>
 
     <Transition name="slide-left">
-      <MusicLibrary v-if="showLibrary" @close="showLibrary = false" />
+      <MusicLibrary
+        v-if="showLibrary"
+        :data-mobile="isAndroid ? 'true' : undefined"
+        @close="showLibrary = false"
+      />
     </Transition>
 
     <Transition name="slide-right">
-      <PlaylistView v-if="showPlaylist" @close="showPlaylist = false" />
+      <PlaylistView
+        v-if="showPlaylist"
+        :data-mobile="isAndroid ? 'true' : undefined"
+        @close="showPlaylist = false"
+      />
     </Transition>
 
     <!-- 错误通知浮层 -->
@@ -283,6 +290,7 @@ import { useImmersiveAutoHide } from '@/composables/useImmersiveAutoHide'
 import { useImmersiveCover } from './composables/useImmersiveCover'
 import { usePlatform } from './composables/usePlatform'
 import { useOrientation } from './composables/useOrientation'
+import { setSystemUiHidden } from './services/appService'
 import { useGlobalKeyboard } from './composables/useGlobalKeyboard'
 import { useAppLifecycle } from './composables/useAppLifecycle'
 import type { ImmersiveColorScheme } from './types'
@@ -306,11 +314,10 @@ const configStore = useConfigStore()
 const { isAndroid } = usePlatform()
 
 // 方向判定：竖屏把上部区域从"左封面+右歌词"改成单面板切换
-const { isPortrait } = useOrientation()
+const { isPortrait, isLandscape } = useOrientation()
 
 // 初始化错误通知(浮层组件 ErrorNotifications 自行读取同一模块级单例)
-const { showError, showSuccess, unsubscribe: unsubscribeErrorNotification } =
-  useErrorNotification()
+const { showError, showSuccess, unsubscribe: unsubscribeErrorNotification } = useErrorNotification()
 
 // script 里也要用到文案（提取封面的成功提示），模板侧继续走 $t
 const { t } = useI18n()
@@ -347,6 +354,7 @@ const {
   handleAlbumArtMouseMove,
   handleAlbumArtMouseLeave,
   handleCoverPointerDown,
+  handleCoverPointerMove,
   handleCoverPointerUp,
   closeCoverMenu,
   consumeLongPressClick,
@@ -361,10 +369,9 @@ const showLibrary = ref(false)
 const showPlaylist = ref(false)
 const immersiveCover = ref(false)
 
-// 上部区域当前显示哪一块：封面 / 歌词 / 波形。
-// - 横屏：左栏恒为封面，不参与切换，所以是 封面(=歌词)↔波形 两态；
-// - 竖屏：只有 封面 ⇄ 歌词 两态。波形不进竖屏（手机上那块区域留给封面和歌词
-//   更值），切换也不靠按钮，而是点封面看歌词、点歌词空白处回封面。
+// 上部区域当前显示哪一块：封面 / 歌词 / 波形。横屏左栏恒为封面、不参与切换，所以是封面与波形两态；
+// 竖屏只有封面与歌词两态，波形不进竖屏（手机上那块区域留给封面和歌词更值），切换不靠按钮，
+// 而是点封面看歌词、点歌词空白处回封面。
 type UpperView = 'cover' | 'lyrics' | 'visualizer'
 const upperView = ref<UpperView>('cover')
 
@@ -385,21 +392,15 @@ const cycleUpperView = (): void => {
   upperView.value = nextUpperView.value
 }
 
-// 右侧面板实际渲染什么：只有横屏才可能出现波形；竖屏恒为歌词。
-// 不能只判断 upperView —— 横屏停在波形时转成竖屏，upperView 会短暂
-// 还是 'visualizer'（下面的 watch 随后把它归位），这里必须自己不渲染波形。
+// 右侧面板实际渲染什么：只有横屏才可能出现波形，竖屏恒为歌词。不能只判断 upperView，横屏停在波形时
+// 转成竖屏，upperView 会短暂仍是 'visualizer'（下面的 watch 随后才把它归位），这里必须自己不渲染波形。
 const panelView = computed<'lyrics' | 'visualizer'>(() =>
   !isPortrait.value && upperView.value === 'visualizer' ? 'visualizer' : 'lyrics',
 )
 
-// 按钮图标/提示都指向"按下去会看到的那一块"。
-//
-// ⚠️ 不能直接拿 upperView 的名字取图标：横屏左栏恒为封面，右栏在
-// 'cover' 与 'lyrics' 两种状态下渲染的都是歌词（见 panelView），
-// 所以横屏的 'cover' 对用户来说就是"歌词"，图标必须给 lyrics。
-// 原始实现写的正是 `viewMode === 'lyrics' ? 'equalizer' : 'lyrics'`，
-// 那套语义是对的，这里只是把"竖屏下的封面"单独分出来。
-// ⚠️ 这套图标桌面端与手机共用，改动会同时影响桌面端。
+// 按钮图标/提示都指向"按下去会看到的那一块"。不能直接拿 upperView 的名字取图标：横屏左栏恒为封面，
+// 右栏在 'cover' 与 'lyrics' 两种状态下渲染的都是歌词（见 panelView），所以横屏的 'cover' 对用户来说
+// 就是"歌词"，图标必须给 lyrics。这套图标桌面端与手机共用，改动会同时影响桌面端。
 const nextUpperViewIcon = computed(() => {
   const next = nextUpperView.value
   if (next === 'visualizer') return 'equalizer'
@@ -448,18 +449,16 @@ const onCoverMenuExtract = async (): Promise<void> => {
   await handleExtractCover()
 }
 
-// 切换上部面板后补一次 resize 广播：
-// - 歌词组件靠 window resize 把当前行重新滚到中间；竖屏下它可能刚经历
-//   display:none（隐藏期间设置的 scrollTop 不生效，必须重算）
-// - 波形画布同样只在 resize 时重新测量，从隐藏恢复时要重测尺寸
+// 切换上部面板后补一次 resize 广播：歌词组件靠 window resize 把当前行重新滚到中间，而竖屏下它可能刚
+// 经历 display:none（隐藏期间设置的 scrollTop 不生效，必须重算）；波形画布同样只在 resize 时重新测量，
+// 从隐藏恢复时要重测尺寸。
 watch(upperView, () => {
   void nextTick(() => window.dispatchEvent(new Event('resize')))
 })
 
-// 转成竖屏时要收拾两件横屏留下的状态：
-// 1. 退出沉浸式封面 —— 竖屏没有"点左半区退出"的那块空白，沉浸层的样式
-//    与单面板布局会互相打架（封面会被压成 0 宽而不可见）
-// 2. 若正停在波形态则归位到封面 —— 竖屏没有波形这一态
+// 转成竖屏时要收拾两件横屏留下的状态：一是退出沉浸式封面，竖屏没有"点左半区退出"的那块空白，沉浸层的
+// 样式与单面板布局会互相打架（封面会被压成 0 宽而不可见）；二是若正停在波形态就归位到封面，竖屏没有
+// 波形这一态。
 watch(isPortrait, (portrait) => {
   if (!portrait) return
   if (immersiveCover.value) {
@@ -470,7 +469,18 @@ watch(isPortrait, (portrait) => {
   }
 })
 
-// 竖屏：点歌词面板的空白处 → 回封面（事件由 LyricsDisplay 判定后发出）。
+// Android 系统栏：导航条常驻会在底部留一条白带，一律收起（从边缘滑动仍可临时唤出）；
+// 状态栏在横屏或沉浸封面时收起，与界面控制栏走同一套判据
+watch(
+  [isAndroid, isLandscape, immersiveCover],
+  ([android, landscape, immersive]) => {
+    if (!android) return
+    void setSystemUiHidden(landscape || immersive, true)
+  },
+  { immediate: true },
+)
+
+// 竖屏：点歌词面板的空白处就回封面（事件由 LyricsDisplay 判定后发出）。
 // 横屏下这个事件不应有副作用（左栏恒为封面，语义上无从"返回"）。
 const handleLyricsBlankClick = (): void => {
   if (isPortrait.value) {

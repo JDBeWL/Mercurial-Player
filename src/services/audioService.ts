@@ -18,10 +18,9 @@ export function getCurrentAudioDevice(): Promise<AudioDevice> {
   return invoke<AudioDevice>('get_current_audio_device')
 }
 
-/** 切换音频设备（携带当前播放进度，便于后端无缝续播）。
- * @param remember 是否记住该设备选择(落盘 preferredDeviceId)。设置页主动选择默认 true;
- *                 设备拔出自动回退 / 跟随系统默认切换应传 false,避免覆盖用户选择。
- */
+/** 切换音频设备（携带当前播放进度，便于后端无缝续播）。@param remember 是否记住该设备选择(落盘
+ *  preferredDeviceId)。设置页主动选择默认 true;设备拔出自动回退 / 跟随系统默认切换应传 false,
+ *  避免覆盖用户选择。 */
 export function setAudioDevice(
   deviceName: string,
   currentTime: number,

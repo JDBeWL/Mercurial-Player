@@ -5,6 +5,7 @@
       class="progress-bar-wrapper"
       :class="{ 'is-hovering': isHovering, 'is-dragging': isDragging }"
       @pointerdown="handlePointerDown"
+      @pointerup="handlePointerUp"
       @mouseenter="isHovering = true"
       @mouseleave="handleMouseLeave"
       @mousemove="handleMouseMoveHover"
@@ -25,9 +26,8 @@
       </div>
     </div>
 
-    <!-- 已播 / 总时长。桌面靠悬停气泡显示时间，触摸设备没有 hover，
-         竖屏下把这一行常显出来，否则手机上完全看不到播放进度时间。
-         位置刻意留在进度条下方 18px：进度条的热区（::before）向下探了 14px，
+    <!-- 已播 / 总时长。桌面靠悬停气泡显示时间，触摸设备没有 hover，竖屏下把这一行常显出来，否则手机上
+         完全看不到播放进度时间。位置刻意留在进度条下方 18px：进度条的热区（::before）向下探了 14px，
          贴着放的话点时间文字会误触成"拖动进度条"。 -->
     <div class="progress-time-row">
       <span class="progress-time">{{ formatTime(displayTime) }}</span>
@@ -134,6 +134,13 @@ const handleMouseMoveHover = (event: MouseEvent) => {
 
 const handleMouseLeave = () => {
   if (!isDragging.value) {
+    isHovering.value = false
+  }
+}
+
+/** 触摸产生的兼容 mouseenter 不会配一个 mouseleave，气泡会一直挂着，抬手时收掉 */
+const handlePointerUp = (event: PointerEvent) => {
+  if (event.pointerType !== 'mouse') {
     isHovering.value = false
   }
 }
@@ -291,12 +298,10 @@ const handleMouseLeave = () => {
   }
 }
 
-/* 竖屏（手机）：常显时间行。
-   这个组件的根在 App.vue 上被 .global-progress-bar 拉了 -16px 的通栏负边距
-   （让进度条贴到窗口左右边缘），所以文字要补回 16px 才能与上方的曲目信息、
-   下方的控制栏对齐；本组件只有 App.vue 这一处使用，不担心影响别处。 */
+/* 竖屏（手机）常显时间行。这个组件的根在 App.vue 上被 .global-progress-bar 拉了 -16px 的通栏负边距（让
+   进度条贴到窗口左右边缘），所以文字要补回 16px 才能与上方的曲目信息、下方的控制栏对齐。 */
 @media (orientation: portrait) {
-  .progress-time-row {
+  .progress-container[data-mobile='true'] .progress-time-row {
     display: flex;
     align-items: center;
     justify-content: space-between;

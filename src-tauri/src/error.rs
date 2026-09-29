@@ -1,13 +1,6 @@
-//! 应用统一错误类型
-//!
-//! 提供 [`AppError`] 作为 Tauri 命令层与核心模块（audio/config/plugins/updater）的
-//! 统一错误类型；命令层通过 [`AppError::Serialize`] 实现序列化为 Display 字符串，
-//! 与历史 `Result<T, String>` 在 IPC 上的表现一致，前端契约不变。
-//!
-//! 全部核心模块（media/system/taskbar/audio 内部实现）均已迁移到 `AppError`。
-//! `From<String> for AppError` 与 `From<AppError> for String` 双向转换保证新旧
-//! 签名互通：字符串错误经 `?` 自动进入 `Other` 变体（Display 原样输出，不改变
-//! IPC 错误文案），旧 `Result<T, String>` 签名也可直接用 `?` 接收 `AppError`。
+//! 应用统一错误类型 [`AppError`]：命令层序列化成 Display 字符串，与历史 `Result<T, String>`
+//! 在 IPC 上的表现一致，前端契约不变。`From<String>` 与 `From<AppError> for String` 双向转换
+//! 保证新旧签名互通：字符串错误经 `?` 进入 `Other` 变体，旧签名也能直接用 `?` 接收 `AppError`。
 //!
 //! ## 示例
 //!
@@ -26,11 +19,8 @@
 
 use std::fmt;
 
-// ── Tauri 命令层序列化 ─────────────────────────────────────────────────
-//
-// Tauri 要求 command 的错误类型实现 Serialize。这里序列化为 Display 字符串，
-// 与历史 `Result<T, String>` 在 IPC 上的表现完全一致，前端契约不变；
-// 未来若需要结构化错误（分类码 + 消息），只需改这一处。
+// Tauri 要求 command 的错误类型实现 Serialize。这里序列化为 Display 字符串，与历史
+// `Result<T, String>` 在 IPC 上的表现完全一致；将来要结构化错误只需改这一处。
 
 impl serde::Serialize for AppError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -171,7 +161,7 @@ impl std::error::Error for AppError {
     }
 }
 
-// ── From 转换：让 `?` 自动传播常见错误类型 ──────────────────────────────
+// From 转换：让 `?` 自动传播常见错误类型
 
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
@@ -200,7 +190,7 @@ impl From<&str> for AppError {
     }
 }
 
-// ── 音频库错误:让 `?` 直接归入 Audio,避免 `.to_string().into()` 落入 Other ──
+// 音频库错误:让 `?` 直接归入 Audio,避免 `.to_string().into()` 落入 Other
 //
 // 注:cpal 0.15+ 已无统一的 `cpal::Error`,错误按操作拆分
 // (BuildStreamError/StreamError/DevicesError/...);rodio 0.22 在根路径
@@ -240,7 +230,7 @@ impl From<windows_core::Error> for AppError {
     }
 }
 
-// ── 向下兼容：AppError -> String，让旧 Result<T, String> 代码可用 ? ─────
+// 向下兼容：AppError -> String，让旧 Result<T, String> 代码可用 ?
 
 impl From<AppError> for String {
     fn from(e: AppError) -> Self {

@@ -203,7 +203,7 @@ describe('watchTrack', () => {
     expect(getTrackTitle(current.value)).toBe('Prefilled')
   })
 
-  // ⚠️ 已确认的缺陷(本测试如实记录当前行为,非期望行为):
+  // 已确认的缺陷(本测试如实记录当前行为,非期望行为):
   // watchTrack 预填时把缓存标记为 processing:true,紧接着调用的 processTrackInfo
   // 因 `getCached(path)?.processing` 为真而 early-return,TitleExtractor.extractTitle
   // 在主流程(App.vue / MiniPlayer.vue 均只走 watchTrack)中永远不会被调用,

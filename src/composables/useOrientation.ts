@@ -1,16 +1,8 @@
 import { computed, onMounted, onUnmounted, readonly, ref, type ComputedRef, type Ref } from 'vue'
 
-/**
- * 屏幕方向判定（竖屏 = 宽度 < 高度）。
- *
- * 只认 `(orientation: portrait)` 这一个来源：它与样式表里用的媒体查询**完全同源**，
- * 不会出现"JS 认为竖屏、CSS 认为横屏"两套判定打架、布局与交互对不上的情况。
- * （用 innerWidth/innerHeight 自己比大小也可以，但那等于把方向语义抄了两遍，
- * 且软键盘弹出时 innerHeight 会缩水、存在误判成横屏的风险。）
- *
- * 做成模块级单例 + 引用计数：一次运行里方向是全局状态，
- * 每个组件各自挂监听只会让同一个 resize 被重复处理。
- */
+/** 方向只认 `(orientation: portrait)` 这一个来源，与样式表用的媒体查询完全同源，不会出现
+ *  JS 与 CSS 两套判定打架；自己比 innerWidth/innerHeight 在软键盘弹出时会误判。做成模块级
+ *  单例 + 引用计数，避免每个组件重复挂同一个监听。 */
 const portraitQuery = '(orientation: portrait)'
 
 function readPortrait(): boolean {
@@ -51,13 +43,8 @@ export interface OrientationInfo {
   isLandscape: ComputedRef<boolean>
 }
 
-/**
- * 屏幕方向信息。
- *
- * 竖屏下播放主界面会切成"单面板"形态（封面 / 歌词二选一占满上部区域），
- * 但横屏与桌面窗口仍沿用左封面 + 右歌词的双栏布局，所以这是**方向**而非平台判定，
- * 桌面把窗口拉成窄高同样会走竖屏形态。
- */
+/** 屏幕方向信息。竖屏下播放主界面切成单面板形态（封面/歌词二选一），横屏与桌面窗口仍是
+ *  左封面 + 右歌词的双栏；这是**方向**而非平台判定，桌面把窗口拉成窄高同样走竖屏形态。 */
 export function useOrientation(): OrientationInfo {
   // 挂载前先同步一次：模块首次加载与组件挂载之间方向可能已经变了
   sync()

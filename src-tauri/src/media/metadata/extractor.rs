@@ -14,10 +14,19 @@ use super::cache::{
 };
 use super::cover::extract_cover_to_cache;
 
-/// 打开媒体文件并读取标签（本地路径 / Android SAF 雙模式）
-fn open_tagged_file(path: &str) -> Result<lofty::file::TaggedFile, AppError> {
+/// 打开媒体文件并读取标签（本地路径 / Android SAF content URI）
+pub(super) fn open_tagged_file(path: &str) -> Result<lofty::file::TaggedFile, AppError> {
+    if !android_saf::is_content_uri(path) {
+        // 本地路径按扩展名探测，不让内容嗅探改变桌面既有的格式判定
+        return Probe::open(Path::new(path))
+            .map_err(|e| e.to_string())
+            .map_err(AppError::from)?
+            .read()
+            .map_err(|e| e.to_string())
+            .map_err(AppError::from);
+    }
+    // content URI 没有扩展名可用；Probe 0.24+ 需显式 guess_file_type
     let file = android_saf::open_media_file(path)?;
-    // Probe 0.24+ 需显式 guess_file_type 才会识别格式（read 不自动探测）
     Probe::new(BufReader::new(file))
         .guess_file_type()
         .map_err(|e| e.to_string())

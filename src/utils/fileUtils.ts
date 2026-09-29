@@ -9,12 +9,8 @@ import type { Playlist } from '@/types'
  * 文件工具类，处理文件和目录相关操作
  */
 export class FileUtils {
-  /**
-   * 打开文件夹选择对话框
-   *
-   * Android 上 plugin-dialog 的目录选择不可用（分区存储需 SAF），改为调系统
-   * 目录选择器并轮询返回已保存的 content:// 树 URI；桌面保持原生对话框。
-   */
+  /** 打开文件夹选择对话框。Android 上 plugin-dialog 的目录选择不可用（分区存储需 SAF），改为调系统
+   *  目录选择器并轮询返回已保存的 content:// 树 URI；桌面保持原生对话框。 */
   static async selectFolder(options: Parameters<typeof open>[0] = {}): Promise<string | null> {
     const platform = await invoke<string>('get_platform')
     if (platform === 'android') {
@@ -157,13 +153,9 @@ export class FileUtils {
     return lastDotIndex > 0 ? fileName.substring(0, lastDotIndex) : fileName
   }
 
-  /**
-   * 获取音轨显示名称
-   * 优先级: displayTitle > title > 文件名(根据 hideExtension 决定是否含扩展名)
-   *
-   * 当 hideExtension=true 时,会对 displayTitle/title 也去除与文件扩展名匹配的后缀,
-   * 防止元数据 title 恰好含扩展名时(常见于 wav 文件)绕过隐藏设置。
-   */
+  /** 获取音轨显示名称，优先级: displayTitle 大于 title 大于 文件名(根据 hideExtension 决定是否含扩展名)。
+   *  hideExtension=true 时会对 displayTitle/title 也去除与文件扩展名匹配的后缀，防止元数据 title 恰好
+   *  含扩展名时(常见于 wav 文件)绕过隐藏设置。 */
   static getTrackDisplayName(
     track: { displayTitle?: string; title?: string; name?: string; path: string },
     hideExtension: boolean = true,

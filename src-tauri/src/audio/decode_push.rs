@@ -1,8 +1,6 @@
-//! WASAPI 独占模式的解码推送线程
-//!
-//! 由 play_track_exclusive 启动:解码 -> (可选重采样) -> EQ -> 通道转换 -> 推送
-//! 到 WASAPI 独占播放器。推送采样同时驱动频谱分析器发送 `spectrum-update`。
-//! 通过代际计数器(generation)实现线程取消。
+//! 独占模式的解码推送线程（Windows = WASAPI 独占，Android = AAudio 独占）
+//! 由 play_track_exclusive 启动：解码 -> (可选重采样) -> EQ -> 通道转换 -> 推送给独占播放器，
+//! 同时驱动频谱分析器发 `spectrum-update`；靠代际计数器(generation)取消线程。
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -364,10 +362,8 @@ pub(super) fn decode_and_push_to_wasapi(
             // 可视化:推送采样同时计算频谱并发送 spectrum-update
             spectrum_analyzer.push_and_maybe_emit(final_out, &spectrum_data, &target_fps, &app);
 
-            // 等待缓冲区有空间。
-            // 水位查询与推送都只触碰 SPSC 环形缓冲的原子计数(无互斥锁),
-            // 不与音频渲染线程竞争;外层 wasapi 锁仅用于访问播放器实例。
-            // 缓冲区容量约 2 秒 (远大于 21ms 的处理块),轮询延迟不构成欠载风险。
+            // 等待缓冲区有空间。水位查询与推送都只触碰 SPSC 环形缓冲的原子计数(无互斥锁)，
+            // 不与音频渲染线程竞争；外层 wasapi 锁仅用于访问播放器实例。
             let max_buffer = target_sr as usize * target_ch as usize * 2;
             loop {
                 if generation.load(Ordering::SeqCst) != my_generation

@@ -154,7 +154,7 @@ const onSelect = (id: string): void => {
   }
 
   .nav-item {
-    /* ⚠️ 必须重置 width —— 基础样式是给"纵向列表"写的 width:100%，
+    /* 必须重置 width —— 基础样式是给"纵向列表"写的 width:100%，
        横向 flex 下配合 flex-shrink:0 会让每个 tab 撑满整行宽度，
        N 个 tab 就排成 N 屏宽、用户只能看到第一个（实测 10 个 tab
        宽度全是 398px，top 全是 145）。 */
@@ -174,7 +174,7 @@ const onSelect = (id: string): void => {
    既看不出还有多少页、也点不准。这里换成手机上最标准的「列表 → 详情」两级，
    竖屏下这一栏就是整屏的入口列表（由 Settings.vue 控制与详情的互斥）。
 
-   ⚠️ 用 [data-mobile='true'] 守卫：@media (orientation: portrait) 在桌面
+   用 [data-mobile='true'] 守卫：@media (orientation: portrait) 在桌面
    把窗口拉成窄高时同样会命中，不加守卫会把桌面端的导航形态一起改掉。 */
 @media (orientation: portrait) {
   .settings-nav[data-mobile='true'] {

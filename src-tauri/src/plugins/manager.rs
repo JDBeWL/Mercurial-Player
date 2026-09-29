@@ -29,14 +29,9 @@ const fn default_auto_activate() -> bool {
     true
 }
 
-/// 获取插件目录路径（与可执行文件同级）
+/// 插件目录：桌面与可执行文件同级；Android 的 .so 在只读 APK 里，只能放数据目录
 pub fn get_plugins_dir() -> Result<PathBuf, AppError> {
-    let exe_path = std::env::current_exe()
-        .map_err(|e| AppError::Plugin(format!("无法获取可执行文件路径: {e}")))?;
-
-    let exe_dir = exe_path.parent().ok_or("无法获取可执行文件目录")?;
-
-    let plugins_dir = exe_dir.join("plugins");
+    let plugins_dir = plugin_base_dir()?.join("plugins");
 
     // 确保目录存在
     if !plugins_dir.exists() {
@@ -45,6 +40,21 @@ pub fn get_plugins_dir() -> Result<PathBuf, AppError> {
     }
 
     Ok(plugins_dir)
+}
+
+#[cfg(not(target_os = "android"))]
+fn plugin_base_dir() -> Result<PathBuf, AppError> {
+    let exe_path = std::env::current_exe()
+        .map_err(|e| AppError::Plugin(format!("无法获取可执行文件路径: {e}")))?;
+    let exe_dir = exe_path.parent().ok_or("无法获取可执行文件目录")?;
+    Ok(exe_dir.to_path_buf())
+}
+
+#[cfg(target_os = "android")]
+fn plugin_base_dir() -> Result<PathBuf, AppError> {
+    crate::android_saf::get_app_data_dir()?
+        .map(PathBuf::from)
+        .ok_or_else(|| AppError::Plugin("拿不到应用数据目录".to_string()))
 }
 
 /// 列出所有插件目录

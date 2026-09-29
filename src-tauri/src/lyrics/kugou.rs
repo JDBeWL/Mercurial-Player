@@ -22,7 +22,7 @@ const LYRIC_DOWNLOAD_URL: &str = "https://lyrics.kugou.com/download";
 /// `contenttype == 2` 表示 base64 的纯文本歌词
 const CONTENT_TYPE_PLAIN: i64 = 2;
 
-// ---------------------------------------------------------------- 响应结构
+// 响应结构
 
 #[derive(Debug, Deserialize)]
 struct WebSearchResponse {

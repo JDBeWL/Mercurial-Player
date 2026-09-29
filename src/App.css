@@ -174,11 +174,9 @@
   padding-right: 8px;
 }
 
-/* 窄屏（≈手机竖屏）：保留"上/下一首 + 播放/暂停"的中枢，收侧栏。
-   注意不要把 .audio-info-corner / .side-controls 直接 display:none ——
-   两侧同时塌掉会让控制按钮整组往左偏，而且等于把播放列表入口一起藏了。
-   做法是让两侧都保留 flex:1 的占位，只把里面的内容收起来（.side-controls 里
-   再单独干掉不属于手机的项），这样播放控制依旧居中。 */
+/* 窄屏（≈手机竖屏）：保留"上/下一首 + 播放/暂停"的中枢，收侧栏。不要把 .audio-info-corner /
+   .side-controls 整个 display:none，两侧同时塌掉会让控制按钮整组左偏，而且等于把播放列表入口一起
+   藏了。做法是两侧都保留 flex:1 的占位，只把里面的内容收起来，播放控制依旧居中。 */
 @media (max-width: 640px) {
   .audio-info-text {
     display: none;
@@ -220,10 +218,9 @@
   margin-right: 4vw;
 }
 
-/* 挂在 .player-upper 上（而不是原来的 .player-right 里），竖屏切到封面时
-   .player-right 会整体隐藏，按钮跟着消失就再也切不回去了。
-   横屏下 .player-right 自带 4vw 右外边距，这里用 right: 4vw 复刻它原来的落点；
-   竖屏没有那层外边距，在下面的竖屏块里改回 0。 */
+/* 挂在 .player-upper 上（而不是原来的 .player-right 里），竖屏切到封面时 .player-right 会整体
+   隐藏，按钮跟着消失就再也切不回去了。横屏下 .player-right 自带 4vw 右外边距，这里用 right: 4vw
+   复刻它原来的落点；竖屏没有那层外边距，在下面的竖屏块里改回 0。 */
 .view-controls-container {
   position: absolute;
   top: 0;
@@ -279,13 +276,9 @@
 }
 
 .album-art-container {
-  /* 宽高必须同时受左列宽(36vw)约束：
-     若只按 54vh 取值，在 54vh > 36vw 的窗口（偏高偏窄）下封面会比
-     .player-left（flex: 0 0 min(600px, 36vw)）更宽，flex 项默认 min-width:auto
-     会把左列撑宽到 54vh；而沉浸式封面模式隐藏封面后左列缩回 36vw，
-     右侧面板宽度随之变化 —— .visualizer-container 的 margin-top: 4% 按
-     宽度解析，频谱/歌词就会在进出沉浸模式时竖直跳动数px。
-     统一取三值最小后，两种模式下左列宽度恒为 min(600px, 36vw)，几何完全一致。 */
+  /* 宽高必须同时受左列宽 (36vw) 约束：只按 54vh 取值时封面会比 .player-left 更宽，flex 项默认
+     min-width:auto 会把左列撑开，沉浸模式隐藏封面后左列缩回 36vw，而 .visualizer-container 的
+     margin-top: 4% 按宽度解析，进出沉浸模式时频谱会竖直跳动。取三值最小后两种模式几何一致。 */
   width: min(600px, 36vw, 54vh);
   height: min(600px, 36vw, 54vh);
   flex-shrink: 0;
@@ -377,7 +370,7 @@
   min-width: 176px;
   padding: 8px;
   border-radius: 16px;
-  /* ⚠️ 只能用 surface：本项目主题没有输出 surface-container-* 系列，
+  /* 只能用 surface：本项目主题没有输出 surface-container-* 系列，
      引用它们声明会静默失效（浮层变全透明），见 tests/utils/themeTokens.test.ts */
   background-color: var(--md-sys-color-surface);
   box-shadow: var(--md-sys-elevation-level3);
@@ -483,10 +476,8 @@
   );
 }
 
-/* 中层：靠左放大、裁剪的封面。
-   融合采用双通道：::after 先把封面向背景色"染色"，
-   mask 再缓慢淡出 alpha——观感是封面渐渐沉入背景，
-   而非像素被直接擦除 */
+/* 中层：靠左放大、裁剪的封面。融合走双通道：::after 先把封面向背景色"染色"，mask 再缓慢淡出
+   alpha，观感是封面渐渐沉入背景，而非像素被直接擦除 */
 .cover-mask-layer {
   position: absolute;
   left: 0;
@@ -494,15 +485,9 @@
   height: 100%;
   aspect-ratio: 1 / 1; /* 宽度跟随窗口高度，封面区域始终为正方形，不被裁切成矩形 */
 
-  /* alpha 通道：封面自身的淡出。
-     色标按 smoothstep（t²(3−2t)）采样：两端导数为 0，所以 74% 处不会出现
-     旧版那种"折点"（旧写法是 70% 才开始线性下降，眼睛能看到一条隐约的接缝）。
-
-     ⚠️ `-webkit-` 版必须写在**后面**：构建时的 CSS 压缩器会把"同一属性的前缀版
-     与标准版"去重、只留最后一条；而无前缀的 `mask-image` 要到 Chromium 120 才支持，
-     设备上的 WebView 110 只认 `-webkit-mask-image`。顺序写反 + 目标定成现代浏览器，
-     压缩后就会只剩不生效的那条 —— 表现为染色层退化成一块不透明纯色、封面被糊死。
-     （构建目标已在 vite.config.ts 里按平台区分，这里再留一道保险。） */
+  /* alpha 通道：封面自身的淡出。色标按 smoothstep 采样，两端导数为 0，所以 74% 处没有可见折点。
+     `-webkit-` 版必须写在**后面**：CSS 压缩器会把同一属性的前缀版与标准版去重、只留最后一条，
+     而无前缀 `mask-image` 到 Chromium 120 才支持，老 Android WebView 只认带前缀的那条。 */
   mask-image: linear-gradient(
     to right,
     black 0%,
@@ -531,12 +516,9 @@
   );
 }
 
-/* 染色层：封面右侧先向背景色降亮度沉入，纹理渐隐而非被擦除。
-   实现方式是「纯色底 + alpha 遮罩」而非"多段 color-mix 渐变"——
-   Android WebView 110 尚未支持 color-mix()（Chrome 111 才引入），
-   写在同一个 gradient() 里的 color-mix 会让整条声明失效、染色层整片消失，
-   封面在安卓上表现为"直接硬切"：观感就是没有过渡。
-   纯色 + mask 渐变在两种写法下渲染结果一致，且向下兼容到很老的 WebKit。 */
+/* 染色层：封面右侧先向背景色降亮度沉入，纹理渐隐而非被擦除。写成「纯色底 + alpha 遮罩」而不是
+   多段 color-mix 渐变：Android WebView 110 尚未支持 color-mix()（Chrome 111 才引入），混进同一个
+   gradient() 里会让整条声明失效、染色层整片消失，封面表现为直接硬切。纯色 + mask 向下兼容。 */
 .cover-mask-layer::after {
   content: '';
   position: absolute;
@@ -592,9 +574,8 @@
   /* 底色与模糊强度都跟随主题的玻璃效果开关:
      开启 = 透明底 + 磨砂;关闭 = 不透明底 + 无模糊 */
   background: var(--immersive-bar-bg, rgba(255, 255, 255, 0));
-  /* -webkit- 前缀必须在前。构建时 CSS 压缩器会把前缀版与标准版
-     视为同一属性去重、仅保留最后一条；若标准版在前，产物会只剩 -webkit- 版，
-     而 WebView2(Chromium) 只认不带前缀的 backdrop-filter */
+  /* -webkit- 前缀必须在前：CSS 压缩器会把前缀版与标准版视为同一属性去重、仅保留最后一条，
+     若标准版在前产物就只剩 -webkit- 版，而 WebView2(Chromium) 只认不带前缀的 backdrop-filter */
   -webkit-backdrop-filter: blur(var(--glass-blur, 10px)) saturate(0.5);
   backdrop-filter: blur(var(--glass-blur, 10px)) saturate(0.5);
   border-top: 1px solid rgba(255, 255, 255, 0.18);
@@ -688,10 +669,9 @@
   width: auto;
 }
 
-/* 手机竖屏的沉浸模式：上面那组规则会把左栏还原成 min(600px, 36vw)，
-   而沉浸模式下小封面是隐藏的——那 36vw 纯粹是一块空白，
-   在 400px 宽的屏幕上等于从歌词里挖走一大半。这里把它清零，
-   让歌词/频谱独占整宽。必须写在上面那组之后才能覆盖。 */
+/* 手机竖屏的沉浸模式：上面那组规则会把左栏还原成 min(600px, 36vw)，而沉浸模式下小封面是隐藏的，
+   那 36vw 纯粹是一块空白，等于从歌词里挖走一大半。这里清零让歌词/频谱独占整宽。
+   必须写在上面那组之后才能覆盖。 */
 @media (max-width: 768px) {
   .app-container.immersive-cover .player-upper {
     flex-direction: column;
@@ -711,18 +691,14 @@
   }
 }
 
-/* 竖屏时"高度 = 窗口高"的正方形封面层会远宽于屏幕（400×800 的手机上是 800px 宽），
-   屏幕上只看得到它左侧一半——过渡区（62%~100%）整个落在屏幕外，
-   于是封面糊满整屏、根本看不到"沉入背景"的过程。
-   窄屏改为按可见宽度铺开，过渡才真正发生在用户眼前。 */
+/* 竖屏下"高度 = 窗口高"的正方形封面层远宽于屏幕，屏幕上只看得到左侧一半，过渡区（62%~100%）整个落
+   在屏幕外，于是封面糊满整屏、看不到"沉入背景"的过程。窄屏改按可见宽度铺开，过渡才发生在用户眼前。 */
 @media (max-width: 768px) {
   .cover-mask-layer {
     aspect-ratio: auto;
     width: 100%;
   }
 }
-
-/* ===== 触摸设备：给只认 hover 的交互补一条能用的路径 ===== */
 
 /* 专辑封面右下角的"提取封面"按钮靠 mousemove 判定（见 useAlbumArtInteraction），
    手指没有 hover，按钮永远出不来。触摸设备上改为常显。 */
@@ -738,34 +714,22 @@
   }
 }
 
-/* ===================================================================
-   竖屏（手机）：上部区域收成单面板 + 大封面 + 贴手的控制区
-   -------------------------------------------------------------------
-   横屏与桌面窗口仍走上面的"左封面 + 右歌词"双栏，这里所有规则都限定在
-   (orientation: portrait)，桌面把窗口拉成窄高同样会走进来（这是需要的：
-   窄高窗口用双栏会把歌词挤成一条）。
-
-   ⚠️ 本文件的书写顺序有坑：同特异性下后写的规则胜出，而 .album-art-container
-   的基础规则在文件后段 —— 写在它前面的 @media (max-width: 768px) 里那条
-   width: min(280px, 40vw) 其实一直没生效。所以竖屏块放在文件最末尾，
-   并用 .player-upper[data-upper-view=...] 提升特异性，不依赖书写顺序。
-   =================================================================== */
+/* 竖屏（手机）：上部区域收成单面板 + 大封面 + 贴手的控制区；横屏与桌面仍走双栏。方向之外还要加
+   [data-mobile='true'] 守卫，桌面把窗口拉成窄高同样命中 (orientation: portrait)，这些规则只属于手机。
+   本块放在文件最末尾并用 [data-upper-view=...] 提升特异性：同特异性下要后写的才胜出。 */
 
 /* 曲目信息（标题/艺术家）竖屏横屏都在顶栏的 .nav-center 里，
    这里不再有第二份，见 AppHeader.vue。 */
 
 @media (orientation: portrait) {
-  /* --- 顶栏 ---
-     竖屏顶栏的曲目信息不再一刀切隐藏：歌词态要显示（"标题和艺术家放顶部"），
-     封面态才收起来（那时它贴在进度条上方）。显隐由 App.vue 算出后经
-     AppHeader 的 track-info-visible 传入，这里不再用 CSS 覆盖。
-     顶栏内部的重排（菜单靠左、三件套靠右）见 AppHeader.vue 的竖屏块。 */
+  /* 顶栏：竖屏的曲目信息不再一刀切隐藏，歌词态要显示（"标题和艺术家放顶部"），封面态才收起来
+     （那时它贴在进度条上方）。显隐由 App.vue 算出后经 AppHeader 的 track-info-visible 传入，这里
+     不再用 CSS 覆盖；顶栏内部的重排见 AppHeader.vue 的竖屏块。 */
 
-  /* --- 上部区域：单面板 ---
-     封面态下 .player-left 不参与拉伸（见下面的 flex: 0 0 auto），
-     配合 justify-content: center 让封面在剩余空间里垂直居中；
-     歌词态 .player-right 是 flex: 1 会把空间吃满，居中自然失效。 */
-  .player-upper {
+  /* 上部区域单面板：封面态下 .player-left 不参与拉伸（见下面的 flex: 0 0 auto），配合
+     justify-content: center 让封面在剩余空间里垂直居中；歌词态 .player-right 是 flex: 1
+     会把空间吃满，居中自然失效。 */
+  .player-main[data-mobile='true'] .player-upper {
     flex-direction: column;
     gap: 0;
     min-height: 0;
@@ -773,8 +737,8 @@
     row-gap: 10px;
   }
 
-  .player-left,
-  .player-right {
+  .player-main[data-mobile='true'] .player-left,
+  .player-main[data-mobile='true'] .player-right {
     width: 100%;
     max-width: none;
     margin: 0;
@@ -787,56 +751,44 @@
   /* 只显示当前选中的那一块 —— data-upper-view 由 App.vue 按 upperView 写入。
      不隐藏另一块的话，纵向布局会把上半屏切成两个很矮的区域：
      封面被压到 200px 左右，歌词也只剩一条。 */
-  .player-main[data-upper-view='cover'] .player-right,
-  .player-main[data-upper-view='lyrics'] .player-left,
-  .player-main[data-upper-view='visualizer'] .player-left {
+  .player-main[data-mobile='true'][data-upper-view='cover'] .player-right,
+  .player-main[data-mobile='true'][data-upper-view='lyrics'] .player-left,
+  .player-main[data-mobile='true'][data-upper-view='visualizer'] .player-left {
     display: none;
   }
 
   /* 封面态下封面列**不要**参与拉伸：让它按封面本身的高度收住，
      这样它才能和下面的曲目信息一起被 justify-content: center 居中。
      歌词/波形态则保持 flex: 1（由上面那条规则给出）把高度吃满。 */
-  .player-main[data-upper-view='cover'] .player-left {
+  .player-main[data-mobile='true'][data-upper-view='cover'] .player-left {
     flex: 0 0 auto;
   }
 
-  /* --- 大封面：竖屏的主角，宽度吃到 90vw，同时用 vh 兜住可用高度 --- */
-  .album-art-container {
+  /* 大封面：竖屏的主角，宽度吃到 90vw，同时用 vh 兜住可用高度 */
+  .player-main[data-mobile='true'] .album-art-container {
     width: min(90vw, 58vh);
     height: min(90vw, 58vh);
   }
 
   /* 视图切换按钮贴到上部区域右上角（横屏那 4vw 的右留白来自 .player-right
      的外边距，竖屏没有这层外边距） */
-  .view-controls-container {
+  .player-main[data-mobile='true'] .view-controls-container {
     right: 0;
     top: 2px;
   }
 
-  /* --- 控制区：底部不再顶到屏幕边缘 ---
-     这里**不要**再给左右 padding：本行六个按钮（5 个主按钮 + 播放列表）宽度已经
-     接近满宽，再塞 8px 内缩会让整行比时间行窄一圈（时间行走 .global-progress-bar
-     的通栏负边距 + 自身 padding: 0 16px，正好落在 16px 处），而且侧边占位被压到
-     3px、播放列表被迫与循环按钮贴死（实测间距 0，其余 4 处都是 14px ——
-     就是"底部按钮不协调"的来源）。去掉 padding 后本行两端与时间行对齐。 */
+  /* 控制区：底部不再顶到屏幕边缘。这里不要再给左右 padding：本行六个按钮（5 个主按钮 + 播放列表）
+     宽度已经接近满宽，再塞 8px 内缩会让整行比通栏的时间行窄一圈，侧边占位被压没、播放列表被迫与
+     循环按钮贴死。去掉 padding 后本行两端与时间行对齐。 */
   .controls-area {
     padding: 0;
     margin-top: 4px;
     margin-bottom: 4px;
   }
 
-  /* --- 六个按钮的间距统一为 14px（.controls-row 的 gap 也是 14px）---
-     .side-controls 是 flex: 1 的平衡占位，里面的播放列表按钮由 `justify-content:
-     flex-end` 贴到最右，所以它与循环按钮之间天然是 0 间距。三条规则配合：
-       ① 收掉竖屏下已经空掉的 .audio-info-corner —— 竖屏的音频信息改由时间行的
-          time-middle 插槽承担（ProgressBar.vue），这里只剩个空壳；
-       ② 让 .side-controls 收成内容宽（否则它和左侧占位瓜分空间时，按钮会溢出它的盒子）；
-       ③ 间距挂在**按钮自己**身上而不是 .side-controls 上 —— 播放列表为空时按钮整块
-          不渲染（v-if="playlist.length > 0"），挂在容器上会留下一段 14px 空档，
-          把 5 个主按钮整体推左 ~7px。
-     ⚠️ ②③ 用 [data-mobile='true'] 守卫：@media (orientation: portrait) 在桌面窗口
-     拉成窄高时也会命中，而桌面竖屏下 .side-controls 里还有桌面歌词与音量，
-     改成内容宽会把它们的排布一起改掉。① 不用守卫 —— 桌面竖屏的音频信息同样在时间行里。 */
+  /* 六个按钮的间距统一为 14px（.controls-row 的 gap 也是 14px）。三条规则配合：收掉竖屏下已经空掉的
+     .audio-info-corner（音频信息改由时间行的 time-middle 插槽承担）、把 .side-controls 收成内容宽、
+     间距挂在按钮自己身上（按钮不渲染时挂容器上会留一段空档）。三条都带 [data-mobile='true'] 守卫。 */
   .controls-area[data-mobile='true'] .audio-info-corner {
     display: none;
   }
@@ -849,34 +801,28 @@
     margin-left: 14px;
   }
 
-  /* 底部一行的按钮尺寸在这里统一定义。
-     这一行里除了 PlayerControls 的 5 个主按钮，还有 .side-controls 里的播放列表 ——
-     两处各写一份就会出现"播放列表比其它按钮小一圈"（原来 48px 只写在
-     PlayerControls.vue 的 scoped 样式里，够不到 App.vue 自己渲染的按钮）。
-     ⚠️ 必须用 :deep()：App.css 是 `<style scoped src>`，普通选择器会被加上本组件的
-     data-v 属性，而子组件内部渲染的按钮只有子组件自己的 data-v，压根匹配不到。
-     `A :deep(B)` 编译成 `A[data-v-x] B`，因此能穿过子组件的 scoped 边界，
-     特异性也更高（(0,3,0) > 组件内 `.icon-button[data-v-y]` 的 (0,2,0)），不依赖书写顺序。 */
-  .controls-area :deep(.icon-button) {
+  /* 底部一行的按钮尺寸在这里统一定义：PlayerControls 的 5 个主按钮和 .side-controls 里的播放列表分属
+     两个组件，各写一份就会出现播放列表比其它按钮小一圈。必须用 :deep()：App.css 是 `<style scoped src>`，
+     `A :deep(B)` 编译成 `A[data-v-x] B`，才能穿过子组件的 scoped 边界并拿到更高特异性。 */
+  .controls-area[data-mobile='true'] :deep(.icon-button) {
     width: 48px;
     height: 48px;
   }
 
-  .controls-area :deep(.play-button) {
+  .controls-area[data-mobile='true'] :deep(.play-button) {
     width: 64px;
     height: 64px;
   }
 
-  /* 音频信息在竖屏统一由进度条那一行的 time-middle 插槽承担
-     （见 ProgressBar.vue），控制栏左下角这份要收起来，避免同屏出现两遍。
-     只收起文字本身、保留 .audio-info-corner 的 flex:1 占位 ——
-     两侧同时塌掉会让控制按钮整组往左偏。 */
+  /* 音频信息在竖屏统一由进度条那一行的 time-middle 插槽承担（见 ProgressBar.vue），控制栏左下角这份
+     要收起来，避免同屏出现两遍。只收起文字本身、保留 .audio-info-corner 的 flex:1 占位 —— 两侧同时
+     塌掉会让控制按钮整组往左偏。 */
   .audio-info-text {
     display: none;
   }
 
   /* 沉浸式封面在竖屏下不再提供入口（点封面改成了"翻到歌词"，见 App.vue 的
-     handleAlbumArtClick），这里兜住"横屏进沉浸 → 转竖屏"瞬间可能残留的
+     handleAlbumArtClick），这里兜住"横屏进沉浸后再转竖屏"瞬间可能残留的
      通栏负边距，避免底部控制条被拉出屏幕 */
   .app-container.immersive-cover .player-lower {
     margin-left: 0;
@@ -884,4 +830,3 @@
     margin-bottom: 0;
   }
 }
-

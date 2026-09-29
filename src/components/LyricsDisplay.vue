@@ -159,10 +159,9 @@ export default {
     const configStore = useConfigStore()
     const containerRef = ref<HTMLElement | null>(null)
 
-    // 按需加载歌词样式 CSS:
-    // 监听 lyricsStyle 变化,首次切换到某样式时动态 import 对应 CSS。
-    // 已加载的 CSS 会常驻 DOM,但由于 .lyrics-style-modern / .lyrics-style-classic
-    // 选择器互斥,不会产生样式冲突。
+    // 按需加载歌词样式 CSS：监听 lyricsStyle 变化，首次切换到某样式时动态 import 对应 CSS。
+    // 已加载的 CSS 会常驻 DOM，但由于 .lyrics-style-modern / .lyrics-style-classic
+    // 选择器互斥，不会产生样式冲突。
     const loadedLyricsStyles = new Set<string>()
     const loadLyricsStyleCss = async (style: string | undefined): Promise<void> => {
       const normalized = style || 'modern'
@@ -507,15 +506,9 @@ export default {
       window.removeEventListener('resize', handleResize)
     })
 
-    // 点是否真的落在歌词文字上。
-    //
-    // 歌词行是整宽的块级元素（.lyrics 是 flex column、宽度撑满容器），
-    // 所以不能只靠 closest('.lyrics') 判断——那样点行内左右的大片留白
-    // 也会被算成"点歌词"，用户想返回封面时会莫名其妙跳到那一句。
-    // 这里用 Range 量出文字实际占据的矩形来精确判断。
-    //
-    // getClientRects() 返回空（某些环境对 Range 支持不全）时保守返回 true，
-    // 即"当作点在歌词上"：宁可少返回一次，也不要误吞掉跳句操作。
+    // 判断点是否真的落在歌词文字上。歌词行是整宽的块级元素（.lyrics 是 flex column、宽度撑满容器），
+    // 只靠 closest('.lyrics') 会把行内左右的大片留白也算成"点歌词"，用户想返回封面时莫名其妙跳到那句，
+    // 所以用 Range 量出文字实际占据的矩形来精确判断。getClientRects() 返回空时保守返回 true。
     const isPointOnLyricText = (event: MouseEvent, line: HTMLElement): boolean => {
       const range = document.createRange()
       range.selectNodeContents(line)
@@ -530,14 +523,9 @@ export default {
       )
     }
 
-    // 点击歌词面板的空白处 → 通知父组件（竖屏下用于返回封面）。
-    //
-    // 判定原则：只有"确实落在空白上"才发事件。所以要把这几类排除掉——
-    //   button             获取歌词、插件动作、偏移 +/- 等
-    //   .offset-value      偏移数值，点它是重置偏移
-    //   .lyrics-bottom-bar 底部控制栏，属于控制区而非"面板外部的空白"
-    //  歌词文字            语义是"跳到这一句"，不是"返回"（见 isPointOnLyricText）
-    // 否则用户想跳句子或调偏移时会莫名其妙退回封面。
+    // 点击歌词面板的空白处时通知父组件（竖屏下用于返回封面）。原则是只有确实落在空白上才发事件，所以
+    // 排除 button（获取歌词、插件动作、偏移加减）、.offset-value（点它是重置偏移）、.lyrics-bottom-bar
+    // （控制区）和歌词文字（语义是"跳到这一句"，见 isPointOnLyricText），否则用户会莫名其妙退回封面。
     const handleBlankClick = (event: MouseEvent): void => {
       const el = event.target as HTMLElement | null
       if (el?.closest('button, .offset-value, .lyrics-bottom-bar')) return
@@ -591,11 +579,9 @@ export default {
 
 .lyrics-display {
   height: 100%;
-  /* 左右对称。（原来是 `0 32px 0 8px`：右边 32px 是早年为可见滚动条留的，
-     后来滚动条已经隐藏（见下面 scrollbar-width / ::-webkit-scrollbar 两条），
-     那 32px 就成了纯右侧空白 —— 看着像"右边藏着什么东西"，唱词也整体偏左。
-     取 20px 是因为它正好是 (8+32)/2：**唱词的光学中心一点没动**，只是两边终于一样宽。
-     手机竖屏要更大宽度，在文件末尾的 orientation 媒体查询里再收窄。 */
+  /* 左右对称。原来是 `0 32px 0 8px`，右边 32px 是早年为可见滚动条留的，滚动条隐藏后（见下面的
+     scrollbar-width / ::-webkit-scrollbar）它就成了纯右侧空白、唱词整体偏左。取 20px 是因为它正好是
+     (8+32)/2，唱词的光学中心一点没动，只是两边终于一样宽。竖屏在文件末尾再收窄。 */
   padding: 0 20px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -764,10 +750,8 @@ export default {
   height: 45vh;
 }
 
-/* 手机竖屏：这一屏的宽度本来就紧，唱词要吃掉更多横向空间。
-   左右仍然对称（12px / 12px），只是整体比横屏的 20px 更贴边。
-   只按方向判断、不挂平台守卫：这是"窄屏必须能看"的兜底规则，
-   桌面窗口被拉成窄高时也该跟着放宽。 */
+/* 手机竖屏：这一屏的宽度本来就紧，唱词要吃掉更多横向空间。左右仍然对称（12px / 12px），只是整体比横屏的
+   20px 更贴边。只按方向判断、不挂平台守卫：这是"窄屏必须能看"的兜底规则，桌面窗口拉成窄高也该跟着放宽。 */
 @media (orientation: portrait) {
   .lyrics-display {
     padding: 0 12px;

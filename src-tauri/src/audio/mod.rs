@@ -4,31 +4,20 @@
 
 pub mod commands;
 
-// ============================================================================
-// 锁序约定(避免死锁)
-// ============================================================================
-//
-// `AudioOutputState` 中各锁按以下全局顺序获取,任何需要同时持有多个锁的代码
-// 都必须按此顺序,且尽量缩小临界区、避免在持锁期间执行 IPC/文件 IO:
+// 锁序约定（避免死锁）：`AudioOutputState` 各锁按下面的全局顺序获取，需要同时持有多个锁
+// 的代码必须遵守此顺序，并尽量缩小临界区、避免在持锁期间执行 IPC/文件 IO：
 //
 //   sink → output_stream → target_volume → exclusive_mode → wasapi_player
 //        → current_device_name → current_path
 //
-// 可视化数据(spectrum_data)与 device_monitor/equalizer 相互独立,
-// 不与上述锁同栈嵌套。
+// 独占播放器的采样缓冲 SampleRing 是无锁 SPSC，不参与锁序：渲染/解码/宿主线程只经原子
+// 计数访问，持有 wasapi_player 锁期间操作它不构成锁序嵌套。
+// 可视化数据(spectrum_data)与 device_monitor/equalizer 相互独立，不与上述锁同栈嵌套。
 //
-// 注意:WASAPI 独占模式的采样缓冲(SpscSampleRing)是无锁 SPSC 环形缓冲,
-// 不参与上述锁序——音频渲染线程/解码线程/宿主线程通过原子计数访问,
-// 持有 wasapi_player 锁期间操作它不再构成锁序嵌套。
-//
-// 两个既有约定:
-// - 核心路径(音频线程等)用 `lock_or_log!`:锁中毒自动恢复,不中断播放;
-// - 命令边界(返回错误给前端的 Tauri command)用 [`LockOrErr`]:把获取锁的
-//   失败转换为描述性错误。
+// 核心路径（音频线程等）用 `lock_or_log!`：锁中毒自动恢复，不中断播放；
+// 命令边界用 [`LockOrErr`]：把获取锁失败转成描述性错误返回给前端。
 
-// ============================================================================
 // 共享常量
-// ============================================================================
 
 /// 共享模式播放/恢复时的淡入时长(毫秒)。
 /// 播放起点没有对应的淡出,用稍长淡入掩盖可能的爆音。
@@ -37,9 +26,7 @@ pub(crate) const FADE_IN_MS: u64 = 80;
 pub(crate) const FADE_IN_ON_SEEK_MS: u64 = 50;
 
 /// 独占/直出播放器的状态机
-///
-/// 原来只定义在 WASAPI 独占模块里；Android 的 AAudio 独占通道要复用同一套
-/// 状态（命令层与解码推送线程都按它判断），因此提到平台无关的位置。
+/// 提到平台无关位置：Windows 的 WASAPI 与 Android 的 AAudio 共用，命令层与解码推送按它判断。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackState {
     Uninitialized,
@@ -85,16 +72,8 @@ pub use aaudio::AaudioExclusivePlayer;
 pub use wasapi::WasapiExclusivePlayback;
 
 /// 按当前的系统默认输出设备重建共享模式输出（Android）
-///
-/// 共享输出（`rodio::Player` + `MixerDeviceSink`）是**启动那一刻**按当时的默认设备开的。
-/// Android 的默认输出设备会随 USB 拔插变化，而 cpal 的流不会跟着迁移、也不会自愈 ——
-/// 不重建的话，拔掉 DAC 之后所有共享模式播放都还在往一条已经死掉的流里灌数据，
-/// 现象和独占那条路一样：**没有声音，重启应用才恢复**。
-///
-/// 调用方需保证此刻没有正在播的音频：本函数会替换掉 sink，当前播放队列随之丢失。
-/// 目前唯一的调用点是 [`aaudio::on_audio_route_changed`]，它已经先暂停了播放。
-///
-/// 新输出建好之前不碰旧状态 —— 创建失败时原样保留，至少还留着"重启可恢复"的退路。
+/// cpal 的流不会随默认设备迁移也不自愈，不重建则拔掉 DAC 后共享播放一直没声；创建失败时
+/// 原样保留旧状态。调用方需保证此刻没有正在播的音频：替换 sink 会丢掉当前播放队列。
 #[cfg(target_os = "android")]
 pub fn rebuild_shared_sink(state: &crate::AppState) -> Result<(), crate::error::AppError> {
     use rodio::stream::DeviceSinkBuilder;
@@ -139,11 +118,8 @@ pub fn rebuild_shared_sink(state: &crate::AppState) -> Result<(), crate::error::
 
 use std::sync::{LockResult, MutexGuard, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 
-/// 统一的锁获取错误映射:把 PoisonError/TryLockError 转成带锁名称的描述性错误,
-/// 替代各命令里逐行重复的 `.map_err(|e| format!("Failed to acquire ... lock: {e}"))`。
-///
-/// 与 `lock_or_log!` 的区别:本 trait 用于命令边界(把错误返回给前端),
-/// `lock_or_log!` 用于核心路径(中毒自动恢复,不中断)。
+/// 统一的锁获取错误映射：把 PoisonError/TryLockError 转成带锁名的描述性错误，免掉各命令里
+/// 重复的 `.map_err(...)`。命令边界用它，核心路径用 `lock_or_log!`（中毒不中断播放）。
 pub(crate) trait LockOrErr {
     type Guard;
 

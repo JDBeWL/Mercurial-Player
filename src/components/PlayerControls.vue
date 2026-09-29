@@ -1,18 +1,10 @@
 <template>
   <div class="player-controls">
     <div class="controls-row">
-      <!-- 播放模式：把原来的「随机播放」「循环播放」两颗按钮压成一颗，按一次走一格 ——
-           顺序播放 → 列表循环 → 单曲循环 → 随机播放 → 顺序播放……
-           底部那一行因此从 6 颗减到 5 颗（本组件 4 颗 + .side-controls 的播放列表），
-           手机上不再拥挤，play 按钮也刚好落在正中间。
-           图标只表明"当前是什么模式"，**不加 active 高亮**：四种模式各有各的样子，
-           高亮反而多一层冗余。顺序播放 **没有专用图标**，就是 repeat 加一道斜线
-           （Material Symbols 里没有 repeat_off，斜线用 ::after 画）。 -->
-      <button
-        class="icon-button"
-        :title="playModeTitle"
-        @click="playerStore.cyclePlayMode"
-      >
+      <!-- 播放模式：把原来的「随机播放」「循环播放」两颗按钮压成一颗，按一次走一格（顺序、列表循环、
+           单曲循环、随机，再回到顺序），底部那一行因此从 6 颗减到 5 颗，手机上不再拥挤、play 按钮也刚好
+           落在正中间。图标只表明"当前是什么模式"，不加 active 高亮：四种模式各有各的样子，高亮是冗余。 -->
+      <button class="icon-button" :title="playModeTitle" @click="playerStore.cyclePlayMode">
         <span
           class="material-symbols-rounded play-mode-icon"
           :class="{ 'is-order': !isPlayModeActive }"
@@ -61,7 +53,7 @@ const playerStore = usePlayerStore()
 
 /** 非"顺序播放"的三种模式都算激活（顺序播放要给它画上斜线） */
 const isPlayModeActive = computed<boolean>(
-  () => playerStore.isShuffle || playerStore.repeatMode !== 'none'
+  () => playerStore.isShuffle || playerStore.repeatMode !== 'none',
 )
 
 const playModeIcon = computed<string>(() => {
@@ -116,10 +108,8 @@ const playModeTitle = computed<string>(() => {
   font-size: 32px;
 }
 
-/* 竖屏（手机）：行内间距拉开，避免误触。按钮**尺寸**不在这里定义 ——
-   底部那一行里还有播放列表 / 音量等不属于本组件的按钮，尺寸分散在两处
-   就会不一致（播放列表曾因此一直是 40px，与这里的 48px 对不齐）。
-   统一尺寸见 App.css 的 `@media (orientation: portrait) .controls-area` 规则。 */
+/* 竖屏（手机）：行内间距拉开，避免误触。按钮尺寸不在这里定义，底部那一行里还有播放列表 / 音量等不属于
+   本组件的按钮，尺寸分散在两处就会不一致。统一尺寸见 App.css 的 `@media (orientation: portrait)` 规则。 */
 @media (orientation: portrait) {
   .controls-row {
     gap: 14px;
@@ -130,20 +120,9 @@ const playModeTitle = computed<string>(() => {
   }
 }
 
-/* ===== 「顺序播放」= repeat 图标 + 一道斜线 =====
-   Material Symbols 没有 repeat_off，斜线只能自己画。
-   要点：
-   - **长度必须超过字形盒（1.25em > 1em）**：短斜线（最初写的 0.92em）两端都埋在
-     字形里，而 repeat 自身的两个箭头正好也落在 45° 对角线上 —— 两者会在视觉上连成
-     一个"Z"，完全读不出"划掉"的意思。两端各出头约 0.125em 之后才一眼可辨。
-   - 斜线方向不能用 +45°（另一条对角线）：那条正好横穿 repeat 的回环笔画，糊成一团。
-   - 尺寸用 em，跟着图标字号走 —— 竖屏把图标放大到 36px 时斜线自动同比例变长；
-     颜色用 currentColor，深/浅主题、hover、disabled 态都不用另外处理。
-   - **不加"背景色描边"来给斜线留白**：那个描边得是按钮背后的实际颜色，而沉浸式模式下
-     背景是 `--immersive-bg`（只在 `.immersive-layer` 上定义、不在按钮的继承链上），
-     写死 surface 色会在沉浸式下露出错误颜色的一条线。宁可朴素一点也不出错。
-   - `inset: 0; margin: auto` 而不是手算位移：字形盒就是 line-height（=1）撑出的正方形，
-     这样斜线正好压在字形中心；::after 画在文字之后，天然盖在图标上面，不需要 z-index。 */
+/* 「顺序播放」= repeat 图标加一道斜线，Material Symbols 没有 repeat_off。斜线必须长过字形盒 (1.25em 大于
+   1em)、且取 45° 那条对角线：短了两端埋在字形里、与 repeat 自身的箭头连成"Z"；另一条对角线横穿回环笔画。
+   不要给斜线加"背景色描边"留白：沉浸模式的 --immersive-bg 不在按钮的继承链上，写死 surface 色会露错色。 */
 .play-mode-icon {
   position: relative;
 }

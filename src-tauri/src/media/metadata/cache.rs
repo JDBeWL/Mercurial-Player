@@ -4,7 +4,7 @@ use crate::error::AppError;
 use crate::security::is_sensitive_path;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::RwLock;
 use std::time::UNIX_EPOCH;
 
@@ -100,11 +100,19 @@ fn save_metadata_cache(cache: &MetadataCache) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 获取文件的修改时间
-fn get_file_modified_time(path: &Path) -> Option<u64> {
-    fs::metadata(path)
+/// 获取文件的修改时间（content URI 没有可 stat 的路径，从 SAF fd 上取）
+fn get_file_modified_time(path: &str) -> Option<u64> {
+    let metadata = if crate::android_saf::is_content_uri(path) {
+        crate::android_saf::open_media_file(path)
+            .ok()?
+            .metadata()
+            .ok()?
+    } else {
+        fs::metadata(path).ok()?
+    };
+    metadata
+        .modified()
         .ok()
-        .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_secs())
 }
@@ -114,7 +122,7 @@ pub fn get_metadata_from_cache(path: &str) -> Option<TrackMetadata> {
     let cached = get_cached_entry(path)?;
 
     // 检查文件是否被修改
-    let current_modified = get_file_modified_time(Path::new(path))?;
+    let current_modified = get_file_modified_time(path)?;
     if current_modified != cached.modified_time {
         log::debug!("文件已修改，缓存失效: {path}");
         return None;
@@ -159,9 +167,10 @@ pub fn clean_metadata_cache() -> Result<usize, AppError> {
     let keys =
         cached_keys.unwrap_or_else(|| load_metadata_cache().entries.keys().cloned().collect());
 
+    // 用带 content URI 分支的判断：按本地路径 exists 会把所有 SAF 条目误判为已删除
     let stale: Vec<String> = keys
         .into_iter()
-        .filter(|path| !Path::new(path).exists())
+        .filter(|path| !crate::media::filesystem::check_file_exists_internal(path))
         .collect();
 
     if stale.is_empty() {
@@ -271,7 +280,7 @@ fn flush_memory_cache() -> Result<(), AppError> {
 
 /// 保存元数据到内存缓存（不立即写入磁盘）
 pub fn save_metadata_to_memory_cache(path: &str, metadata: &TrackMetadata) {
-    if let Some(modified_time) = get_file_modified_time(Path::new(path)) {
+    if let Some(modified_time) = get_file_modified_time(path) {
         let cached = CachedMetadata {
             metadata: metadata.clone(),
             modified_time,
@@ -334,9 +343,7 @@ pub(super) fn cover_cache_dir() -> PathBuf {
         .join("cover-cache")
 }
 
-// ============================================================================
 // 缓存清理配置
-// ============================================================================
 
 /// 默认缓存最大大小（1GB）
 const DEFAULT_MAX_CACHE_SIZE_MB: u64 = 1024;

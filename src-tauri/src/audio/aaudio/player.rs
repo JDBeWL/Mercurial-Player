@@ -1,33 +1,16 @@
-//! AAudio 独占（位完美）输出播放器
-//!
-//! 与 Windows 的 WASAPI 独占模式对应：绕过 AudioFlinger 的混音与重采样，
-//! 把解码后的 PCM 按**设备原生采样率**直接写进 USB DAC。
-//!
-//! 三个关键点：
-//! 1. **共享模式**：`AAUDIO_SHARING_MODE_EXCLUSIVE`。共享模式下 AAudio 一定会把
-//!    输出重采样到设备速率（典型 48kHz），44.1kHz 的唱片就会被"洗"一遍；
-//!    独占模式下 AAudio 不接受非原生速率，速率不对会直接开不出流——这也正好
-//!    用来判断"这条链路是不是真的位完美"。
-//! 2. **速率匹配**：`ensure_format()` 先按曲目原生采样率开流，开不出来再退到
-//!    设备支持的其它速率（此时由解码线程重采样，前端显示的状态会说明）。
-//! 3. **热插拔**：USB DAC 拔掉时 AAudio 会抛 `Disconnected`，由看门狗线程收尾；
-//!    Kotlin 的设备回调再触发 `super::on_audio_route_changed()` 决定回落或重连。
-//!
-//! 数据通路：解码线程 `push_samples` → 无锁 SPSC 环形缓冲 → AAudio 数据回调取走
-//! （回调里做音量与淡入淡出，绝不阻塞、不分配）。
+//! AAudio 独占（位完美）输出播放器：绕过 AudioFlinger 的混音与重采样，按设备原生采样率
+//! 直写 USB DAC。数据通路：解码线程 `push_samples` → 无锁 SPSC 环形缓冲 → AAudio 数据
+//! 回调（回调内只做音量与淡入淡出，全走原子量，不阻塞、不分配）。
 
-// 与 `wasapi/exclusive.rs` 的 `mod simd_convert` 同一策略：整个模块就是 AAudio 的
-// FFI 边界——裸指针解引用、C 回调 ABI、跨线程共享的 `UnsafeCell` 都必须用 unsafe，
-// 逐项标注只会重复同一句话，故在模块级统一 allow。该 allow 仅限本文件：
-// Cargo.toml 里全局的 `unsafe_code = "warn"` 保持不变，模块外新增的 unsafe
-// 依旧会被提示；每个 unsafe 块内部仍保留独立的 SAFETY 说明。
+// 本模块就是 AAudio 的 FFI 边界（裸指针解引用、C 回调 ABI、跨线程 UnsafeCell），逐项标注
+// 只会重复同一句话，故在模块级统一 allow；每个 unsafe 块内仍保留独立的 SAFETY 说明。
 #![allow(unsafe_code)]
 
 use std::cell::UnsafeCell;
 use std::os::raw::c_void;
 use std::ptr;
 use std::sync::atomic::{
-    AtomicBool, AtomicI32, AtomicPtr, AtomicU8, AtomicU32, AtomicU64, Ordering,
+    AtomicBool, AtomicI32, AtomicPtr, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering,
 };
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -77,19 +60,11 @@ const PENDING_NONE: u8 = 0;
 const PENDING_PAUSE: u8 = 1;
 const PENDING_STOP: u8 = 2;
 
-#[derive(Debug, Clone, Copy)]
-enum FadeState {
-    Idle,
-    Out {
-        remaining: usize,
-        total: usize,
-        action: FadeAction,
-    },
-    In {
-        remaining: usize,
-        total: usize,
-    },
-}
+// 斜坡状态：回调线程每帧递减 remaining，命令线程只在淡变开始时写一次，
+// 因此用原子而不是 Mutex —— 实时回调里阻塞会造成 xrun。
+const FADE_IDLE: u8 = 0;
+const FADE_OUT: u8 = 1;
+const FADE_IN: u8 = 2;
 
 /// 音频回调与命令线程共享的状态（全部是无锁字段）
 struct Shared {
@@ -100,7 +75,11 @@ struct Shared {
     volume: AtomicU32,
     channels: AtomicU32,
     format: AtomicI32,
-    fade: Mutex<FadeState>,
+    fade_dir: AtomicU8,
+    fade_left: AtomicUsize,
+    fade_total: AtomicUsize,
+    /// 淡出走完后要交给看门狗的动作（PENDING_*）
+    fade_action: AtomicU8,
     /// 淡出完成后待执行的动作
     pending: AtomicU8,
     underruns: AtomicU64,
@@ -178,9 +157,7 @@ impl AaudioExclusivePlayer {
         guard.as_ref().map(|i| Arc::clone(&i.ctx.shared))
     }
 
-    /// 打开独占流。
-    ///
-    /// `device` 传设备 id 的字符串形式（与 WASAPI 版本传设备名共用同一个签名）；
+    /// 打开独占流。`device` 传设备 id 的字符串形式（与 WASAPI 版本共用同一签名）；
     /// 传 `None` 或解析失败时自动取当前 USB 音频设备。
     pub fn initialize(&self, device: Option<&str>) -> Result<(u32, u16, String), AppError> {
         let wanted_id = device.and_then(|s| s.trim().parse::<i32>().ok());
@@ -208,23 +185,15 @@ impl AaudioExclusivePlayer {
     }
 
     /// 作废当前流（USB DAC 热插拔后由 [`super::on_audio_route_changed`] 调用）。
-    ///
-    /// 必须连同**缓存的设备快照**一起丢掉，原因见 [`Self::ensure_format`]：
-    /// AAudio 的流在创建时就死绑 `AAudioStreamBuilder_setDeviceId` 拿到的设备 id，
-    /// 设备拔掉后这条流不会自愈，而系统在设备重新接入时分配的是**新的 id**。
+    /// 必须连同缓存的设备快照一起丢掉：AAudio 的流死绑创建时的 device id，设备重插后系统
+    /// 给的是**新 id**，拿旧快照开流会让独占与共享回退两条路都失败。
     pub fn release_stream(&self) {
         self.close_stream();
     }
 
-    /// 按曲目的原生采样率/声道对齐输出；必要时关掉旧流重开。
-    ///
-    /// 返回实际生效的 (采样率, 声道)。采样率与源一致时即为"直出"（无重采样）。
-    ///
-    /// ⚠️ 没有流时这里会**重新解析当前的 USB 输出设备**，而不是报错。
-    /// 这不只是"首次调用"的路径：USB DAC 拔插一次之后旧流就废了
-    /// （设备 id 变了 / 设备已不在），若继续拿 `Inner` 里缓存的旧 id 去开流，
-    /// 独占与共享回退两条路都会失败 —— 用户看到的现象就是
-    /// "拔插一次 USB DAC 后再也放不出声，必须重启应用"，所以自愈是必要的。
+    /// 按曲目的原生采样率/声道对齐输出，必要时关掉旧流重开；返回实际生效的 (采样率, 声道)，
+    /// 与源一致即为直出（无重采样）。
+    /// 没有流时在这里**重新解析**当前 USB 设备而不是报错：拔插一次后旧设备 id 已失效。
     pub fn ensure_format(&self, sample_rate: u32, channels: u16) -> Result<(u32, u16), AppError> {
         let current = (
             self.sample_rate.load(Ordering::SeqCst),
@@ -280,7 +249,10 @@ impl AaudioExclusivePlayer {
             volume: AtomicU32::new(self.volume.load(Ordering::SeqCst)),
             channels: AtomicU32::new(wanted_channels as u32),
             format: AtomicI32::new(wanted_format),
-            fade: Mutex::new(FadeState::Idle),
+            fade_dir: AtomicU8::new(FADE_IDLE),
+            fade_left: AtomicUsize::new(0),
+            fade_total: AtomicUsize::new(0),
+            fade_action: AtomicU8::new(PENDING_NONE),
             pending: AtomicU8::new(PENDING_NONE),
             underruns: AtomicU64::new(0),
             disconnected: AtomicBool::new(false),
@@ -375,9 +347,7 @@ impl AaudioExclusivePlayer {
             "AAudio stream opened: {} @ {actual_rate}Hz, {actual_channels}ch, format={actual_format}, sharing={sharing}",
             device.name
         );
-        // 看门狗在这里启动（而不是 initialize）：它负责把 pending 的 pause/stop
-        // 请求转成 AAudio 调用，凡是"流存在"就必须有它，而 ensure_format 也会开流
-        // （热插拔后按新设备重建时）。重复调用无副作用。
+        // 看门狗随开流启动而非 initialize：ensure_format 重建流时也需要它，重复启动无副作用
         self.start_watchdog();
         Ok((actual_rate, actual_channels))
     }
@@ -454,7 +424,7 @@ impl AaudioExclusivePlayer {
         *guard = Some(handle);
     }
 
-    // ---------------- 播放控制 ----------------
+    // 播放控制
 
     pub fn start(&self) -> Result<(), AppError> {
         self.request_start()
@@ -464,6 +434,9 @@ impl AaudioExclusivePlayer {
         let Some(shared) = self.shared() else {
             return Ok(());
         };
+        // 取消进行中的淡出，否则回调结束后会把 pending 覆盖成暂停
+        shared.fade_dir.store(FADE_IDLE, Ordering::SeqCst);
+        shared.fade_action.store(PENDING_NONE, Ordering::SeqCst);
         shared.pending.store(PENDING_STOP, Ordering::SeqCst);
         shared.ring.clear();
         self.state.store(ST_STOPPED, Ordering::SeqCst);
@@ -482,10 +455,8 @@ impl AaudioExclusivePlayer {
         let Some(shared) = self.shared() else {
             return Ok(());
         };
-        *shared
-            .fade
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = FadeState::Idle;
+        shared.fade_dir.store(FADE_IDLE, Ordering::SeqCst);
+        shared.fade_left.store(0, Ordering::SeqCst);
         shared.pending.store(PENDING_PAUSE, Ordering::SeqCst);
         self.state.store(ST_PAUSED, Ordering::SeqCst);
         Ok(())
@@ -509,13 +480,10 @@ impl AaudioExclusivePlayer {
         };
         let frames = fade_frames(duration_ms, self.sample_rate.load(Ordering::SeqCst));
         if frames > 0 {
-            *shared
-                .fade
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = FadeState::In {
-                remaining: frames,
-                total: frames,
-            };
+            shared.fade_total.store(frames, Ordering::SeqCst);
+            shared.fade_left.store(frames, Ordering::SeqCst);
+            shared.fade_action.store(PENDING_NONE, Ordering::SeqCst);
+            shared.fade_dir.store(FADE_IN, Ordering::SeqCst);
         }
         self.request_start()
     }
@@ -535,8 +503,12 @@ impl AaudioExclusivePlayer {
         };
         let mut offset = 0;
         // 背压：缓冲满时等一会儿再推。解码线程不是实时线程，等在这里不会造成爆音，
-        // 而直接丢弃样本会。
+        // 而直接丢弃样本会。但流已停/已断开时没人消费，必须退出，否则解码线程永久卡死。
         while offset < samples.len() {
+            if !shared.running.load(Ordering::Acquire) || shared.disconnected.load(Ordering::SeqCst)
+            {
+                return Ok(());
+            }
             let written = shared.ring.push_slice(&samples[offset..]);
             if written == 0 {
                 std::thread::sleep(std::time::Duration::from_millis(2));
@@ -605,7 +577,7 @@ impl AaudioExclusivePlayer {
             .map_or(0, |s| s.underruns.load(Ordering::SeqCst))
     }
 
-    // ---------------- 内部 ----------------
+    // 内部实现
 
     fn request_start(&self) -> Result<(), AppError> {
         let handle = {
@@ -641,26 +613,21 @@ impl AaudioExclusivePlayer {
             return Ok(());
         };
         let frames = fade_frames(duration_ms, self.sample_rate.load(Ordering::SeqCst));
-        *shared
-            .fade
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = if frames == 0 {
-            shared.pending.store(
-                if action == FadeAction::Pause {
-                    PENDING_PAUSE
-                } else {
-                    PENDING_STOP
-                },
-                Ordering::SeqCst,
-            );
-            FadeState::Idle
+        let action_code = if action == FadeAction::Pause {
+            PENDING_PAUSE
         } else {
-            FadeState::Out {
-                remaining: frames,
-                total: frames,
-                action,
-            }
+            PENDING_STOP
         };
+        if frames == 0 {
+            shared.pending.store(action_code, Ordering::SeqCst);
+            shared.fade_dir.store(FADE_IDLE, Ordering::SeqCst);
+        } else {
+            // 先写斜坡参数，最后置方向，避免回调读到半更新状态
+            shared.fade_total.store(frames, Ordering::SeqCst);
+            shared.fade_left.store(frames, Ordering::SeqCst);
+            shared.fade_action.store(action_code, Ordering::SeqCst);
+            shared.fade_dir.store(FADE_OUT, Ordering::SeqCst);
+        }
         self.state.store(
             if action == FadeAction::Pause {
                 ST_PAUSING
@@ -688,9 +655,7 @@ impl Drop for AaudioExclusivePlayer {
     }
 }
 
-// ============================================================================
 // 回调与工具
-// ============================================================================
 
 fn ring_capacity(sample_rate: u32, channels: u16) -> usize {
     ((sample_rate as usize * channels as usize) as f32 * RING_SECONDS) as usize
@@ -757,7 +722,7 @@ unsafe extern "C" fn data_callback(
         return ffi::AAUDIO_CALLBACK_RESULT_CONTINUE;
     }
 
-    let channels = shared.channels.load(Ordering::Relaxed) as usize;
+    let channels = shared.channels.load(Ordering::Relaxed).max(1) as usize;
     let need = frames as usize * channels;
 
     // SAFETY: scratch 只在本回调线程访问
@@ -770,46 +735,34 @@ unsafe extern "C" fn data_callback(
     }
 
     let volume = f32::from_bits(shared.volume.load(Ordering::Relaxed));
-    let (fade_start, fade_end, finished) = {
-        let mut fade = shared
-            .fade
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        match *fade {
-            FadeState::Idle => (1.0f32, 1.0f32, None),
-            FadeState::Out {
-                remaining,
-                total,
-                action,
-            } => {
-                let left = remaining.saturating_sub(frames as usize);
-                let start = remaining as f32 / total as f32;
-                let end = left as f32 / total as f32;
-                *fade = if left == 0 {
-                    FadeState::Idle
-                } else {
-                    FadeState::Out {
-                        remaining: left,
-                        total,
-                        action,
+    // 斜坡按帧而不是按采样推进：一个帧含 channels 个采样，按采样推进会在半个
+    // 回调块内就走完斜坡并继续过冲（淡出时增益转负 → 反相失真），左右声道还不一致
+    let (fade_start, fade_end) = {
+        let dir = shared.fade_dir.load(Ordering::Relaxed);
+        let total = shared.fade_total.load(Ordering::Relaxed);
+        if dir == FADE_IDLE || total == 0 {
+            (1.0f32, 1.0f32)
+        } else {
+            let now = shared.fade_left.load(Ordering::Relaxed);
+            let left = now.saturating_sub(frames as usize);
+            shared.fade_left.store(left, Ordering::Relaxed);
+            let ratio_now = now as f32 / total as f32;
+            let ratio_left = left as f32 / total as f32;
+            let gain = if dir == FADE_OUT {
+                (ratio_now, ratio_left)
+            } else {
+                (1.0 - ratio_now, 1.0 - ratio_left)
+            };
+            if left == 0 {
+                shared.fade_dir.store(FADE_IDLE, Ordering::Relaxed);
+                if dir == FADE_OUT {
+                    let action = shared.fade_action.swap(PENDING_NONE, Ordering::SeqCst);
+                    if action != PENDING_NONE {
+                        shared.pending.store(action, Ordering::SeqCst);
                     }
-                };
-                (start, end, if left == 0 { Some(action) } else { None })
+                }
             }
-            FadeState::In { remaining, total } => {
-                let left = remaining.saturating_sub(frames as usize);
-                let start = 1.0 - remaining as f32 / total as f32;
-                let end = 1.0 - left as f32 / total as f32;
-                *fade = if left == 0 {
-                    FadeState::Idle
-                } else {
-                    FadeState::In {
-                        remaining: left,
-                        total,
-                    }
-                };
-                (start, end, None)
-            }
+            gain
         }
     };
 
@@ -825,13 +778,13 @@ unsafe extern "C" fn data_callback(
             ffi::AAUDIO_FORMAT_PCM_FLOAT => {
                 let out = std::slice::from_raw_parts_mut(audio as *mut f32, need);
                 for (i, dst) in out.iter_mut().enumerate() {
-                    *dst = scratch[i] * volume * (fade_start + step * i as f32);
+                    *dst = scratch[i] * volume * (fade_start + step * (i / channels) as f32);
                 }
             }
             ffi::AAUDIO_FORMAT_PCM_I32 => {
                 let out = std::slice::from_raw_parts_mut(audio as *mut i32, need);
                 for (i, dst) in out.iter_mut().enumerate() {
-                    let v = scratch[i] * volume * (fade_start + step * i as f32);
+                    let v = scratch[i] * volume * (fade_start + step * (i / channels) as f32);
                     *dst = (v.clamp(-1.0, 1.0) * i32::MAX as f32) as i32;
                 }
             }
@@ -840,7 +793,7 @@ unsafe extern "C" fn data_callback(
                 let v_scale = 8_388_607.0f32; // 2^23 - 1
                 let out = std::slice::from_raw_parts_mut(audio as *mut u8, need * 3);
                 for i in 0..need {
-                    let v = scratch[i] * volume * (fade_start + step * i as f32);
+                    let v = scratch[i] * volume * (fade_start + step * (i / channels) as f32);
                     let q = (v.clamp(-1.0, 1.0) * v_scale) as i32;
                     let b = q.to_le_bytes();
                     out[i * 3] = b[0];
@@ -852,7 +805,7 @@ unsafe extern "C" fn data_callback(
                 // I16（未知格式也按 I16 处理，AAudio 不接受时已在 open 阶段回落共享模式）
                 let out = std::slice::from_raw_parts_mut(audio as *mut i16, need);
                 for (i, dst) in out.iter_mut().enumerate() {
-                    let v = scratch[i] * volume * (fade_start + step * i as f32);
+                    let v = scratch[i] * volume * (fade_start + step * (i / channels) as f32);
                     *dst = (v.clamp(-1.0, 1.0) * 32767.0) as i16;
                 }
             }
@@ -860,17 +813,6 @@ unsafe extern "C" fn data_callback(
     }
 
     shared.written.fetch_add(need as u64, Ordering::Relaxed);
-
-    if let Some(action) = finished {
-        shared.pending.store(
-            if action == FadeAction::Pause {
-                PENDING_PAUSE
-            } else {
-                PENDING_STOP
-            },
-            Ordering::SeqCst,
-        );
-    }
 
     ffi::AAUDIO_CALLBACK_RESULT_CONTINUE
 }

@@ -127,9 +127,7 @@ impl Drop for DeviceMonitor {
     }
 }
 
-// ============================================================================
 // 基于 cpal 的轮询实现（所有平台共用）
-// ============================================================================
 
 /// 监听设备变更的主循环
 ///
@@ -246,9 +244,7 @@ fn monitor_device_changes(
     }
 }
 
-// ============================================================================
 // 辅助函数（双平台共用）
-// ============================================================================
 
 /// 获取所有设备名称
 #[cfg(not(all(target_os = "windows", feature = "imm-notification")))]
@@ -290,14 +286,9 @@ fn find_fallback_device(host: &cpal::Host, excluded_device: &str) -> Option<Stri
         .find(|name| name != excluded_device)
 }
 
-// ============================================================================
-// Windows 平台：基于 IMMNotificationClient 的事件驱动实现（已禁用）
-// ============================================================================
-// 默认不使用：IMMNotificationClient 的 COM 回调触发和 previous_default 状态同步
-// 在运行时存在可靠性问题，默认走轮询模式以保证功能稳定。
-// 如需启用：给构建加上 `imm-notification` feature，DeviceMonitor::start 会自动分派到
-// 本模块的 run_windows_monitor。
-// ============================================================================
+// Windows 平台：基于 IMMNotificationClient 的事件驱动实现（默认禁用）
+// COM 回调触发与 previous_default 状态同步存在运行时可靠性问题，故默认走轮询模式。
+// 启用方式：构建时加 `imm-notification` feature，DeviceMonitor::start 会分派到 run_windows_monitor。
 
 #[cfg(all(target_os = "windows", feature = "imm-notification"))]
 mod windows_impl {

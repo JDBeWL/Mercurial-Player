@@ -114,10 +114,8 @@
       </button>
     </div>
 
-    <!-- 手机竖屏：设置 / 明暗 / 主题色收进溢出菜单。
-         480px 宽放 4 个按钮时相邻间距只有 8px（误触风险）、曲名只剩 134px；
-         这三项都是装好就很少改的，常驻顶栏性价比很低。
-         横屏与桌面端不进这个分支，行为完全不变。 -->
+    <!-- 手机竖屏：设置 / 明暗 / 主题色收进溢出菜单。窄顶栏放 4 个按钮时相邻间距只剩 8px（有误触
+         风险）、曲名也被挤得看不全，而这三项都是装好就很少改的。横屏与桌面端不进这个分支。 -->
     <template v-if="showOverflowMenu">
       <button
         class="icon-button nav-overflow-btn"
@@ -170,11 +168,8 @@ import { usePlatform } from '@/composables/usePlatform'
 import { useOrientation } from '@/composables/useOrientation'
 import ThemeSelector from './ThemeSelector.vue'
 
-/**
- * 顶栏导航(曲目信息 + 主题/窗口/库入口)。
- * 从 App.vue 拆出:自身状态走 store,窗口控制函数与全屏状态由父级注入
- * (App 的 useWindowControls 实例是唯一状态源),避免二次订阅。
- */
+/** 顶栏导航(曲目信息 + 主题/窗口/库入口)。从 App.vue 拆出:自身状态走 store,窗口控制函数与全屏
+ *  状态由父级注入(App 的 useWindowControls 实例是唯一状态源),避免二次订阅。 */
 defineProps<{
   /** 全屏状态(决定全屏按钮标题与图标) */
   isFullscreen: boolean
@@ -248,15 +243,9 @@ watch(showOverflowMenu, (visible) => {
 </script>
 
 <style scoped>
-/* ===== 三列栅格：把曲目信息真正钉在窗口正中 =====
-   为什么不用 flex：`.nav-center` 若是 flex:1，它只会在"左侧按钮之后剩下的空间"里居中。
-   桌面端左右按钮数接近，视觉上还过得去；但 Android 上右侧窗口按钮整组被 v-if 掉，
-   左侧那 ~200px 的按钮就全成了偏移量，标题明显偏右。
-
-   栅格则是"左右各 1fr"，两列恒等宽 —— 中间列不管多宽，它的中心都等于窗口中心，
-   与左右各放几个按钮无关。且曲目信息仍在原来那一行，不需要换行。
-   中间列写 minmax(0, auto)：宽度贴合内容，长曲名会被压成省略号，
-   而不会把两侧按钮顶出屏幕。 */
+/* 三列栅格把曲目信息真正钉在窗口正中。flex 下 .nav-center 只能在"左侧按钮之后剩下的空间"里居中，
+   Android 上右侧窗口按钮整组被 v-if 掉，那 ~200px 就全成了偏移量，标题明显偏右；栅格左右各 1fr
+   恒等宽，中间列的中心即窗口中心。中间列 minmax(0, auto) 让长曲名压成省略号而不顶掉两侧按钮。 */
 .nav-bar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
@@ -360,15 +349,9 @@ watch(showOverflowMenu, (visible) => {
   }
 }
 
-/* ===== 手机竖屏：低频操作收进溢出菜单 =====
-   .nav-left 的盒子消失（display: contents），它的子项直接成为 .nav-bar 的栅格项，
-   再手工指定各自所在列。桌面/横屏完全不进这个块。
-
-   ⚠️ 整块用 [data-mobile='true'] 守卫：@media (orientation: portrait) 在桌面
-   把窗口拉成窄高时同样会命中，不加守卫会把桌面端的按钮一起藏掉。
-   ⚠️ 必须把 640px 那条窄屏规则留下的两行 areas 一并撤掉 —— 否则曲名会被
-   自动放置甩到第二行，顶栏高度直接翻倍（实测 99px，曲名 cy=70 而按钮 cy=28）。
-   行、列都用 grid-area 显式钉死，不依赖自动放置。 */
+/* 手机竖屏：低频操作收进溢出菜单，.nav-left 的盒子消失（display: contents）让子项直接成为栅格项。
+   整块用 [data-mobile='true'] 守卫，(orientation: portrait) 在桌面把窗口拉成窄高时同样会命中。
+   必须撤掉 640px 那条窄屏规则留下的两行 areas，否则曲名会被自动放置甩到第二行、顶栏高度翻倍。 */
 @media (orientation: portrait) {
   .nav-bar[data-mobile='true'] .nav-left {
     display: contents;
@@ -433,7 +416,7 @@ watch(showOverflowMenu, (visible) => {
   padding: 6px;
   border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: 16px;
-  /* ⚠️ 不能用 surface-container-* 系列：本应用主题只输出 29 个基础角色，
+  /* 不能用 surface-container-* 系列：本应用主题只输出 29 个基础角色，
      那一族全部不存在，声明会静默失效变透明（见 tests/utils/themeTokens.test.ts
      的棘轮断言）。浮层用真实存在的 surface。 */
   background-color: var(--md-sys-color-surface);

@@ -42,7 +42,15 @@ fn now_secs() -> u64 {
 ///
 /// 失败返回 None
 fn get_file_metadata(path: &str) -> Option<(u64, u64)> {
-    let metadata = std::fs::metadata(path).ok()?;
+    // content URI 没有可 stat 的路径，只能从 SAF fd 上取
+    let metadata = if crate::android_saf::is_content_uri(path) {
+        crate::android_saf::open_media_file(path)
+            .ok()?
+            .metadata()
+            .ok()?
+    } else {
+        std::fs::metadata(path).ok()?
+    };
     let size = metadata.len();
     let mtime = metadata
         .modified()

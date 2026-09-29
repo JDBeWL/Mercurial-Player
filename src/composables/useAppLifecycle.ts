@@ -28,37 +28,18 @@ interface UseAppLifecycleOptions {
   stopWatchTrack: WatchStopHandle | null
 }
 
-/**
- * 应用生命周期 Composable
- *
- * 集中处理 App 启动初始化序列与卸载清理：
- *
- * onMounted 顺序：
- *   1. 注册 beforeunload（关闭前 flush 配置 + 清理播放器 + 清理插件）
- *   2. 加载配置文件（允许重置 UI 状态）
- *   3. 应用语言设置
- *   4. 应用主题设置
- *   5. 设置封面缓存路径到后端
- *   6. 初始化音频播放器（注册监听器、启动清理任务）
- *   7. 恢复上次播放会话
- *   8. 同步可视化目标帧率到后端（用于 FFT 频率）
- *   9. 检查更新（若启用），通过错误通知容器提示用户
- *   10. 同步窗口全屏/最大化状态
- *
- * onUnmounted：flush 配置 → 移除 beforeunload → 取消错误通知桥接 → 停止音轨监听 → 清理播放器
- *
- * 注意：键盘监听器由 useGlobalKeyboard 自行注册/注销，不在此处管理。
- */
+/** 应用生命周期 Composable：集中处理 App 的启动初始化序列与卸载清理。onUnmounted 要 flush 配置、
+ *  移除 beforeunload、取消错误通知桥接、停止音轨监听、清理播放器。
+ *  注意：键盘监听由 useGlobalKeyboard 自行注册/注销，不在此处管理。 */
 export function useAppLifecycle(options: UseAppLifecycleOptions): void {
   const playerStore = usePlayerStore()
   const configStore = useConfigStore()
   const themeStore = useThemeStore()
   const { t } = useI18n()
 
-  // 应用关闭前强制保存配置并清理资源。
-  // 注意:beforeunload 中 WebView 不保证等待异步 IPC 完成,
-  // 因此真实关闭路径走 onCloseRequested (见下),此处仅作兜底:
-  // fire-and-forget 发出 IPC,消息一旦发出后端即会处理
+  // 应用关闭前强制保存配置并清理资源。注意 beforeunload 中 WebView 不保证等待异步 IPC 完成，
+  // 因此真实关闭路径走 onCloseRequested（见下），此处仅作兜底：fire-and-forget 发出 IPC，
+  // 消息一旦发出后端即会处理。
   const flushResourcesOnClose = (): void => {
     void configStore.flushPendingSave()
     // 清理播放器资源（包括全局快捷键）
@@ -129,11 +110,9 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
 
     // 歌词字号：写成根元素上的 CSS 变量，主歌词面板与可视化面板的单行歌词共用。
     // 放在配置加载之后 watch，immediate 那一次拿到的就是已加载的值。
-    lyricsFontScaleWatch = watch(
-      () => configStore.lyrics?.fontScale ?? 1,
-      applyLyricsFontScale,
-      { immediate: true },
-    )
+    lyricsFontScaleWatch = watch(() => configStore.lyrics?.fontScale ?? 1, applyLyricsFontScale, {
+      immediate: true,
+    })
 
     // 从配置加载主题设置
     try {

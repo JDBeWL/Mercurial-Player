@@ -5,10 +5,14 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : TauriActivity() {
   companion object {
@@ -16,13 +20,17 @@ class MainActivity : TauriActivity() {
       System.loadLibrary("mercurial_player")
     }
 
+    // singleTask 生命周期内只有一个 Activity 实例，静态方法据此取窗口
+    @Volatile
+    private var current: MainActivity? = null
     // 初始化 Rust 侧 cpal AAudio 依赖的 ndk_context（JavaVM + Activity）
     @JvmStatic external fun initNdkContext(activity: MainActivity)
 
     // 由 Rust 侧通过 JNI（call_static_method）调用，转发给 SafBridge 调起系统目录选择器
     @JvmStatic
     fun safRequestPick() {
-      SafBridge.requestPick()
+      // Rust 的调用线程不是主线程，而 Activity Result API 的 launch 必须在主线程
+      Handler(Looper.getMainLooper()).post { SafBridge.requestPick() }
     }
 
     /**
@@ -45,6 +53,28 @@ class MainActivity : TauriActivity() {
     fun setAppFontScale(scale: Float) {
       FontScaleBridge.setScale(scale)
     }
+
+    /** 隐藏/恢复系统栏。由 Rust 命令 `set_system_ui_hidden` 经 JNI 调用 */
+    @JvmStatic
+    fun setSystemUiHidden(hideStatusBars: Boolean, hideNavigationBars: Boolean) {
+      val activity = current ?: return
+      activity.runOnUiThread {
+        val controller = WindowInsetsControllerCompat(activity.window, activity.window.decorView)
+        // 隐藏后从边缘滑动可临时唤出，不会把用户锁死
+        controller.systemBarsBehavior =
+          WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (hideStatusBars) {
+          controller.hide(WindowInsetsCompat.Type.statusBars())
+        } else {
+          controller.show(WindowInsetsCompat.Type.statusBars())
+        }
+        if (hideNavigationBars) {
+          controller.hide(WindowInsetsCompat.Type.navigationBars())
+        } else {
+          controller.show(WindowInsetsCompat.Type.navigationBars())
+        }
+      }
+    }
   }
 
   /** Android 13+ 通知运行时权限：没有它通知栏完全不可见 */
@@ -55,12 +85,18 @@ class MainActivity : TauriActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
+    current = this
     initNdkContext(this)
     SafBridge.init(this)
     MediaBridge.init(this)
     AudioBridge.init(this)
     super.onCreate(savedInstanceState)
     askNotificationPermissionIfNeeded()
+  }
+
+  override fun onDestroy() {
+    if (current === this) current = null
+    super.onDestroy()
   }
 
   override fun onResume() {

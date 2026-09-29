@@ -1,13 +1,6 @@
-/**
- * 播放队列同步（阶段 3.0 · Android 后台播放）
- *
- * 背景：桌面端「播完切下一首」由前端 `_onEnded()` 驱动；Android 上 App 进入
- * 后台后 WebView 的 JS 会被节流/冻结，`track-ended` 可能无人处理，播完即停。
- * 因此这里把「已排好播放顺序」的队列同步给 Rust，由 Rust 负责自然结束后的推进，
- * 前端在 Android 上退化为跟随者（监听 `queue-track-changed`）。
- *
- * 桌面端 `auto_advance` 恒为 false，Rust 侧不会自动推进 —— 行为零改变。
- */
+/** 播放队列同步。Android 上 App 进后台后 WebView 的 JS 会被节流/冻结，`track-ended`
+ *  可能无人处理、播完即停，故把排好序的队列同步给 Rust 负责自然结束后的推进，
+ *  前端在 Android 上退化为跟随者（监听 `queue-track-changed`）。桌面端行为零改变。 */
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { watch, type WatchStopHandle } from 'vue'
@@ -50,12 +43,8 @@ function toSnapshot(track: TrackSnapshot | null | undefined): TrackSnapshot | nu
   }
 }
 
-/**
- * 计算「最终播放顺序」的曲目数组
- *
- * 随机模式下复用 store 已生成的 `_shuffleOrder`；顺序失效时按当前列表顺序输出，
- * Rust 侧不实现 shuffle，避免两端算法分歧。
- */
+/** 计算「最终播放顺序」的曲目数组。Rust 侧不实现 shuffle，避免两端算法分歧，随机模式
+ *  只复用 store 已生成的 `_shuffleOrder`；顺序失效时退回列表原顺序。 */
 function orderedTracks(store: PlayerStore): TrackSnapshot[] {
   if (!store.isShuffle || store._shuffleOrder.length !== store.playlist.length) {
     return store.playlist
@@ -119,14 +108,12 @@ export async function setupQueueListener(store: PlayerStore): Promise<UnlistenFn
 
 let stateSyncUnlisten: UnlistenFn | null = null
 
-/**
- * 回到前台时重新同步播放状态
- *
- * 实测（MuMu / Android 15）：App 退到后台约 1 分钟后 WebView 的 JS 会被完全冻结
- * （心跳探针停止、期间发出的事件丢失），因此回到前台必须让 Rust 推一次真实状态，
- * 否则 UI 会停留在后台前的旧曲目与进度。
- */
+/** 回到前台时重新同步播放状态。Android 上 WebView 的 JS 在后台会被完全冻结、期间发出的
+ *  事件丢失，不重新同步 UI 就会停在后台前的旧曲目与进度。 */
 export async function setupStateSyncListener(store: PlayerStore): Promise<UnlistenFn | null> {
+  // `_setupListeners` 可重入，先注销上一个再建新的，否则旧句柄被覆盖后再也拿不到
+  stateSyncUnlisten?.()
+  stateSyncUnlisten = null
   try {
     stateSyncUnlisten = await listen<{
       index: number | null
@@ -161,8 +148,16 @@ let queueWatchStop: WatchStopHandle | null = null
 /** 监听播放列表/循环/随机变化，自动同步队列到 Rust */
 export function watchPlayQueue(store: PlayerStore): void {
   if (queueWatchStop) return
+  // 取路径拼接而不是数组本身：原地 push/splice 不改变 store.playlist 的引用，
+  // 直接 watch 数组不会触发
   queueWatchStop = watch(
-    () => [store.playlist, store.currentTrack?.path, store.repeatMode, store.isShuffle] as const,
+    () =>
+      [
+        store.playlist.map((t) => t.path).join('\n'),
+        store.currentTrack?.path,
+        store.repeatMode,
+        store.isShuffle,
+      ] as const,
     () => {
       void syncPlayQueue(store)
     },
@@ -180,13 +175,8 @@ export function stopPlayQueueWatch(): void {
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let heartbeatSeq = 0
 
-/**
- * 后台心跳探针（阶段 3 实测用）
- *
- * 固定间隔调用 Rust 命令打日志，`adb logcat | grep background-heartbeat`
- * 即可观察 App 进入后台后 JS 是否仍被调度，用于验证「播放推进必须下沉到 Rust」
- * 这一判断。移动端专用，桌面端不会启动。
- */
+/** 后台心跳探针（调试用）：固定间隔调用 Rust 命令打日志，`adb logcat` 里看它是否停止
+ *  即可判断 App 进后台后 JS 还在不被调度。移动端专用，桌面端不会启动。 */
 export async function startBackgroundHeartbeat(intervalMs = 1000): Promise<void> {
   if (heartbeatTimer) return
   if (!(await isAndroid())) return

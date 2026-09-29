@@ -52,6 +52,11 @@ vi.mock('@tauri-apps/plugin-global-shortcut', () => ({
   unregister: vi.fn(),
 }))
 
+// setupGlobalShortcuts 会先按平台判断是否注册（移动端交给 MediaSession），这里固定为桌面
+vi.mock('@/services/appService', () => ({
+  getPlatform: async () => 'windows',
+}))
+
 vi.mock('@/utils/logger', () => ({
   default: {
     debug: vi.fn(),

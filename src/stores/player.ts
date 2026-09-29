@@ -286,17 +286,15 @@ export const usePlayerStore = defineStore('player', {
       await this._initPromise
     },
 
-    /**
-     * 统一设置所有事件监听器 (track-ended / playback-position / taskbar / device / global shortcuts)
-     * 监听器实现抽离到 playerListeners.ts
-     */
+    /** 统一设置所有事件监听器 (track-ended / playback-position / taskbar / device / global shortcuts)，
+     *  监听器实现抽离到 playerListeners.ts */
     async _setupListeners(): Promise<void> {
       this._trackEndedUnlisten = await setupTrackEndedListener(this)
       this._positionUnlisten = await setupPositionListener(this)
       this._queueUnlisten = await setupQueueListener(this)
       await setupStateSyncListener(this)
 
-      // 阶段 3.0：把播放队列同步给 Rust（Android 开启自动推进）
+      // 把播放队列同步给 Rust（Android 开启自动推进）
       watchPlayQueue(this)
       void startBackgroundHeartbeat()
 
@@ -314,18 +312,12 @@ export const usePlayerStore = defineStore('player', {
       await setupGlobalShortcuts(this)
     },
 
-    /**
-     * 立即保存 last_session (无节流,用于 pause/切曲/关闭等关键节点)
-     * 实现在 playerSession.ts
-     */
+    /** 立即保存 last_session (无节流,用于 pause/切曲/关闭等关键节点)，实现在 playerSession.ts */
     async _saveLastSessionNow(): Promise<void> {
       await saveLastSessionNow(this)
     },
 
-    /**
-     * 启动时调用 - 尝试恢复上次播放会话
-     * 实现在 playerSession.ts
-     */
+    /** 启动时调用，尝试恢复上次播放会话。实现在 playerSession.ts */
     async resumeLastSession(): Promise<ResumeResult | null> {
       return resumeLastSession(this)
     },
@@ -846,17 +838,12 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
-    /**
-     * 播放模式按钮（底部控制栏最左那颗）的单键循环：
-     * 顺序播放 → 列表循环 → 单曲循环 → 随机播放 → 顺序播放……
-     *
-     * 之所以能压成一个按钮：本 store 里 `isShuffle` 与 `repeatMode` 本来就是**互斥**的
-     * （`toggleShuffle` 打开时会把 `repeatMode` 置回 `none`，`toggleRepeat` 进入 `list`
-     * 时会把 `isShuffle` 关掉），所以四种状态刚好是一条环，不会丢组合。
-     */
+    /** 播放模式按钮（底部控制栏最左那颗）的单键循环：顺序、列表循环、单曲循环、随机，再回到顺序。
+     *  能压成一个按钮是因为本 store 里 `isShuffle` 与 `repeatMode` 本来就互斥（各自 toggle 时会把对方
+     *  置回 none/false），四种状态刚好是一条环，不会丢组合。 */
     cyclePlayMode(): void {
       if (this.isShuffle) {
-        // 随机 → 顺序（toggleShuffle 关闭时不动 repeatMode，此时本来就是 none）
+        // 随机切回顺序（toggleShuffle 关闭时不动 repeatMode，此时本来就是 none）
         this.toggleShuffle()
       } else if (this.repeatMode === 'none') {
         this.repeatMode = 'list'
@@ -923,13 +910,9 @@ export const usePlayerStore = defineStore('player', {
 
     // --- 数据加载 ---
 
-    /**
-     * 整体替换播放列表。
-     * markRaw:上万首 Track 全量深度代理代价极高,列表内改动一律重新赋值(见
-     * playerPlaylist / playerSession),不依赖数组原地变异触发更新。
-     * 复制一份再 markRaw:直接标记入参会连带让调用方的数组(如 musicLibrary
-     * 的 playlist.files)失去响应式能力。
-     */
+    /** 整体替换播放列表。markRaw：上万首 Track 全量深度代理代价极高，列表内改动一律重新赋值（见
+     *  playerPlaylist / playerSession），不依赖数组原地变异触发更新。必须先复制一份再 markRaw，直接
+     *  标记入参会连带让调用方的数组（如 musicLibrary 的 playlist.files）失去响应式能力。 */
     _setPlaylist(tracks: Track[]): void {
       this.playlist = markRaw([...tracks])
     },

@@ -181,9 +181,8 @@ export default {
 
     const karaokeStyleCache = new Map<string, Record<string, string>>()
     const activeColor = 'var(--md-sys-color-primary)'
-    // 老 WebView（如 Android 110）不支持 color-mix()，会整条丢弃内联赋值；
-    // 逐字高亮是靠 background-image + background-clip: text 画的，
-    // 丢了就是空白一片，故按支持情况换用安全色
+    // 不支持 color-mix() 的老 WebView 会整条丢弃这个内联赋值，而逐字高亮是靠
+    // background-image + background-clip: text 画的，丢了就是空白一片，故按支持情况换用安全色
     const inactiveColor = supportsColorMix()
       ? 'color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1))'
       : 'var(--md-sys-color-outline)'
@@ -457,11 +456,9 @@ canvas {
   overflow: hidden;
 }
 
-/* 卡拉OK 逐字高亮的"未唱部分"底色。
-   Android WebView 110 不支持 color-mix()，且自定义属性值不会被语法校验——
-   旧 WebView 会把这个（对它而言）无意义的字符串原样保留，再替换进 background-image
-   时整条声明失效；配合下面的 background-clip: text + color: transparent，
-   歌词会整行消失。因此默认给一个所有浏览器都能解析的颜色，只在支持时才升级。 */
+/* 卡拉OK 逐字高亮的"未唱部分"底色。判据与 supportsColorMix() 保持一致：
+   自定义属性值不做语法校验，老 WebView 会原样保留 color-mix() 字符串，
+   整条声明失效后配合 background-clip: text 会让歌词整行消失。 */
 .karaoke-word {
   --inactive-color: var(--md-sys-color-outline);
   --active-color: var(--md-sys-color-primary);
@@ -470,7 +467,7 @@ canvas {
   color: transparent;
 }
 
-@supports (background-image: color-mix(in srgb, red 40%, blue)) {
+@supports (color: color-mix(in srgb, red 40%, blue)) {
   .karaoke-word {
     --inactive-color: color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1));
   }

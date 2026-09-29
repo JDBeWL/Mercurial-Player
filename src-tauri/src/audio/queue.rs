@@ -1,23 +1,6 @@
-//! 播放队列与媒体控制入口（阶段 3.0 · Android 后台播放前置）
-//!
-//! # 为什么需要这一层
-//!
-//! 桌面端「播完自动切下一首」完全由前端驱动：Rust 只发 `track-ended`，
-//! `src/stores/player.ts` 的 `_onEnded()` 负责循环/随机判定并调用 `play_track`。
-//! Android 上 App 进入后台后 WebView 的 JS 会被节流乃至冻结，`track-ended`
-//! 无人处理 —— 结果是「后台能出声，但播完一首就停」，通知栏按钮同样会失灵。
-//!
-//! 因此在 Rust 侧维护一份播放队列，曲目结束时由 Rust 自行推进；前端退化为
-//! 「跟随者」（监听 `queue-track-changed` 同步 UI）。
-//!
-//! # 设计约定
-//!
-//! - **顺序由前端算好**：随机序/循环序在前端计算完毕后整条推过来，Rust 不实现
-//!   shuffle，避免前后端两套随机算法产生分歧；
-//! - **`auto_advance` 是运行时开关**：桌面端前端不开启，Rust 侧不自动推进，
-//!   桌面行为零改变；Android 端开启后 EOF 由 Rust 接管；
-//! - **队列只存快照**：复用 [`TrackSnapshot`]（与 `last_session` 同构），
-//!   不含任何解码状态，切歌时直接取 path 走既有 `play_track_shared` 路径。
+//! 播放队列与媒体控制入口。Android 后台时 WebView 的 JS 被冻结，`track-ended` 无人处理，
+//! 故队列在 Rust 侧维护、EOF 由 Rust 推进（桌面端 `auto_advance=false`，行为零改变）；
+//! 随机序/循环序由前端算好后整条推过来，Rust 不实现 shuffle，避免两端算法分歧。
 
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,10 +12,8 @@ use crate::error::AppError;
 
 use super::LockOrErr;
 
-/// 最近一次上报的播放位置（毫秒）
-///
-/// 通知栏 / MediaSession 只在状态变化时刷新，需要知道那一刻的位置作基准，
-/// 之后由系统用 `updateTime + speed` 自行推算进度，因此这里只需一个原子量。
+/// 最近一次上报的播放位置（毫秒）。通知栏/MediaSession 只在状态变化时刷新，之后由系统用
+/// `updateTime + speed` 自行推算进度，因此这里只需一个原子量。
 static LAST_POSITION_MS: AtomicU64 = AtomicU64::new(0);
 
 /// 记录播放位置（由 `emit_playback_position` 调用）
@@ -108,9 +89,7 @@ impl PlaybackQueue {
         Self::default()
     }
 
-    /// 整条替换队列
-    ///
-    /// `index` 为当前曲目在 `tracks` 中的下标；越界或不传时按「未知」处理
+    /// 整条替换队列。`index` 为当前曲目在 `tracks` 中的下标；越界或不传时按「未知」处理
     /// （`auto_advance` 依赖它，未知则本次不推进）。
     pub fn set_queue(
         &mut self,
@@ -161,10 +140,8 @@ impl PlaybackQueue {
         self.auto_advance
     }
 
-    /// 曲目自然结束后推进
-    ///
-    /// 返回下一首应播放的 `(下标, 快照)`；返回 `None` 表示队列到底，应停止。
-    /// 单曲循环模式下返回当前曲目本身。
+    /// 曲目自然结束后推进：返回下一首的 `(下标, 快照)`，`None` 表示队列到底应停止；
+    /// 单曲循环时返回当前曲目本身。
     pub fn advance_on_end(&mut self) -> Option<(usize, TrackSnapshot)> {
         let len = self.tracks.len();
         if len == 0 {
@@ -256,14 +233,9 @@ fn stop_at_queue_end(app: &AppHandle, state: &AppState) {
     sync_media_session(app, state);
 }
 
-/// 曲目自然结束的统一入口
-///
-/// 由 `playback::emit_track_ended` 在发出 `track-ended` 之后调用：
-/// - 未开启 `auto_advance`（桌面端）：立即返回，行为与旧版完全一致；
-/// - 开启后（Android）：推进队列并直接播放下一首，同时发 `queue-track-changed`。
-///
-/// 直接在本线程推进（调用方是分析线程，非音频回调线程）：`play_track_shared`
-/// 只短暂持有 rodio 的内部锁，不会与音频回调形成锁序环。
+/// 曲目自然结束的统一入口，由 `playback::emit_track_ended` 在发出 `track-ended` 之后调用：
+/// 未开 `auto_advance`（桌面端）立即返回，开则推进队列并播下一首。
+/// 调用方是分析线程而非音频回调，直接推进不会与回调形成锁序环。
 pub fn handle_track_ended(app: &AppHandle, state: &AppState) {
     let next = {
         let Ok(mut queue) = state.player.queue.lock().lock_or_err("playback queue") else {
@@ -301,10 +273,8 @@ fn play_queue_track(
     Ok(())
 }
 
-/// 播放开始后同步队列下标与（Android）通知栏
-///
-/// 供 `play_track` 命令调用：前端任何切歌都会走这里，保证 Rust 侧队列下标
-/// 与通知栏始终跟随实际播放的曲目。
+/// 播放开始后同步队列下标与（Android）通知栏：前端任何切歌都走这里，
+/// 保证队列下标与通知栏始终跟随实际播放的曲目。
 pub fn note_playback_started(app: &AppHandle, state: &AppState, path: &str) {
     if let Ok(mut queue) = state.player.queue.lock() {
         queue.sync_index_by_path(path);
@@ -312,10 +282,8 @@ pub fn note_playback_started(app: &AppHandle, state: &AppState, path: &str) {
     sync_media_session(app, state);
 }
 
-/// 媒体控制动作（通知栏 / MediaSession / 耳机线控共用入口）
-///
-/// 与前端的播放操作走同一套播放函数，保证前后台行为一致。
-/// 仅在共享模式下调用（Android 无独占模式）。
+/// 媒体控制动作（通知栏 / MediaSession / 耳机线控共用入口），与前端操作走同一套播放函数。
+/// 注意：本入口只驱动共享模式的 rodio sink，不走独占播放器分支。
 pub fn media_control(
     app: &AppHandle,
     state: &AppState,
@@ -416,11 +384,8 @@ pub fn media_control(
     }
 }
 
-/// 把当前播放状态同步给 Android 通知栏 / MediaSession
-///
-/// 桌面端为空实现。仅在切歌、播放状态变化、seek 时调用（低频），
-/// 播放进度由 `PlaybackState.setState` 的 `updateTime + speed` 让系统自行推算，
-/// 不做逐帧回调。
+/// 把当前播放状态同步给 Android 通知栏 / MediaSession，桌面端为空实现。
+/// 仅在切歌、播放状态变化、seek 时调用（低频）；进度由系统的 `updateTime + speed` 推算。
 pub fn sync_media_session(app: &AppHandle, state: &AppState) {
     #[cfg(target_os = "android")]
     {

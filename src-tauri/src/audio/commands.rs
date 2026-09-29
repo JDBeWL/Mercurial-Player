@@ -20,20 +20,15 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, State, command};
 
-// ============================================================================
 // 共享模式淡入淡出辅助
-// ============================================================================
 
 /// 共享模式淡入淡出步数(30ms 总时长 / 3ms 每步 = 10 步)
 const FADE_STEPS: u32 = 10;
 const FADE_STEP_MS: u64 = 3;
 
-/// 启动共享模式 fade 线程(后台执行,立即返回)
-/// 递增代际计数器以取消之前未完成的 fade 线程
-/// `direction`: 正数 = 淡入(0→target), 负数 = 淡出(target→0)
-/// `on_complete`: fade 完成后执行的闭包(在 fade 线程中调用)
-/// 注:on_complete 在持锁状态下执行,且执行前会再次检查代际,
-/// 防止 fade-out 的 pause() 在 resume 的 play() 之后执行的竞态
+/// 启动共享模式 fade 线程(后台执行,立即返回)，并递增代际以取消之前未完成的 fade 线程。
+/// `direction` 正数淡入、负数淡出；`on_complete` 在持锁状态下执行且执行前再查一次代际，
+/// 防止 fade-out 的 pause() 落在 resume 的 play() 之后。
 fn spawn_shared_fade(
     sink: Arc<std::sync::Mutex<rodio::Player>>,
     target_volume: f32,
@@ -72,9 +67,7 @@ fn spawn_shared_fade(
     });
 }
 
-// ============================================================================
 // 播放控制命令
-// ============================================================================
 
 #[command]
 pub async fn play_track(
@@ -100,10 +93,7 @@ pub async fn play_track(
     Ok(())
 }
 
-/// 共享模式暂停（供 `pause_track` 命令与媒体控制入口复用）
-///
-/// 媒体控制（通知栏 / MediaSession / 耳机线控）走的是同一套淡入淡出逻辑，
-/// 抽出来避免两处行为漂移。
+/// 共享模式暂停（供 `pause_track` 命令与媒体控制入口复用，避免两处行为漂移）
 pub fn pause_playback(state: &AppState) -> Result<(), AppError> {
     // 共享模式:fade 启用时启动淡出线程,否则直接 pause
     if state.player.fade.enabled.load(Ordering::SeqCst) {
@@ -151,8 +141,7 @@ pub fn pause_track(app: AppHandle, state: State<AppState>) -> Result<(), AppErro
                 .lock()
                 .lock_or_err("WASAPI player")?;
             if let Some(ref wasapi) = *guard {
-                // 独占模式:wasapi.pause()/resume() 内部已实现淡入淡出
-                // 若 fade 禁用,则使用不带 fade 的方法立即暂停/恢复
+                // 独占播放器的 pause()/resume() 内部已实现淡入淡出；fade 禁用时用不带 fade 的方法
                 if state.player.fade.enabled.load(Ordering::SeqCst) {
                     wasapi.pause()?;
                 } else {
@@ -349,9 +338,7 @@ pub async fn seek_track(
     }
 }
 
-// ============================================================================
 // 设备管理命令
-// ============================================================================
 
 #[command]
 pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, AppError> {
@@ -359,10 +346,8 @@ pub fn get_audio_devices() -> Result<Vec<AudioDeviceInfo>, AppError> {
 }
 
 /// 切换音频设备(携带当前播放进度,便于后端无缝续播)。
-///
-/// `remember`: 是否记住该设备选择(落盘 `audio.preferredDeviceId`)。
-/// 仅设置页里的主动选择传 true;设备拔出自动回退 / 跟随系统默认切换传 false,
-/// 避免自动切换覆盖用户的固定选择。缺省(前端旧调用)按 true 处理。
+/// `remember` 控制是否把设备落盘到 `audio.preferredDeviceId`：只有设置页的主动选择传 true，
+/// 设备拔出自动回退 / 跟随系统默认传 false，避免覆盖用户的固定选择；缺省按 true。
 #[command]
 pub async fn set_audio_device(
     app: AppHandle,
@@ -504,12 +489,8 @@ async fn switch_to_wasapi_exclusive(
                 *device_name_guard = device_name.to_string();
             }
 
-            // 4. 恢复播放 (如果有正在播放的曲目)
-            // 直接调用 play_track_exclusive,不通过 play_track 派发
-            // 因为此时 exclusive_mode 标志尚未更新 (仍为旧值 false),
-            // 若用 play_track 会错误路由到 play_track_shared
-            // 若切换前为暂停状态,传 start_playback=false,仅加载并预缓冲而不启动,
-            // 保持暂停;之后点击 resume 会走 wasapi.resume() 从缓冲处继续播放
+            // 直接调 play_track_exclusive 而不走 play_track 派发：此时 exclusive_mode 仍是旧值
+            // false，用命令派发会被错误路由到共享模式。切换前若为暂停则传 start_playback=false。
             if let Some(path) = current_path {
                 play_track_exclusive(app, state, &path, current_time, is_playing).await?;
                 // play_track_exclusive 不会读 target_volume,需要手动同步音量
@@ -569,26 +550,24 @@ async fn switch_to_shared_mode(
     // 1. 先记录当前播放状态和路径 (在停止旧播放器前)
     // 用 lock() 阻塞等待:播放期间解码线程会周期性持有这些锁,try_lock 会失败
     let (is_playing, volume, current_path) = {
-        // 独占模式在播的其实是 WASAPI 播放器,旧的 cpal sink 在切换到独占时已被
-        // stop/clear,其 is_paused() 不代表当前真实播放状态。因此只要 wasapi 存在,
-        // 播放状态以 wasapi.player.state() 为准;只有纯共享模式换设备(wasapi 为
-        // None)时才回退用 cpal sink 判断。
+        // 独占模式下真正在播的是独占播放器（Windows=WASAPI，Android=AAudio），
+        // cpal sink 在切独占时已被 stop/clear，它的 is_paused() 不代表当前状态。
+        // 因此独占播放器存在时以它的 state() 为准，只有纯共享模式换设备才回退 sink。
         let wasapi_playing = {
-            // WASAPI 播放器仅 Windows 存在；非 Windows 平台 wasapi_player 恒为 None
-            #[cfg(not(windows))]
+            #[cfg(not(any(windows, target_os = "android")))]
             {
                 None
             }
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "android"))]
             {
                 let g = state
                     .player
                     .output
                     .wasapi_player
                     .lock()
-                    .lock_or_err("WASAPI player")?;
+                    .lock_or_err("exclusive player")?;
                 g.as_ref()
-                    .map(|w| w.state() == super::wasapi::PlaybackState::Playing)
+                    .map(|p| p.state() == crate::audio::PlaybackState::Playing)
             }
         };
         let (sink_playing, vol) = {
@@ -610,8 +589,7 @@ async fn switch_to_shared_mode(
         (playing, vol, current_path)
     };
 
-    // 2. 先停止并 drop WASAPI 独占模式播放器,释放设备
-    // 必须在打开新的 cpal stream 之前完成,否则设备仍被独占模式占用
+    // 先停止并 drop 独占播放器,释放设备：必须在打开新的 cpal stream 之前完成，否则设备仍被占用
     // 用 lock() 阻塞等待:解码线程会周期性持有此锁调用 push_samples 等
     {
         let mut wasapi_guard = state
@@ -628,10 +606,8 @@ async fn switch_to_shared_mode(
         let _ = wasapi_guard.take();
     }
 
-    // 3+4. 尝试打开新的 cpal/rodio stream (带重试,等待 WASAPI 独占模式释放设备)
-    // 设备枚举与流创建是阻塞系统调用,放到阻塞线程池执行避免占用 async runtime;
-    // 重试间隔使用 tokio 异步 sleep,等待期间不阻塞 worker 线程
-    // 注意:output_devices() 返回迭代器,设备只能消费一次,因此每次重试都要重新获取
+    // 打开新的 cpal/rodio stream (带重试,等待独占模式释放设备)：枚举与建流是阻塞系统调用，
+    // 放阻塞线程池执行；output_devices() 的迭代器只能消费一次，故每次重试都重新获取
     let new_mixer_sink = {
         let mut last_err: Option<AppError> = None;
         let mut sink: Option<rodio::MixerDeviceSink> = None;
@@ -720,10 +696,8 @@ async fn switch_to_shared_mode(
     }
 
     if let Some(path) = current_path {
-        // 直接调用 play_track_shared,不通过 play_track 派发
-        // 因为此时 exclusive_mode 标志尚未更新 (仍为旧值 true),
-        // 若用 play_track 会错误路由到 play_track_exclusive,
-        // 而 WASAPI 播放器已被 take() 走,导致 "WASAPI player not initialized"
+        // 直接调 play_track_shared 而不走 play_track 派发：此时 exclusive_mode 仍是旧值 true，
+        // 派发会走到已被 take() 走的独占播放器上
         play_track_shared(app, state, &path, current_time)?;
         // play_track_shared 末尾总是 play();若切换前为暂停状态需重新暂停,
         // 保持暂停,点击恢复时才从该位置继续播放(音源 fade_in 从 0 开始,不会爆音)
@@ -905,9 +879,7 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
     })
 }
 
-// ============================================================================
 // 上次播放会话恢复
-// ============================================================================
 
 /// 启动时调用,根据配置中的 last_session 校验并恢复播放
 #[command]
@@ -985,17 +957,11 @@ pub fn get_fade_enabled(state: State<AppState>) -> Result<bool, AppError> {
     Ok(state.player.fade.enabled.load(Ordering::SeqCst))
 }
 
-// ============================================================================
-// 播放队列与媒体控制（阶段 3.0 / 3.2 / 3.5）
-// ============================================================================
+// 播放队列与媒体控制
 
-/// 同步播放队列到 Rust 侧
-///
-/// 前端在播放列表 / 随机序 / 循环模式变化时调用；`tracks` 必须是**已按最终播放
-/// 顺序排列**的快照（随机序由前端算好），Rust 不实现 shuffle，避免两端算法分歧。
-///
-/// `auto_advance` 建议仅在 Android 传 true：开启后曲目自然结束由 Rust 推进；
-/// 桌面端保持 false，走原有的前端 `track-ended` 逻辑，行为零改变。
+/// 同步播放队列到 Rust 侧（前端在列表 / 随机序 / 循环模式变化时调用）。
+/// `tracks` 必须**已按最终播放顺序排列**（随机序由前端算好），Rust 不实现 shuffle。
+/// `auto_advance` 仅在 Android 传 true（曲目自然结束由 Rust 推进），桌面端保持 false。
 #[command]
 pub fn set_play_queue(
     state: State<AppState>,
@@ -1013,9 +979,7 @@ pub fn set_play_queue(
 }
 
 /// 媒体控制统一入口（通知栏 / MediaSession / 耳机线控 / 蓝牙按键）
-///
-/// `action`: `play` / `pause` / `toggle` / `stop` / `next` / `previous` / `seek`
-/// `position`: 仅 `seek` 需要（目标秒数）
+/// `action`: `play` / `pause` / `toggle` / `stop` / `next` / `previous` / `seek`，`position` 仅 seek 需要
 #[command]
 pub fn media_control(
     app: AppHandle,
@@ -1026,24 +990,17 @@ pub fn media_control(
     queue::media_control(&app, &state, &action, position)
 }
 
-/// 后台心跳探针（阶段 3 实测用）
-///
-/// 前端以固定间隔调用，`adb logcat | grep background-heartbeat` 即可观察
-/// App 进入后台后 WebView 的 JS 是否被节流/冻结，用于判定播放推进是否必须
-/// 下沉到 Rust。桌面端同样可用（无副作用）。
+/// 后台心跳探针：前端按固定间隔调用，`adb logcat | grep background-heartbeat` 可观察
+/// 进入后台后 WebView 的 JS 是否被节流/冻结。无副作用，桌面端同样可用。
 #[command]
 pub fn background_heartbeat(seq: u64) -> Result<(), AppError> {
     log::info!("background-heartbeat seq={seq}");
     Ok(())
 }
 
-// ============================================================================
 // Android：USB DAC 独占（位完美）输出
-// ============================================================================
 
-/// 当前输出路由快照（Android）
-///
-/// 设置页据此展示"当前是扬声器还是 USB DAC"、独占是否真的生效、实际输出采样率。
+/// 当前输出路由快照（Android）：设置页据此展示当前设备、独占是否真的生效、实际输出采样率
 #[cfg(target_os = "android")]
 #[command]
 pub fn get_audio_route(state: State<AppState>) -> Result<serde_json::Value, AppError> {
@@ -1066,11 +1023,8 @@ pub fn get_audio_route() -> Result<serde_json::Value, AppError> {
     ))
 }
 
-/// 开关 USB DAC 独占（位完美）输出（Android）
-///
-/// 与 Windows 的 `toggle_exclusive_mode` 同一类操作：开启时把 AAudio 独占流建起来
-/// 并把播放切过去；关闭时收掉独占流回落到共享模式。切换前后都在播同一首时，
-/// 会按 `current_time` 从原位置续播。
+/// 开关 USB DAC 独占（位完美）输出（Android），与 Windows 的 `toggle_exclusive_mode` 同类操作。
+/// 开则建 AAudio 独占流并把播放切过去，关则收流回落共享模式；同一首曲目按 `current_time` 续播。
 #[cfg(target_os = "android")]
 #[command]
 pub async fn set_usb_dac_exclusive(
@@ -1101,14 +1055,30 @@ pub async fn set_usb_dac_exclusive(
         .lock()
         .lock_or_err("current path")?
         .clone();
-    let was_playing = state
-        .player
-        .output
-        .sink
-        .lock()
-        .lock_or_err("player")
-        .map(|sink| !sink.is_paused())
-        .unwrap_or(false);
+    // 开独占前正在播的是 cpal sink；关独占前正在播的是 AAudio 流，
+    // 那时 sink 早已被 stop/clear，只读它会得到过时状态。
+    let was_playing = if enabled {
+        state
+            .player
+            .output
+            .sink
+            .lock()
+            .lock_or_err("player")
+            .map(|sink| !sink.is_paused())
+            .unwrap_or(false)
+    } else {
+        state
+            .player
+            .output
+            .wasapi_player
+            .lock()
+            .lock_or_err("exclusive player")
+            .map(|g| {
+                g.as_ref()
+                    .is_some_and(|p| p.state() == crate::audio::PlaybackState::Playing)
+            })
+            .unwrap_or(false)
+    };
 
     if enabled {
         let player = AaudioExclusivePlayer::new();

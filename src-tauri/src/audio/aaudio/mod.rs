@@ -1,13 +1,6 @@
-//! Android AAudio 独占（位完美）输出
-//!
-//! 与 Windows 的 WASAPI 独占对应的一条平台通道：USB DAC 插上时绕过系统混音与
-//! 重采样，按曲目原生采样率直出。
-//!
-//! 模块划分：
-//! - [`ffi`]：libaaudio 的 FFI 声明
-//! - [`device`]：经 Kotlin `AudioManager` 查询输出设备（USB DAC 的 id / 采样率 / 位深）
-//! - [`player`]：独占流播放器，接口与 `WasapiExclusivePlayback` 对齐
-//!   （因此命令层与解码推送线程可以完全复用 Windows 独占路径的写法）
+//! Android AAudio 独占（位完美）输出：USB DAC 插上时绕过系统混音与重采样，按原生采样率直出。
+//! [`player`] 的接口与 `WasapiExclusivePlayback` 对齐，命令层与解码推送线程因此完全复用；
+//! [`device`] 经 Kotlin `AudioManager` 查询设备信息，[`ffi`] 是 libaaudio 的 FFI 声明。
 
 pub mod device;
 pub mod ffi;
@@ -62,15 +55,9 @@ pub fn usb_dac_available() -> Result<bool, AppError> {
 }
 
 /// USB DAC 热插拔：由 Kotlin 的 `AudioDeviceCallback` 经 JNI 调用。
-///
-/// - 拔掉（或本来就查不到 USB 设备）：作废独占流、关掉独占标志，暂停播放并通知前端。
-/// - 插上：把播放器（若还没有）连同独占流一起建起来，然后打开独占标志。
-///
-/// ⚠️ 核心约束：**AAudio 的流在创建时就死绑 `setDeviceId` 给的设备 id**，设备拔掉后
-/// 这条流不会自愈，而系统在设备重新接入时分配的是**新的 id**。因此凡"流绑定的设备
-/// 已不在输出列表里"，就必须作废这条流（[`AaudioExclusivePlayer::release_stream`]）；
-/// 否则下次播放会拿旧 id 去开流，独占与共享回退两条路都会失败 ——
-/// 用户看到的就是"拔插一次 USB DAC 后再也放不出声，重启应用才好"。
+/// 拔掉 → 作废独占流、关独占标志并暂停；插上 → 建流后置标志。
+/// 核心约束：AAudio 的流死绑创建时的 device id，设备不在了就必须丢掉这条流
+/// （[`AaudioExclusivePlayer::release_stream`]），否则拿旧 id 开流时独占与共享回退都会失败。
 pub fn on_audio_route_changed(app: &tauri::AppHandle) {
     use tauri::Emitter;
     use tauri::Manager;
@@ -95,7 +82,8 @@ pub fn on_audio_route_changed(app: &tauri::AppHandle) {
         && usb;
 
     // 锁序遵循 audio/mod.rs 顶部的约定：exclusive_mode → wasapi_player。
-    // 两个临界区都很短，JNI 与建流都在持锁之外/之内最小化了范围。
+    // 注意：下面的 wasapi_player 临界区会跨 `initialize()`（内含 JNI 设备查询与 openStream），
+    // 持锁时间不短；这条路径只在设备插拔时走，不与音频回调争锁。
     let Ok(mut exclusive) = state.player.output.exclusive_mode.lock() else {
         log::warn!("on_audio_route_changed: exclusive_mode 锁中毒");
         return;
@@ -124,13 +112,8 @@ pub fn on_audio_route_changed(app: &tauri::AppHandle) {
             }
         }
 
-        // 没有流就现在建一条，覆盖两种情形：
-        //  - 应用启动时没插 DAC（那时 `create_exclusive_mode_player` 回落共享模式，
-        //    播放器字段是 None）。旧实现只把标志置成 `is_some()`，结果恒为 false，
-        //    "先开应用再插 DAC"这条路永远进不了独占；
-        //  - 流刚被上面作废（拔插过）。
-        // 现在就建（而不是等下次播放）是为了让设置页立刻显示"独占已生效"，
-        // 否则会误报成"没能开成独占流，已回落共享模式"。
+        // 没有流就现在建一条：应用启动时没插 DAC（播放器字段是 None），或流刚被上面作废。
+        // 现在就建而不是等下次播放，设置页才能立刻反映"独占已生效"。
         if player_guard
             .as_ref()
             .is_none_or(|p| p.current_device().is_none())

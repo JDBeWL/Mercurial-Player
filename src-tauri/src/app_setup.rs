@@ -245,10 +245,7 @@ pub fn create_exclusive_mode_player(device_name: &str) -> Result<AudioOutput, Ap
 }
 
 /// 创建独占模式播放器（Android：AAudio 独占 / USB DAC 位完美）
-///
-/// 与 Windows 的 WASAPI 独占是同一类诉求，但设备选择完全不同：AAudio 需要
-/// 系统设备 id（来自 `AudioDeviceInfo.getId()`），而 cpal 枚举出来的名字多半是
-/// 同一个手机型号，没法用。因此这里让 `initialize` 自己去找当前的 USB 音频设备。
+/// AAudio 要的是系统设备 id（原因见 [`crate::audio::aaudio::device`]），故让 `initialize` 自己找当前 USB 设备。
 #[cfg(target_os = "android")]
 pub fn create_exclusive_mode_player(_device_name: &str) -> Result<AudioOutput, AppError> {
     // 共享模式的 sink 照旧创建：USB 拔出后要能立刻回落到它，

@@ -9,14 +9,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 输出设备探测（USB DAC 独占 / 位完美的设备信息来源）。
- *
- * Rust 侧为什么不直接用 cpal 枚举：AAudio 的 `AAudioStreamBuilder_setDeviceId`
- * 要的是 `AudioDeviceInfo.getId()` 这种系统设备 id，而 cpal 在安卓上枚举出来的
- * 名字几乎都是同一个手机型号（扬声器/听筒/USB 全都叫一个名），既没法区分也拿不到
- * 采样率与位深。所以设备信息一律经 [getOutputDevicesJson] 从这里取。
- *
- * 字段与 Rust `src-tauri/src/audio/aaudio/device.rs` 的 `OutputDeviceInfo` 一一对应。
+ * 输出设备探测（USB DAC 独占 / 位完美的设备信息来源）：AAudio 要 `AudioDeviceInfo.getId()`，
+ * cpal 在安卓上给不了（原理见 Rust `audio/aaudio::device`），故设备信息一律经 [getOutputDevicesJson] 取。
+ * JSON 字段与 Rust 侧的 `OutputDeviceInfo` 一一对应，改一边要同步另一边。
  */
 object AudioBridge {
   private const val TAG = "AudioBridge"
@@ -67,11 +62,7 @@ object AudioBridge {
       }
   }
 
-  /**
-   * 由 Rust 调用（JNI）：返回全部输出设备的 JSON 数组。
-   *
-   * 返回空串表示"拿不到"（权限或 API 太低），Rust 侧按空列表处理。
-   */
+  /** 由 Rust 调用（JNI）：返回全部输出设备的 JSON 数组；空串表示拿不到，Rust 侧按空列表处理 */
   @JvmStatic
   fun getOutputDevicesJson(): String {
     val manager = audioManager ?: return ""

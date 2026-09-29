@@ -23,24 +23,9 @@ export interface UseDragValueResult {
   stopDrag: () => void
 }
 
-/**
- * 按 "pointerdown -> document pointermove/pointerup" 模式拖拽取值的骨架。
- * 统一了各滑块组件手写的监听器挂载/清理样板;
- * document 级监听保证指针移出滑块后拖拽不中断,并在组件卸载时自动清理。
- *
- * 之所以用 Pointer Events 而不是 mouse events：Android WebView 上手指拖动
- * **不会**产生 `mousemove`（触摸只在按下/抬起时合成少量鼠标事件），
- * 结果就是进度条、音量条、EQ 滑块在手机上"点一下能动、拖着走不动"。
- * PointerEvent 统一了鼠标/触摸/触控笔三种输入，且天然携带 `clientX/Y`
- * （签名仍按 `MouseEvent` 收，因为 PointerEvent 继承自 MouseEvent，
- * 这样 hover 路径传进来的真 MouseEvent 也能直接复用同一个测算函数）。
- *
- * 配套要求：调用方必须在滑块元素上写 `touch-action: none`，
- * 否则浏览器会把这次拖拽判成滚动手势，中途抛 pointercancel 打断拖拽。
- *
- * 注意: getPercent 收到的 document 级事件没有 currentTarget,
- * 需要通过元素 ref 或闭包定位滑块几何。
- */
+/** 拖拽取值的骨架：pointerdown 后把 pointermove/pointerup 挂到 document 上，指针移出滑块也不会中断，
+ *  组件卸载时自动清理。用 Pointer Events 而不用 mouse events，因为 Android WebView 上手指拖动不产生
+ *  mousemove。调用方必须给滑块写 touch-action: none，否则被判成滚动手势、中途抛 pointercancel 打断。 */
 export function useDragValue(options: UseDragValueOptions): UseDragValueResult {
   const isDragging = ref(false)
   const percent = ref(0)

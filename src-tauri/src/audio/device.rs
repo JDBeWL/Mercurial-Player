@@ -41,11 +41,8 @@ pub fn get_device_friendly_name(device: &cpal::Device) -> Option<String> {
 
 /// 获取所有可用的音频输出设备
 ///
-/// Android 走的是特例：cpal 的 AAudio 后端会把系统里所有 OUTPUT 条目（扬声器、听筒、
-/// 蓝牙、HDMI……）都枚举出来，而它们的 `productName` 常常都是同一个**手机型号**。
-/// 结果就是设置页出现三行一模一样的名字，既无法区分，也没法操作——更何况音频路由
-/// 本来就是系统统一管理的事（插上蓝牙/耳机自动切过去），App 里选设备既不符合平台
-/// 惯例，强行指定也往往建不出流。因此这里只上报默认设备作为占位。
+/// Android 特例：cpal 的 AAudio 后端会枚举出所有 OUTPUT 条目（扬声器、听筒、蓝牙、HDMI……），
+/// 而它们的 `productName` 常常是同一个手机型号：既无法区分，音频路由也本就由系统统一管理，故只上报默认设备。
 pub fn get_all_audio_devices() -> Result<Vec<AudioDeviceInfo>, AppError> {
     let host = cpal::default_host();
 
@@ -107,9 +104,7 @@ fn check_wasapi_exclusive_support(device_name: &str) -> bool {
     }
 }
 
-// ============================================================================
 // 跨平台音频设备标识 (Device ID)
-// ============================================================================
 // 设备友好名会随驱动更新、系统语言而变化,不适合作为持久化标识。cpal 的
 // `DeviceTrait::id()` 在各平台返回的都是原生稳定标识:
 //   - Windows (WASAPI)  : IMMDevice::GetId() 的 endpoint ID

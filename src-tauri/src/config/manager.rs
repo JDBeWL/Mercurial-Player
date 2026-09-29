@@ -45,11 +45,7 @@ pub struct AppConfig {
 pub struct UiConfig {
     #[serde(default)]
     pub mini_mode: bool,
-    /// 界面字号倍率（1.0 = 设计稿原始大小）。
-    ///
-    /// 只有 Android 生效：WebView 会把系统「字体大小」当成倍率乘到所有 CSS px 字号上，
-    /// 原生侧直接接管 WebView 的 textZoom（倍率的唯一来源）从而覆盖系统设置，
-    /// 见 [`crate::app_font_scale`]；桌面端不生效。
+    /// 界面字号倍率（1.0 = 设计稿原始大小），仅 Android 生效，机制见 [`crate::app_font_scale`]。
     /// 必须在这里留字段，否则前端保存时 serde 会静默丢掉它（下次启动回默认值）。
     #[serde(default = "default_font_scale")]
     pub font_scale: f32,
@@ -240,17 +236,12 @@ pub struct AudioConfig {
     /// 是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音)
     #[serde(default = "default_true")]
     pub fade_enabled: bool,
-    /// 用户手动选择的输出设备标识,取自 cpal `DeviceTrait::id()`,各平台为原生稳定标识:
-    /// Windows = WASAPI endpoint ID,macOS = CoreAudio DeviceUID,Linux = ALSA PCM 名。
-    /// 落盘格式为 `"host:id"`;标识机器绑定,失效时启动时静默回退到系统默认设备。
-    /// 仅在用户在设置页主动选择设备时写入,自动回退/跟随系统默认不写,避免覆盖用户选择。
+    /// 用户手动选择的输出设备标识,取自 cpal `DeviceTrait::id()`(各平台原生稳定标识),落盘为 `"host:id"`。
+    /// 标识机器绑定,失效时启动静默回退系统默认设备;只有设置页主动选择才写入,自动回退不覆盖用户选择。
     #[serde(default)]
     pub preferred_device_id: Option<String>,
-    /// Android:USB DAC 独占(位完美)输出。
-    ///
-    /// 与 Windows 的独占模式是同一类诉求——绕过系统混音/重采样,按曲目原生采样率
-    /// 直连 USB 声卡。仅当系统里确实存在 USB 音频输出设备时才可能真正生效;
-    /// 拔出后会自动回落共享模式并暂停(见 `audio::aaudio::on_audio_route_changed`)。
+    /// Android:USB DAC 独占(位完美)输出,绕过系统混音/重采样按曲目原生采样率直连 USB 声卡。
+    /// 只有系统里确实存在 USB 音频输出设备时才可能生效,拔出后自动回落共享模式并暂停。
     #[serde(default)]
     pub usb_dac_exclusive: bool,
 }

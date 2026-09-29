@@ -27,9 +27,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-// ============================================================================
 // 预计算查找表
-// ============================================================================
 
 /// 软削波查找表大小（覆盖0.0到2.0范围，精度0.001）
 /// 批量处理块大小（对齐到SIMD友好的边界）
@@ -66,20 +64,11 @@ pub(super) fn emit_playback_position(
     Ok(())
 }
 
-// ============================================================================
 // 批量处理缓冲区
-// ============================================================================
 
-/// EQ 处理器(共享模式与独占模式共用)
-///
-/// 共享模式通过 [`EqProcessor::process_batch`] 批量处理,
-/// 独占模式通过 [`EqProcessor::process_sample_cached`] 逐采样处理。
-///
-/// 性能优化要点:
-/// 1. states 采用扁平布局 `[channel * EQ_BAND_COUNT + band]`,同一 channel 的所有
-///    band 状态在内存中连续,避免双层 Vec 解引用,提升 cache 命中率
-/// 2. 三个处理阶段(preamp/biquad/soft_clip)合并为单次循环,提升 cache 局部性
-/// 3. i % channels 在 channels=2 时编译器会优化为位运算,无需手动展开
+/// EQ 处理器(共享模式与独占模式共用):共享走 [`EqProcessor::process_batch`] 批量处理,
+/// 独占走 [`EqProcessor::process_sample_cached`] 逐采样。
+/// states 用扁平布局 `[channel * EQ_BAND_COUNT + band]` 且三阶段合并为单次循环,均为 cache 局部性。
 pub struct EqProcessor {
     coefficients: Vec<crate::equalizer::BiquadCoefficients>,
     /// 扁平布局: states[channel * EQ_BAND_COUNT + band]
@@ -154,7 +143,7 @@ impl EqProcessor {
     }
 
     /// 逐采样处理(独占模式解码线程使用)
-    // 独占模式仅存在于 Windows(WASAPI),Linux 编译时这两个方法无调用方
+    // 独占模式只有 Windows(WASAPI) 与 Android(AAudio)，其它平台编译时这两个方法无调用方
     /// 处理单个采样(preamp + biquad + soft_clip),公开供独占模式与 benchmark 复用。
     /// 调用方需保证按交错声道依次调用(channel = 采样在帧内声道下标)。
     #[inline(always)]
@@ -181,10 +170,8 @@ impl EqProcessor {
 }
 
 /// 共享模式音源:EQ 批量处理 + 把采样交给频谱分析线程
-///
 /// `next` 跑在 rodio 音频回调线程上:只做无锁写入与置标志,
-/// FFT 与 spectrum-update / playback-position / track-ended 的发送见
-/// [`spawn_spectrum_thread`]。
+/// FFT 与 spectrum-update / playback-position / track-ended 的发送见 [`spawn_spectrum_thread`]。
 pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     input: I,
     eq_settings: Arc<RwLock<EqSettings>>,
@@ -495,11 +482,9 @@ pub fn play_track_shared(
         }
     };
 
-    // 获取 mixer 输出配置，手动重采样到 mixer 的采样率
-    // rodio 0.22 的 UniformSourceIterator 在 queue keep_alive 模式下，
-    // 当 source.current_span_len() 返回 None 时不会重新 bootstrap SampleRateConverter，
-    // 导致高采样率音频以错误的速率播放（降速）。
-    // 解决方案：在 append 之前手动将 source 重采样到 mixer 的采样率。
+    // 手动重采样到 mixer 的采样率：rodio 0.22 的 UniformSourceIterator 在 queue keep_alive 模式下，
+    // source.current_span_len() 返回 None 时不会重新 bootstrap SampleRateConverter，高采样率音轨
+    // 会被以错误的速率播放（降速）；因此在 append 之前先手动重采样。
     let resampled: Box<dyn Source<Item = f32> + Send> = {
         let stream_guard = lock_or_log!(player.output.output_stream.lock());
         if let Some(ref mixer_sink) = *stream_guard {
@@ -527,18 +512,10 @@ pub fn play_track_shared(
     Ok(())
 }
 
-/// 播放音轨（独占模式）
+/// 播放音轨（独占模式），Windows（WASAPI）与 Android（AAudio）共用，差异只在 ensure_format。
 ///
-/// 异步实现：等待淡出/解码线程启动/缓冲区填充的 sleep 改用 `tokio::time::sleep`,
-/// 避免阻塞 Tauri 命令线程导致前端 UI 卡顿（原本最坏阻塞 ~600ms）。
-/// 解码推送线程内部仍有自己的 sleep，那是后台线程内的等待，不在此处理。
-///
-/// `start_playback`：是否在预填充后立即启动音频流。为 `false` 时仅加载并
-/// 预缓冲解码数据而不 start（解码线程持续填充），用于热切换时保持暂停状态；
-/// 之后用户点击 resume 会走独占播放器的 `resume()` 从缓冲处开始播放。
-///
-/// Windows（WASAPI 独占）与 Android（AAudio 独占）共用这一份实现：
-/// 两者的方法签名一致，差异只在下面 `ensure_format` 那一步。
+/// 异步：淡出/解码线程启动/缓冲填充的等待用 `tokio::time::sleep`，否则阻塞 Tauri 命令线程（最坏 ~600ms）。
+/// `start_playback=false` 时只加载并预缓冲、不 start 流，用于热切换后保持暂停，resume 时从缓冲继续。
 #[cfg(any(windows, target_os = "android"))]
 pub async fn play_track_exclusive(
     app: &AppHandle,

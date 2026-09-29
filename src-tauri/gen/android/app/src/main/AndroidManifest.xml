@@ -17,8 +17,9 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.mercurial_player"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
+        <!-- fontScale|density 必须列出：否则改系统字号会重建 Activity，onConfigurationChanged 不触发 -->
         <activity
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|fontScale|density|layoutDirection"
             android:launchMode="singleTask"
             android:label="@string/main_activity_title"
             android:name=".MainActivity"

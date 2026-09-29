@@ -80,11 +80,9 @@
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.display') }}</h4>
 
-      <!-- 界面字号：只有 Android 真正生效。系统「字体大小」会被 WebView 当成倍率乘到
-           所有 CSS px 字号上，而本应用是固定像素布局 —— 放大后容器盒子不跟着长，
-           g / y 这类带下伸部的字母会被裁掉。原生侧（FontScaleBridge）接管了 WebView 的
-           textZoom，系统设置被整体覆盖，这里成为字号的唯一来源。
-           桌面端仍显示该项，但后端是 no-op。 -->
+      <!-- 界面字号：只有 Android 真正生效。系统「字体大小」会被 WebView 乘到所有 CSS px 字号
+           上，而本应用是固定像素布局、容器盒子不跟着长，故由原生侧接管 textZoom 整体覆盖，这里
+           成为字号的唯一来源。桌面端仍显示该项，但后端是 no-op。 -->
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.interfaceFontSize') }}</span>
@@ -99,7 +97,7 @@
             step="0.05"
             class="cache-slider"
             :style="uiFontScaleSliderStyle"
-            @input="handleUIFontScaleChange"
+            @change="handleUIFontScaleChange"
           />
           <span class="cache-size-value ui-font-size-value">{{ uiFontScaleText }}</span>
         </div>
@@ -360,7 +358,7 @@ const uiFontScaleSliderStyle = computed(() => {
 /** 100% = 设计稿原始大小 */
 const uiFontScaleText = computed(() => `${Math.round(uiFontScale.value * 100)}%`)
 
-/** 只在下发时调用（见 applyAppFontScale 的注释：拖动中每帧下发会卡） */
+/** 把当前倍率下发给原生侧 */
 const handleUIFontScaleChange = (): void => {
   void applyAppFontScale(uiFontScale.value)
 }
@@ -781,12 +779,9 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-/* ===== 窄屏（手机竖屏）=====
-   这一行右侧是「一长串路径 + 两个图标按钮」，横排时它的 max-content 宽度必须靠
-   挤压左侧文字来腾地方。真机实测（Redmi Note 11T Pro，411px 宽）：
-   .setting-info 被压到 **0px**、标签只剩 18.6px（"缓存存储路径"竖着排成一条），
-   而 .cache-path-control 仍有 418px —— 比整行 371px 还宽，直接顶出屏幕。
-   改成上下排：文字占满整行，路径单独一行并允许换行，按钮落到下一行右对齐。 */
+/* 窄屏（手机竖屏）：这一行右侧是"一长串路径 + 两个图标按钮"，横排时它的 max-content 宽度只
+   能靠挤压左侧文字腾地方，.setting-info 会被压到 0px 而控件顶出屏幕。改成上下排：文字占满整
+   行，路径单独一行并允许换行，按钮落到下一行右对齐。 */
 @media (orientation: portrait) {
   .setting-item-wide {
     flex-direction: column;

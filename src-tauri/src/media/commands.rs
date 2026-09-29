@@ -86,7 +86,10 @@ pub async fn get_tracks_metadata_batch(paths: Vec<String>) -> Vec<TrackMetadata>
             .collect()
     })
     .await
-    .unwrap_or_default()
+    .unwrap_or_else(|e| {
+        log::error!("批量元数据提取任务失败（返回空列表）: {e}");
+        Vec::new()
+    })
 }
 
 /// 按需提取并返回音轨封面缓存路径

@@ -1,8 +1,6 @@
 //! Android 输出设备能力查询
-//!
-//! AAudio 的 `AAudioStreamBuilder_setDeviceId` 需要的是 `AudioDeviceInfo.getId()`
-//! 这个系统设备 id，而 cpal 侧枚举出来的名字（多半还是同一个手机型号）既不可靠
-//! 也拿不到采样率/位深，所以设备信息一律经由 Kotlin 的 `AudioManager` 取。
+//! `AAudioStreamBuilder_setDeviceId` 要的是 `AudioDeviceInfo.getId()` 这个系统设备 id，
+//! cpal 枚举出的名字（多半是同一个手机型号）拿不到它，也拿不到采样率/位深，故一律经 Kotlin 取。
 
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
@@ -48,10 +46,8 @@ pub fn find_usb_output_device() -> Result<Option<OutputDeviceInfo>, AppError> {
     Ok(query_output_devices()?.into_iter().find(|d| d.is_usb))
 }
 
-/// 在设备支持的采样率里挑一个最接近 `preferred` 的。
-///
-/// 位完美的关键就是"别让系统重采样"——曲目原生采样率能被设备接受时直接用它；
-/// 设备没上报采样率列表（UNSPECIFIED）时按 0 处理，调用方走设备默认值。
+/// 在设备支持的采样率里挑一个最接近 `preferred` 的：位完美的关键就是别让系统重采样。
+/// 设备没上报采样率列表（UNSPECIFIED）时返回 None，调用方走设备默认值。
 pub fn pick_sample_rate(device: &OutputDeviceInfo, preferred: u32) -> Option<u32> {
     if device.sample_rates.is_empty() {
         return None;

@@ -1,9 +1,5 @@
-/**
- * 配置默认值与旧版本配置迁移
- *
- * 从 config store 抽离的纯逻辑:store 只保留状态与读写流程,
- * 默认值兜底、字段迁移在此集中维护。
- */
+/** 配置默认值与旧版本配置迁移。从 config store 抽离的纯逻辑：store 只保留状态与读写流程，
+ *  默认值兜底、字段迁移在此集中维护。 */
 import type { AppConfig, LyricsConfig } from '@/types'
 
 /** 歌词配置默认值(desktopLyrics 含全部字段) */
@@ -54,10 +50,8 @@ export function ensureLyricsConfigDefaults(lyrics: LyricsConfig): LyricsConfig {
   return lyrics
 }
 
-/**
- * 把旧版本存放在 general 分区下的歌词字段迁移到 lyrics 分区。
- * 返回是否发生了迁移(调用方据此标记配置为脏)。
- */
+/** 把旧版本存放在 general 分区下的歌词字段迁移到 lyrics 分区，返回是否发生了迁移
+ *  （调用方据此标记配置为脏）。 */
 export function migrateLyricsFieldsFromGeneral(configData: Partial<AppConfig>): boolean {
   if (!configData.general) return false
 

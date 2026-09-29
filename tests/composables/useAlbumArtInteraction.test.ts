@@ -147,9 +147,7 @@ describe('useAlbumArtInteraction - extractCover', () => {
 
     await useAlbumArtInteraction(track).extractCover()
 
-    expect(save).toHaveBeenCalledWith(
-      expect.objectContaining({ defaultPath: 'a_cover.jpg' }),
-    )
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ defaultPath: 'a_cover.jpg' }))
   })
 
   it('handles unix-style paths', async () => {
@@ -228,6 +226,7 @@ describe('useAlbumArtInteraction - extractCover', () => {
 
 describe('useAlbumArtInteraction - 长按手势（手机端）', () => {
   const enabled = () => ref(true)
+  const pointerAt = (x = 0, y = 0) => ({ clientX: x, clientY: y }) as PointerEvent
 
   it('opens the menu after a long press', async () => {
     vi.useFakeTimers()
@@ -236,7 +235,7 @@ describe('useAlbumArtInteraction - 长按手势（手机端）', () => {
       longPressEnabled: enabled(),
     })
 
-    handleCoverPointerDown()
+    handleCoverPointerDown(pointerAt())
     expect(showCoverMenu.value).toBe(false)
 
     vi.advanceTimersByTime(450)
@@ -251,12 +250,40 @@ describe('useAlbumArtInteraction - 长按手势（手机端）', () => {
       { longPressEnabled: enabled() },
     )
 
-    handleCoverPointerDown()
+    handleCoverPointerDown(pointerAt())
     vi.advanceTimersByTime(200) // 还没到 450ms
     handleCoverPointerUp()
     vi.advanceTimersByTime(1000)
 
     expect(showCoverMenu.value).toBe(false)
+  })
+
+  it('does not open the menu when the finger slides past the tolerance', async () => {
+    vi.useFakeTimers()
+    const track = ref<Track | null>({ path: '/a.mp3', coverPath: '/c.jpg' } as Track)
+    const { showCoverMenu, handleCoverPointerDown, handleCoverPointerMove } =
+      useAlbumArtInteraction(track, { longPressEnabled: enabled() })
+
+    handleCoverPointerDown(pointerAt(100, 100))
+    vi.advanceTimersByTime(200)
+    // 在封面上滑动（翻歌/拖拽）不该被当成长按
+    handleCoverPointerMove(pointerAt(130, 100))
+    vi.advanceTimersByTime(1000)
+
+    expect(showCoverMenu.value).toBe(false)
+  })
+
+  it('still opens the menu for a slide within the tolerance', async () => {
+    vi.useFakeTimers()
+    const track = ref<Track | null>({ path: '/a.mp3', coverPath: '/c.jpg' } as Track)
+    const { showCoverMenu, handleCoverPointerDown, handleCoverPointerMove } =
+      useAlbumArtInteraction(track, { longPressEnabled: enabled() })
+
+    handleCoverPointerDown(pointerAt(100, 100))
+    handleCoverPointerMove(pointerAt(103, 102))
+    vi.advanceTimersByTime(450)
+
+    expect(showCoverMenu.value).toBe(true)
   })
 
   it('does nothing when long press is disabled (桌面端)', async () => {
@@ -266,7 +293,7 @@ describe('useAlbumArtInteraction - 长按手势（手机端）', () => {
       longPressEnabled: ref(false),
     })
 
-    handleCoverPointerDown()
+    handleCoverPointerDown(pointerAt())
     vi.advanceTimersByTime(1000)
 
     expect(showCoverMenu.value).toBe(false)
@@ -279,7 +306,7 @@ describe('useAlbumArtInteraction - 长按手势（手机端）', () => {
       longPressEnabled: enabled(),
     })
 
-    handleCoverPointerDown()
+    handleCoverPointerDown(pointerAt())
     vi.advanceTimersByTime(1000)
 
     expect(showCoverMenu.value).toBe(false)
@@ -292,7 +319,7 @@ describe('useAlbumArtInteraction - 长按手势（手机端）', () => {
       longPressEnabled: enabled(),
     })
 
-    handleCoverPointerDown()
+    handleCoverPointerDown(pointerAt())
     vi.advanceTimersByTime(450)
 
     // 手指抬起后浏览器补的那次 click 必须被吞掉，否则菜单一出现就被切成歌词
@@ -312,11 +339,14 @@ describe('useAlbumArtInteraction - 长按手势（手机端）', () => {
   it('closes the menu on request', async () => {
     vi.useFakeTimers()
     const track = ref<Track | null>({ path: '/a.mp3', coverPath: '/c.jpg' } as Track)
-    const { showCoverMenu, handleCoverPointerDown, closeCoverMenu } = useAlbumArtInteraction(track, {
-      longPressEnabled: enabled(),
-    })
+    const { showCoverMenu, handleCoverPointerDown, closeCoverMenu } = useAlbumArtInteraction(
+      track,
+      {
+        longPressEnabled: enabled(),
+      },
+    )
 
-    handleCoverPointerDown()
+    handleCoverPointerDown(pointerAt())
     vi.advanceTimersByTime(450)
     expect(showCoverMenu.value).toBe(true)
 

@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 /// 单生产者单消费者无锁环形缓冲(容量向上取整到 2 的幂)。
-/// `written` 只由生产者写、`consumed` 只由消费者写,无需额外同步。
+/// `written` 只由生产者写;`consumed` 允许双方前进但永不后退(见 `fetch_max` 注释)。
 pub struct SampleRing {
     /// 采样以 f32 位模式存放,避免为 f32 引入额外的同步包装
     slots: Box<[AtomicU32]>,
@@ -80,9 +80,10 @@ impl SampleRing {
 
     /// 丢弃尚未被取走的全部采样(切歌 / seek 用)
     pub fn clear(&self) {
-        // 直接把消费指针追平到写指针,等价于"全部已读"
+        // fetch_max 而非 store:与并发 drain 交错时不会把 consumed 退回旧值,
+        // 否则清空后会重播一遍切歌前的样本
         let w = self.written.load(Ordering::Acquire);
-        self.consumed.store(w, Ordering::Release);
+        self.consumed.fetch_max(w, Ordering::Release);
     }
 
     /// 尚未被取走的采样数
@@ -117,7 +118,8 @@ impl SampleRing {
             let slot = c.wrapping_add(i) & self.mask;
             *dst = f32::from_bits(self.slots[slot].load(Ordering::Relaxed));
         }
-        self.consumed.store(c.wrapping_add(n), Ordering::Release);
+        self.consumed
+            .fetch_max(c.wrapping_add(n), Ordering::Release);
         n
     }
 }

@@ -262,10 +262,9 @@ const stopWatchPlaylist = watch(
   { immediate: true },
 )
 
-// ===== 封面增量更新 =====
-// store 的 _loadPlaylistCovers 每处理完一批递增 playlistCoverVersion，
-// 这里取走更新并就地修改 processedTrack（配合 triggerRef 与 v-memo，
-// 只重渲染封面真正变化的项目），复杂度 O(变更数) 而非 O(N²)
+// 封面增量更新：store 的 _loadPlaylistCovers 每处理完一批递增 playlistCoverVersion，这里取走更新并就地
+// 修改 processedTrack（配合 triggerRef 与 v-memo，只重渲染封面真正变化的那几项），
+// 代价只随变化数增长，不会每批都全量重排整个列表。
 watch(
   () => playerStore.playlistCoverVersion,
   () => {
@@ -590,7 +589,7 @@ const handleListClick = (event: MouseEvent): void => {
    手机上看起来像"没铺满的浮层"，而整屏列表才是手机上的正常形态。
    与上面的 480px 规则分开写：那是按宽度收窄，这里是按方向。 */
 @media (orientation: portrait) {
-  .playlist-view {
+  .playlist-view[data-mobile='true'] {
     width: 100vw;
     max-width: 100vw;
   }

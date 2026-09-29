@@ -161,11 +161,9 @@ export interface UIConfig {
   showSettings: boolean
   showConfigPanel: boolean
   miniMode: boolean
-  /* 界面字号倍率，1 = 设计稿原始大小。
-     只有 Android 生效：WebView 会把系统「字体大小」当成字号倍率乘到所有 CSS px 字号上
-     （固定像素布局的界面会被撑变形，带下伸部的字母还会被裁掉）。原生侧直接接管
-     WebView 的 textZoom（它才是倍率的唯一来源），系统设置因此被整体覆盖，
-     应用内的这一项成为唯一来源。桌面端读取该字段但不生效。 */
+  /* 界面字号倍率，1 = 设计稿原始大小，桌面端读取但不生效。只有 Android 生效：WebView 会把系统
+     「字体大小」乘到所有 CSS px 字号上，固定像素布局会被撑变形。原生侧直接接管 WebView 的
+     textZoom（它才是倍率的唯一来源），系统设置因此被整体覆盖，应用内这一项是唯一来源。 */
   fontScale?: number
 }
 
@@ -187,10 +185,7 @@ export interface VisualizerConfig {
   detectedRefreshRate?: number
 }
 
-/**
- * 上次播放会话信息 (用于启动恢复)
- * 文件大小+修改时间用于启动时检测文件是否被替换
- */
+/** 上次播放会话信息 (用于启动恢复)。文件大小+修改时间用于启动时检测文件是否被替换 */
 interface LastSession {
   trackPath: string
   trackTitle: string
@@ -206,10 +201,7 @@ interface LastSession {
   playlistTracks?: TrackSnapshot[]
 }
 
-/**
- * 曲目元数据快照 (用于 last_session 持久化播放队列)
- * 不含 coverPath (按需加载)
- */
+/** 曲目元数据快照 (用于 last_session 持久化播放队列)，不含 coverPath (按需加载) */
 export interface TrackSnapshot {
   path: string
   title?: string | null
@@ -223,12 +215,9 @@ export interface TrackSnapshot {
   format?: string | null
 }
 
-/**
- * 启动恢复结果
- * - resumed=true 时其他字段填充曲目信息
- * - status 用于前端日志/调试,可能值: no_session / expired / not_found /
- *   metadata_unreadable / resumed / resumed_replaced / playback_failed: <err>
- */
+/** 启动恢复结果。resumed=true 时其他字段填充曲目信息；status 用于前端日志/调试，
+ *  可能值: no_session / expired / not_found / metadata_unreadable / resumed /
+ *  resumed_replaced / playback_failed: <err> */
 export interface ResumeResult {
   resumed: boolean
   trackPath?: string | null

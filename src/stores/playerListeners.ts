@@ -3,6 +3,7 @@ import { register, unregisterAll, isRegistered } from '@tauri-apps/plugin-global
 import logger from '@/utils/logger'
 import i18n from '@/i18n'
 import errorHandler, { ErrorType, ErrorSeverity } from '@/utils/errorHandler'
+import { isAndroid } from './playerQueue'
 import type { usePlayerStore } from './player'
 
 /**
@@ -80,6 +81,9 @@ export async function setupTaskbarListeners(store: PlayerStore): Promise<Taskbar
  * 注册全局媒体键快捷方式 (MediaPlayPause / MediaTrackNext / MediaTrackPrevious)
  */
 export async function setupGlobalShortcuts(store: PlayerStore): Promise<void> {
+  // 移动端没有 global-shortcut 插件：媒体键由 MediaSession / PlaybackService 经 JNI 下发
+  if (await isAndroid()) return
+
   const shortcuts = [
     { key: 'MediaPlayPause', handler: () => store.togglePlay() },
     { key: 'MediaTrackNext', handler: () => store.nextTrack() },

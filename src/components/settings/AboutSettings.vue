@@ -8,22 +8,22 @@
       <div class="app-header">
         <div class="app-name">Mercurial Player</div>
         <div class="app-version">v{{ appVersion }}</div>
-      <!-- .app-actions 原来是一段内联 style（margin-left:auto + 右对齐）。
+        <!-- .app-actions 原来是一段内联 style（margin-left:auto + 右对齐）。
            内联样式没法被媒体查询覆盖，窄屏下这颗「检查更新」按钮会整块顶出右边界，
            所以挪成类名，竖屏规则见文件末尾。 -->
-      <div class="app-actions">
-        <div>
-          <button class="filled-button" :disabled="isChecking" @click="checkForUpdates">
-            <span v-if="!isChecking" class="material-symbols-rounded">download</span>
-            <span v-else class="material-symbols-rounded spin">hourglass_empty</span>
-            {{ isChecking ? t('config.checkingUpdates') : t('config.checkUpdates') }}
-          </button>
-        </div>
+        <div class="app-actions">
+          <div>
+            <button class="filled-button" :disabled="isChecking" @click="checkForUpdates">
+              <span v-if="!isChecking" class="material-symbols-rounded">download</span>
+              <span v-else class="material-symbols-rounded spin">hourglass_empty</span>
+              {{ isChecking ? t('config.checkingUpdates') : t('config.checkUpdates') }}
+            </button>
+          </div>
 
-        <div v-if="error" class="text-caption app-actions-error">
-          {{ error }}
+          <div v-if="error" class="text-caption app-actions-error">
+            {{ error }}
+          </div>
         </div>
-      </div>
       </div>
     </div>
 

@@ -13,14 +13,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * SAF（Storage Access Framework）桥。
- *
- * Rust 侧 cpal/lofty/symphonia 需要真实的本地 fd 才能读取媒体文件，
- * Android 分区存储下绝对路径不可用，因此通过本桥：
- *  1. 调起系统目录选择器（ACTION_OPEN_DOCUMENT_TREE）并持久化 URI 权限；
- *  2. 递归枚举已授权树下的音频文件（返回 uri+名字+所在目录名）；
- *  3. 按 content:// URI 打开文件描述符（detachFd 后所有权移交 Rust，由 Rust 的
- *     File::from_raw_fd 包装，fd 生命周期由 Rust 侧 File 管理）。
+ * SAF（Storage Access Framework）桥：调起目录选择器并持久化 URI 权限、枚举树下的音频文件、
+ * 按 content:// URI 打开 fd。fd 经 detachFd 把所有权移交 Rust，由其 File::from_raw_fd 负责关闭。
  */
 object SafBridge {
     private const val PREFS_NAME = "saf_access"
@@ -114,18 +108,9 @@ object SafBridge {
     private val AUDIO_EXTS = setOf("mp3", "flac", "wav", "ogg", "m4a", "aac")
 
     /**
-     * 递归枚举已授权树下的音频文件。
-     *
-     * 实现要点：
-     * - 走 `DocumentsContract.buildChildDocumentsUriUsingTree` + `ContentResolver.query`，
-     *   一个目录一次查询即可拿到全部子项；原先的 `DocumentFile.listFiles()` 会对每个
-     *   子项的 `exists()/isDirectory/name/parentFile` 各自再发一次查询，深层目录极慢；
-     * - `folder` 取**相对树根**的父目录显示名（原实现取 `parentFile.name`，对树根下的
-     *   文件会返回 document id 本身，如 `primary%3AMusic`）；
-     * - 个别 provider 不支持 child documents 查询时回退到 DocumentFile 递归。
-     *
-     * @return JSON 数组，元素形如
-     *   {"uri": "content://...", "name": "a.mp3", "folder": "Album", "folderPath": "Album/Sub"}
+     * 递归枚举已授权树下的音频文件，返回 JSON 数组，元素形如
+     * `{"uri": "content://...", "name": "a.mp3", "folder": "Album", "folderPath": "Album/Sub"}`。
+     * 走 `buildChildDocumentsUriUsingTree` + `query`：`DocumentFile.listFiles()` 会对每个子项再发数次查询，深层目录极慢。
      */
     @JvmStatic
     fun listAudioFiles(treeUri: String): String {
@@ -287,13 +272,8 @@ object SafBridge {
     }
 
     /**
-     * 打开 content:// URI 用于**写入**并返回 detached fd（-1 表示失败）。
-     *
-     * 模式用 `"wt"`（写 + 截断）而不是 `"w"`：系统保存对话框允许用户挑一个已存在的
-     * 文件，`"w"` 不截断，新封面比旧文件短时会留下旧文件的尾巴。
-     *
-     * 由「提取封面」调用 —— 桌面端写的是保存对话框给的本地路径，安卓端拿到的是
-     * content URI，必须走 ContentResolver 拿 fd，直接按路径 fs::write 会失败。
+     * 打开 content:// URI 用于**写入**并返回 detached fd（-1 表示失败），所有权移交 Rust。
+     * 模式用 `"wt"`（写 + 截断）而不是 `"w"`：保存对话框允许挑已存在的文件，`"w"` 不截断会留下旧文件尾巴。
      */
     @JvmStatic
     fun openOutputFd(uri: String): Int {
@@ -310,11 +290,9 @@ object SafBridge {
     }
 
     /**
-     * 查询 content URI 的显示名（拿不到时返回空串）。
-     *
-     * 保存对话框返回的是 document URI，**URI 本身看不出文件名**
-     * （下载提供者给的是 `.../document/msf%3A1000000021` 这种），所以只能回查。
-     * Rust 侧用它守住"只往图片文件写封面"这条校验 —— 顺着路径分支的扩展名白名单而来。
+     * 查询 content URI 的显示名（拿不到时返回空串）：URI 本身看不出文件名
+     * （下载提供者给的是 `.../document/msf%3A1000000021` 这种），只能回查 provider。
+     * Rust 侧用它守住「封面只能写进图片文件」这条扩展名校验。
      */
     @JvmStatic
     fun getDisplayName(uri: String): String {
