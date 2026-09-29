@@ -2,13 +2,39 @@
   <div class="audio-device-settings">
     <div class="content-header">
       <h3>{{ $t('config.audioDeviceSettings') }}</h3>
-      <button class="filled-tonal-button" @click="refreshDevices">
+      <!-- Android 上没有可切换的输出设备，刷新按钮只会刷出一个「系统默认」，意义不大 -->
+      <button v-if="!isAndroidPlatform" class="filled-tonal-button" @click="refreshDevices">
         <span class="material-symbols-rounded">refresh</span>
         {{ $t('config.refreshDevices') }}
       </button>
     </div>
 
-    <div v-if="audioDevices.length > 0" class="device-list">
+    <!-- Android：输出路由由系统统一管理（扬声器/蓝牙/有线耳机自动切换），
+         列表里只会枚举出若干个同名的手机型号，选了也没效果，直接不展示 -->
+    <div v-if="isAndroidPlatform" class="capability-notice platform-notice">
+      <span class="material-symbols-rounded">speaker_phone</span>
+      <p>{{ $t('config.audioDeviceManagedBySystem') }}</p>
+    </div>
+
+    <!-- Android：输出路由 + USB DAC 独占（对应 Windows 的 WASAPI 独占） -->
+    <div v-if="isAndroidPlatform" class="route-panel">
+      <div class="route-row">
+        <span class="route-label">{{ $t('config.currentOutputRoute') }}</span>
+        <span class="route-value">
+          <span class="material-symbols-rounded route-icon">{{ routeIcon }}</span>
+          {{ routeLabel }}
+        </span>
+      </div>
+      <div class="route-row">
+        <span class="route-label">{{ $t('config.outputSampleRate') }}</span>
+        <span class="route-value">
+          {{ audioRoute?.sampleRate ? `${audioRoute.sampleRate} Hz` : '—' }}
+          <template v-if="audioRoute?.channels"> · {{ audioRoute.channels }}ch </template>
+        </span>
+      </div>
+    </div>
+
+    <div v-else-if="audioDevices.length > 0" class="device-list">
       <div
         v-for="device in audioDevices"
         :key="device.name"
@@ -66,10 +92,64 @@
         </div>
       </div>
 
-      <!-- 平台不支持独占模式提示 -->
-      <div v-if="!isWindowsPlatform" class="capability-notice platform-notice">
+      <!-- Android：USB DAC 独占（位完美）。与 Windows 的 WASAPI 独占是同一类
+           诉求，区别在于安卓上设备由系统路由，只在检测到 USB 音频设备时才有意义 -->
+      <div
+        v-if="isAndroidPlatform"
+        class="option-item"
+        :class="{ disabled: !audioRoute?.usbConnected }"
+        @click="toggleUsbDacExclusive"
+      >
+        <div class="option-label">
+          <span class="material-symbols-rounded">usb</span>
+          <div class="option-text">
+            <h4>{{ $t('config.usbDacExclusive') }}</h4>
+            <p>{{ $t('config.usbDacExclusiveDesc') }}</p>
+            <div v-if="usbDacExclusiveEnabled" class="device-status">
+              <span class="status-label">{{ $t('config.currentAudioMode') }}:</span>
+              <span
+                class="status-value"
+                :class="audioRoute?.exclusiveActive ? 'status-exclusive' : 'status-standard'"
+              >
+                {{
+                  audioRoute?.exclusiveActive
+                    ? $t('config.usbDacActive')
+                    : $t('config.exclusiveModeStatus.standard')
+                }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="option-control">
+          <SettingSwitch
+            :model-value="usbDacExclusiveEnabled"
+            :disabled="!audioRoute?.usbConnected"
+          />
+        </div>
+      </div>
+
+      <!-- 平台不支持独占模式提示（Android 有自己的 USB DAC 通道，不算不支持） -->
+      <div
+        v-if="!isWindowsPlatform && !isAndroidPlatform"
+        class="capability-notice platform-notice"
+      >
         <span class="material-symbols-rounded">desktop_windows</span>
         <p>{{ $t('config.exclusiveModePlatformNotSupported') }}</p>
+      </div>
+
+      <!-- Android：未插 DAC / 独占没能开成 -->
+      <div v-if="isAndroidPlatform && !audioRoute?.usbConnected" class="capability-notice">
+        <span class="material-symbols-rounded">usb_off</span>
+        <p>{{ $t('config.usbDacNotConnected') }}</p>
+      </div>
+      <div
+        v-else-if="
+          isAndroidPlatform && usbDacExclusiveEnabled && audioRoute && !audioRoute.exclusiveActive
+        "
+        class="capability-notice"
+      >
+        <span class="material-symbols-rounded">info</span>
+        <p>{{ $t('config.usbDacFallback') }}</p>
       </div>
 
       <!-- 设备能力提示 -->
@@ -134,7 +214,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import {
   getAudioDevices,
   getCurrentAudioDevice,
@@ -143,9 +224,13 @@ import {
   setAudioDevice,
   setFadeEnabled,
   toggleExclusiveMode as toggleExclusiveModeCommand,
+  getAudioRoute,
+  setUsbDacExclusive,
   type AudioDevice,
+  type AudioRouteInfo,
 } from '../../services/audioService'
 import { getPlatform } from '../../services/appService'
+import { useI18n } from 'vue-i18n'
 import { usePlayerStore } from '../../stores/player'
 import { useConfigStore } from '../../stores/config'
 import logger from '../../utils/logger'
@@ -154,6 +239,7 @@ import SettingSwitch from './SettingSwitch.vue'
 
 const playerStore = usePlayerStore()
 const configStore = useConfigStore()
+const { t } = useI18n()
 
 // 状态管理
 const audioDevices = ref<AudioDevice[]>([])
@@ -165,10 +251,80 @@ const useExclusiveMode = ref(false)
 const fadeEnabled = ref(true)
 const currentPlatform = ref<string>('unknown')
 
+/** Android 输出路由快照；非安卓平台保持 null（后端在非安卓上返回错误） */
+const audioRoute = ref<AudioRouteInfo | null>(null)
+const usbDacExclusiveEnabled = ref(false)
+
 // 平台检测
 const isWindowsPlatform = computed(() => {
   return currentPlatform.value === 'windows'
 })
+
+// Android 上输出设备由系统接管（见模板说明），不提供设备列表
+const isAndroidPlatform = computed(() => {
+  return currentPlatform.value === 'android'
+})
+
+/** 把设备类型名映射成一句人话（未接 USB 时按主要类型猜一个） */
+const routeLabel = computed(() => {
+  const route = audioRoute.value
+  if (!route) return '—'
+  if (route.usbConnected && route.usbDeviceName) return route.usbDeviceName
+  const usb = route.devices?.find((d) => d.isUsb)
+  if (usb) return usb.name
+  const type = route.devices?.find((d) => !d.isUsb)?.typeName ?? ''
+  if (type.includes('BLUETOOTH')) return t('config.bluetoothAudio')
+  if (type.includes('WIRED')) return t('config.wiredHeadphones')
+  if (type.includes('SPEAKER') || type.includes('EARPIECE')) {
+    return t('config.builtinSpeaker')
+  }
+  return t('config.unknownOutput')
+})
+
+const routeIcon = computed(() => {
+  const route = audioRoute.value
+  if (!route) return 'speaker'
+  const type =
+    route.devices?.find((d) => d.isUsb)?.typeName ??
+    route.devices?.find((d) => !d.isUsb)?.typeName ??
+    ''
+  if (type.includes('USB')) return 'usb'
+  if (type.includes('BLUETOOTH')) return 'bluetooth'
+  if (type.includes('WIRED')) return 'headphones'
+  return 'speaker'
+})
+
+/** 读取输出路由。非安卓平台后端会报错，静默忽略即可 */
+const fetchAudioRoute = async (): Promise<void> => {
+  if (!isAndroidPlatform.value) return
+  try {
+    audioRoute.value = await getAudioRoute()
+    usbDacExclusiveEnabled.value = audioRoute.value.exclusiveEnabled
+  } catch (err) {
+    logger.warn('读取输出路由失败（非 Android 平台预期行为）:', err)
+    audioRoute.value = null
+  }
+}
+
+const toggleUsbDacExclusive = async (): Promise<void> => {
+  if (!audioRoute.value?.usbConnected) {
+    logger.warn('未检测到 USB 音频设备，忽略独占开关操作')
+    return
+  }
+  const next = !usbDacExclusiveEnabled.value
+  try {
+    await setUsbDacExclusive(next, playerStore.currentTime)
+    usbDacExclusiveEnabled.value = next
+    configStore.setAudioConfig({ usbDacExclusive: next })
+    await fetchAudioRoute()
+  } catch (err) {
+    logger.error('切换 USB DAC 独占失败:', err)
+    error.value = getErrorMessage(err, 'Failed to toggle USB DAC exclusive mode')
+  }
+}
+
+/** USB DAC 插拔由后端广播；在设置页打开时顺手刷新一次 */
+let unlistenRoute: UnlistenFn | null = null
 
 // 获取音频设备列表
 const fetchAudioDevices = async (): Promise<void> => {
@@ -285,6 +441,7 @@ const toggleFadeEnabled = async (): Promise<void> => {
 // 刷新设备列表
 const refreshDevices = (): void => {
   void fetchAudioDevices()
+  void fetchAudioRoute()
 }
 
 // 组件挂载时获取设备列表
@@ -334,6 +491,27 @@ onMounted(async () => {
   } catch (err) {
     logger.error('Failed to get current audio device:', err)
   }
+
+  // Android：输出路由 + USB DAC 独占状态
+  if (configStore.audio?.usbDacExclusive !== undefined) {
+    usbDacExclusiveEnabled.value = configStore.audio.usbDacExclusive
+  }
+  await fetchAudioRoute()
+
+  if (isAndroidPlatform.value) {
+    try {
+      unlistenRoute = await listen('audio-route-changed', () => {
+        void fetchAudioRoute()
+      })
+    } catch (err) {
+      logger.warn('订阅输出路由变化事件失败:', err)
+    }
+  }
+})
+
+onUnmounted(() => {
+  unlistenRoute?.()
+  unlistenRoute = null
 })
 
 // 监听当前设备变化
@@ -442,6 +620,52 @@ watch(useExclusiveMode, (newValue: boolean) => {
 
 .device-item.active .device-icon {
   color: var(--md-sys-color-primary);
+}
+
+/* Android 输出路由摘要 */
+.route-panel {
+  border-radius: 12px;
+  padding: 4px 16px;
+  margin-bottom: 24px;
+  background-color: var(--md-sys-color-surface-container);
+}
+
+.route-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+}
+
+.route-row + .route-row {
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.route-label {
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  flex-shrink: 0;
+}
+
+.route-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+  /* 设备名可能很长（USB 产品名），优先截断而不是撑破面板 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-icon {
+  font-size: 18px;
+  color: var(--md-sys-color-primary);
+  flex-shrink: 0;
 }
 
 .audio-options {

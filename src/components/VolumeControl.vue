@@ -1,13 +1,14 @@
 <template>
   <div
+    ref="container"
     class="volume-control-container"
     @mouseenter="showVolume = true"
-    @mouseleave="showVolume = false"
+    @mouseleave="handleMouseLeave"
   >
     <button
       class="icon-button volume-button"
       :title="playerStore.isMuted ? $t('controls.unmute') : $t('controls.mute')"
-      @click="playerStore.toggleMute"
+      @click="handleVolumeButtonClick"
     >
       <span class="material-symbols-rounded">{{ getVolumeIcon() }}</span>
     </button>
@@ -18,7 +19,7 @@
           ref="volumeSlider"
           class="slider vertical"
           :class="{ dragging: isDragging }"
-          @mousedown="startDrag"
+          @pointerdown="startDrag"
         >
           <div class="slider-track"></div>
           <div class="slider-fill" :style="{ height: `${playerStore.volume * 100}%` }"></div>
@@ -31,13 +32,66 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { usePlayerStore } from '../stores/player'
 import { useDragValue } from '../composables/useDragValue'
 
 const playerStore = usePlayerStore()
+const container = ref<HTMLElement | null>(null)
 const volumeSlider = ref<HTMLElement | null>(null)
 const showVolume = ref(false)
+
+/** 是否由触摸操作展开的（鼠标靠 hover，离开自动收起；手指没有"离开"这一说） */
+const openedByTouch = ref(false)
+
+const isCoarsePointer = (): boolean => {
+  if (typeof window === 'undefined' || !window.matchMedia) return false
+  return window.matchMedia('(pointer: coarse)').matches
+}
+
+// 触摸设备没有 hover 态，滑块永远出不来，改由喇叭按钮负责展开/收起；
+// 静音仍可通过把音量拖到 0 达到（或再次长按），鼠标设备保持原点击静音行为
+const handleVolumeButtonClick = (): void => {
+  if (isCoarsePointer()) {
+    if (showVolume.value && openedByTouch.value) {
+      closeTouchPopup()
+      return
+    }
+    showVolume.value = true
+    openedByTouch.value = true
+    return
+  }
+  playerStore.toggleMute()
+}
+
+const handleMouseLeave = (): void => {
+  if (openedByTouch.value) return // 触摸展开的不由 pointerleave 收起
+  showVolume.value = false
+}
+
+const closeTouchPopup = (): void => {
+  openedByTouch.value = false
+  showVolume.value = false
+}
+
+// 触摸端：点容器外任意处收起，否则滑块会一直挂着
+const onDocumentPointerDown = (event: PointerEvent): void => {
+  const target = event.target
+  if (target instanceof Node && container.value?.contains(target)) return
+  closeTouchPopup()
+}
+
+watch(openedByTouch, (opened) => {
+  if (opened) {
+    document.addEventListener('pointerdown', onDocumentPointerDown)
+  } else {
+    document.removeEventListener('pointerdown', onDocumentPointerDown)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
+})
 
 // 垂直滑块: 从底部计算百分比;拖拽骨架 (document 级监听/清理) 由 useDragValue 提供
 const { isDragging, startDrag } = useDragValue({
@@ -111,6 +165,8 @@ const getVolumeIcon = () => {
   border-radius: 4px;
   cursor: pointer;
   margin: 8px auto;
+  /* 竖直拖动手势：不禁用默认滚动手势会被判定为页面滚动而被 pointercancel 打断 */
+  touch-action: none;
 }
 
 .volume-slider-popup .slider-track {

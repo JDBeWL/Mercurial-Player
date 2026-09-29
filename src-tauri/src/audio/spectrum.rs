@@ -117,7 +117,7 @@ impl SpectrumAnalyzer {
 
     /// 追加一批交错采样;缓冲满且到达目标帧率间隔时计算并发射频谱
     /// (独占模式解码线程按块驱动)
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "android"))]
     pub fn push_and_maybe_emit(
         &mut self,
         samples: &[f32],

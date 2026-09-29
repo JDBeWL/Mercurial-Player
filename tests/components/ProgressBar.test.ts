@@ -38,8 +38,9 @@ function mockBoundingClientRect(el: HTMLElement, rect: { left: number; width: nu
 }
 
 /** 在 document 上派发鼠标事件 */
+/** 拖拽改用 Pointer Events 后，document 级事件也必须是 pointer 系 */
 function dispatchMouseEvent(type: string, clientX: number) {
-  document.dispatchEvent(new MouseEvent(type, { clientX, bubbles: true }))
+  document.dispatchEvent(new PointerEvent(type, { clientX, bubbles: true }))
 }
 
 describe('ProgressBar.vue', () => {
@@ -163,8 +164,8 @@ describe('ProgressBar.vue', () => {
       mockBoundingClientRect(wrapperEl.element as HTMLElement, { left: 0, width: 100 })
 
       // 模拟在 50% 位置按下并释放鼠标
-      await wrapperEl.trigger('mousedown', { clientX: 50 })
-      dispatchMouseEvent('mouseup', 50)
+      await wrapperEl.trigger('pointerdown', { clientX: 50 })
+      dispatchMouseEvent('pointerup', 50)
       vi.advanceTimersByTime(1100)
       await nextTick()
 
@@ -180,8 +181,8 @@ describe('ProgressBar.vue', () => {
       const wrapperEl = wrapper.find('.progress-bar-wrapper')
       mockBoundingClientRect(wrapperEl.element as HTMLElement, { left: 0, width: 100 })
 
-      await wrapperEl.trigger('mousedown', { clientX: 50 })
-      dispatchMouseEvent('mouseup', 50)
+      await wrapperEl.trigger('pointerdown', { clientX: 50 })
+      dispatchMouseEvent('pointerup', 50)
       vi.advanceTimersByTime(1100)
       await nextTick()
 
@@ -197,8 +198,8 @@ describe('ProgressBar.vue', () => {
       const wrapperEl = wrapper.find('.progress-bar-wrapper')
       mockBoundingClientRect(wrapperEl.element as HTMLElement, { left: 0, width: 100 })
 
-      await wrapperEl.trigger('mousedown', { clientX: 0 })
-      dispatchMouseEvent('mouseup', 0)
+      await wrapperEl.trigger('pointerdown', { clientX: 0 })
+      dispatchMouseEvent('pointerup', 0)
       vi.advanceTimersByTime(1100)
       await nextTick()
 
@@ -214,8 +215,8 @@ describe('ProgressBar.vue', () => {
       const wrapperEl = wrapper.find('.progress-bar-wrapper')
       mockBoundingClientRect(wrapperEl.element as HTMLElement, { left: 0, width: 100 })
 
-      await wrapperEl.trigger('mousedown', { clientX: 100 })
-      dispatchMouseEvent('mouseup', 100)
+      await wrapperEl.trigger('pointerdown', { clientX: 100 })
+      dispatchMouseEvent('pointerup', 100)
       vi.advanceTimersByTime(1100)
       await nextTick()
 
@@ -234,9 +235,9 @@ describe('ProgressBar.vue', () => {
       mockBoundingClientRect(wrapperEl.element as HTMLElement, { left: 0, width: 100 })
 
       // 按下 -> 拖动 -> 释放
-      await wrapperEl.trigger('mousedown', { clientX: 20 })
-      dispatchMouseEvent('mousemove', 80)
-      dispatchMouseEvent('mouseup', 80)
+      await wrapperEl.trigger('pointerdown', { clientX: 20 })
+      dispatchMouseEvent('pointermove', 80)
+      dispatchMouseEvent('pointerup', 80)
       vi.advanceTimersByTime(1100)
       await nextTick()
 
@@ -254,7 +255,7 @@ describe('ProgressBar.vue', () => {
       mockBoundingClientRect(wrapperEl.element as HTMLElement, { left: 0, width: 100 })
 
       // 按下在 50% 位置
-      await wrapperEl.trigger('mousedown', { clientX: 50 })
+      await wrapperEl.trigger('pointerdown', { clientX: 50 })
       await nextTick()
 
       // 拖拽 tooltip 应该显示拖拽位置的时间 (50秒 = 0:50)
@@ -274,7 +275,7 @@ describe('ProgressBar.vue', () => {
       const wrapperEl = wrapper.find('.progress-bar-wrapper')
       mockBoundingClientRect(wrapperEl.element as HTMLElement, { left: 0, width: 100 })
 
-      await wrapperEl.trigger('mousedown', { clientX: 70 })
+      await wrapperEl.trigger('pointerdown', { clientX: 70 })
       await nextTick()
 
       const fill = wrapper.find('.progress-bar-fill')
@@ -291,7 +292,7 @@ describe('ProgressBar.vue', () => {
       mockBoundingClientRect(wrapperEl.element as HTMLElement, { left: 0, width: 100 })
 
       // 拖到超出左边界
-      await wrapperEl.trigger('mousedown', { clientX: -50 })
+      await wrapperEl.trigger('pointerdown', { clientX: -50 })
       await nextTick()
       const fill = wrapper.find('.progress-bar-fill')
       expect(fill.attributes('style')).toContain('width: 0%')
@@ -311,8 +312,8 @@ describe('ProgressBar.vue', () => {
       mockBoundingClientRect(wrapperEl.element as HTMLElement, { left: 0, width: 100 })
 
       // seek 到 80
-      await wrapperEl.trigger('mousedown', { clientX: 80 })
-      dispatchMouseEvent('mouseup', 80)
+      await wrapperEl.trigger('pointerdown', { clientX: 80 })
+      dispatchMouseEvent('pointerup', 80)
       await nextTick()
 
       // 此时处于 pendingSeek 状态，显示位置应保持在 80%
@@ -338,8 +339,8 @@ describe('ProgressBar.vue', () => {
       const wrapperEl = wrapper.find('.progress-bar-wrapper')
       mockBoundingClientRect(wrapperEl.element as HTMLElement, { left: 0, width: 100 })
 
-      await wrapperEl.trigger('mousedown', { clientX: 80 })
-      dispatchMouseEvent('mouseup', 80)
+      await wrapperEl.trigger('pointerdown', { clientX: 80 })
+      dispatchMouseEvent('pointerup', 80)
       await nextTick()
 
       // pendingSeek 中，显示 80%
@@ -351,6 +352,30 @@ describe('ProgressBar.vue', () => {
 
       // pendingSeek 清除后跟随真实 currentTime (仍为 0)
       expect(wrapper.find('.progress-bar-fill').attributes('style')).toContain('width: 0%')
+    })
+  })
+
+  // ---------- 时间行插槽（竖屏下用来放音频信息） ----------
+
+  describe('time-middle 插槽', () => {
+    it('插槽内容渲染在时间行中间', async () => {
+      store.duration = 245
+      wrapper = mount(ProgressBar, {
+        slots: { 'time-middle': '<span class="probe">FLAC | 320 kbps</span>' },
+      })
+      await nextTick()
+
+      const middle = wrapper.find('.progress-time-middle')
+      expect(middle.exists()).toBe(true)
+      expect(middle.find('.probe').text()).toBe('FLAC | 320 kbps')
+    })
+
+    it('没有插槽内容时中间槽位仍在，两端时间的布局不跳动', async () => {
+      wrapper = mount(ProgressBar)
+      await nextTick()
+
+      expect(wrapper.find('.progress-time-middle').exists()).toBe(true)
+      expect(wrapper.find('.progress-time-middle').text()).toBe('')
     })
   })
 })

@@ -19,6 +19,8 @@ export function createDefaultLyricsConfig(): LyricsConfig {
     lyricsFontFamily: 'Noto Sans SC',
     translationFontFamily: '',
     lyricsStyle: 'modern',
+    /* 主歌词面板字号倍率，1 = 样式表原始大小（字体被系统放大时也能由用户自行调整） */
+    fontScale: 1,
     showNoLyricsHint: true,
     showFetchLyricsButton: true,
     autoSelectBestLyrics: true,
@@ -39,6 +41,7 @@ export function ensureLyricsConfigDefaults(lyrics: LyricsConfig): LyricsConfig {
   if (!lyrics.lyricsFontFamily) lyrics.lyricsFontFamily = 'Noto Sans SC'
   if (lyrics.translationFontFamily === undefined) lyrics.translationFontFamily = ''
   if (!lyrics.lyricsStyle) lyrics.lyricsStyle = 'modern'
+  if (lyrics.fontScale === undefined) lyrics.fontScale = 1
   if (lyrics.onlineSource === undefined) lyrics.onlineSource = 'netease'
   if (lyrics.lyricProviderOrder === undefined) {
     lyrics.lyricProviderOrder = [lyrics.onlineSource || 'netease']

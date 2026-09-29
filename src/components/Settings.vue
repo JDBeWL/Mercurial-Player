@@ -1,6 +1,27 @@
 <template>
-  <div class="settings-panel">
-    <SettingsNav v-model="activeTab" :tabs="visibleTabs" @close="configStore.closeConfigPanel" />
+  <div
+    class="settings-panel"
+    :data-mobile="isMobilePortrait ? 'true' : undefined"
+    :data-view="mobileView"
+  >
+    <SettingsNav
+      v-model="activeTab"
+      :tabs="visibleTabs"
+      @close="configStore.closeConfigPanel"
+      @select="onTabSelect"
+    />
+
+    <!-- 手机竖屏：详情页头（返回 + 当前页名）。
+         放在滚动容器**外面**：这样它天然不随内容滚动，既不需要 sticky、
+         也不需要给自己铺一层不透明底色（本项目 surface-container-* 全族缺失，
+         铺了也是透明，滚动时内容会从下面透出来）。
+         桌面/横屏不渲染这块（v-if），左右并排的导航栏本身就是"返回"路径 -->
+    <div v-if="isMobilePortrait" class="mobile-detail-header">
+      <button class="mobile-back-btn" :title="$t('common.back')" @click="backToList">
+        <span class="material-symbols-rounded">arrow_back</span>
+      </button>
+      <h2 class="mobile-detail-title">{{ $t(currentTabLabel) }}</h2>
+    </div>
 
     <div class="settings-content">
       <FolderSettings v-if="activeTab === 'folders'" />
@@ -19,8 +40,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, defineAsyncComponent } from 'vue'
+import { ref, computed, defineAsyncComponent, watch } from 'vue'
 import { useConfigStore } from '../stores/config'
+import { usePlatform } from '../composables/usePlatform'
+import { useOrientation } from '../composables/useOrientation'
 import { pluginManager } from '../plugins'
 import { useDeveloperMode } from '../composables/useDeveloperMode'
 import { SettingsNav } from './settings'
@@ -47,6 +70,37 @@ const DeveloperSettings = defineAsyncComponent(() => import('./settings/Develope
 const configStore = useConfigStore()
 const { developerMode } = useDeveloperMode()
 const activeTab = ref<string>('folders')
+
+const { isAndroid } = usePlatform()
+const { isPortrait } = useOrientation()
+
+/**
+ * 手机竖屏：面板拆成「列表 → 详情」两级。
+ * 480px 宽放不下"左栏 280px + 右内容"的并排布局，而原来的窄屏降级（一排横向
+ * tab）又因为 .nav-item 没重置 width:100% 而彻底失效——10 个 tab 各撑满整行，
+ * 用户只能看到第一个（详见 SettingsNav 的样式注释）。
+ * 桌面端与横屏不走这里，behavior 不变。
+ */
+const isMobilePortrait = computed<boolean>(() => isAndroid.value && isPortrait.value)
+const mobileView = ref<'list' | 'detail'>('list')
+
+// 用 select 事件而不是 watch(activeTab)：点"当前已选中"的那一项时值没变化，
+// watch 不会触发，用户就卡在列表页进不去详情
+const onTabSelect = (): void => {
+  mobileView.value = 'detail'
+}
+
+const backToList = (): void => {
+  mobileView.value = 'list'
+}
+
+// 每次重新打开设置都从列表开始，而不是停在上次看的详情页
+watch(
+  () => configStore.ui.showConfigPanel,
+  (open) => {
+    if (open) mobileView.value = 'list'
+  },
+)
 
 const baseTabs: SettingsTab[] = [
   { id: 'folders', icon: 'folder', label: 'config.musicFolders' },
@@ -81,6 +135,11 @@ const visibleTabs = computed<SettingsTab[]>(() => {
 
   return tabs
 })
+
+/** 竖屏详情页的标题 —— 直接复用导航项的 i18n key，避免两处文案漂移 */
+const currentTabLabel = computed<string>(
+  () => visibleTabs.value.find((tab) => tab.id === activeTab.value)?.label ?? '',
+)
 </script>
 
 <style scoped>
@@ -123,6 +182,71 @@ const visibleTabs = computed<SettingsTab[]>(() => {
 
   .settings-content {
     padding: 16px;
+  }
+}
+
+/* 竖屏详情页头：只在手机竖屏渲染（模板里 v-if），其余情况不占位 */
+.mobile-detail-header {
+  display: none;
+}
+
+/* ===== 手机竖屏：列表 ↔ 详情 两级 =====
+   上面那条 768px 规则把面板改成纵向堆叠（导航横跨整行），在 480px 宽的竖屏下
+   仍然不可用：横跨整行的是一排横向 tab，而 .nav-item 没重置 width:100%，
+   10 个 tab 各撑满整行 → 排成 10 屏宽，用户只看得到一个空胶囊（实测截图）。
+   这里换成手机上标准的「整屏列表 → 详情」，导航的列表形态见 SettingsNav。
+
+   ⚠️ 用 [data-mobile='true'] 守卫：@media (orientation: portrait) 在桌面把窗口
+   拉成窄高时同样会命中，不加守卫会把桌面端的并排布局一起改掉。 */
+@media (orientation: portrait) {
+  .settings-panel[data-mobile='true'] {
+    flex-direction: column;
+    /* 列表页由导航自己撑满、详情页由内容区撑满，左右留白交给各自的容器 */
+    padding: 0;
+  }
+
+  /* 列表页：只留整屏的入口列表；详情页：只留头部 + 内容。
+     .settings-nav 是子组件的根元素，用 :deep 保证选择器一定命中
+     （不依赖"子组件根元素继承父 scope id"这一行为） */
+  .settings-panel[data-mobile='true'][data-view='list'] .settings-content,
+  .settings-panel[data-mobile='true'][data-view='list'] .mobile-detail-header,
+  .settings-panel[data-mobile='true'][data-view='detail'] :deep(.settings-nav) {
+    display: none;
+  }
+
+  .settings-panel[data-mobile='true'] .settings-content {
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* 详情页头靠 flex 天然固定在顶部（它在滚动容器之外），不需要 sticky */
+  .mobile-detail-header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 16px 8px;
+  }
+
+  .mobile-detail-title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--md-sys-color-on-surface);
+  }
+
+  /* 负左边距让图标视觉上与下方内容左对齐，同时保住 44px 的触摸目标 */
+  .mobile-back-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin-left: -10px;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: var(--md-sys-color-on-surface-variant);
+    cursor: pointer;
   }
 }
 </style>

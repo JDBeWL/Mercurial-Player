@@ -1,10 +1,11 @@
-import { onMounted, onUnmounted, type Ref, type WatchStopHandle } from 'vue'
+import { onMounted, onUnmounted, watch, type Ref, type WatchStopHandle } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 import { usePlayerStore } from '@/stores/player'
 import { useThemeStore } from '@/stores/theme'
 import { useConfigStore } from '@/stores/config'
 import { setLocale } from '@/i18n'
+import { applyAppFontScale, applyLyricsFontScale } from '@/composables/useAppFontScale'
 import { pluginManager } from '@/plugins'
 import logger from '@/utils/logger'
 import { applyVisualizerFps } from '@/utils/visualizerFps'
@@ -74,6 +75,8 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
   let unlistenWindowMove: (() => void) | null = null
   let unlistenCloseRequested: (() => void) | null = null
   let moveDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  // 歌词字号 → 根元素 CSS 变量的 watch（在 onMounted 里才建立，故类型可空）
+  let lyricsFontScaleWatch: WatchStopHandle | null = null
   // 防止 CloseRequested 清理期间用户再次触发关闭
   let isClosing = false
 
@@ -120,6 +123,18 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
       logger.error('Failed to apply language from config:', error)
     }
 
+    // 界面字号：Android 上原生侧会抵消 WebView 对系统字号的放大（见 applyAppFontScale），
+    // 这里在配置就绪后对齐一次；之后改配置由设置页在滑块松手时下发
+    await applyAppFontScale(configStore.ui?.fontScale ?? 1)
+
+    // 歌词字号：写成根元素上的 CSS 变量，主歌词面板与可视化面板的单行歌词共用。
+    // 放在配置加载之后 watch，immediate 那一次拿到的就是已加载的值。
+    lyricsFontScaleWatch = watch(
+      () => configStore.lyrics?.fontScale ?? 1,
+      applyLyricsFontScale,
+      { immediate: true },
+    )
+
     // 从配置加载主题设置
     try {
       const savedTheme = configStore.general.theme
@@ -133,11 +148,14 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
     // 应用主题
     themeStore.applyTheme()
 
-    // 初始化封面缓存路径
+    // 初始化封面缓存路径（Android 已由后端固定到应用沙箱，前端不覆盖）
     try {
-      await invoke('set_cover_cache_path_command', {
-        path: configStore.general.coverCachePath,
-      })
+      const platform = await invoke<string>('get_platform')
+      if (platform !== 'android') {
+        await invoke('set_cover_cache_path_command', {
+          path: configStore.general.coverCachePath,
+        })
+      }
     } catch (error) {
       logger.warn('Failed to set cover cache path:', error)
     }
@@ -218,6 +236,10 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
     if (unlistenCloseRequested) {
       unlistenCloseRequested()
       unlistenCloseRequested = null
+    }
+    if (lyricsFontScaleWatch) {
+      lyricsFontScaleWatch()
+      lyricsFontScaleWatch = null
     }
     // 强制保存待处理的配置。
     // 每一步异步清理都独立兜错:任一失败都不能中断后续清理,

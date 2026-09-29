@@ -131,6 +131,9 @@ export interface LyricsConfig {
   lyricProviderOrder?: string[]
   /* 每来源的算法(method)与文本类型(preferKind)偏好 */
   lyricProviderSettings?: Record<string, ProviderLyricSetting>
+  /* 主歌词面板（播放页那一片）的字号倍率，1 = 样式表原始大小。
+     与 desktopLyrics.fontSize 互不影响：那个是独立的桌面歌词窗口。 */
+  fontScale?: number
   desktopLyrics?: DesktopLyricsConfig
 }
 
@@ -158,6 +161,12 @@ export interface UIConfig {
   showSettings: boolean
   showConfigPanel: boolean
   miniMode: boolean
+  /* 界面字号倍率，1 = 设计稿原始大小。
+     只有 Android 生效：WebView 会把系统「字体大小」当成字号倍率乘到所有 CSS px 字号上
+     （固定像素布局的界面会被撑变形，带下伸部的字母还会被裁掉）。原生侧直接接管
+     WebView 的 textZoom（它才是倍率的唯一来源），系统设置因此被整体覆盖，
+     应用内的这一项成为唯一来源。桌面端读取该字段但不生效。 */
+  fontScale?: number
 }
 
 export interface AudioConfig {
@@ -165,6 +174,10 @@ export interface AudioConfig {
   volume: number
   /* 是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音) */
   fadeEnabled: boolean
+  /* Android:是否在检测到 USB 音频设备时走 AAudio 独占(位完美)。
+     与 Windows 的 exclusiveMode 是同一类诉求,但触发条件不同(必须插着 USB DAC),
+     因此单独一个开关:桌面端读到 false 不影响任何行为。 */
+  usbDacExclusive?: boolean
 }
 
 export interface VisualizerConfig {

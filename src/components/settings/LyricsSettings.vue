@@ -177,6 +177,28 @@
           @change="saveConfig"
         />
       </div>
+
+      <!-- 主歌词面板的字号。与下面「桌面歌词」里的字号是两回事：那个管独立的
+           桌面歌词窗口，这个管播放页那一片歌词（含可视化面板的单行歌词）。
+           改的是 CSS 变量 --lyrics-scale，所以不需要重建歌词 DOM。 -->
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.lyricsFontSize') }}</span>
+          <span class="setting-description">{{ $t('config.lyricsFontSizeDesc') }}</span>
+        </div>
+        <div class="font-size-control">
+          <input
+            v-model.number="lyricsFontScale"
+            type="range"
+            :min="LYRICS_FONT_SCALE_MIN"
+            :max="LYRICS_FONT_SCALE_MAX"
+            :step="0.05"
+            class="font-size-slider"
+            :style="lyricsFontScaleSliderStyle"
+          />
+          <span class="font-size-value">{{ lyricsFontScaleText }}</span>
+        </div>
+      </div>
     </div>
 
     <div class="settings-section">
@@ -701,6 +723,36 @@ const fontSizeSliderStyle = computed(() => {
     background: `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`,
   }
 })
+
+/* ===== 主歌词面板字号 =====
+   v-model 只改配置；实际生效走 useAppLifecycle 里对 lyrics.fontScale 的 watch
+   （它把倍率写到根元素的自定义属性 --lyrics-scale 上），因此拖动时是实时的、
+   也不需要重建歌词 DOM。上下限即变量可取的区间。 */
+const LYRICS_FONT_SCALE_MIN = 0.6
+const LYRICS_FONT_SCALE_MAX = 1.8
+
+const lyricsFontScale = computed({
+  get: () => configStore.lyrics?.fontScale ?? 1,
+  set: (value: number) => {
+    configStore.setLyricsConfig({ fontScale: value })
+  },
+})
+
+const lyricsFontScaleFillPercent = useSliderFill(
+  LYRICS_FONT_SCALE_MIN,
+  LYRICS_FONT_SCALE_MAX,
+  lyricsFontScale,
+)
+
+const lyricsFontScaleSliderStyle = computed(() => {
+  const percentage = lyricsFontScaleFillPercent.value
+  return {
+    background: `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`,
+  }
+})
+
+/** 100% = 歌词样式表里的原始字号 */
+const lyricsFontScaleText = computed(() => `${Math.round(lyricsFontScale.value * 100)}%`)
 
 const toggleDesktopLyrics = async (): Promise<void> => {
   configStore.setDesktopLyricsConfig({ enabled: !desktopLyricsConfig.value.enabled })

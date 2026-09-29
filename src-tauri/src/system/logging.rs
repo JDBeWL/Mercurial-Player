@@ -28,7 +28,12 @@ const PREV_LOG_FILE: &str = "mercurial-player-prev.log";
 static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 /// 主程序同级 logs/ 目录(与 plugins/、screenshots/ 的解析方式一致)
+///
+/// Android：current_exe() 位于只读 APK 内，改写应用数据目录下的 logs/
 fn log_dir() -> Result<PathBuf, AppError> {
+    if let Some(dir) = crate::config::data_dir_override() {
+        return Ok(dir.join("logs"));
+    }
     let exe_path = std::env::current_exe()
         .map_err(|e| AppError::msg(format!("无法获取可执行文件路径: {e}")))?;
     let exe_dir = exe_path.parent().ok_or("无法获取可执行文件目录")?;

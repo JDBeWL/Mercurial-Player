@@ -1,11 +1,15 @@
 {
   "common": {
     "close": "关闭",
+    "back": "返回",
     "cancel": "取消",
     "later": "稍后"
   },
   "nav": {
+    "library": "音乐库",
+    "more": "更多",
     "settings": "设置",
+    "themeColor": "主题颜色",
     "theme": {
       "dark": "深色模式",
       "light": "浅色模式",
@@ -20,6 +24,7 @@
     "durationM": "{minutes}分钟",
     "durationS": "{seconds}秒",
     "extractCover": "提取封面",
+    "extractCoverSuccess": "封面已保存",
     "viewCoverFullscreen": "沉浸式封面",
     "exitCoverFullscreen": "点击左侧区域或按 Esc 退出",
     "queueInfo": "第 {current} 首 / 共 {total} 首"
@@ -34,7 +39,8 @@
     "shuffle": "随机播放",
     "repeat": "循环播放",
     "repeatList": "列表循环",
-    "repeatOne": "单曲循环"
+    "repeatOne": "单曲循环",
+    "repeatOff": "顺序播放"
   },
   "library": {
     "title": "音乐库",
@@ -252,6 +258,19 @@
     "loadingDevices": "加载音频设备中...",
     "deviceLoadError": "加载音频设备失败",
     "noAudioDevices": "未找到音频设备",
+    "audioDeviceManagedBySystem": "音频输出设备由系统统一管理：插入耳机或连接蓝牙时系统会自动切换，无需在本应用中选择",
+    "usbDacExclusive": "USB DAC 独占（位完美）",
+    "usbDacExclusiveDesc": "检测到 USB 音频设备时绕过系统混音与重采样，按曲目原生采样率直出",
+    "usbDacNotConnected": "未检测到 USB 音频设备：插上 DAC 后这个开关才可用",
+    "usbDacFallback": "这台设备没能开成独占流，已回落共享模式（多为被其它应用占用或不支持该采样率）",
+    "usbDacActive": "独占已生效",
+    "currentOutputRoute": "当前输出",
+    "outputSampleRate": "输出采样率",
+    "usbDac": "USB DAC",
+    "builtinSpeaker": "扬声器",
+    "wiredHeadphones": "有线耳机",
+    "bluetoothAudio": "蓝牙音频",
+    "unknownOutput": "未知输出设备",
     "retry": "重试",
     "refresh": "刷新",
     "refreshDevices": "刷新设备列表",
@@ -424,7 +443,11 @@
     "resetAllConfigDesc": "将所有设置恢复为默认值,此操作不可撤销",
     "resetAllConfigConfirm": "确定要将所有设置恢复为默认值吗?此操作不可撤销。",
     "logLevel": "日志等级",
-    "logLevelDesc": "控制写入日志文件与控制台输出的最低等级,立即生效并跨启动保存"
+    "logLevelDesc": "控制写入日志文件与控制台输出的最低等级,立即生效并跨启动保存",
+    "interfaceFontSize": "界面字号",
+    "interfaceFontSizeDesc": "应用内文字大小的倍率。手机系统的「字体大小」不会再影响本应用，改这里即可；100% 为设计稿原始大小。",
+    "lyricsFontSize": "歌词字号",
+    "lyricsFontSizeDesc": "主歌词面板的字号倍率，与「桌面歌词」的字号互不影响。"
   },
   "window": {
     "miniMode": "Mini模式",
@@ -433,7 +456,8 @@
     "exitFullscreen": "退出全屏",
     "close": "关闭",
     "switchToVisualizer": "切换到波形模式",
-    "switchToLyrics": "切换到歌词模式"
+    "switchToLyrics": "切换到歌词模式",
+    "switchToCover": "切换到封面模式"
   },
   "errors": {
     "unknownError": "未知错误",

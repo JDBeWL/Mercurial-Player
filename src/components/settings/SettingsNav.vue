@@ -1,5 +1,5 @@
 <template>
-  <nav class="settings-nav">
+  <nav class="settings-nav" :data-mobile="isAndroid ? 'true' : undefined">
     <div class="nav-header">
       <h2>{{ $t('config.title') }}</h2>
       <button class="icon-button" :title="$t('common.close')" @click="$emit('close')">
@@ -13,7 +13,7 @@
         :key="tab.id"
         class="nav-item"
         :class="{ active: modelValue === tab.id }"
-        @click="$emit('update:modelValue', tab.id)"
+        @click="onSelect(tab.id)"
       >
         <span class="material-symbols-rounded">{{ tab.icon }}</span>
         <span class="nav-label">{{ $t(tab.label) }}</span>
@@ -24,16 +24,27 @@
 
 <script setup lang="ts">
 import type { SettingsTab } from '@/types'
+import { usePlatform } from '@/composables/usePlatform'
 
 defineProps<{
   modelValue: string
   tabs: SettingsTab[]
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   'update:modelValue': [value: string]
   close: []
+  /** 手机竖屏靠这个事件切到详情页 —— 只监听 v-model 的话，
+      点"当前已选中"的那一项值时不变，watch 不触发就进不去详情 */
+  select: [value: string]
 }>()
+
+const { isAndroid } = usePlatform()
+
+const onSelect = (id: string): void => {
+  emit('update:modelValue', id)
+  emit('select', id)
+}
 </script>
 
 <style scoped>
@@ -143,6 +154,11 @@ defineEmits<{
   }
 
   .nav-item {
+    /* ⚠️ 必须重置 width —— 基础样式是给"纵向列表"写的 width:100%，
+       横向 flex 下配合 flex-shrink:0 会让每个 tab 撑满整行宽度，
+       N 个 tab 就排成 N 屏宽、用户只能看到第一个（实测 10 个 tab
+       宽度全是 398px，top 全是 145）。 */
+    width: auto;
     flex-shrink: 0;
     padding: 12px 16px;
     margin-bottom: 0;
@@ -150,6 +166,50 @@ defineEmits<{
 
   .nav-label {
     display: none;
+  }
+}
+
+/* ===== 手机竖屏：导航改成整屏的入口列表 =====
+   上面那条横向 tab 是给"桌面窄窗口"用的：手机上 10 个 tab 横向滚动
+   既看不出还有多少页、也点不准。这里换成手机上最标准的「列表 → 详情」两级，
+   竖屏下这一栏就是整屏的入口列表（由 Settings.vue 控制与详情的互斥）。
+
+   ⚠️ 用 [data-mobile='true'] 守卫：@media (orientation: portrait) 在桌面
+   把窗口拉成窄高时同样会命中，不加守卫会把桌面端的导航形态一起改掉。 */
+@media (orientation: portrait) {
+  .settings-nav[data-mobile='true'] {
+    width: 100%;
+    min-width: 0;
+    flex: 1;
+    min-height: 0;
+    border-right: none;
+    border-bottom: none;
+  }
+
+  .settings-nav[data-mobile='true'] .nav-header {
+    padding: 8px 20px 12px;
+  }
+
+  .settings-nav[data-mobile='true'] .nav-items {
+    display: block;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 0 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    gap: 0;
+  }
+
+  /* 触摸目标给到 56px，并按行分隔而不是靠间距 */
+  .settings-nav[data-mobile='true'] .nav-item {
+    width: 100%;
+    min-height: 56px;
+    padding: 12px 16px;
+    margin-bottom: 2px;
+    font-size: 15px;
+  }
+
+  /* 覆盖上面 768px 那条的 display:none —— 手机上纯图标完全看不出是哪一页 */
+  .settings-nav[data-mobile='true'] .nav-label {
+    display: block;
   }
 }
 </style>

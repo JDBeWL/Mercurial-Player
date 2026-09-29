@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- maximum-scale + user-scalable=no：应用是固定布局的桌面级 UI，
+         手机上一旦被双指缩放就再也恢复不了，整体控件也会错位。
+         viewport-fit=cover：配合 CSS 的 env(safe-area-inset-*) 预留刘海/手势条区域 -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <title>MusicPlayer</title>
   </head>
   <body>

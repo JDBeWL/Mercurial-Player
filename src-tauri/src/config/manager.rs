@@ -40,11 +40,29 @@ pub struct AppConfig {
 }
 
 /// UI 设置(仅持久化非临时状态)
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UiConfig {
     #[serde(default)]
     pub mini_mode: bool,
+    /// 界面字号倍率（1.0 = 设计稿原始大小）。
+    ///
+    /// 只有 Android 生效：WebView 会把系统「字体大小」当成倍率乘到所有 CSS px 字号上，
+    /// 原生侧直接接管 WebView 的 textZoom（倍率的唯一来源）从而覆盖系统设置，
+    /// 见 [`crate::app_font_scale`]；桌面端不生效。
+    /// 必须在这里留字段，否则前端保存时 serde 会静默丢掉它（下次启动回默认值）。
+    #[serde(default = "default_font_scale")]
+    pub font_scale: f32,
+}
+
+impl Default for UiConfig {
+    /// 不能 derive：`f32` 的默认值是 0，界面字号会变成"0 倍"。
+    fn default() -> Self {
+        Self {
+            mini_mode: false,
+            font_scale: default_font_scale(),
+        }
+    }
 }
 
 /// 可视化(频谱)设置
@@ -63,6 +81,11 @@ pub struct VisualizerConfig {
 
 fn default_target_fps() -> u32 {
     60
+}
+
+/// 字号倍率的默认值（1.0 = 原始大小）
+const fn default_font_scale() -> f32 {
+    1.0
 }
 
 impl Default for VisualizerConfig {
@@ -223,6 +246,13 @@ pub struct AudioConfig {
     /// 仅在用户在设置页主动选择设备时写入,自动回退/跟随系统默认不写,避免覆盖用户选择。
     #[serde(default)]
     pub preferred_device_id: Option<String>,
+    /// Android:USB DAC 独占(位完美)输出。
+    ///
+    /// 与 Windows 的独占模式是同一类诉求——绕过系统混音/重采样,按曲目原生采样率
+    /// 直连 USB 声卡。仅当系统里确实存在 USB 音频输出设备时才可能真正生效;
+    /// 拔出后会自动回落共享模式并暂停(见 `audio::aaudio::on_audio_route_changed`)。
+    #[serde(default)]
+    pub usb_dac_exclusive: bool,
 }
 
 /// 歌词设置
@@ -252,6 +282,10 @@ pub struct LyricsConfig {
     pub show_fetch_lyrics_button: bool,
     #[serde(default = "default_lyrics_style")]
     pub lyrics_style: String,
+    /// 主歌词面板（播放页那一片）的字号倍率，1.0 = 样式表原始大小。
+    /// 与 `desktop_lyrics.font_size` 互不影响：那个管独立的桌面歌词窗口。
+    #[serde(default = "default_font_scale")]
+    pub font_scale: f32,
     /// 点击"获取歌词"时是否自动择优(true = 无感自动写盘,false = 打开候选挑选弹窗)
     #[serde(default = "default_true")]
     pub auto_select_best_lyrics: bool,
@@ -419,6 +453,7 @@ impl Default for AudioConfig {
             volume: default_volume(),
             fade_enabled: true,
             preferred_device_id: None,
+            usb_dac_exclusive: false,
         }
     }
 }
@@ -436,6 +471,7 @@ impl Default for LyricsConfig {
             show_no_lyrics_hint: true,
             show_fetch_lyrics_button: true,
             lyrics_style: default_lyrics_style(),
+            font_scale: default_font_scale(),
             auto_select_best_lyrics: true,
             lyric_provider_order: default_lyric_provider_order(),
             lyric_provider_settings: HashMap::new(),
@@ -504,6 +540,10 @@ impl ConfigManager {
     }
 
     fn get_app_config_dir() -> Result<String, Box<dyn std::error::Error>> {
+        // Android 覆盖：current_exe() 在只读 APK 内，改写应用数据目录
+        if let Some(dir) = crate::config::data_dir_override() {
+            return Ok(dir.join("data").to_string_lossy().to_string());
+        }
         let exe_path = std::env::current_exe()?;
         let exe_dir = exe_path
             .parent()

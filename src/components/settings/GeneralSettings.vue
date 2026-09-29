@@ -80,6 +80,31 @@
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.display') }}</h4>
 
+      <!-- 界面字号：只有 Android 真正生效。系统「字体大小」会被 WebView 当成倍率乘到
+           所有 CSS px 字号上，而本应用是固定像素布局 —— 放大后容器盒子不跟着长，
+           g / y 这类带下伸部的字母会被裁掉。原生侧（FontScaleBridge）接管了 WebView 的
+           textZoom，系统设置被整体覆盖，这里成为字号的唯一来源。
+           桌面端仍显示该项，但后端是 no-op。 -->
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('config.interfaceFontSize') }}</span>
+          <div class="setting-desc">{{ $t('config.interfaceFontSizeDesc') }}</div>
+        </div>
+        <div class="cache-size-control">
+          <input
+            v-model.number="uiFontScale"
+            type="range"
+            :min="UI_FONT_SCALE_MIN"
+            :max="UI_FONT_SCALE_MAX"
+            step="0.05"
+            class="cache-slider"
+            :style="uiFontScaleSliderStyle"
+            @input="handleUIFontScaleChange"
+          />
+          <span class="cache-size-value ui-font-size-value">{{ uiFontScaleText }}</span>
+        </div>
+      </div>
+
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.showAudioInfo') }}</span>
@@ -172,7 +197,9 @@
         </div>
       </div>
 
-      <div class="setting-item">
+      <!-- setting-item-wide：这一行的右侧控件（缓存路径 + 两个按钮）在窄屏上是撑不满的，
+           见文件末尾 orientation 媒体查询，竖屏下改成上下排。 -->
+      <div class="setting-item setting-item-wide">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.coverCachePath') }}</span>
           <div class="setting-desc">
@@ -259,6 +286,7 @@ import {
   clearFontCaches as clearFontCachesCommand,
   getFontCacheStats,
 } from '../../services/appService'
+import { applyAppFontScale } from '../../composables/useAppFontScale'
 import type { ImmersiveColorScheme } from '../../types'
 
 const configStore = useConfigStore()
@@ -306,6 +334,36 @@ const cacheSliderStyle = computed(() => {
     background: `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`,
   }
 })
+
+/* ===== 界面字号 =====
+   上下限必须与原生侧 FontScaleBridge.MIN_SCALE / MAX_SCALE 一致，
+   那边还会再 clamp 一次（超范围的值不会让界面崩掉，只会被收进这个区间）。 */
+const UI_FONT_SCALE_MIN = 0.8
+const UI_FONT_SCALE_MAX = 1.6
+
+const uiFontScale = computed({
+  get: () => configStore.ui?.fontScale ?? 1,
+  set: (value: number) => {
+    configStore.setUIFontScale(value)
+  },
+})
+
+const uiFontScaleFillPercent = useSliderFill(UI_FONT_SCALE_MIN, UI_FONT_SCALE_MAX, uiFontScale)
+
+const uiFontScaleSliderStyle = computed(() => {
+  const percentage = uiFontScaleFillPercent.value
+  return {
+    background: `linear-gradient(to right, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) ${percentage}%, var(--md-sys-color-surface-variant) ${percentage}%, var(--md-sys-color-surface-variant) 100%)`,
+  }
+})
+
+/** 100% = 设计稿原始大小 */
+const uiFontScaleText = computed(() => `${Math.round(uiFontScale.value * 100)}%`)
+
+/** 只在下发时调用（见 applyAppFontScale 的注释：拖动中每帧下发会卡） */
+const handleUIFontScaleChange = (): void => {
+  void applyAppFontScale(uiFontScale.value)
+}
 
 const coverCachePath = computed({
   get: () => configStore.general.coverCachePath,
@@ -656,6 +714,11 @@ onMounted(() => {
   color: var(--md-sys-color-on-surface);
 }
 
+/* 百分比文案（"100%"）在拖动时会从 3 位变 4 位，留个下限宽度免得整行左右抖 */
+.ui-font-size-value {
+  min-width: 44px;
+}
+
 /* 缓存路径控制 */
 .cache-path-control {
   display: flex;
@@ -716,5 +779,36 @@ onMounted(() => {
 .clear-cache-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* ===== 窄屏（手机竖屏）=====
+   这一行右侧是「一长串路径 + 两个图标按钮」，横排时它的 max-content 宽度必须靠
+   挤压左侧文字来腾地方。真机实测（Redmi Note 11T Pro，411px 宽）：
+   .setting-info 被压到 **0px**、标签只剩 18.6px（"缓存存储路径"竖着排成一条），
+   而 .cache-path-control 仍有 418px —— 比整行 371px 还宽，直接顶出屏幕。
+   改成上下排：文字占满整行，路径单独一行并允许换行，按钮落到下一行右对齐。 */
+@media (orientation: portrait) {
+  .setting-item-wide {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .setting-item-wide .cache-path-control {
+    flex-wrap: wrap;
+    /* 路径独占一行（flex-basis 100%），按钮因此被挤到第二行，靠右收尾 */
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .setting-item-wide .cache-path-value {
+    flex: 1 1 100%;
+    white-space: normal;
+    /* 路径没有可断行的空格，只有 break-all 才能换行；
+       用 anywhere 会在过窄时把单行压成极限窄，break-all 更稳 */
+    word-break: break-all;
+    line-height: 1.35;
+    text-overflow: clip;
+  }
 }
 </style>

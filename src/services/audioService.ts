@@ -49,3 +49,39 @@ export function setFadeEnabled(enabled: boolean): Promise<void> {
 export function getFadeEnabled(): Promise<boolean> {
   return invoke<boolean>('get_fade_enabled')
 }
+
+// ============================================================================
+// Android：USB DAC 独占（位完美）
+// ============================================================================
+
+/** 单个输出设备的摘要（Android，来自 AudioManager.getDevices） */
+export interface OutputDevice {
+  id: number
+  name: string
+  typeName: string
+  isUsb: boolean
+  sampleRates: number[]
+  channelCounts: number[]
+  encodings: number[]
+}
+
+/** 当前输出路由快照（Android） */
+export interface AudioRouteInfo {
+  usbConnected: boolean
+  usbDeviceName: string
+  exclusiveEnabled: boolean
+  exclusiveActive: boolean
+  sampleRate: number
+  channels: number
+  devices: OutputDevice[]
+}
+
+/** 读取当前输出路由；非 Android 平台会返回错误，调用方需 catch */
+export function getAudioRoute(): Promise<AudioRouteInfo> {
+  return invoke<AudioRouteInfo>('get_audio_route')
+}
+
+/** 开关 USB DAC 独占（位完美）输出；currentTime 用于切换后从原位置续播 */
+export function setUsbDacExclusive(enabled: boolean, currentTime: number): Promise<void> {
+  return invoke<void>('set_usb_dac_exclusive', { enabled, currentTime })
+}

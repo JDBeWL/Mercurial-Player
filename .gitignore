@@ -36,3 +36,41 @@ package-lock.json
 # (package.json 的 version:sync 脚本依赖它)
 scripts/*
 !scripts/sync-version.mjs
+
+# ============================================================================
+# Android / Tauri 移动端
+# ============================================================================
+# gen/android 只提交手工维护的部分（MainActivity / SafBridge / PlaybackService /
+# MediaBridge / AndroidManifest.xml / build.gradle.kts / proguard-rules.pro）。
+# Tauri 自带的 gen/android/.gitignore 已排除 generated/、*.so、local.properties、build。
+
+# tauri android init 可再生成的脚手架
+src-tauri/gen/android/gradlew
+src-tauri/gen/android/gradlew.bat
+src-tauri/gen/android/gradle/wrapper/
+src-tauri/gen/android/buildSrc/
+
+# 启动图标位图：pnpm tauri icon src-tauri/icons/icon.png 可重新生成
+src-tauri/gen/android/app/src/main/res/mipmap-hdpi/*.png
+src-tauri/gen/android/app/src/main/res/mipmap-mdpi/*.png
+src-tauri/gen/android/app/src/main/res/mipmap-xhdpi/*.png
+src-tauri/gen/android/app/src/main/res/mipmap-xxhdpi/*.png
+src-tauri/gen/android/app/src/main/res/mipmap-xxxhdpi/*.png
+
+# 打包时拷贝到 assets 的前端产物（自包含 APK 用）
+src-tauri/gen/android/app/src/main/assets/
+
+# 图标预览图（scripts/gen-android-icons.py --preview 的可再生产物）
+icon-preview.png
+__pycache__/
+
+# 签名与发布产物（私钥绝对不能入库）
+*.keystore
+*.jks
+key.properties
+keystore.properties
+*.apk
+*.aab
+
+# 本地 agent 工作区（会话记忆等，不入库）
+.workbuddy/

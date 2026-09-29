@@ -5,6 +5,16 @@ export function getPlatform(): Promise<string> {
   return invoke<string>('get_platform')
 }
 
+/**
+ * 设置应用内界面字号倍率（1 = 设计稿原始大小）。
+ *
+ * 只有 Android 会真正生效：WebView 会把系统「字体大小」放大到所有 CSS px 字号上，
+ * 原生侧先抵消它、再乘上这里给的倍率；桌面端后端是 no-op。
+ */
+export function setAppFontScale(scale: number): Promise<void> {
+  return invoke<void>('set_app_font_scale', { scale })
+}
+
 /** 获取系统字体列表 */
 export function getSystemFonts(): Promise<string[]> {
   return invoke<string[]>('get_system_fonts')

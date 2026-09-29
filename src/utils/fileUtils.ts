@@ -1,5 +1,6 @@
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
+import logger from './logger'
 import { ErrorType, ErrorSeverity, handlePromise } from './errorHandler'
 import { formatTime } from './format'
 import type { Playlist } from '@/types'
@@ -10,8 +11,16 @@ import type { Playlist } from '@/types'
 export class FileUtils {
   /**
    * 打开文件夹选择对话框
+   *
+   * Android 上 plugin-dialog 的目录选择不可用（分区存储需 SAF），改为调系统
+   * 目录选择器并轮询返回已保存的 content:// 树 URI；桌面保持原生对话框。
    */
   static async selectFolder(options: Parameters<typeof open>[0] = {}): Promise<string | null> {
+    const platform = await invoke<string>('get_platform')
+    if (platform === 'android') {
+      return this.selectFolderAndroid()
+    }
+
     const result = await handlePromise(
       open({
         directory: true,
@@ -29,6 +38,32 @@ export class FileUtils {
     )
 
     return result.success ? (result.data as string | null) : null
+  }
+
+  /** Android：调起 SAF 系统目录选择器，轮询等待授权结果（树 URI 持久化在 Kotlin 侧） */
+  private static async selectFolderAndroid(): Promise<string | null> {
+    const before = await invoke<{ uri?: string | null; version: number }>('saf_get_pick_state')
+    await invoke('saf_request_pick')
+
+    // 系统选择器为异步 UI：每 500ms 轮询，直到**授权版本号**变化，超时 3 分钟。
+    // 不能比较 URI：重新授权同一个目录时 URI 完全相同，会永远等不到结果。
+    const timeoutMs = 3 * 60 * 1000
+    const startedAt = Date.now()
+    let treeUri: string | null = before.uri ?? null
+    let version = before.version
+    while (Date.now() - startedAt < timeoutMs) {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const state = await invoke<{ uri?: string | null; version: number }>('saf_get_pick_state')
+      treeUri = state.uri ?? null
+      version = state.version
+      if (treeUri && version !== before.version) break
+    }
+
+    if (!treeUri || version === before.version) {
+      logger.warn('SAF pick cancelled or timed out')
+      return null
+    }
+    return treeUri
   }
 
   /**
@@ -156,6 +191,20 @@ export class FileUtils {
   static getFileName(filePath: string): string {
     const normalizedPath = filePath.replace(/[\\/]+$/, '')
     if (!normalizedPath) return filePath
+
+    // Android：content:// URI 的末段是 URL 编码的 document id
+    // （如 .../document/primary%3AMusic%2FSong.mp3），必须先解码再取文件名，
+    // 否则界面会直接显示 primary%3AMusic%2F…
+    if (normalizedPath.startsWith('content://')) {
+      let lastSegment = normalizedPath.split('/').pop() || normalizedPath
+      try {
+        lastSegment = decodeURIComponent(lastSegment)
+      } catch {
+        // 非法百分号编码时保留原样，不因解码失败影响整条列表
+      }
+      const decodedParts = lastSegment.split(/[/\\]/)
+      return decodedParts[decodedParts.length - 1] || lastSegment
+    }
 
     const parts = normalizedPath.split(/[/\\]/)
     return parts[parts.length - 1] || normalizedPath

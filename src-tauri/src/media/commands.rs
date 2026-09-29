@@ -23,19 +23,26 @@ pub fn read_directory(path: String) -> Result<Vec<String>, AppError> {
 }
 
 /// 获取指定目录中的所有音频文件，并创建播放列表
+///
+/// 扫描是 CPU + IPC 密集型（Android 上还要逐个走 SAF fd 桥），放到阻塞线程池执行，
+/// 避免占用主线程导致界面卡死。
 #[command]
-pub fn get_audio_files(path: String) -> Result<Playlist, AppError> {
-    get_audio_files_from_dir(&path)
+pub async fn get_audio_files(path: String) -> Result<Playlist, AppError> {
+    tauri::async_runtime::spawn_blocking(move || get_audio_files_from_dir(&path))
+        .await
+        .map_err(|e| AppError::msg(format!("扫描任务异常退出: {e}")))?
 }
 
 /// 获取多个目录中的所有音频文件，并创建播放列表
 #[command]
-pub fn get_all_audio_files(
-    state: State<AppState>,
+pub async fn get_all_audio_files(
+    state: State<'_, AppState>,
     paths: Vec<String>,
 ) -> Result<Vec<Playlist>, AppError> {
     let config = state.config_manager.load_config()?;
-    get_all_audio_files_from_dirs(&paths, &config)
+    tauri::async_runtime::spawn_blocking(move || get_all_audio_files_from_dirs(&paths, &config))
+        .await
+        .map_err(|e| AppError::msg(format!("批量扫描任务异常退出: {e}")))?
 }
 
 /// 检查文件是否存在
@@ -63,12 +70,23 @@ pub fn get_track_metadata(path: String) -> Result<TrackMetadata, AppError> {
 }
 
 /// 批量获取多个音轨的元数据信息
+///
+/// 并行提取（rayon）：Android 上每首都要经 SAF fd 桥打开，串行会明显拖慢首次扫描。
 #[command]
-pub fn get_tracks_metadata_batch(paths: Vec<String>) -> Vec<TrackMetadata> {
-    paths
-        .into_iter()
-        .filter_map(|path| get_track_metadata_internal(&path).ok())
-        .collect()
+pub async fn get_tracks_metadata_batch(paths: Vec<String>) -> Vec<TrackMetadata> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use rayon::prelude::*;
+        paths
+            .par_iter()
+            .filter_map(|path| {
+                get_track_metadata_internal(path)
+                    .map_err(|e| log::warn!("批量元数据提取失败 {path}: {e}"))
+                    .ok()
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// 按需提取并返回音轨封面缓存路径
@@ -151,4 +169,31 @@ pub fn flush_metadata_cache_command() -> Result<(), AppError> {
 #[command]
 pub fn get_temp_dir_command() -> String {
     std::env::temp_dir().to_string_lossy().to_string()
+}
+
+/// 调起系统目录选择器（Android SAF），仅移动端生效；桌面端为 no-op
+#[command]
+pub fn saf_request_pick() -> Result<(), AppError> {
+    crate::android_saf::request_pick_directory()
+}
+
+/// 获取已保存的音乐目录树 URI（Android SAF；桌面端返回 None）
+#[command]
+pub fn saf_get_saved_tree() -> Result<Option<String>, AppError> {
+    crate::android_saf::get_saved_tree_uri()
+}
+
+/// 获取 SAF 授权状态（URI + 授权版本号 + 显示名）
+///
+/// 前端轮询 `version` 判断系统选择器是否已返回：重新授权同一个目录时 URI 不变，
+/// 只有 version 会递增（早期版本比较 URI，导致"删掉目录再加同一个"永远加不上）。
+#[command]
+pub fn saf_get_pick_state() -> Result<crate::android_saf::SafPickState, AppError> {
+    crate::android_saf::get_pick_state()
+}
+
+/// 清除已保存的 SAF 树（移除音乐目录时同步清理，避免残留状态影响重新授权）
+#[command]
+pub fn saf_clear_saved_tree() -> Result<(), AppError> {
+    crate::android_saf::clear_saved_tree()
 }

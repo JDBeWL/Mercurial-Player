@@ -388,6 +388,11 @@ const handleListClick = (event: MouseEvent): void => {
   flex-direction: column;
   overflow: hidden;
   will-change: transform;
+  /* fixed 相对视口定位，不吃 #app 的安全区 padding，
+     安卓边到边时会顶到状态栏 / 手势条下面，这里单独让出来 */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-sizing: border-box;
   /* transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); */
 }
 
@@ -578,6 +583,16 @@ const handleListClick = (event: MouseEvent): void => {
 
   .list-item-supporting {
     font-size: 12px;
+  }
+}
+
+/* 竖屏（手机）：侧滑抽屉改为整屏。400px 的固定宽度在竖屏下会露出左侧背景，
+   手机上看起来像"没铺满的浮层"，而整屏列表才是手机上的正常形态。
+   与上面的 480px 规则分开写：那是按宽度收窄，这里是按方向。 */
+@media (orientation: portrait) {
+  .playlist-view {
+    width: 100vw;
+    max-width: 100vw;
   }
 }
 </style>

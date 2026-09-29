@@ -4,7 +4,7 @@
       ref="progressBarWrapper"
       class="progress-bar-wrapper"
       :class="{ 'is-hovering': isHovering, 'is-dragging': isDragging }"
-      @mousedown="handleMouseDown"
+      @pointerdown="handlePointerDown"
       @mouseenter="isHovering = true"
       @mouseleave="handleMouseLeave"
       @mousemove="handleMouseMoveHover"
@@ -23,6 +23,20 @@
           {{ formatTime(displayTime) }} / {{ formatTime(playerStore.duration) }}
         </div>
       </div>
+    </div>
+
+    <!-- 已播 / 总时长。桌面靠悬停气泡显示时间，触摸设备没有 hover，
+         竖屏下把这一行常显出来，否则手机上完全看不到播放进度时间。
+         位置刻意留在进度条下方 18px：进度条的热区（::before）向下探了 14px，
+         贴着放的话点时间文字会误触成"拖动进度条"。 -->
+    <div class="progress-time-row">
+      <span class="progress-time">{{ formatTime(displayTime) }}</span>
+      <!-- 中间插槽：给"音频信息"这类与时间同高的附加信息留的位置（App.vue 用）。
+           没有内容时它仍占 flex:1，把两端时间顶到边缘，布局不因有无内容而跳动。 -->
+      <span class="progress-time-middle">
+        <slot name="time-middle" />
+      </span>
+      <span class="progress-time">{{ formatTime(playerStore.duration) }}</span>
     </div>
   </div>
 </template>
@@ -79,7 +93,7 @@ const updateDragPosition = (percent: number) => {
 }
 
 // 拖拽骨架 (document 级监听/清理) 由 useDragValue 提供
-const { isDragging, startDrag: handleMouseDown } = useDragValue({
+const { isDragging, startDrag: handlePointerDown } = useDragValue({
   getPercent: (event) => {
     if (!progressBarWrapper.value) return 0
     const rect = progressBarWrapper.value.getBoundingClientRect()
@@ -133,6 +147,22 @@ const handleMouseLeave = () => {
   margin-bottom: 8px;
 }
 
+/* 时间行：桌面不占位（时间只在悬停气泡里出现），竖屏才由媒体查询打开 */
+.progress-time-row {
+  display: none;
+}
+
+/* 中间插槽：吃掉两端时间之间的空间。内容居中、超长省略 ——
+   音频信息（格式/码率/采样率…）在窄屏上很容易过长，不能让它把时间挤走。 */
+.progress-time-middle {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .progress-bar-wrapper {
   width: 100%;
   height: 0px; /* 零高度不占布局空间，避免撑大磨砂玻璃面板 */
@@ -140,6 +170,9 @@ const handleMouseLeave = () => {
   align-items: center;
   cursor: pointer;
   position: relative;
+  /* 拖拽走 pointer events：不禁用默认手势的话，手指按下后浏览器会把这一下
+     判成页面滚动并在移动时抛 pointercancel，导致安卓上"拖不动进度条" */
+  touch-action: none;
 }
 
 /* 伪元素上下各延伸 10px 扩大可点击范围。 */
@@ -150,6 +183,15 @@ const handleMouseLeave = () => {
   right: 0;
   top: -10px;
   bottom: -10px;
+}
+
+/* 触摸设备（手机/平板）：22px 的有效高度对手指太薄，扩到 32px 便于点按拖动。
+   高度保持 0 不变，只把热区往下探出去一点，不影响布局。 */
+@media (pointer: coarse) {
+  .progress-bar-wrapper::before {
+    top: -14px;
+    bottom: -14px;
+  }
 }
 
 .progress-bar {
@@ -246,6 +288,26 @@ const handleMouseLeave = () => {
   to {
     opacity: 1;
     transform: translateX(-50%) scaleY(0.5) translateY(0);
+  }
+}
+
+/* 竖屏（手机）：常显时间行。
+   这个组件的根在 App.vue 上被 .global-progress-bar 拉了 -16px 的通栏负边距
+   （让进度条贴到窗口左右边缘），所以文字要补回 16px 才能与上方的曲目信息、
+   下方的控制栏对齐；本组件只有 App.vue 这一处使用，不担心影响别处。 */
+@media (orientation: portrait) {
+  .progress-time-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    /* 18px 见模板注释：给进度条向下探 14px 的触控热区留出空白 */
+    margin-top: 18px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--md-sys-color-on-surface-variant);
+    /* 等宽数字：时间跳动时宽度不变，两端文字不会左右抖动 */
+    font-variant-numeric: tabular-nums;
   }
 }
 </style>

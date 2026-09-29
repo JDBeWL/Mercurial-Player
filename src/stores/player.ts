@@ -26,6 +26,15 @@ import {
 } from './shuffle'
 import { PlayerCacheManager } from './playerCache'
 import { saveLastSessionNow, resumeLastSession } from './playerSession'
+import {
+  isAndroid,
+  setupQueueListener,
+  setupStateSyncListener,
+  startBackgroundHeartbeat,
+  stopBackgroundHeartbeat,
+  stopPlayQueueWatch,
+  watchPlayQueue,
+} from './playerQueue'
 
 // ============================================================================
 // 常量
@@ -68,6 +77,7 @@ interface PlayerState {
   _isInitializing: boolean
   _initPromise: Promise<void> | null
   _trackEndedUnlisten: UnlistenFn | null
+  _queueUnlisten: UnlistenFn | null
   _positionUnlisten: UnlistenFn | null
   _taskbarPreviousUnlisten: UnlistenFn | null
   _taskbarPlayPauseUnlisten: UnlistenFn | null
@@ -151,6 +161,7 @@ export const usePlayerStore = defineStore('player', {
     _deviceSwitchRequiredUnlisten: null,
     _noDeviceAvailableUnlisten: null,
     _deviceDefaultChangedUnlisten: null,
+    _queueUnlisten: null,
 
     // 并发保护
     _playRequestId: 0,
@@ -282,6 +293,12 @@ export const usePlayerStore = defineStore('player', {
     async _setupListeners(): Promise<void> {
       this._trackEndedUnlisten = await setupTrackEndedListener(this)
       this._positionUnlisten = await setupPositionListener(this)
+      this._queueUnlisten = await setupQueueListener(this)
+      await setupStateSyncListener(this)
+
+      // 阶段 3.0：把播放队列同步给 Rust（Android 开启自动推进）
+      watchPlayQueue(this)
+      void startBackgroundHeartbeat()
 
       const taskbarListeners = await setupTaskbarListeners(this)
       this._taskbarPreviousUnlisten = taskbarListeners.previous
@@ -637,6 +654,14 @@ export const usePlayerStore = defineStore('player', {
     async _onEnded(): Promise<void> {
       if (this._isDestroyed || !this.currentTrack) return
 
+      // Android：后台时 WebView 的 JS 会被节流/冻结，`track-ended` 可能延迟甚至
+      // 无人处理，自动切歌已下沉到 Rust 播放队列（阶段 3.0）。这里直接让位，
+      // 由 `queue-track-changed` 事件同步 UI，避免前后端各切一次导致跳曲。
+      if (await isAndroid()) {
+        logger.debug('Android: 自动切歌由 Rust 队列接管，跳过前端 _onEnded')
+        return
+      }
+
       // 空播放列表守卫:停止播放,避免后续 list 模式分支 % 0 得到 NaN
       if (this.playlist.length === 0) {
         this.isPlaying = false
@@ -818,6 +843,28 @@ export const usePlayerStore = defineStore('player', {
         this.repeatMode = 'track'
       } else {
         this.repeatMode = 'none'
+      }
+    },
+
+    /**
+     * 播放模式按钮（底部控制栏最左那颗）的单键循环：
+     * 顺序播放 → 列表循环 → 单曲循环 → 随机播放 → 顺序播放……
+     *
+     * 之所以能压成一个按钮：本 store 里 `isShuffle` 与 `repeatMode` 本来就是**互斥**的
+     * （`toggleShuffle` 打开时会把 `repeatMode` 置回 `none`，`toggleRepeat` 进入 `list`
+     * 时会把 `isShuffle` 关掉），所以四种状态刚好是一条环，不会丢组合。
+     */
+    cyclePlayMode(): void {
+      if (this.isShuffle) {
+        // 随机 → 顺序（toggleShuffle 关闭时不动 repeatMode，此时本来就是 none）
+        this.toggleShuffle()
+      } else if (this.repeatMode === 'none') {
+        this.repeatMode = 'list'
+      } else if (this.repeatMode === 'list') {
+        this.repeatMode = 'track'
+      } else {
+        // 单曲循环 → 随机（toggleShuffle 打开时会顺手把 repeatMode 置 none）
+        this.toggleShuffle()
       }
     },
 
@@ -1021,12 +1068,15 @@ export const usePlayerStore = defineStore('player', {
       this._lastDeviceSwitchTarget = null
 
       this._stopCleanupTask()
+      stopPlayQueueWatch()
+      stopBackgroundHeartbeat()
       this._cacheManager?.destroy()
       this._cacheManager = null
 
       // 统一清理所有 Tauri 事件监听 (各 unlisten 字段在注册后仍保留字段本身,便于判空)
       const unlistenFns = [
         this._trackEndedUnlisten,
+        this._queueUnlisten,
         this._positionUnlisten,
         this._taskbarPreviousUnlisten,
         this._taskbarPlayPauseUnlisten,

@@ -130,6 +130,38 @@ describe('usePlayerStore navigation & state', () => {
     })
   })
 
+  // ---------- 播放模式（底部一颗按钮循环四种状态） ----------
+
+  describe('cyclePlayMode', () => {
+    it('依次走 顺序 -> 列表循环 -> 单曲循环 -> 随机 -> 顺序', () => {
+      const store = usePlayerStore()
+      expect([store.repeatMode, store.isShuffle]).toEqual(['none', false])
+
+      store.cyclePlayMode()
+      expect([store.repeatMode, store.isShuffle]).toEqual(['list', false])
+
+      store.cyclePlayMode()
+      expect([store.repeatMode, store.isShuffle]).toEqual(['track', false])
+
+      store.cyclePlayMode()
+      expect([store.repeatMode, store.isShuffle]).toEqual(['none', true])
+
+      store.cyclePlayMode()
+      expect([store.repeatMode, store.isShuffle]).toEqual(['none', false])
+    })
+
+    it('从随机态退出时不会残留 repeatMode', () => {
+      const store = usePlayerStore()
+      store.cyclePlayMode() // list
+      store.cyclePlayMode() // track
+      store.cyclePlayMode() // shuffle
+      expect(store.isShuffle).toBe(true)
+      store.cyclePlayMode() // 回到顺序
+      expect(store.isShuffle).toBe(false)
+      expect(store.repeatMode).toBe('none')
+    })
+  })
+
   // ---------- nextTrack / previousTrack ----------
 
   describe('nextTrack / previousTrack (non-shuffle)', () => {

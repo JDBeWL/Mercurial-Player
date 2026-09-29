@@ -88,15 +88,23 @@ body {
   font-family: var(--app-font-family);
   background-color: var(--md-sys-color-background);
   color: var(--md-sys-color-on-background);
+  /* 这是 app 不是网页：触摸端不需要默认的蓝色长按高亮块 */
+  -webkit-tap-highlight-color: transparent;
   transition:
     background-color var(--transition-normal) var(--ease-in-out),
     color var(--transition-normal) var(--ease-in-out);
 }
 
 /* 换主题期间所有元素统一走这份过渡，否则各元素各写各的、中间帧会出现区域间色差。
-   由 theme store 在换色前置上、过渡跑完摘掉（见 scheduleThemeFade）；只过渡颜色属性。 */
+   由 theme store 在换色前置上、过渡跑完摘掉（见 scheduleThemeFade）；只过渡颜色属性。
+
+   ⚠️ `transition` 是整体覆盖的属性：加了 !important 的这条通杀规则会把元素自身
+   的 transition 一并抹掉。进入/退出沉浸式封面时恰好会触发"按封面主色自动切深浅
+   主题"，于是沉浸层的淡入淡出被动效自身的换色覆盖吞掉——表现为切进封面没过渡。
+   因此必须把"这一刻正在跑自己动画"的元素排除掉：Vue 的过渡类恒以
+   -enter-active / -leave-active 结尾，用属性选择器排除就不用逐个枚举。 */
 html.theme-fading,
-html.theme-fading *,
+html.theme-fading *:not([class*='-enter-active']):not([class*='-leave-active']),
 html.theme-fading *::before,
 html.theme-fading *::after {
   transition:
@@ -107,7 +115,15 @@ html.theme-fading *::after {
 }
 
 #app {
+  /* dvh 优先：Android 上系统手势条/软键盘会让 100vh 与实际可视高度不一致，
+     底部控制条会被顶到屏幕外。不支持 dvh 时回落到 100vh */
   height: 100vh;
+  height: 100dvh;
+  /* Activity 一旦是全屏/边到边，内容会被状态栏和手势条压住，这里把安全区让出来。
+     非边到边时 inset 取值为 0，等于没有副作用，因此可以直接常驻。 */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
 }

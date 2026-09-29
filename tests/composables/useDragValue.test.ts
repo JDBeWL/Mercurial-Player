@@ -32,8 +32,9 @@ const mountDrag = (options: Partial<UseDragValueOptions> = {}) => {
   }
 }
 
-const mouse = (type: string, clientX: number) =>
-  document.dispatchEvent(new MouseEvent(type, { clientX, bubbles: true }))
+/** 构造一个指针事件；鼠标/触摸/触控笔共用同一种事件类型 */
+const pointer = (type: string, clientX: number, init: PointerEventInit = {}) =>
+  document.dispatchEvent(new PointerEvent(type, { clientX, bubbles: true, ...init }))
 
 beforeEach(() => {
   mounted.length = 0
@@ -50,11 +51,11 @@ describe('useDragValue', () => {
     expect(api.percent.value).toBe(0)
   })
 
-  it('enters the dragging state on mousedown', () => {
+  it('enters the dragging state on pointerdown', () => {
     const onStart = vi.fn()
     const { api } = mountDrag({ onStart })
 
-    api.startDrag(new MouseEvent('mousedown', { clientX: 25 }))
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 25 }))
 
     expect(api.isDragging.value).toBe(true)
     expect(api.percent.value).toBe(0.25)
@@ -64,11 +65,11 @@ describe('useDragValue', () => {
   it('aborts the drag when onStart returns false', () => {
     const { api } = mountDrag({ onStart: () => false })
 
-    api.startDrag(new MouseEvent('mousedown', { clientX: 25 }))
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 25 }))
 
     expect(api.isDragging.value).toBe(false)
 
-    mouse('mousemove', 80)
+    pointer('pointermove', 80)
     // 监听器未挂载,移动不应被处理
     expect(api.percent.value).toBe(0.25)
   })
@@ -76,9 +77,9 @@ describe('useDragValue', () => {
   it('tracks the pointer while dragging', () => {
     const onMove = vi.fn()
     const { api } = mountDrag({ onMove })
-    api.startDrag(new MouseEvent('mousedown', { clientX: 10 }))
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 10 }))
 
-    mouse('mousemove', 60)
+    pointer('pointermove', 60)
 
     expect(api.percent.value).toBe(0.6)
     expect(onMove).toHaveBeenCalledWith(0.6)
@@ -88,7 +89,7 @@ describe('useDragValue', () => {
     const onMove = vi.fn()
     const { api } = mountDrag({ onMove })
 
-    mouse('mousemove', 60)
+    pointer('pointermove', 60)
 
     expect(api.percent.value).toBe(0)
     expect(onMove).not.toHaveBeenCalled()
@@ -97,44 +98,44 @@ describe('useDragValue', () => {
   it('keeps tracking after the pointer leaves the slider element', () => {
     // document 级监听:鼠标移出滑块范围也应继续拖拽
     const { api } = mountDrag()
-    api.startDrag(new MouseEvent('mousedown', { clientX: 10 }))
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 10 }))
 
     const outside = document.createElement('div')
     document.body.appendChild(outside)
-    outside.dispatchEvent(new MouseEvent('mousemove', { clientX: 90, bubbles: true }))
+    outside.dispatchEvent(new PointerEvent('pointermove', { clientX: 90, bubbles: true }))
 
     expect(api.percent.value).toBe(0.9)
   })
 
-  it('finishes the drag on mouseup', () => {
+  it('finishes the drag on pointerup', () => {
     const onEnd = vi.fn()
     const { api } = mountDrag({ onEnd })
-    api.startDrag(new MouseEvent('mousedown', { clientX: 10 }))
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 10 }))
 
-    mouse('mouseup', 75)
+    pointer('pointerup', 75)
 
     expect(api.isDragging.value).toBe(false)
     expect(api.percent.value).toBe(0.75)
     expect(onEnd).toHaveBeenCalledWith(0.75)
   })
 
-  it('removes the document listeners after mouseup', () => {
+  it('removes the document listeners after pointerup', () => {
     const onMove = vi.fn()
     const { api } = mountDrag({ onMove })
-    api.startDrag(new MouseEvent('mousedown', { clientX: 10 }))
-    mouse('mouseup', 75)
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 10 }))
+    pointer('pointerup', 75)
     onMove.mockClear()
 
-    mouse('mousemove', 20)
+    pointer('pointermove', 20)
 
     expect(onMove).not.toHaveBeenCalled()
   })
 
-  it('ignores a mouseup that was not preceded by a drag', () => {
+  it('ignores a pointerup that was not preceded by a drag', () => {
     const onEnd = vi.fn()
     const { api } = mountDrag({ onEnd })
 
-    mouse('mouseup', 75)
+    pointer('pointerup', 75)
 
     expect(onEnd).not.toHaveBeenCalled()
     expect(api.isDragging.value).toBe(false)
@@ -143,10 +144,10 @@ describe('useDragValue', () => {
   it('does not stack duplicate listeners when started twice', () => {
     const onMove = vi.fn()
     const { api } = mountDrag({ onMove })
-    api.startDrag(new MouseEvent('mousedown', { clientX: 10 }))
-    api.startDrag(new MouseEvent('mousedown', { clientX: 20 }))
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 10 }))
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 20 }))
 
-    mouse('mousemove', 50)
+    pointer('pointermove', 50)
 
     expect(onMove).toHaveBeenCalledTimes(1)
   })
@@ -155,14 +156,14 @@ describe('useDragValue', () => {
     const onEnd = vi.fn()
     const onMove = vi.fn()
     const { api } = mountDrag({ onEnd, onMove })
-    api.startDrag(new MouseEvent('mousedown', { clientX: 10 }))
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 10 }))
 
     api.stopDrag()
 
     expect(api.isDragging.value).toBe(false)
     expect(onEnd).not.toHaveBeenCalled()
 
-    mouse('mousemove', 50)
+    pointer('pointermove', 50)
     expect(onMove).not.toHaveBeenCalled()
   })
 
@@ -170,19 +171,19 @@ describe('useDragValue', () => {
     const getPercent = vi.fn((event: MouseEvent) => event.clientX / PERCENT_SCALE)
     const { api } = mountDrag({ getPercent })
 
-    expect(api.getPercent(new MouseEvent('click', { clientX: 40 }))).toBe(0.4)
+    expect(api.getPercent(new PointerEvent('click', { clientX: 40 }))).toBe(0.4)
     expect(getPercent).toHaveBeenCalled()
   })
 
   it('cleans up automatically when the component unmounts', () => {
     const onMove = vi.fn()
     const { api, wrapper } = mountDrag({ onMove })
-    api.startDrag(new MouseEvent('mousedown', { clientX: 10 }))
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 10 }))
 
     wrapper.unmount()
 
     expect(api.isDragging.value).toBe(false)
-    mouse('mousemove', 50)
+    pointer('pointermove', 50)
     expect(onMove).not.toHaveBeenCalled()
   })
 
@@ -191,8 +192,40 @@ describe('useDragValue', () => {
     const { api } = mountDrag({
       getPercent: (event: MouseEvent) => event.clientX / PERCENT_SCALE,
     })
-    api.startDrag(new MouseEvent('mousedown', { clientX: 250 }))
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 250 }))
 
     expect(api.percent.value).toBe(2.5)
+  })
+
+  it('aborts cleanly on pointercancel without applying the value', () => {
+    // 安卓上手指手势被系统接管（回滚滚动/来电）会抛 pointercancel，
+    // 此时既不能提交取值，也必须退出拖拽态
+    const onEnd = vi.fn()
+    const onMove = vi.fn()
+    const { api } = mountDrag({ onEnd, onMove })
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 10 }))
+
+    pointer('pointercancel', 90)
+
+    expect(api.isDragging.value).toBe(false)
+    expect(onEnd).not.toHaveBeenCalled()
+
+    pointer('pointermove', 40)
+    expect(onMove).not.toHaveBeenCalled()
+  })
+
+  it('ignores a secondary touch finger on the same slider', () => {
+    const { api } = mountDrag()
+    api.startDrag(new PointerEvent('pointerdown', { clientX: 10 }))
+
+    // 第二根手指：isPrimary 为 false
+    const second = new PointerEvent('pointerdown', {
+      clientX: 90,
+      pointerType: 'touch',
+      isPrimary: false,
+    })
+    api.startDrag(second)
+
+    expect(api.percent.value).toBe(0.1)
   })
 })

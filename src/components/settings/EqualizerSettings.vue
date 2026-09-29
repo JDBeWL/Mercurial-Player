@@ -44,7 +44,7 @@
         ref="preampSlider"
         class="slider horizontal"
         :class="{ disabled: !enabled, dragging: preampDragging }"
-        @mousedown="startPreampDrag"
+        @pointerdown="startPreampDrag"
         @click="handlePreampClick"
       >
         <div class="slider-track"></div>
@@ -65,7 +65,7 @@
             :ref="(el) => (bandSliders[index] = el as HTMLElement)"
             class="slider vertical"
             :class="{ disabled: !enabled, dragging: bandDragging && activeBandIndex === index }"
-            @mousedown="(e) => startBandDrag(e, index)"
+            @pointerdown="(e) => startBandDrag(e, index)"
             @click="(e) => handleBandClick(e, index)"
           >
             <div class="slider-track"></div>
@@ -488,6 +488,8 @@ onMounted(() => {
   cursor: pointer;
   display: flex;
   align-items: center;
+  /* 触摸拖拽：不禁用默认手势会被当成横向滚动，拖到一半就断 */
+  touch-action: none;
 }
 
 .slider.horizontal .slider-track {
@@ -584,6 +586,8 @@ onMounted(() => {
   width: 20px;
   height: 120px;
   cursor: pointer;
+  /* 竖直方向滑动默认是页面滚动手势，必须显式接管 */
+  touch-action: none;
 }
 
 .slider.vertical .slider-track {

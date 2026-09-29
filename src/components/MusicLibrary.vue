@@ -571,6 +571,11 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* fixed 相对视口定位，不吃 #app 的安全区 padding，
+     安卓边到边时会顶到状态栏 / 手势条下面，这里单独让出来 */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-sizing: border-box;
 }
 
 @media (max-width: 480px) {
@@ -585,6 +590,16 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
 
   .list-item-supporting {
     font-size: 12px;
+  }
+}
+
+/* 竖屏（手机）：侧滑抽屉改为整屏。450px 的固定宽度在竖屏下会露出右侧背景，
+   手机上看起来像"没铺满的浮层"，而整屏列表才是手机上的正常形态。
+   与上面的 480px 规则分开写：那是按宽度收窄，这里是按方向。 */
+@media (orientation: portrait) {
+  .music-library {
+    width: 100vw;
+    max-width: 100vw;
   }
 }
 
@@ -734,6 +749,13 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   min-height: 44px;
 }
 
+/* ⚠️ 这两条曾各有一个 `max-height: 1.4em`（注释写"约 1 行的高度"），
+   Android 上它会把 g / y / p 这些带下伸部的字母连下半截一起切掉。
+   原因：ANDROID 系统字号设置会被 WebView 放大到网页文字上（本机 font_scale=1.17，
+   16px 实际按 18.56px 排），行高跟着变成 26px，而 `1.4em` 是按未放大的 16px 算的
+   22.4px —— 于是盒子比文字矮 4px，正好切掉下伸部（实测 clientHeight 22 / scrollHeight 26）。
+   两行既然都是 `white-space: nowrap`，盒子高度天然就是 1 行，这个 max-height 从来是多余的，
+   直接删掉即可（留着它只是给"字号被外部放大"埋雷）。 */
 .list-item-headline {
   font-size: 16px;
   font-weight: 400;
@@ -744,8 +766,6 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   /* 添加平滑过渡 */
   transition: all 0.2s ease;
   line-height: 1.4;
-  /* 确保短标题不会有多余空间 */
-  max-height: 1.4em; /* 约1行的高度 */
 }
 
 .list-item-supporting {
@@ -757,8 +777,6 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   /* 添加平滑过渡 */
   transition: all 0.2s ease;
   line-height: 1.4;
-  /* 确保短艺术家名不会有多余空间 */
-  max-height: 1.4em; /* 约1行的高度 */
 }
 
 .list-item-trailing {

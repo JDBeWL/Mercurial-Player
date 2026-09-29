@@ -30,6 +30,7 @@ function createMockStore(overrides: Record<string, unknown> = {}) {
     togglePlay: vi.fn(),
     toggleShuffle: vi.fn(),
     toggleRepeat: vi.fn(),
+    cyclePlayMode: vi.fn(),
     nextTrack: vi.fn(),
     previousTrack: vi.fn(),
     ...overrides,
@@ -168,99 +169,69 @@ describe('PlayerControls.vue', () => {
     })
   })
 
-  // ---------- 随机/循环模式 ----------
+  // ---------- 播放模式（随机 / 循环合并成一颗按钮） ----------
 
-  describe('随机模式', () => {
-    it('isShuffle=false 时 shuffle 按钮无 active 类', async () => {
+  describe('播放模式按钮', () => {
+    /** 播放模式按钮是 .controls-row 里的第 0 颗（原本的随机按钮位置） */
+    const modeBtnOf = (w: ReturnType<typeof mount>) => w.findAll('.icon-button')[0]!
+
+    /** 顺序态的判定靠图标上的 .is-order（那一道斜线），不再靠 active 高亮 */
+    const modeIconOf = (w: ReturnType<typeof mount>) => w.find('.play-mode-icon')
+
+    it('顺序播放：显示 repeat 且带 is-order 斜线，且不加 active 高亮', async () => {
       store.isShuffle = false
+      store.repeatMode = 'none'
       wrapper = mountComponent(store)
       await nextTick()
-      const buttons = wrapper.findAll('.icon-button')
-      const shuffleBtn = buttons[0]!
-      expect(shuffleBtn.classes()).not.toContain('active')
+      expect(modeBtnOf(wrapper).classes()).not.toContain('active')
+      const icon = modeIconOf(wrapper)
+      expect(icon.text()).toContain('repeat')
+      expect(icon.text()).not.toContain('repeat_one')
+      expect(icon.classes()).toContain('is-order')
     })
 
-    it('isShuffle=true 时 shuffle 按钮有 active 类', async () => {
+    it('列表循环：显示 repeat 且没有斜线，不加 active 高亮', async () => {
+      store.repeatMode = 'list'
+      wrapper = mountComponent(store)
+      await nextTick()
+      expect(modeBtnOf(wrapper).classes()).not.toContain('active')
+      const icon = modeIconOf(wrapper)
+      expect(icon.text()).toContain('repeat')
+      expect(icon.text()).not.toContain('repeat_one')
+      expect(icon.classes()).not.toContain('is-order')
+    })
+
+    it('单曲循环：显示 repeat_one，不加 active 高亮', async () => {
+      store.repeatMode = 'track'
+      wrapper = mountComponent(store)
+      await nextTick()
+      expect(modeBtnOf(wrapper).classes()).not.toContain('active')
+      const icon = modeIconOf(wrapper)
+      expect(icon.text()).toContain('repeat_one')
+      expect(icon.classes()).not.toContain('is-order')
+    })
+
+    it('随机播放：显示 shuffle，不加 active 高亮', async () => {
       store.isShuffle = true
       wrapper = mountComponent(store)
       await nextTick()
-      const buttons = wrapper.findAll('.icon-button')
-      const shuffleBtn = buttons[0]!
-      expect(shuffleBtn.classes()).toContain('active')
+      expect(modeBtnOf(wrapper).classes()).not.toContain('active')
+      const icon = modeIconOf(wrapper)
+      expect(icon.text()).toContain('shuffle')
+      expect(icon.classes()).not.toContain('is-order')
     })
 
-    it('点击 shuffle 按钮调用 toggleShuffle', async () => {
+    it('点击播放模式按钮调用 cyclePlayMode', async () => {
       wrapper = mountComponent(store)
       await nextTick()
-      const buttons = wrapper.findAll('.icon-button')
-      await buttons[0]!.trigger('click')
-      expect(store.toggleShuffle).toHaveBeenCalledTimes(1)
-    })
-  })
-
-  describe('循环模式', () => {
-    it('repeatMode=none 时循环按钮无 active 类', async () => {
-      store.repeatMode = 'none'
-      wrapper = mountComponent(store)
-      await nextTick()
-      const buttons = wrapper.findAll('.icon-button')
-      const repeatBtn = buttons[4]!
-      expect(repeatBtn.classes()).not.toContain('active')
+      await modeBtnOf(wrapper).trigger('click')
+      expect(store.cyclePlayMode).toHaveBeenCalledTimes(1)
     })
 
-    it('repeatMode=list 时循环按钮有 active 类', async () => {
-      store.repeatMode = 'list'
+    it('底部一行只有 4 颗主按钮（随机与循环已合并）', async () => {
       wrapper = mountComponent(store)
       await nextTick()
-      const buttons = wrapper.findAll('.icon-button')
-      const repeatBtn = buttons[4]!
-      expect(repeatBtn.classes()).toContain('active')
-    })
-
-    it('repeatMode=track 时循环按钮有 active 类', async () => {
-      store.repeatMode = 'track'
-      wrapper = mountComponent(store)
-      await nextTick()
-      const buttons = wrapper.findAll('.icon-button')
-      const repeatBtn = buttons[4]!
-      expect(repeatBtn.classes()).toContain('active')
-    })
-
-    it('repeatMode=track 时显示 repeat_one 图标', async () => {
-      store.repeatMode = 'track'
-      wrapper = mountComponent(store)
-      await nextTick()
-      const buttons = wrapper.findAll('.icon-button')
-      const repeatBtn = buttons[4]!
-      expect(repeatBtn.text()).toContain('repeat_one')
-    })
-
-    it('repeatMode=list 时显示 repeat 图标', async () => {
-      store.repeatMode = 'list'
-      wrapper = mountComponent(store)
-      await nextTick()
-      const buttons = wrapper.findAll('.icon-button')
-      const repeatBtn = buttons[4]!
-      expect(repeatBtn.text()).toContain('repeat')
-      expect(repeatBtn.text()).not.toContain('repeat_one')
-    })
-
-    it('repeatMode=none 时显示 repeat 图标', async () => {
-      store.repeatMode = 'none'
-      wrapper = mountComponent(store)
-      await nextTick()
-      const buttons = wrapper.findAll('.icon-button')
-      const repeatBtn = buttons[4]!
-      expect(repeatBtn.text()).toContain('repeat')
-      expect(repeatBtn.text()).not.toContain('repeat_one')
-    })
-
-    it('点击循环按钮调用 toggleRepeat', async () => {
-      wrapper = mountComponent(store)
-      await nextTick()
-      const buttons = wrapper.findAll('.icon-button')
-      await buttons[4]!.trigger('click')
-      expect(store.toggleRepeat).toHaveBeenCalledTimes(1)
+      expect(wrapper.findAll('.controls-row .icon-button')).toHaveLength(4)
     })
   })
 
@@ -278,16 +249,17 @@ describe('PlayerControls.vue', () => {
       expect(wrapper.find('.play-button').text()).toContain('play_arrow')
     })
 
-    it('shuffle 状态切换时 active 类更新', async () => {
-      store.isShuffle = false
+    it('播放模式切换时图标与斜线标记同步更新', async () => {
       wrapper = mountComponent(store)
       await nextTick()
-      const buttons = wrapper.findAll('.icon-button')
-      expect(buttons[0]!.classes()).not.toContain('active')
+      const icon = wrapper.find('.play-mode-icon')
+      expect(icon.classes()).toContain('is-order')
+      expect(icon.text()).toContain('repeat')
 
       store.isShuffle = true
       await nextTick()
-      expect(buttons[0]!.classes()).toContain('active')
+      expect(icon.classes()).not.toContain('is-order')
+      expect(icon.text()).toContain('shuffle')
     })
   })
 })

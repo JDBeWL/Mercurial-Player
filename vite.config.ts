@@ -25,7 +25,18 @@ export default defineConfig({
     legalComments: 'none',
   },
   build: {
-    target: process.env.TAURI_PLATFORM == 'windows' ? 'chrome120' : 'safari17',
+    // CSS 产物里是否保留 -webkit- 前缀，完全由这个 target 决定（esbuild 按目标
+    // 浏览器的支持情况增删前缀）。Android 上真正的运行时是 **System WebView 110**，
+    // 比桌面端 WebView2 老得多：无前缀的 `mask-image` 要 Chrome 120 才支持，
+    // 写成 safari17 会让压缩器把 `-webkit-mask-image` 整条删掉，
+    // 于是靠 mask 做渐变的染色层退化成一块不透明纯色、把封面糊死。
+    // 所以安卓必须显式按 chrome110 构建。
+    target:
+      process.env.TAURI_PLATFORM == 'android'
+        ? 'chrome110'
+        : process.env.TAURI_PLATFORM == 'windows'
+          ? 'chrome120'
+          : 'safari17',
     minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_DEBUG,
     // 启用压缩和优化

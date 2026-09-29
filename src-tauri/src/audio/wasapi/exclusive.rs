@@ -118,18 +118,9 @@ pub enum AudioResponse {
     Error(String),
 }
 
-/// WASAPI独占模式播放器状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlaybackState {
-    Uninitialized,
-    Stopped,
-    Playing,
-    Paused,
-    /// 带淡出的停止中:已发送 StopWithFadeOut 命令,音频线程仍在淡出,完成后转为 Stopped
-    Stopping,
-    /// 带淡出的暂停中:已发送 PauseWithFadeOut 命令,音频线程仍在淡出,完成后转为 Paused
-    Pausing,
-}
+// 播放器状态已提到平台无关的 `crate::audio::PlaybackState`：
+// Android 的 AAudio 独占通道与命令层共用同一套状态语义。
+pub use crate::audio::PlaybackState;
 
 // ============================================================================
 // 无锁 SPSC 采样环形缓冲

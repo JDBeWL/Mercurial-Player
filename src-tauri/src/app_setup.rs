@@ -2,17 +2,17 @@
 //!
 //! 包含 setup 回调、播放器创建与任务栏钩子,保持 main() 精简。
 
-use mercurial_player::{AppState, system};
+use crate::{AppState, system};
 
 #[cfg(windows)]
-use mercurial_player::audio::WasapiExclusivePlayback;
+use crate::audio::WasapiExclusivePlayback;
 #[cfg(windows)]
-use mercurial_player::taskbar;
+use crate::taskbar;
 
 use rodio::stream::DeviceSinkBuilder;
 
 use crate::app_state::{AudioOutput, PlatformPlayer};
-use mercurial_player::error::AppError;
+use crate::error::AppError;
 
 /// Tauri setup 回调主体
 pub fn init(app: &tauri::App) {
@@ -91,7 +91,43 @@ pub fn init(app: &tauri::App) {
         }
     }
 
-    // 启动设备监听器
+    // Android：缓存与配置文件迁移到应用沙箱目录
+    // 桌面端默认用系统临时目录 + 主程序同级 data/（免安装包体积、便携化）；
+    // Android 的 /tmp 多数情况不可写、current_exe() 在只读 APK 内，统一收敛到 app 数据目录。
+    #[cfg(target_os = "android")]
+    {
+        use tauri::Manager;
+        // JNI 反向调用（通知栏 / MediaSession / 耳机线控）需要进程级 AppHandle
+        crate::android::set_app_handle(app.handle());
+        if let Ok(data_dir) = app.path().app_data_dir() {
+            // config.json / library-cache.json 改写到 <app_data>/data
+            crate::config::set_data_dir_override(data_dir.clone());
+            log::info!("Android data dir override: {}", data_dir.display());
+        }
+        if let Ok(cache_dir) = app.path().app_cache_dir() {
+            let media_cache = cache_dir.join("mercurial-player");
+            if let Some(parent) = media_cache.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    log::warn!("创建 Android 缓存目录失败: {e}");
+                }
+            }
+            // 元数据缓存 + 封面缓存统一走自定义缓存路径（metadata_cache_path/cover_cache_dir 优先读它）
+            if let Err(e) = crate::media::metadata::set_cover_cache_path(Some(
+                media_cache.to_string_lossy().to_string(),
+            )) {
+                log::warn!("设置 Android 缓存路径失败: {e}");
+            }
+            // 封面临入经 asset 协议提供前端，须放开访问范围
+            if let Err(e) = app
+                .asset_protocol_scope()
+                .allow_directory(&media_cache, true)
+            {
+                log::warn!("放行 Android 缓存目录到 asset 范围失败: {e}");
+            }
+        }
+    }
+
+    // 启动设备监听器（Android 上为降级 no-op，见 device_monitor.rs）
     {
         let state: tauri::State<AppState> = app.state();
         // 锁中毒时自动恢复而非 panic
@@ -108,7 +144,7 @@ pub fn init(app: &tauri::App) {
 
     // 清理封面缓存
     {
-        use mercurial_player::media::metadata;
+        use crate::media::metadata;
         let state: tauri::State<AppState> = app.state();
         let max_cache_size_mb = state
             .config_manager
@@ -208,10 +244,50 @@ pub fn create_exclusive_mode_player(device_name: &str) -> Result<AudioOutput, Ap
     }
 }
 
-/// 创建独占模式播放器（非Windows平台回退到共享模式）
-#[cfg(not(windows))]
+/// 创建独占模式播放器（Android：AAudio 独占 / USB DAC 位完美）
+///
+/// 与 Windows 的 WASAPI 独占是同一类诉求，但设备选择完全不同：AAudio 需要
+/// 系统设备 id（来自 `AudioDeviceInfo.getId()`），而 cpal 枚举出来的名字多半是
+/// 同一个手机型号，没法用。因此这里让 `initialize` 自己去找当前的 USB 音频设备。
+#[cfg(target_os = "android")]
 pub fn create_exclusive_mode_player(_device_name: &str) -> Result<AudioOutput, AppError> {
-    log::warn!("Exclusive mode is only supported on Windows, falling back to shared mode");
+    // 共享模式的 sink 照旧创建：USB 拔出后要能立刻回落到它，
+    // 否则设置页关掉开关时会出现"没有播放器可用"的空窗
+    let mixer_sink = DeviceSinkBuilder::from_default_device()
+        .map_err(|e| format!("Failed to create default device sink builder: {e}"))?
+        .open_stream()
+        .map_err(|e| format!("Failed to create default mixer sink: {e}"))?;
+    let player = rodio::Player::connect_new(mixer_sink.mixer());
+
+    let aaudio = crate::audio::aaudio::AaudioExclusivePlayer::new();
+    match aaudio.initialize(None) {
+        Ok((sample_rate, channels, device)) => {
+            log::info!("AAudio 独占就绪: {device} @ {sample_rate}Hz, {channels} ch");
+            Ok(AudioOutput {
+                sink: player,
+                mixer_sink,
+                wasapi_player: Some(aaudio),
+            })
+        }
+        Err(e) => {
+            // 没有 USB DAC（或设备被占用）时不能让应用起不来：回落共享模式，
+            // 由设置页把"未检测到 USB 音频设备"如实显示出来
+            log::warn!("AAudio 独占初始化失败，回落共享模式: {e}");
+            Ok(AudioOutput {
+                sink: player,
+                mixer_sink,
+                wasapi_player: None,
+            })
+        }
+    }
+}
+
+/// 创建独占模式播放器（非 Windows / 非 Android 平台回退到共享模式）
+#[cfg(not(any(windows, target_os = "android")))]
+pub fn create_exclusive_mode_player(_device_name: &str) -> Result<AudioOutput, AppError> {
+    log::warn!(
+        "Exclusive mode is only supported on Windows / Android, falling back to shared mode"
+    );
     let mixer_sink = DeviceSinkBuilder::from_default_device()
         .map_err(|e| format!("Failed to create default device sink builder: {e}"))?
         .open_stream()

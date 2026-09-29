@@ -55,6 +55,7 @@ import { useLyricsTypography } from '@/composables/useLyricsTypography'
 import { listen } from '@tauri-apps/api/event'
 import logger from '@/utils/logger'
 import { detectLyricLanguage } from '@/utils/languageDetect'
+import { supportsColorMix } from '@/utils/cssSupport'
 import type { KaraokeWord } from '@/types'
 
 export default {
@@ -180,8 +181,12 @@ export default {
 
     const karaokeStyleCache = new Map<string, Record<string, string>>()
     const activeColor = 'var(--md-sys-color-primary)'
-    const inactiveColor =
-      'color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1))'
+    // 老 WebView（如 Android 110）不支持 color-mix()，会整条丢弃内联赋值；
+    // 逐字高亮是靠 background-image + background-clip: text 画的，
+    // 丢了就是空白一片，故按支持情况换用安全色
+    const inactiveColor = supportsColorMix()
+      ? 'color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1))'
+      : 'var(--md-sys-color-outline)'
 
     const getKaraokeStyle = (word: KaraokeWord) => {
       const offset = playerStore.lyricsOffset || 0
@@ -417,7 +422,8 @@ canvas {
 }
 
 .lyric-original {
-  font-size: 32px;
+  /* 与主歌词面板共用「歌词字号」倍率（变量写在根元素上，见 applyLyricsFontScale） */
+  font-size: calc(32px * var(--lyrics-scale, 1));
   font-weight: 500;
   color: var(--md-sys-color-primary);
   line-height: 1.3;
@@ -440,7 +446,8 @@ canvas {
 }
 
 .lyric-translation {
-  font-size: 32px;
+  /* 同上：跟随「歌词字号」倍率 */
+  font-size: calc(32px * var(--lyrics-scale, 1));
   color: var(--md-sys-color-primary);
   font-weight: 500;
   /* 限制最多显示2行 */
@@ -450,12 +457,23 @@ canvas {
   overflow: hidden;
 }
 
+/* 卡拉OK 逐字高亮的"未唱部分"底色。
+   Android WebView 110 不支持 color-mix()，且自定义属性值不会被语法校验——
+   旧 WebView 会把这个（对它而言）无意义的字符串原样保留，再替换进 background-image
+   时整条声明失效；配合下面的 background-clip: text + color: transparent，
+   歌词会整行消失。因此默认给一个所有浏览器都能解析的颜色，只在支持时才升级。 */
 .karaoke-word {
-  --inactive-color: color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1));
+  --inactive-color: var(--md-sys-color-outline);
   --active-color: var(--md-sys-color-primary);
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
+}
+
+@supports (background-image: color-mix(in srgb, red 40%, blue)) {
+  .karaoke-word {
+    --inactive-color: color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1));
+  }
 }
 
 .lyric-placeholder {

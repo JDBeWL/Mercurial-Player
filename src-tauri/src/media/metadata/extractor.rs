@@ -1,16 +1,31 @@
 //! 音轨元数据提取。
 
+use crate::android_saf;
 use crate::error::AppError;
 use crate::security::is_sensitive_path;
 use lofty::prelude::{Accessor, AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
 use serde::{Deserialize, Serialize};
+use std::io::BufReader;
 use std::path::Path;
 
 use super::cache::{
     get_metadata_from_cache, save_metadata_to_cache, save_metadata_to_memory_cache,
 };
 use super::cover::extract_cover_to_cache;
+
+/// 打开媒体文件并读取标签（本地路径 / Android SAF 雙模式）
+fn open_tagged_file(path: &str) -> Result<lofty::file::TaggedFile, AppError> {
+    let file = android_saf::open_media_file(path)?;
+    // Probe 0.24+ 需显式 guess_file_type 才会识别格式（read 不自动探测）
+    Probe::new(BufReader::new(file))
+        .guess_file_type()
+        .map_err(|e| e.to_string())
+        .map_err(AppError::from)?
+        .read()
+        .map_err(|e| e.to_string())
+        .map_err(AppError::from)
+}
 
 /// 单个音轨的元数据
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -102,11 +117,10 @@ pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, AppErr
         }
 
         // 缓存中没有封面或封面文件不存在，补充提取封面
-        let file_path = Path::new(path);
-        if let Ok(tagged_file) = Probe::open(file_path).and_then(|f| f.read()) {
+        if let Ok(tagged_file) = open_tagged_file(path) {
             if let Some(tag) = tagged_file.primary_tag() {
                 if let Some(picture) = tag.pictures().first() {
-                    cached.cover_path = extract_cover_to_cache(file_path, picture).ok();
+                    cached.cover_path = extract_cover_to_cache(Path::new(path), picture).ok();
                 }
             }
         }
@@ -120,11 +134,10 @@ pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, AppErr
     let mut metadata = get_track_metadata_with_options(path, false)?;
 
     // 提取封面路径
-    let file_path = Path::new(path);
-    if let Ok(tagged_file) = Probe::open(file_path).and_then(|f| f.read()) {
+    if let Ok(tagged_file) = open_tagged_file(path) {
         if let Some(tag) = tagged_file.primary_tag() {
             if let Some(picture) = tag.pictures().first() {
-                metadata.cover_path = extract_cover_to_cache(file_path, picture).ok();
+                metadata.cover_path = extract_cover_to_cache(Path::new(path), picture).ok();
             }
         }
     }
@@ -140,28 +153,42 @@ fn get_track_metadata_with_options(
     path: &str,
     include_cover: bool,
 ) -> Result<TrackMetadata, AppError> {
+    let is_uri = android_saf::is_content_uri(path);
     let file_path = Path::new(path);
 
-    let tagged_file = Probe::open(file_path)
-        .map_err(|e| e.to_string())?
-        .read()
-        .map_err(|e| e.to_string())?;
-
+    let tagged_file = open_tagged_file(path)?;
     let properties = tagged_file.properties();
     let duration = properties.duration().as_secs_f64();
 
-    let format = file_path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(str::to_uppercase);
-
-    let mut metadata = TrackMetadata {
-        path: path.replace('/', "\\"),
-        name: file_path
+    // 本地路径从扩展名推断格式；content URI 由 SAF 侧传入的显示名兜底（上层填写）
+    let format = if is_uri {
+        None
+    } else {
+        file_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_uppercase)
+    };
+    // name 兜底：本地路径取文件名；content URI 解码 document id 取文件名
+    // （URI 末段是 URL 编码的 document id，直接展示会变成 primary%3AMusic%2F…）
+    let name = if is_uri {
+        android_saf::display_name_from_document_uri(path)
+    } else {
+        file_path
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
-            .to_string(),
+            .to_string()
+    };
+
+    let mut metadata = TrackMetadata {
+        // 桌面端保持原有 `\` 风格路径（兼容旧缓存）；URI 原样保留
+        path: if is_uri {
+            path.to_string()
+        } else {
+            path.replace('/', "\\")
+        },
+        name,
         duration: if duration > 0.0 { Some(duration) } else { None },
         bitrate: properties.audio_bitrate(),
         sample_rate: properties.sample_rate(),
@@ -178,7 +205,7 @@ fn get_track_metadata_with_options(
 
         if include_cover {
             if let Some(picture) = tag.pictures().first() {
-                metadata.cover_path = extract_cover_to_cache(file_path, picture).ok();
+                metadata.cover_path = extract_cover_to_cache(Path::new(path), picture).ok();
             }
         }
     }

@@ -115,7 +115,7 @@ pub(crate) fn downmix_surround_to_stereo(
 
 /// 通道转换(in-place 版本):写入预分配缓冲区,避免每帧堆分配。
 /// out 会被 clear 并填充结果。
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "android"))]
 pub(crate) fn convert_channels_into(
     samples: &[f32],
     src_ch: u16,
@@ -262,7 +262,7 @@ mod tests {
         );
     }
 
-    #[cfg(windows)] // convert_channels_into 仅 Windows 独占模式使用
+    #[cfg(any(windows, target_os = "android"))] // convert_channels_into 仅独占模式（Windows/AAudio）使用
     #[test]
     fn test_convert_channels_into_6_to_2_matches_downmix() {
         // (6|8,2) 分支必须与 downmix_surround_to_stereo 逐帧一致

@@ -22,7 +22,7 @@ export function useImmersiveAutoHide(immersiveCover: Ref<boolean>): {
   let immersiveHideTimer: ReturnType<typeof setTimeout> | null = null
   let immersivePointerY = -1
 
-  // 鼠标是否位于顶/底控制栏热区（悬停时不隐藏，保证可点击）
+  // 指针（鼠标/手指）是否位于顶/底控制栏热区（停在这两处时不隐藏，保证可点击）
   const immersivePointerInControls = (): boolean => {
     if (immersivePointerY < 0) return false
     return (
@@ -45,8 +45,14 @@ export function useImmersiveAutoHide(immersiveCover: Ref<boolean>): {
     }, IMMERSIVE_IDLE_DELAY)
   }
 
-  const handleImmersivePointerMove = (e: MouseEvent): void => {
+  const handleImmersivePointerMove = (e: PointerEvent): void => {
     immersivePointerY = e.clientY
+    markImmersiveActivity()
+  }
+
+  // 只标记活动、不更新热区：手指点一下是这样的——先 pointerdown，
+  // 但"不足以更正驻某处"的判断不该由单次点击给出（悬浮判定的 Y 值会失真）
+  const handleImmersivePointerDown = (): void => {
     markImmersiveActivity()
   }
 
@@ -76,13 +82,18 @@ export function useImmersiveAutoHide(immersiveCover: Ref<boolean>): {
     if (active) {
       immersiveControlsVisible.value = true
       immersivePointerY = -1
-      window.addEventListener('mousemove', handleImmersivePointerMove, { passive: true })
+      // 这里必须用 Pointer Events：Android WebView 上手指不会产生 mousemove，
+      // 一旦缩进自动隐藏就再也唤不回来（手机也没有 Esc），等于被困在沉浸模式里。
+      // pointerdown 覆盖"点一下唤出"，pointermove 覆盖拖动手势
+      window.addEventListener('pointermove', handleImmersivePointerMove, { passive: true })
+      window.addEventListener('pointerdown', handleImmersivePointerDown, { passive: true })
       document.addEventListener('mouseleave', handleImmersivePointerLeave)
       window.addEventListener('blur', handleImmersiveBlur)
       window.addEventListener('focus', handleImmersiveFocus)
       markImmersiveActivity()
     } else {
-      window.removeEventListener('mousemove', handleImmersivePointerMove)
+      window.removeEventListener('pointermove', handleImmersivePointerMove)
+      window.removeEventListener('pointerdown', handleImmersivePointerDown)
       document.removeEventListener('mouseleave', handleImmersivePointerLeave)
       window.removeEventListener('blur', handleImmersiveBlur)
       window.removeEventListener('focus', handleImmersiveFocus)
@@ -97,7 +108,8 @@ export function useImmersiveAutoHide(immersiveCover: Ref<boolean>): {
 
   // 组件卸载时移除监听(与 watch(false) 分支同样彻底,避免泄漏)
   const cleanup = (): void => {
-    window.removeEventListener('mousemove', handleImmersivePointerMove)
+    window.removeEventListener('pointermove', handleImmersivePointerMove)
+    window.removeEventListener('pointerdown', handleImmersivePointerDown)
     document.removeEventListener('mouseleave', handleImmersivePointerLeave)
     window.removeEventListener('blur', handleImmersiveBlur)
     window.removeEventListener('focus', handleImmersiveFocus)

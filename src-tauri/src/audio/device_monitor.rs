@@ -9,18 +9,28 @@
 //! 但由于 COM 回调触发和 previous_default 状态同步存在运行时可靠性问题，
 //! 默认关闭以保证功能稳定。
 
-use cpal::traits::HostTrait;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+// Duration / Emitter / HostTrait / get_device_friendly_name 只有轮询与 Windows 事件
+// 实现用到;Android 上监听已降级 no-op,这些 import 一并按平台门控。
+#[cfg(not(target_os = "android"))]
+use cpal::traits::HostTrait;
 // Duration / Emitter 只有轮询实现用到;启用 imm-notification 后该实现不参与编译,
 // windows_impl 内部有自己的同名导入。
-#[cfg(not(all(target_os = "windows", feature = "imm-notification")))]
+#[cfg(all(
+    not(target_os = "android"),
+    not(all(target_os = "windows", feature = "imm-notification"))
+))]
 use std::time::Duration;
 use tauri::AppHandle;
-#[cfg(not(all(target_os = "windows", feature = "imm-notification")))]
+#[cfg(all(
+    not(target_os = "android"),
+    not(all(target_os = "windows", feature = "imm-notification"))
+))]
 use tauri::Emitter;
 
+#[cfg(not(target_os = "android"))]
 use super::device::get_device_friendly_name;
 
 /// 设备变更事件
@@ -55,20 +65,32 @@ impl DeviceMonitor {
         }
 
         self.is_running.store(true, Ordering::SeqCst);
-        let is_running = Arc::clone(&self.is_running);
-        let current_device = Arc::clone(&self.current_device);
 
-        let monitor_thread = thread::spawn(move || {
-            // 两者入参一致,按 feature 二选一:启用 imm-notification 时走 Windows
-            // 事件驱动实现,否则走跨平台 cpal 轮询实现。
-            #[cfg(all(target_os = "windows", feature = "imm-notification"))]
-            windows_impl::run_windows_monitor(app_handle, is_running, current_device);
+        // Android：AAudio 设备枚举语义与桌面不同（插拔/切换事件不适用），
+        // 且 cpal 枚举 loop 在移动端无意义，直接降级为 no-op。
+        // 桌面端代码包在 cfg(not) 中，避免 Android 下 unreachable 警告。
+        #[cfg(not(target_os = "android"))]
+        {
+            let is_running = Arc::clone(&self.is_running);
+            let current_device = Arc::clone(&self.current_device);
 
-            #[cfg(not(all(target_os = "windows", feature = "imm-notification")))]
-            monitor_device_changes(app_handle, is_running, current_device);
-        });
+            let monitor_thread = thread::spawn(move || {
+                // 两者入参一致,按 feature 二选一:启用 imm-notification 时走 Windows
+                // 事件驱动实现,否则走跨平台 cpal 轮询实现。
+                #[cfg(all(target_os = "windows", feature = "imm-notification"))]
+                windows_impl::run_windows_monitor(app_handle, is_running, current_device);
 
-        self.monitor_thread = Some(monitor_thread);
+                #[cfg(not(all(target_os = "windows", feature = "imm-notification")))]
+                monitor_device_changes(app_handle, is_running, current_device);
+            });
+
+            self.monitor_thread = Some(monitor_thread);
+        }
+        #[cfg(target_os = "android")]
+        {
+            let _ = app_handle;
+            log::info!("Device monitor disabled on Android (AAudio manages devices)");
+        }
     }
 
     /// 停止设备监听
@@ -114,6 +136,7 @@ impl Drop for DeviceMonitor {
 /// 仅在使用轮询模式时编译:启用 imm-notification 后由 `windows_impl` 接管,
 /// 此时本函数(及其专用的 `get_device_names`)不会被引用。
 #[cfg(not(all(target_os = "windows", feature = "imm-notification")))]
+#[cfg(not(target_os = "android"))]
 fn monitor_device_changes(
     app: AppHandle,
     is_running: Arc<AtomicBool>,
@@ -229,6 +252,7 @@ fn monitor_device_changes(
 
 /// 获取所有设备名称
 #[cfg(not(all(target_os = "windows", feature = "imm-notification")))]
+#[cfg(not(target_os = "android"))]
 fn get_device_names(host: &cpal::Host) -> Vec<String> {
     host.output_devices()
         .ok()
@@ -241,12 +265,14 @@ fn get_device_names(host: &cpal::Host) -> Vec<String> {
 }
 
 /// 获取系统默认输出设备名称
+#[cfg(not(target_os = "android"))]
 fn get_default_device_name(host: &cpal::Host) -> Option<String> {
     host.default_output_device()
         .and_then(|device| get_device_friendly_name(&device))
 }
 
 /// 查找备用设备
+#[cfg(not(target_os = "android"))]
 fn find_fallback_device(host: &cpal::Host, excluded_device: &str) -> Option<String> {
     // 首先尝试默认设备
     if let Some(default_device) = host.default_output_device() {

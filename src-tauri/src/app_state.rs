@@ -5,23 +5,37 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
 
-use mercurial_player::config::ConfigManager;
-use mercurial_player::equalizer::GlobalEqualizer;
-use mercurial_player::{
+use crate::config::ConfigManager;
+use crate::equalizer::GlobalEqualizer;
+use crate::{
     AppState, AudioOutputState, DecodeThreadState, FadeControl, PlayerState, TrackState,
     VisualizationState,
 };
 
 #[cfg(windows)]
-use mercurial_player::audio::{DeviceMonitor, WasapiExclusivePlayback};
+use crate::audio::{DeviceMonitor, PlaybackQueue, WasapiExclusivePlayback};
 
-#[cfg(not(windows))]
-use mercurial_player::{Placeholder, audio::DeviceMonitor};
+#[cfg(target_os = "android")]
+use crate::audio::{AaudioExclusivePlayer, DeviceMonitor, PlaybackQueue};
 
-/// 跨平台的播放器类型别名
+#[cfg(not(any(windows, target_os = "android")))]
+use crate::{
+    Placeholder,
+    audio::{DeviceMonitor, PlaybackQueue},
+};
+
+/// 跨平台的"独占/直出"播放器类型别名
+///
+/// - Windows：WASAPI 独占
+/// - Android：AAudio 独占（USB DAC 位完美）
+/// - 其它：占位实现（所有方法返回错误）
+///
+/// 三者共用同一套方法签名，命令层与解码推送线程因此不必按平台分支。
 #[cfg(windows)]
 pub type PlatformPlayer = WasapiExclusivePlayback;
-#[cfg(not(windows))]
+#[cfg(target_os = "android")]
+pub type PlatformPlayer = AaudioExclusivePlayer;
+#[cfg(not(any(windows, target_os = "android")))]
 pub type PlatformPlayer = Placeholder;
 
 /// 启动期创建的音频输出三件套(sink 由流派生,流需保活)
@@ -74,6 +88,7 @@ pub fn build_app_state(
                 id: Arc::new(AtomicU64::new(0)),
             },
             device_monitor: Arc::new(Mutex::new(DeviceMonitor::new(device_name))),
+            queue: Arc::new(Mutex::new(PlaybackQueue::new())),
             fade: FadeControl {
                 generation: Arc::new(AtomicU32::new(0)),
                 enabled: Arc::new(AtomicBool::new(fade_enabled)),

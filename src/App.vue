@@ -39,9 +39,49 @@
       <Transition name="fade" mode="out-in">
         <Settings v-if="configStore.ui.showConfigPanel" key="settings" />
         <div v-else key="player" class="player-container">
-          <div class="player-main">
-            <!-- 上方区域：左侧专辑封面，右侧歌词 -->
+          <!-- data-upper-view 挂在 .player-main 上而不是 .player-upper 上：
+               竖屏的布局规则现在要同时管到 .player-upper（面板互斥）和
+               .player-lower（曲目信息只有封面态才贴着进度条），
+               .player-main 是这两块最近的共同祖先。 -->
+          <div class="player-main" :data-upper-view="upperView">
+            <!-- 上方区域：横屏是"左封面 + 右歌词"双栏；竖屏收成单面板，
+                 由 upperView 决定显示封面 / 歌词中的哪一个 -->
             <div class="player-upper">
+              <!-- 右上角控制区域。必须挂在 .player-upper 上而不是 .player-right 里：
+                   竖屏切到封面时 .player-right 整体隐藏，按钮跟着一起消失的话
+                   就再也切不回歌词/波形了。 -->
+              <div class="view-controls-container">
+                <!-- 在线歌词指示图标：只在桌面端显示。
+                     手机上它绝对定位在上部区域右上角，正好压在歌词面板的第一行上，
+                     而"这句歌词来自在线歌词库"在手机上并没有可操作的后续动作，
+                     所以按最小代价直接不渲染。 -->
+                <div
+                  v-if="lyricsSource === 'online' && !isAndroid"
+                  class="online-lyrics-indicator"
+                  :title="$t('lyrics.fromOnline')"
+                >
+                  <span class="material-symbols-rounded">cloud_done</span>
+                </div>
+                <!-- 沉浸封面没有独立的"退出"按钮：点左半区、按 Esc 都能退出
+                     （见 handlePlayerLeftClick / handleCoverKeydown），
+                     而手机竖屏下沉浸封面本来就不可达（点封面是"翻到歌词"）。 -->
+                <!-- 视图切换：只在桌面端出现。
+                     手机上（横竖都一样）没有波形这一态 —— 竖屏是 封面 ⇄ 歌词 靠点击驱动，
+                     横屏本来就是"左封面 + 右歌词"双栏，不需要切换；顶栏空间在手机上很宝贵，
+                     能用手势覆盖的动作就不再占一个图标。
+                     ⚠️ 判据必须用平台（isAndroid）而不是方向（isPortrait）：
+                     桌面窗口绝大多数时候也是"横屏"，用方向判据会把桌面端一起改掉。
+                     isAndroid=false 时与改动前完全一致（含桌面窄高窗口）。 -->
+                <button
+                  v-if="!isAndroid"
+                  class="icon-button view-toggle-btn"
+                  :title="$t(nextUpperViewTitleKey)"
+                  @click="cycleUpperView"
+                >
+                  <span class="material-symbols-rounded">{{ nextUpperViewIcon }}</span>
+                </button>
+              </div>
+
               <!-- 左侧：专辑封面（沉浸式封面模式下点击退出） -->
               <div
                 class="player-left"
@@ -62,12 +102,20 @@
                       class="album-art-wrapper"
                       @mousemove="handleAlbumArtMouseMove"
                       @mouseleave="handleAlbumArtMouseLeave"
+                      @pointerdown="handleCoverPointerDown"
+                      @pointerup="handleCoverPointerUp"
+                      @pointercancel="handleCoverPointerUp"
+                      @pointerleave="handleCoverPointerUp"
                     >
                       <div
                         class="album-art"
                         :style="{ backgroundImage: currentTrackCover }"
-                        :title="$t('player.viewCoverFullscreen')"
-                        @click.stop="openImmersiveCover"
+                        :title="
+                          isPortrait
+                            ? $t('window.switchToLyrics')
+                            : $t('player.viewCoverFullscreen')
+                        "
+                        @click.stop="handleAlbumArtClick"
                       >
                         <div
                           v-if="!currentTrack || !currentTrack.coverPath"
@@ -76,60 +124,83 @@
                           <span class="material-symbols-rounded">album</span>
                         </div>
                       </div>
-                      <!-- 提取封面按钮 -->
+                      <!-- 提取封面按钮：桌面端才有（鼠标移到封面右下角出现）。 -->
                       <button
-                        v-if="currentTrack && currentTrack.coverPath"
+                        v-if="!isAndroid && currentTrack && currentTrack.coverPath"
                         class="extract-cover-btn"
                         :class="{ show: showExtractButton }"
                         :title="$t('player.extractCover')"
-                        @click="extractCover"
+                        @click="handleExtractCover"
                       >
                         <span class="material-symbols-rounded">download</span>
                       </button>
+                      <!-- 手机端：长按封面弹出的菜单。触摸屏没有 hover，按钮点不出来，
+                           所以换成显式手势。遮罩铺满封面区域，点空白处即可关闭。 -->
+                      <Transition name="fade">
+                        <div
+                          v-if="showCoverMenu"
+                          class="cover-menu-backdrop"
+                          @click.stop="closeCoverMenu"
+                          @pointerdown.stop
+                          @pointerup.stop
+                        >
+                          <div class="cover-menu" role="menu">
+                            <button
+                              class="cover-menu-item"
+                              role="menuitem"
+                              @click.stop="onCoverMenuExtract"
+                            >
+                              <span class="material-symbols-rounded">download</span>
+                              <span>{{ $t('player.extractCover') }}</span>
+                            </button>
+                            <button
+                              class="cover-menu-item"
+                              role="menuitem"
+                              @click.stop="closeCoverMenu"
+                            >
+                              <span class="material-symbols-rounded">close</span>
+                              <span>{{ $t('common.cancel') }}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </Transition>
                     </div>
                   </Transition>
                 </div>
               </div>
 
-              <!-- 右侧：歌词/可视化 -->
+              <!-- 右侧：歌词/可视化（竖屏下与封面二选一） -->
               <div class="player-right">
-                <!-- 右上角控制区域 -->
-                <div class="view-controls-container">
-                  <!-- 在线歌词指示图标 -->
-                  <div
-                    v-if="lyricsSource === 'online'"
-                    class="online-lyrics-indicator"
-                    :title="$t('lyrics.fromOnline')"
-                  >
-                    <span class="material-symbols-rounded">cloud_done</span>
-                  </div>
-                  <!-- 视图切换按钮 -->
-                  <button
-                    class="icon-button view-toggle-btn"
-                    :title="
-                      viewMode === 'lyrics'
-                        ? $t('window.switchToVisualizer')
-                        : $t('window.switchToLyrics')
-                    "
-                    @click="toggleViewMode"
-                  >
-                    <span class="material-symbols-rounded">{{
-                      viewMode === 'lyrics' ? 'equalizer' : 'lyrics'
-                    }}</span>
-                  </button>
-                </div>
-
                 <Transition name="fade" mode="out-in">
-                  <LyricsDisplay v-if="viewMode === 'lyrics'" class="lyrics-container" />
+                  <!-- blank-click：点歌词面板的空白处。竖屏下用它返回封面
+                       （判定逻辑在 LyricsDisplay 内部，那里才知道哪些元素可点） -->
+                  <LyricsDisplay
+                    v-if="panelView === 'lyrics'"
+                    class="lyrics-container"
+                    @blank-click="handleLyricsBlankClick"
+                  />
                   <VisualizerPanel v-else class="lyrics-container" />
                 </Transition>
               </div>
+
             </div>
 
-            <!-- 下方区域：进度条和控制按钮 -->
+            <!-- 下方区域：进度条 + 控制按钮 -->
             <div class="player-lower">
-              <ProgressBar class="global-progress-bar" />
-              <div class="controls-area">
+              <!-- 音频信息走 time-middle 插槽：竖屏下它与"已播 / 总时长"
+                   同处一行（时间行只在竖屏常显）。横屏这一行整行 display:none，
+                   音频信息仍在左下角 .audio-info-corner 里，不受影响。 -->
+              <ProgressBar class="global-progress-bar">
+                <template #time-middle>
+                  <span
+                    v-if="currentTrack && formattedAudioInfo && configStore.general.showAudioInfo"
+                    :title="formattedAudioInfo"
+                  >
+                    {{ formattedAudioInfo }}
+                  </span>
+                </template>
+              </ProgressBar>
+              <div class="controls-area" :data-mobile="isAndroid ? 'true' : undefined">
                 <!-- 左下角：音频信息（与封面水平居中对齐） -->
                 <div class="audio-info-corner">
                   <div
@@ -143,8 +214,12 @@
                 <PlayerControls />
                 <!-- 右下角：播放列表开关、桌面歌词与音量控制 -->
                 <div class="side-controls">
+                  <!-- 播放列表入口常显（用户要求）：刚装完还没有任何曲目时也要在，
+                     否则底部这一行的右侧是空的，用户不知道有这个功能。
+                     列表为空时抽屉里显示 playlist.empty（"播放列表为空"）。
+                     另外这也让底部一行的按钮数量恒定（竖屏 5 颗），
+                     不会因为列表有无而忽多忽少、把整行的间距改掉。 -->
                   <button
-                    v-if="playerStore.playlist.length > 0"
                     class="icon-button"
                     :class="{ active: showPlaylist }"
                     :title="$t('playlist.title')"
@@ -152,7 +227,9 @@
                   >
                     <span class="material-symbols-rounded">queue_music</span>
                   </button>
+                  <!-- 桌面歌词是一块独立的桌面级浮窗，Android 上没有对应实现 -->
                   <button
+                    v-if="!isAndroid"
                     class="icon-button"
                     :class="{ active: configStore.lyrics?.desktopLyrics?.enabled }"
                     :title="$t('config.toggleDesktopLyrics')"
@@ -160,7 +237,10 @@
                   >
                     <span class="material-symbols-rounded">subtitles</span>
                   </button>
-                  <VolumeControl />
+                  <!-- 音量：手机端不提供。安卓本身有音量键，且这个竖向拖拽滑块
+                       在手指上并不好用；省下的宽度正好缓解底部一行的拥挤
+                       （411px 宽的机器上，主按钮 + 播放列表 + 音量已经越过可用宽度）。 -->
+                  <VolumeControl v-if="!isAndroid" />
                 </div>
               </div>
             </div>
@@ -183,8 +263,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useI18n } from 'vue-i18n'
 import { usePlayerStore } from './stores/player'
 import { useThemeStore } from './stores/theme'
 import { useConfigStore } from './stores/config'
@@ -200,6 +281,8 @@ import { useAlbumArtInteraction } from './composables/useAlbumArtInteraction'
 import { useDominantColor } from './composables/useDominantColor'
 import { useImmersiveAutoHide } from '@/composables/useImmersiveAutoHide'
 import { useImmersiveCover } from './composables/useImmersiveCover'
+import { usePlatform } from './composables/usePlatform'
+import { useOrientation } from './composables/useOrientation'
 import { useGlobalKeyboard } from './composables/useGlobalKeyboard'
 import { useAppLifecycle } from './composables/useAppLifecycle'
 import type { ImmersiveColorScheme } from './types'
@@ -219,12 +302,23 @@ const playerStore = usePlayerStore()
 const themeStore = useThemeStore()
 const configStore = useConfigStore()
 
+// Android 降级：隐藏桌面专属入口（如独立的桌面歌词浮窗）
+const { isAndroid } = usePlatform()
+
+// 方向判定：竖屏把上部区域从"左封面+右歌词"改成单面板切换
+const { isPortrait } = useOrientation()
+
 // 初始化错误通知(浮层组件 ErrorNotifications 自行读取同一模块级单例)
-const { showError, unsubscribe: unsubscribeErrorNotification } = useErrorNotification()
+const { showError, showSuccess, unsubscribe: unsubscribeErrorNotification } =
+  useErrorNotification()
+
+// script 里也要用到文案（提取封面的成功提示），模板侧继续走 $t
+const { t } = useI18n()
 
 const { currentTrack, playlist, audioInfo, currentTrackIndex } = storeToRefs(playerStore)
 
-// 使用 composable 处理音轨信息(标题/艺术家解析逻辑在 AppHeader 中同样复用)
+// 音轨信息：标题/艺术家的解析与展示现在统一由 AppHeader 负责（竖屏封面态也是），
+// 这里只留 watchTrack —— 切歌时刷新标题解析缓存。
 const { watchTrack } = useTrackInfo()
 
 // 获取歌词来源
@@ -245,9 +339,19 @@ const {
   syncWindowState,
 } = useWindowControls()
 
-// 专辑封面交互（右下角提取封面按钮的显隐与导出逻辑）
-const { showExtractButton, handleAlbumArtMouseMove, handleAlbumArtMouseLeave, extractCover } =
-  useAlbumArtInteraction(currentTrack)
+// 专辑封面交互：桌面端是右下角的悬停按钮，手机端是长按封面弹出的菜单
+// （触摸屏没有 hover，按钮永远点不出来）
+const {
+  showExtractButton,
+  showCoverMenu,
+  handleAlbumArtMouseMove,
+  handleAlbumArtMouseLeave,
+  handleCoverPointerDown,
+  handleCoverPointerUp,
+  closeCoverMenu,
+  consumeLongPressClick,
+  extractCover,
+} = useAlbumArtInteraction(currentTrack, { longPressEnabled: isAndroid })
 
 // 全局键盘事件（内部自注册 onMounted/onUnmounted 监听 keydown）
 useGlobalKeyboard()
@@ -256,12 +360,121 @@ useGlobalKeyboard()
 const showLibrary = ref(false)
 const showPlaylist = ref(false)
 const immersiveCover = ref(false)
-const viewMode = ref('lyrics') // 'lyrics' or 'visualizer'
+
+// 上部区域当前显示哪一块：封面 / 歌词 / 波形。
+// - 横屏：左栏恒为封面，不参与切换，所以是 封面(=歌词)↔波形 两态；
+// - 竖屏：只有 封面 ⇄ 歌词 两态。波形不进竖屏（手机上那块区域留给封面和歌词
+//   更值），切换也不靠按钮，而是点封面看歌词、点歌词空白处回封面。
+type UpperView = 'cover' | 'lyrics' | 'visualizer'
+const upperView = ref<UpperView>('cover')
+
+const upperViewOrder = computed<UpperView[]>(() =>
+  isPortrait.value ? ['cover', 'lyrics'] : ['cover', 'visualizer'],
+)
+
+const nextUpperView = computed<UpperView>(() => {
+  const order = upperViewOrder.value
+  const index = order.indexOf(upperView.value)
+  // index < 0 理论上不会发生（'cover' 在两个顺序表里都在环上），
+  // 留个兜底保证这个 computed 恒有值
+  const nextIndex = index < 0 ? 0 : (index + 1) % order.length
+  return order[nextIndex] ?? 'cover'
+})
+
+const cycleUpperView = (): void => {
+  upperView.value = nextUpperView.value
+}
+
+// 右侧面板实际渲染什么：只有横屏才可能出现波形；竖屏恒为歌词。
+// 不能只判断 upperView —— 横屏停在波形时转成竖屏，upperView 会短暂
+// 还是 'visualizer'（下面的 watch 随后把它归位），这里必须自己不渲染波形。
+const panelView = computed<'lyrics' | 'visualizer'>(() =>
+  !isPortrait.value && upperView.value === 'visualizer' ? 'visualizer' : 'lyrics',
+)
+
+// 按钮图标/提示都指向"按下去会看到的那一块"。
+//
+// ⚠️ 不能直接拿 upperView 的名字取图标：横屏左栏恒为封面，右栏在
+// 'cover' 与 'lyrics' 两种状态下渲染的都是歌词（见 panelView），
+// 所以横屏的 'cover' 对用户来说就是"歌词"，图标必须给 lyrics。
+// 原始实现写的正是 `viewMode === 'lyrics' ? 'equalizer' : 'lyrics'`，
+// 那套语义是对的，这里只是把"竖屏下的封面"单独分出来。
+// ⚠️ 这套图标桌面端与手机共用，改动会同时影响桌面端。
+const nextUpperViewIcon = computed(() => {
+  const next = nextUpperView.value
+  if (next === 'visualizer') return 'equalizer'
+  return next === 'cover' && isPortrait.value ? 'album' : 'lyrics'
+})
+
+const nextUpperViewTitleKey = computed(() => {
+  const next = nextUpperView.value
+  if (next === 'visualizer') return 'window.switchToVisualizer'
+  return next === 'cover' && isPortrait.value ? 'window.switchToCover' : 'window.switchToLyrics'
+})
 
 // 进入沉浸式封面模式（仅有封面时可用）
 const openImmersiveCover = (): void => {
   if (currentTrack.value?.coverPath) {
     immersiveCover.value = true
+  }
+}
+
+// 点封面：竖屏下翻到歌词，横屏/桌面仍进入沉浸式封面。
+// 竖屏的封面本身已经占满整个宽度，"再叠一层全屏封面"是冗余的，
+// 而"点封面看歌词"才是手机上最常用的动作。
+const handleAlbumArtClick = (): void => {
+  // 手机上长按封面会弹出菜单，手指抬起后浏览器仍会补一次 click。
+  // 不吞掉的话菜单一出现就立刻被这次 click 切成歌词，等于按不出来。
+  if (consumeLongPressClick()) return
+  if (isPortrait.value) {
+    upperView.value = 'lyrics'
+    return
+  }
+  openImmersiveCover()
+}
+
+// 提取封面：桌面端是悬停按钮，手机端是长按菜单里的一项。
+// 手机上"点了没反应"是最糟的反馈，所以成功给一条提示，
+// 失败由 useAlbumArtInteraction 内部经 errorHandler 弹出具体原因。
+const handleExtractCover = async (): Promise<void> => {
+  const result = await extractCover()
+  if (result === 'saved') {
+    showSuccess(t('player.extractCoverSuccess'))
+  }
+}
+
+const onCoverMenuExtract = async (): Promise<void> => {
+  closeCoverMenu()
+  await handleExtractCover()
+}
+
+// 切换上部面板后补一次 resize 广播：
+// - 歌词组件靠 window resize 把当前行重新滚到中间；竖屏下它可能刚经历
+//   display:none（隐藏期间设置的 scrollTop 不生效，必须重算）
+// - 波形画布同样只在 resize 时重新测量，从隐藏恢复时要重测尺寸
+watch(upperView, () => {
+  void nextTick(() => window.dispatchEvent(new Event('resize')))
+})
+
+// 转成竖屏时要收拾两件横屏留下的状态：
+// 1. 退出沉浸式封面 —— 竖屏没有"点左半区退出"的那块空白，沉浸层的样式
+//    与单面板布局会互相打架（封面会被压成 0 宽而不可见）
+// 2. 若正停在波形态则归位到封面 —— 竖屏没有波形这一态
+watch(isPortrait, (portrait) => {
+  if (!portrait) return
+  if (immersiveCover.value) {
+    immersiveCover.value = false
+  }
+  if (upperView.value === 'visualizer') {
+    upperView.value = 'cover'
+  }
+})
+
+// 竖屏：点歌词面板的空白处 → 回封面（事件由 LyricsDisplay 判定后发出）。
+// 横屏下这个事件不应有副作用（左栏恒为封面，语义上无从"返回"）。
+const handleLyricsBlankClick = (): void => {
+  if (isPortrait.value) {
+    upperView.value = 'cover'
   }
 }
 
@@ -323,10 +536,6 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleCoverKeydown)
   cleanupImmersiveAutoHide()
 })
-
-const toggleViewMode = () => {
-  viewMode.value = viewMode.value === 'lyrics' ? 'visualizer' : 'lyrics'
-}
 
 const toggleLibrary = () => {
   showLibrary.value = !showLibrary.value

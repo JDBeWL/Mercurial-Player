@@ -23,12 +23,17 @@ pub fn resolve_data_file(file: String) -> Result<String, AppError> {
     if !is_simple_filename(&file) {
         return Err(AppError::msg("非法的数据文件名"));
     }
-    let exe_path = std::env::current_exe()
-        .map_err(|e| AppError::msg(format!("无法获取可执行文件路径: {e}")))?;
-    let exe_dir = exe_path
-        .parent()
-        .ok_or_else(|| AppError::msg("无法获取可执行文件目录"))?;
-    let dir = exe_dir.join("data");
+    // Android 覆盖：current_exe() 在只读 APK 内，改写应用数据目录
+    let dir = if let Some(override_dir) = crate::config::data_dir_override() {
+        override_dir.join("data")
+    } else {
+        let exe_path = std::env::current_exe()
+            .map_err(|e| AppError::msg(format!("无法获取可执行文件路径: {e}")))?;
+        let exe_dir = exe_path
+            .parent()
+            .ok_or_else(|| AppError::msg("无法获取可执行文件目录"))?;
+        exe_dir.join("data")
+    };
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join(&file).to_string_lossy().to_string())
 }
@@ -170,12 +175,15 @@ fn enable_mini_mode(window: &tauri::WebviewWindow) -> Result<(), AppError> {
         .map_err(|e| e.to_string())?;
     window.set_size(mini_size).map_err(|e| e.to_string())?;
     window.set_resizable(false).map_err(|e| e.to_string())?;
+    // Windows/macOS/Linux 才有置顶语义；移动端窗口无此概念
+    #[cfg(desktop)]
     window.set_always_on_top(true).map_err(|e| e.to_string())?;
 
     Ok(())
 }
 
 fn disable_mini_mode(window: &tauri::WebviewWindow) -> Result<(), AppError> {
+    #[cfg(desktop)]
     window.set_always_on_top(false).map_err(|e| e.to_string())?;
     window.set_resizable(true).map_err(|e| e.to_string())?;
     window
@@ -187,6 +195,7 @@ fn disable_mini_mode(window: &tauri::WebviewWindow) -> Result<(), AppError> {
     window
         .set_min_size(Some(Size::Logical(MIN_SIZE)))
         .map_err(|e| e.to_string())?;
+    #[cfg(desktop)]
     window.center().map_err(|e| e.to_string())?;
 
     Ok(())
@@ -202,12 +211,24 @@ pub const fn get_platform() -> &'static str {
         "macos"
     } else if cfg!(target_os = "linux") {
         "linux"
+    } else if cfg!(target_os = "android") {
+        "android"
     } else {
         "unknown"
     }
 }
 
+/// 设置应用内「界面字号」倍率（`1.0` = 设计稿原始大小）
+///
+/// Android 上会抵消 WebView 对系统字号的放大再乘上该倍率（详见
+/// [`crate::app_font_scale`] 的模块注释）；桌面端为 no-op。
+#[command]
+pub fn set_app_font_scale(scale: f32) -> Result<(), AppError> {
+    crate::app_font_scale::set_app_font_scale(scale)
+}
+
 /// 显示器刷新率信息
+#[cfg(desktop)]
 #[derive(Debug, serde::Serialize)]
 pub struct DisplayRefreshRates {
     /// 窗口当前所在显示器的刷新率
@@ -217,9 +238,11 @@ pub struct DisplayRefreshRates {
 }
 
 /// 默认刷新率（显示器信息不可用时回落）
+#[cfg(desktop)]
 const DEFAULT_REFRESH_RATE: u32 = 60;
 
 /// 找到窗口中心点所在的显示器；未命中时回落主显示器，再回落第一个显示器
+#[cfg(desktop)]
 fn find_window_display(window: &tauri::WebviewWindow) -> Option<display_info::DisplayInfo> {
     let displays = display_info::DisplayInfo::all().ok()?;
     let pos = window.outer_position().ok()?;
@@ -234,6 +257,7 @@ fn find_window_display(window: &tauri::WebviewWindow) -> Option<display_info::Di
         .cloned()
 }
 
+#[cfg(desktop)]
 fn display_frequency(display: &display_info::DisplayInfo) -> u32 {
     if display.frequency > 0.0 {
         display.frequency.round() as u32
@@ -245,6 +269,7 @@ fn display_frequency(display: &display_info::DisplayInfo) -> u32 {
 /// 枚举显示器在当前分辨率下支持的全部刷新率（升序去重）。
 /// display_info 0.5 只暴露当前模式，多挡位需按平台 API 自行枚举；
 /// 非 Windows 平台暂无现成依赖，回落为仅当前挡位。
+#[cfg(desktop)]
 #[cfg(windows)]
 #[allow(unsafe_code)] // EnumDisplaySettingsExW 是 unsafe Win32 API
 fn enumerate_refresh_rates(display: &display_info::DisplayInfo) -> Vec<u32> {
@@ -288,12 +313,14 @@ fn enumerate_refresh_rates(display: &display_info::DisplayInfo) -> Vec<u32> {
     rates.into_iter().collect()
 }
 
+#[cfg(desktop)]
 #[cfg(not(windows))]
 fn enumerate_refresh_rates(_display: &display_info::DisplayInfo) -> Vec<u32> {
     Vec::new()
 }
 
 /// 获取窗口所在显示器的刷新率（跨屏移动窗口后返回值跟随变化）
+#[cfg(desktop)]
 #[command]
 pub fn get_screen_refresh_rate(window: tauri::WebviewWindow) -> Result<u32, AppError> {
     if let Some(display) = find_window_display(&window) {
@@ -309,6 +336,7 @@ pub fn get_screen_refresh_rate(window: tauri::WebviewWindow) -> Result<u32, AppE
 /// 获取窗口所在显示器支持的刷新率挡位（用于目标帧率选项，免去硬编码猜测）
 /// available 只保留不超过 MAX_TARGET_FPS 的挡位，与 set_target_fps 的钳制一致；
 /// current 始终为屏幕真实刷新率（仅用于展示，不受上限过滤）
+#[cfg(desktop)]
 #[command]
 pub fn get_display_refresh_rates(
     window: tauri::WebviewWindow,

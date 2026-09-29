@@ -20,7 +20,7 @@ use super::spectrum::SpectrumAnalyzer;
 /// 根据采样率计算解码chunk 大小
 /// 目标是保持约~21ms的处理块（1024@48kHz）
 #[must_use]
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "android"))]
 const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
     match sample_rate {
         0..=32000 => 512,        // ≤32kHz
@@ -30,10 +30,12 @@ const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "android"))]
 pub(super) fn decode_and_push_to_wasapi(
     mut source: LockFreeSymphoniaSource,
-    wasapi: Arc<Mutex<Option<super::wasapi::WasapiExclusivePlayback>>>,
+    // 独占播放器（平台别名：Windows = WASAPI 独占，Android = AAudio 独占）。
+    // 参数名沿用 wasapi，改一次要动几十处调用。
+    wasapi: Arc<Mutex<Option<crate::app_state::PlatformPlayer>>>,
     app: AppHandle,
     generation: Arc<AtomicU64>,
     thread_id_ref: Arc<AtomicU64>,
@@ -130,7 +132,7 @@ pub(super) fn decode_and_push_to_wasapi(
     // 整数倍 chunk 长度的曲目最后一轮读满块,下一轮首样本即 EOF,只能在此收尾;
     // 遗漏会让这类曲目放完不发 track-ended(独占模式表现为不自动切下一首)。
     let finish_eof = |my_gen: u64, my_tid: u64| {
-        use super::wasapi::PlaybackState;
+        use crate::audio::PlaybackState;
 
         // 排空等待上限:设备异常时缓冲可能永不排空
         const MAX_DRAIN_WAIT: Duration = Duration::from_secs(5);

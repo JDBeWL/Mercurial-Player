@@ -803,9 +803,10 @@ const trendAverageLabel = computed(() => {
   // 日均值按原始天粒度计算,避免聚合桶把分母缩小(90 天聚合到 30 桶仍按天数取均值)
   const points = dailySeries.value
   if (points.length === 0) return '--'
-  const addend = trendMetric.value === 'plays'
-    ? (point: DailyPoint) => point.plays
-    : (point: DailyPoint) => point.seconds
+  const addend =
+    trendMetric.value === 'plays'
+      ? (point: DailyPoint) => point.plays
+      : (point: DailyPoint) => point.seconds
   const total = points.reduce((sum, point) => sum + addend(point), 0)
   const average = total / points.length
   return trendMetric.value === 'seconds' ? formatDuration(average) : formatPercentValue(average)

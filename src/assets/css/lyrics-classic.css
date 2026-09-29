@@ -1,7 +1,10 @@
 .lyrics-style-classic .lyrics {
   margin: 6px 0;
   padding: 12px 20px 12px 12px;
-  font-size: 24px;
+  /* --lyrics-scale 是「歌词设置 → 歌词字号」写在根元素上的倍率（默认 1）。
+     兜底值必须给：自定义属性值不做语法校验，变量为空串时 `calc(24px * )` 会让
+     整条 font-size 声明失效，歌词会退回继承来的字号。 */
+  font-size: calc(24px * var(--lyrics-scale, 1));
   /* font-size transition 保留以实现 active 放大效果
        (transform: scale 会被父容器 overflow-x:hidden 截断,不可用)
        滚动定位由 JS 双阶段修正: 立即预估 + 过渡完成后修正 */
@@ -25,7 +28,7 @@
 /* will-change 仅应用于 active 行,避免所有歌词行都被提升为独立 GPU 合成层 */
 .lyrics-style-classic .lyrics.active {
   will-change: transform, font-size;
-  font-size: 32px;
+  font-size: calc(32px * var(--lyrics-scale, 1));
   font-weight: bold;
   /* 启用GPU加速 */
   transform: scale(1.01);
@@ -38,7 +41,11 @@
 }
 
 .lyrics-style-classic .karaoke-text {
-  --inactive-color: color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1));
+  /* --inactive-color 默认取一个所有浏览器都能解析的颜色。
+     Android WebView 110 不支持 color-mix()，而自定义属性值是不做语法校验的——
+     那段字符串会被原样保留，替换进 background-image 后整条声明失效，
+     配合下面的 background-clip: text + color: transparent 会让歌词整行看不见。 */
+  --inactive-color: var(--md-sys-color-outline);
   --active-color: var(--md-sys-color-primary);
 
   background-image: linear-gradient(
@@ -50,4 +57,10 @@
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
+}
+
+@supports (background-image: color-mix(in srgb, red 40%, blue)) {
+  .lyrics-style-classic .karaoke-text {
+    --inactive-color: color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1));
+  }
 }

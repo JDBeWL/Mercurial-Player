@@ -1,11 +1,15 @@
 {
   "common": {
     "close": "Close",
+    "back": "Back",
     "cancel": "Cancel",
     "later": "Later"
   },
   "nav": {
+    "library": "Music Library",
+    "more": "More",
     "settings": "Settings",
+    "themeColor": "Theme Color",
     "theme": {
       "dark": "Dark Mode",
       "light": "Light Mode",
@@ -20,6 +24,7 @@
     "durationM": "{minutes}m",
     "durationS": "{seconds}s",
     "extractCover": "Extract Cover",
+    "extractCoverSuccess": "Cover saved",
     "viewCoverFullscreen": "Immersive cover",
     "exitCoverFullscreen": "Click the left area or press Esc to exit",
     "queueInfo": "{current} of {total}"
@@ -34,7 +39,8 @@
     "shuffle": "Shuffle",
     "repeat": "Repeat",
     "repeatList": "List Repeat",
-    "repeatOne": "Repeat One"
+    "repeatOne": "Repeat One",
+    "repeatOff": "Play in Order"
   },
   "library": {
     "title": "Music Library",
@@ -232,6 +238,19 @@
     "loadingDevices": "Loading audio devices...",
     "deviceLoadError": "Failed to load audio devices",
     "noAudioDevices": "No audio devices found",
+    "audioDeviceManagedBySystem": "Audio output is managed by the system: it switches automatically when you plug in headphones or connect Bluetooth, so no device selection is needed here",
+    "usbDacExclusive": "USB DAC exclusive (bit-perfect)",
+    "usbDacExclusiveDesc": "When a USB audio device is connected, bypass system mixing and resampling and output at the track's native sample rate",
+    "usbDacNotConnected": "No USB audio device detected: this toggle becomes available once a DAC is plugged in",
+    "usbDacFallback": "Could not open an exclusive stream on this device; fell back to shared mode (usually the device is busy or does not accept the sample rate)",
+    "usbDacActive": "Exclusive output active",
+    "currentOutputRoute": "Current output",
+    "outputSampleRate": "Output sample rate",
+    "usbDac": "USB DAC",
+    "builtinSpeaker": "Speaker",
+    "wiredHeadphones": "Wired headphones",
+    "bluetoothAudio": "Bluetooth audio",
+    "unknownOutput": "Unknown output device",
     "enableAutoUpdate": "Enable Automatic Updates",
     "enableAutoUpdateDesc": "Allow automatic update checks and prompt when updates are available (disabled by default to avoid accidental upgrades)",
     "cacheSettings": "Cache Settings",
@@ -424,7 +443,11 @@
     "resetAllConfigDesc": "Restore all settings to defaults. This cannot be undone",
     "resetAllConfigConfirm": "Reset all settings to defaults? This cannot be undone.",
     "logLevel": "Log level",
-    "logLevelDesc": "Minimum level written to the log file and console. Applies immediately and persists across launches"
+    "logLevelDesc": "Minimum level written to the log file and console. Applies immediately and persists across launches",
+    "interfaceFontSize": "Interface Font Size",
+    "interfaceFontSizeDesc": "Text scale inside the app. The system font size no longer affects this app — change it here. 100% is the original design size.",
+    "lyricsFontSize": "Lyrics Font Size",
+    "lyricsFontSizeDesc": "Font scale of the main lyrics panel; independent of the desktop lyrics window."
   },
   "window": {
     "miniMode": "Mini Mode",
@@ -433,7 +456,8 @@
     "exitFullscreen": "Exit Fullscreen",
     "close": "Close",
     "switchToVisualizer": "Switch to Visualizer",
-    "switchToLyrics": "Switch to Lyrics"
+    "switchToLyrics": "Switch to Lyrics",
+    "switchToCover": "Switch to Cover"
   },
   "errors": {
     "unknownError": "Unknown error",

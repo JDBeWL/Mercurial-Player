@@ -91,7 +91,7 @@
       class="progress-bar-container"
       :class="{ dragging: isDragging }"
       data-tauri-drag-region="false"
-      @mousedown="startSeeking"
+      @pointerdown="startSeeking"
     >
       <div class="progress-fill" :style="{ width: progressPercentage + '%' }"></div>
       <!-- 时间预览提示 -->
@@ -210,7 +210,8 @@ const exitMiniMode = (): void => {
 .mini-player {
   position: relative;
   width: 100vw;
-  height: 100vh;
+  /* 同 .app-container：跟随父级 #app 的安全区扣减，避免安卓上手势条压住内容 */
+  height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -420,6 +421,7 @@ const exitMiniMode = (): void => {
   z-index: 10;
   flex-shrink: 0;
   transition: height 0.15s ease;
+  touch-action: none;
 }
 
 .progress-bar-container:hover {

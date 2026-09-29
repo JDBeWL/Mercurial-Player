@@ -1,5 +1,5 @@
 <template>
-  <div class="theme-selector">
+  <div class="theme-selector" :data-mobile="isAndroid ? 'true' : undefined">
     <button
       ref="toggleButtonRef"
       class="icon-button"
@@ -9,79 +9,88 @@
       <span class="material-symbols-rounded">palette</span>
     </button>
 
-    <Transition name="picker-fade">
-      <div v-if="showColorPicker" ref="colorPickerRef" class="color-picker" @click.stop>
-        <div class="color-picker-header">
-          <h3>{{ $t('themeSelector.chooseThemeColor') }}</h3>
-          <button class="close-btn" @click="showColorPicker = false">
-            <span class="material-symbols-rounded">close</span>
-          </button>
-        </div>
+    <!-- 挂到 body：面板在 .nav-bar 内部会受那一层的 stacking context 限制
+         （竖屏下 .nav-bar 是 position:relative + z-index:100，抽屉的 z-index:1200
+         只在 nav-bar 内部有效，对外仍是 100），而音乐库 / 播放列表抽屉是
+         position:fixed + z-index:1000 —— 它们一打开就会把颜色面板整个压住。
+         挂到 body 后抽屉直接在根层级参与比较，永远在最上。
+         主题变量定义在 :root（theme store 直接写 documentElement），body 子树照样继承。
+         :disabled 让横屏 / 桌面维持原来的"相对按钮下拉"形态，不受影响。 -->
+    <Teleport to="body" :disabled="!isPortrait">
+      <Transition name="picker-fade">
+        <div v-if="showColorPicker" ref="colorPickerRef" class="color-picker" @click.stop>
+          <div class="color-picker-header">
+            <h3>{{ $t('themeSelector.chooseThemeColor') }}</h3>
+            <button class="close-btn" @click="showColorPicker = false">
+              <span class="material-symbols-rounded">close</span>
+            </button>
+          </div>
 
-        <!-- 色彩分类标签 -->
-        <div class="color-categories">
-          <button
-            v-for="category in colorCategories"
-            :key="category.id"
-            class="category-chip"
-            :class="{ active: activeCategory === category.id }"
-            @click="activeCategory = category.id"
-          >
-            {{ category.name }}
-          </button>
-        </div>
-
-        <!-- 颜色预设网格 -->
-        <div class="color-presets">
-          <div
-            v-for="color in filteredColors"
-            :key="color.hex"
-            class="color-preset"
-            :class="{ selected: themeStore.primaryColor === color.hex }"
-            :style="{ backgroundColor: color.hex }"
-            :title="colorName(color)"
-            @click="selectColor(color.hex)"
-          >
-            <span
-              v-if="themeStore.primaryColor === color.hex"
-              class="check-icon material-symbols-rounded"
-              >check</span
+          <!-- 色彩分类标签 -->
+          <div class="color-categories">
+            <button
+              v-for="category in colorCategories"
+              :key="category.id"
+              class="category-chip"
+              :class="{ active: activeCategory === category.id }"
+              @click="activeCategory = category.id"
             >
+              {{ category.name }}
+            </button>
           </div>
-        </div>
 
-        <!-- 自定义颜色 -->
-        <div class="custom-color-section">
-          <label for="custom-color">{{ $t('themeSelector.customColor') }}</label>
-          <div class="custom-color-input">
-            <input
-              id="custom-color"
-              type="color"
-              :value="themeStore.primaryColor"
-              @input="selectCustomColor"
-              @change="commitCustomColor"
-            />
-            <input
-              type="text"
-              class="hex-input"
-              :value="themeStore.primaryColor"
-              placeholder="#000000"
-              maxlength="7"
-              @change="onHexInput"
-            />
+          <!-- 颜色预设网格 -->
+          <div class="color-presets">
+            <div
+              v-for="color in filteredColors"
+              :key="color.hex"
+              class="color-preset"
+              :class="{ selected: themeStore.primaryColor === color.hex }"
+              :style="{ backgroundColor: color.hex }"
+              :title="colorName(color)"
+              @click="selectColor(color.hex)"
+            >
+              <span
+                v-if="themeStore.primaryColor === color.hex"
+                class="check-icon material-symbols-rounded"
+                >check</span
+              >
+            </div>
           </div>
-        </div>
 
-        <!-- 当前颜色预览 -->
-        <div class="color-preview">
-          <div class="preview-swatch" :style="{ backgroundColor: themeStore.primaryColor }"></div>
-          <div class="preview-info">
-            <span class="preview-label">{{ $t('themeSelector.currentColor') }}</span>
-            <span class="preview-hex">{{ themeStore.primaryColor }}</span>
+          <!-- 自定义颜色 -->
+          <div class="custom-color-section">
+            <label for="custom-color">{{ $t('themeSelector.customColor') }}</label>
+            <div class="custom-color-input">
+              <input
+                id="custom-color"
+                type="color"
+                :value="themeStore.primaryColor"
+                @input="selectCustomColor"
+                @change="commitCustomColor"
+              />
+              <input
+                type="text"
+                class="hex-input"
+                :value="themeStore.primaryColor"
+                placeholder="#000000"
+                maxlength="7"
+                @change="onHexInput"
+              />
+            </div>
+          </div>
+
+          <!-- 当前颜色预览 -->
+          <div class="color-preview">
+            <div class="preview-swatch" :style="{ backgroundColor: themeStore.primaryColor }"></div>
+            <div class="preview-info">
+              <span class="preview-label">{{ $t('themeSelector.currentColor') }}</span>
+              <span class="preview-hex">{{ themeStore.primaryColor }}</span>
+            </div>
           </div>
         </div>
-      </div>
-    </Transition>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -90,6 +99,8 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useThemeStore } from '../stores/theme'
 import { useConfigStore } from '../stores/config'
+import { usePlatform } from '../composables/usePlatform'
+import { useOrientation } from '../composables/useOrientation'
 import logger from '../utils/logger'
 import { colorPresets, type ColorPreset } from '../utils/themePresets'
 
@@ -108,6 +119,14 @@ const colorName = (color: ColorPreset): string => {
 }
 const themeStore = useThemeStore()
 const configStore = useConfigStore()
+// 手机（Android）竖屏下：自己的触发按钮被收进顶栏溢出菜单，面板改成底部抽屉。
+// 用 data 属性而不是 CSS 媒体查询直接判断 —— @media (orientation: portrait)
+// 在桌面把窗口拉成窄高时也会命中，不加平台守卫会把桌面端的按钮一起藏掉。
+const { isAndroid } = usePlatform()
+// 面板的"贴底抽屉"形态与 Teleport 都只按方向判断，不用平台判断：
+// isAndroid 来自后端 IPC（异步，取不到会被兜底成 unknown → false），
+// 一旦失败就会退回绝对定位的老形态、在窄屏上向右溢出屏幕。
+const { isPortrait } = useOrientation()
 const showColorPicker = ref<boolean>(false)
 const activeCategory = ref<string>('all')
 
@@ -138,11 +157,30 @@ const toggleColorPicker = (): void => {
   showColorPicker.value = !showColorPicker.value
 }
 
+// 供外部打开面板：手机竖屏下这个组件自己的触发按钮被收进顶栏的溢出菜单
+// （AppHeader 的 ⋮ 调用这里暴露出的 open）。桌面端仍走按钮 toggle。
+const open = (): void => {
+  showColorPicker.value = true
+}
+
 // 点击外部关闭（通过模板 ref 定位面板与触发按钮）
 const colorPickerRef = ref<HTMLElement | null>(null)
 const toggleButtonRef = ref<HTMLElement | null>(null)
 
-const handleClickOutside = (event: MouseEvent): void => {
+/**
+ * ⚠️ 必须监听 **pointerdown** 而不是 click。
+ *
+ * 手机竖屏下面板是由顶栏 ⋮ 菜单里的"主题颜色"调 [`open`] 打开的，那一次点击的
+ * target 在溢出菜单里 —— 既不在面板内、也不在本组件被隐藏的触发按钮内。
+ * 若监听 click，document 上的这个监听会在**同一次点击**的冒泡阶段看到它，
+ * 于是面板刚挂上就被当成"点了外面"立刻关掉（真机实测：ADD .color-picker 之后
+ * ~270ms 就被 DEL —— 用户看到的现象就是"打开了但什么都没有"）。
+ *
+ * pointerdown 在 click **之前**触发，那时面板还没打开（showColorPicker 仍是 false），
+ * 关掉是无害的空操作；等 click 真正把面板打开时，不会再被这次交互关掉。
+ * 之后任何一次点到外部都仍然按 pointerdown 正常关闭。
+ */
+const handleClickOutside = (event: PointerEvent): void => {
   const picker = colorPickerRef.value
   const button = toggleButtonRef.value
   const target = event.target as Node
@@ -152,11 +190,11 @@ const handleClickOutside = (event: MouseEvent): void => {
 }
 
 onMounted(() => {
-  document.addEventListener('click', handleClickOutside)
+  document.addEventListener('pointerdown', handleClickOutside)
 })
 
 onUnmounted(() => {
-  document.removeEventListener('click', handleClickOutside)
+  document.removeEventListener('pointerdown', handleClickOutside)
   if (previewRafId !== null) {
     cancelAnimationFrame(previewRafId)
     previewRafId = null
@@ -209,6 +247,8 @@ const onHexInput = (event: Event): Promise<void> | undefined => {
   }
   return undefined
 }
+
+defineExpose({ open })
 </script>
 
 <style scoped>
@@ -473,5 +513,82 @@ const onHexInput = (event: Event): Promise<void> | undefined => {
 
 .color-presets::-webkit-scrollbar-thumb:hover {
   background: var(--md-sys-color-outline);
+}
+
+/* ===== 手机竖屏：触发按钮收进顶栏溢出菜单，面板改成贴底抽屉 =====
+   1) 按钮：顶栏在 480px 宽下放 4 个按钮时相邻间距只有 8px、曲名只剩 134px，
+      调色盘这种低频入口收进 ⋮ 更合适（详见 AppHeader）。
+   2) 面板：原来靠 position:absolute + translate:-45% 相对触发按钮定位，
+      而按钮在顶栏最右侧 —— 480px 屏上面板 360px 宽会向右溢出 165px，
+      实测 left=243 / right=645，只有 59% 可见（右侧的分类标签和色块全被切掉）。
+      改成贴底抽屉后位置与触发按钮无关，宽度也随屏幕走。
+
+   ⚠️ 守卫刻意分成两段，别合并成一段：
+   - 「按钮藏起来 / 盒子消失」用 [data-mobile='true']（平台）守卫。
+     @media (orientation: portrait) 在桌面把窗口拉成窄高时也会命中，
+     不加守卫会让桌面端丢掉调色盘入口（那里没有 ⋮ 菜单可替代）。
+   - 「面板本身改成贴底抽屉」**只按方向判断，不加平台守卫**。
+     它依赖的 isAndroid 来自后端 IPC（异步；取不到时被兜底成 'unknown' → false），
+     一旦失败整块样式失效，用户会退回绝对定位的老形态、在窄屏上向右溢出屏幕。
+     方向判断同步且必然可用，用它兜底；桌面窄高窗口走抽屉也是合理降级
+     （总比面板溢出屏幕看不见好）。 */
+@media (orientation: portrait) {
+  .theme-selector[data-mobile='true'] {
+    /* 盒子消失：不再占栅格列（面板已改 fixed，不再需要它当定位祖先） */
+    display: contents;
+  }
+
+  .theme-selector[data-mobile='true'] > .icon-button {
+    display: none;
+  }
+
+  .color-picker {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    /* 抽屉要盖住顶栏(100)与底部玻璃控制条，所以层级给到 1200 */
+    z-index: 1200;
+    width: auto;
+    /* 先写 vh 再写 dvh：老 WebView(<108) 不认 dvh，只写后者会让 max-height 整条失效 */
+    max-height: 86vh;
+    max-height: 86dvh;
+    translate: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 20px 20px 0 0;
+    padding: 20px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* 抽屉从下往上滑，与桌面端"从按钮下方掉下来"的缩放动画区分。
+     ⚠️ 位移刻意只给 24px 而不是 100%：过渡若被打断（快速开关、元素被复用），
+     元素可能停在 enter-from 态 —— 用 100% 时整个抽屉会停在屏幕下方之外，
+     症状正好是"点了但没有窗口"。24px 最多只是偏下一点，仍然完全可用。 */
+  .picker-fade-enter-from,
+  .picker-fade-leave-to {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+
+  /* 分类标签由换行改成单行横滚：抽屉高度有限，换行会白吃两行 */
+  .color-categories {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 12px;
+    scrollbar-width: none;
+  }
+
+  .color-categories::-webkit-scrollbar {
+    display: none;
+  }
+
+  .category-chip {
+    flex-shrink: 0;
+  }
+
+  .color-presets {
+    max-height: 40vh;
+  }
 }
 </style>

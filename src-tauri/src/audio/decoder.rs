@@ -5,7 +5,6 @@
 use crate::error::AppError;
 use crossbeam_channel::{Receiver, bounded};
 use rodio::Source;
-use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -284,7 +283,7 @@ impl SymphoniaDecoder {
         path: &str,
         buffer_duration_ms: Option<u32>,
     ) -> Result<Self, AppError> {
-        let file = File::open(path).map_err(|e| e.to_string())?;
+        let file = crate::android_saf::open_media_file(path)?;
         let mss = MediaSourceStream::new(
             Box::new(file.try_clone().map_err(|e| e.to_string())?),
             MediaSourceStreamOptions::default(),
@@ -443,7 +442,7 @@ impl SymphoniaDecoder {
     }
 
     fn initialize_decoder(&mut self) -> Result<(), AppError> {
-        let file = File::open(&self.path).map_err(|e| e.to_string())?;
+        let file = crate::android_saf::open_media_file(&self.path)?;
         let mss = MediaSourceStream::new(
             Box::new(file.try_clone().map_err(|e| e.to_string())?),
             MediaSourceStreamOptions::default(),

@@ -133,8 +133,10 @@ pub async fn try_resume_last_session(
         });
     }
 
-    // L1: 文件存在性校验
-    if !Path::new(&session.track_path).exists() {
+    // L1: 文件存在性校验（SAF content URI 视为存在，交由打开时校验）
+    if !crate::android_saf::is_content_uri(&session.track_path)
+        && !Path::new(&session.track_path).exists()
+    {
         log::info!(
             "Last session track not found, clearing: {}",
             session.track_path

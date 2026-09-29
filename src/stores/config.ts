@@ -99,6 +99,8 @@ export const useConfigStore = defineStore('config', {
       showSettings: false,
       showConfigPanel: false,
       miniMode: false,
+      /* 界面字号倍率，见 UIConfig.fontScale 的注释 */
+      fontScale: 1,
     },
 
     // 音频设置
@@ -106,6 +108,7 @@ export const useConfigStore = defineStore('config', {
       exclusiveMode: false,
       volume: 0.5,
       fadeEnabled: true,
+      usbDacExclusive: false,
     },
 
     // 可视化设置
@@ -384,6 +387,18 @@ export const useConfigStore = defineStore('config', {
 
     setLyricsConfig(config: Partial<LyricsConfig>): void {
       this._patchSection('lyrics', config)
+    },
+
+    /**
+     * 设置应用内界面字号倍率。
+     *
+     * 这里只落配置，不负责下发 —— 原生侧的下发（Android 的 WebView textZoom）走
+     * `applyAppFontScale()`：设置页在滑块**松手时**（`change`）调用它一次，
+     * 启动时由应用生命周期在配置加载完成后调用。放在拖动过程中每帧下发会让 WebView
+     * 反复整页重排，手机上肉眼可见地卡。
+     */
+    setUIFontScale(scale: number): void {
+      this._patchSection('ui', { fontScale: scale })
     },
 
     setDesktopLyricsConfig(config: Partial<DesktopLyricsConfig>): void {

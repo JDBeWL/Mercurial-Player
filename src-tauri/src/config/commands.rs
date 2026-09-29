@@ -1,6 +1,7 @@
 //! 配置管理相关的 Tauri 命令
 //!
 //! 这个模块包含所有与配置管理相关的功能，包括加载、保存、导入、导出等。
+use crate::android_saf;
 use crate::error::AppError;
 
 use super::manager::AppConfig;
@@ -10,7 +11,13 @@ use std::path::Path;
 use tauri::{State, command};
 
 /// 验证路径是否安全（不在敏感目录中）
+///
+/// Android SAF 的 content:// URI 无需本地文件系统校验，直接放行。
 fn is_path_safe(path: &str) -> Result<(), AppError> {
+    if android_saf::is_content_uri(path) {
+        return Ok(());
+    }
+
     // 先对原始输入做词法检查
     if is_sensitive_path(path) {
         return Err(AppError::Path(

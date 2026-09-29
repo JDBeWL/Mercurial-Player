@@ -622,4 +622,93 @@ describe('LyricsDisplay.vue', () => {
       expect(wrapper.find('.lyrics-bottom-bar').exists()).toBe(false)
     })
   })
+
+  // ---------- 点空白处（竖屏下由 App.vue 用来返回封面） ----------
+
+  describe('点空白处发出 blankClick', () => {
+    it('点击歌词行不发出 blankClick', async () => {
+      const lyrics = makeLyrics()
+      setupMocks({ currentTrack: makeTrack(), lyrics })
+      wrapper = mountComponent()
+      await nextTick()
+      await nextTick()
+
+      // 歌词行自身的语义是"跳到这一句"，不能顺带把用户弹回封面
+      await wrapper.findAll('.lyrics')[0]!.trigger('click')
+      await nextTick()
+
+      expect(wrapper.emitted('blankClick')).toBeUndefined()
+    })
+
+    it('点击面板空白处发出 blankClick', async () => {
+      const lyrics = makeLyrics()
+      setupMocks({ currentTrack: makeTrack(), lyrics })
+      wrapper = mountComponent()
+      await nextTick()
+
+      await wrapper.find('.lyrics-display').trigger('click')
+
+      expect(wrapper.emitted('blankClick')).toHaveLength(1)
+    })
+
+    it('点击底部控制栏的按钮不发出 blankClick', async () => {
+      const lyrics = makeLyrics()
+      setupMocks({ currentTrack: makeTrack(), lyrics })
+      wrapper = mountComponent()
+      await nextTick()
+
+      const button = wrapper.find('.lyrics-bottom-bar button')
+      expect(button.exists()).toBe(true)
+      await button.trigger('click')
+
+      expect(wrapper.emitted('blankClick')).toBeUndefined()
+    })
+
+    it('点击歌词行内文字之外的留白也发出 blankClick', async () => {
+      const lyrics = makeLyrics()
+      setupMocks({ currentTrack: makeTrack(), lyrics })
+      wrapper = mountComponent()
+      await nextTick()
+      await nextTick()
+
+      // 歌词行是整宽块级元素，但文字只占中间一小块。把文字矩形限定在
+      // (100,500)-(200,540)，然后点在它左侧的留白上 —— 应该算"点空白"。
+      vi.spyOn(Range.prototype, 'getClientRects').mockReturnValue([
+        { left: 100, top: 500, right: 200, bottom: 540 },
+      ] as unknown as DOMRectList)
+
+      await wrapper.findAll('.lyrics')[0]!.trigger('click', { clientX: 20, clientY: 520 })
+
+      expect(wrapper.emitted('blankClick')).toHaveLength(1)
+    })
+
+    it('点击歌词文字本身不发出 blankClick（仍然是跳句）', async () => {
+      const lyrics = makeLyrics()
+      setupMocks({ currentTrack: makeTrack(), lyrics })
+      wrapper = mountComponent()
+      await nextTick()
+      await nextTick()
+
+      vi.spyOn(Range.prototype, 'getClientRects').mockReturnValue([
+        { left: 100, top: 500, right: 200, bottom: 540 },
+      ] as unknown as DOMRectList)
+
+      await wrapper.findAll('.lyrics')[0]!.trigger('click', { clientX: 150, clientY: 520 })
+
+      expect(wrapper.emitted('blankClick')).toBeUndefined()
+      const store = mocks.playerStore as { seek: ReturnType<typeof vi.fn> }
+      expect(store.seek).toHaveBeenCalledWith(0)
+    })
+
+    it('无歌词时点空白处同样发出 blankClick', async () => {
+      // 空状态整块都是空白，此时"点外面返回"应该照样有效
+      setupMocks({ currentTrack: makeTrack(), lyrics: [] })
+      wrapper = mountComponent()
+      await nextTick()
+
+      await wrapper.find('.lyrics-display').trigger('click')
+
+      expect(wrapper.emitted('blankClick')).toHaveLength(1)
+    })
+  })
 })

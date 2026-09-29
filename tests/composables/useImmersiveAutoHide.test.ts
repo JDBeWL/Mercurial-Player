@@ -18,7 +18,11 @@ const mount = (initial = false) => {
   return { immersiveCover, ...api }
 }
 
-const moveTo = (clientY: number) => window.dispatchEvent(new MouseEvent('mousemove', { clientY }))
+const moveTo = (clientY: number) =>
+  window.dispatchEvent(new PointerEvent('pointermove', { clientY }))
+
+/** 触摸端点一下也会唤起控制栏（见 useImmersiveAutoHide 的 pointerdown 监听） */
+const tapSomewhere = () => window.dispatchEvent(new PointerEvent('pointerdown'))
 
 const enterImmersive = async (immersiveCover: { value: boolean }) => {
   immersiveCover.value = true
@@ -158,6 +162,21 @@ describe('useImmersiveAutoHide', () => {
     expect(immersiveControlsVisible.value).toBe(false)
 
     window.dispatchEvent(new Event('focus'))
+
+    expect(immersiveControlsVisible.value).toBe(true)
+  })
+
+  it('restores the controls on tap (no mousemove on touch devices)', async () => {
+    // Android 上手指不会产生 mousemove：如果只监听 pointermove，
+    // 控制栏缩回后就再也唤不回来（手机也没有 Esc 键盘），等于被困在沉浸模式。
+    const { immersiveCover, immersiveControlsVisible } = mount()
+    await enterImmersive(immersiveCover)
+
+    moveTo(window.innerHeight / 2)
+    vi.advanceTimersByTime(IDLE_DELAY)
+    expect(immersiveControlsVisible.value).toBe(false)
+
+    tapSomewhere()
 
     expect(immersiveControlsVisible.value).toBe(true)
   })

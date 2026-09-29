@@ -8,31 +8,22 @@
       <div class="app-header">
         <div class="app-name">Mercurial Player</div>
         <div class="app-version">v{{ appVersion }}</div>
-        <div
-          style="
-            margin-left: auto;
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-            gap: 8px;
-          "
-        >
-          <div>
-            <button class="filled-button" :disabled="isChecking" @click="checkForUpdates">
-              <span v-if="!isChecking" class="material-symbols-rounded">download</span>
-              <span v-else class="material-symbols-rounded spin">hourglass_empty</span>
-              {{ isChecking ? t('config.checkingUpdates') : t('config.checkUpdates') }}
-            </button>
-          </div>
-
-          <div
-            v-if="error"
-            class="text-caption"
-            style="color: var(--md-sys-color-error); margin-top: 6px"
-          >
-            {{ error }}
-          </div>
+      <!-- .app-actions 原来是一段内联 style（margin-left:auto + 右对齐）。
+           内联样式没法被媒体查询覆盖，窄屏下这颗「检查更新」按钮会整块顶出右边界，
+           所以挪成类名，竖屏规则见文件末尾。 -->
+      <div class="app-actions">
+        <div>
+          <button class="filled-button" :disabled="isChecking" @click="checkForUpdates">
+            <span v-if="!isChecking" class="material-symbols-rounded">download</span>
+            <span v-else class="material-symbols-rounded spin">hourglass_empty</span>
+            {{ isChecking ? t('config.checkingUpdates') : t('config.checkUpdates') }}
+          </button>
         </div>
+
+        <div v-if="error" class="text-caption app-actions-error">
+          {{ error }}
+        </div>
+      </div>
       </div>
     </div>
 
@@ -402,6 +393,20 @@ onMounted(() => {
   gap: 20px;
 }
 
+/* 「检查更新」那一列（原来写死在模板的内联 style 里，现在挪出来才能被媒体查询覆盖） */
+.app-actions {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.app-actions-error {
+  color: var(--md-sys-color-error);
+  margin-top: 6px;
+}
+
 .app-name {
   font-size: 2.25rem;
   font-weight: 500;
@@ -758,5 +763,33 @@ onMounted(() => {
   font-size: 12px;
   color: var(--md-sys-color-on-surface-variant);
   margin-top: 2px;
+}
+
+/* ===== 窄屏（手机竖屏）=====
+   「Mercurial Player」字号 2.25rem（36px），加上版本号与「检查更新」按钮本来就排不进
+   411px 宽的一行：真机上那颗按钮被整个顶到屏幕外（只露出左边半颗）。
+   竖屏改成上下排：标题 → 版本号 → 按钮，按钮占满整行居中。 */
+@media (orientation: portrait) {
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .app-actions {
+    margin-left: 0;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .app-actions .filled-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* 仓库链接等长 URL 兜底：宁可断词换行，也不要横向顶出去 */
+  .link-url {
+    word-break: break-all;
+  }
 }
 </style>

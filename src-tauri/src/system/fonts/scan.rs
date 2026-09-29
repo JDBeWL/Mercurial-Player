@@ -250,6 +250,12 @@ pub fn get_system_fonts() -> Result<Vec<String>, AppError> {
     {
         get_linux_fonts()
     }
+
+    // 移动端无系统字体目录概念，前端回落内置字体
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Ok(Vec::new())
+    }
 }
 
 #[cfg(target_os = "windows")]

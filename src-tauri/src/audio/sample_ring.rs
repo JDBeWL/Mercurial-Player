@@ -55,6 +55,50 @@ impl SampleRing {
         true
     }
 
+    /// 生产者:批量写入,返回实际写入的采样数。
+    ///
+    /// 语义与 [`Self::push`] 一致:缓冲满时停止写入(而不是覆盖未读数据),
+    /// 因此返回值可能小于 `samples.len()`。
+    /// 批量版本避免了逐样本重复做容量检查。
+    pub fn push_slice(&self, samples: &[f32]) -> usize {
+        if samples.is_empty() {
+            return 0;
+        }
+        let w = self.written.load(Ordering::Relaxed);
+        let c = self.consumed.load(Ordering::Acquire);
+        let free = self.slots.len() - w.wrapping_sub(c);
+        let n = free.min(samples.len());
+        if n == 0 {
+            return 0;
+        }
+        for (i, sample) in samples[..n].iter().enumerate() {
+            self.slots[w.wrapping_add(i) & self.mask].store(sample.to_bits(), Ordering::Relaxed);
+        }
+        self.written.store(w.wrapping_add(n), Ordering::Release);
+        n
+    }
+
+    /// 丢弃尚未被取走的全部采样(切歌 / seek 用)
+    pub fn clear(&self) {
+        // 直接把消费指针追平到写指针,等价于"全部已读"
+        let w = self.written.load(Ordering::Acquire);
+        self.consumed.store(w, Ordering::Release);
+    }
+
+    /// 尚未被取走的采样数
+    #[must_use]
+    pub fn len(&self) -> usize {
+        let w = self.written.load(Ordering::Acquire);
+        let c = self.consumed.load(Ordering::Acquire);
+        w.wrapping_sub(c)
+    }
+
+    /// 缓冲是否为空
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// 消费者:取走至多 `max_n` 个采样追加到 `out`,返回实际取到的数量。
     pub fn drain_into(&self, out: &mut Vec<f32>, max_n: usize) -> usize {
         if max_n == 0 {
@@ -171,6 +215,44 @@ mod tests {
     }
 
     /// 并发生产/消费:采样必须严格保序,不丢不重(Acquire/Release 配对出错时最易暴露)
+    #[test]
+    fn test_push_slice_writes_sequentially_and_stops_when_full() {
+        let ring = SampleRing::new(4);
+        assert_eq!(ring.push_slice(&[1.0, 2.0, 3.0]), 3);
+        // 只剩 1 个空位:批量写入应被截断到 1 个,而不是覆盖已有数据
+        assert_eq!(ring.push_slice(&[4.0, 5.0]), 1);
+
+        let mut out = Vec::new();
+        assert_eq!(ring.drain_into(&mut out, 4), 4);
+        assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_len_reflects_pending_samples() {
+        let ring = SampleRing::new(8);
+        assert!(ring.is_empty());
+        assert_eq!(ring.push_slice(&[1.0, 2.0, 3.0]), 3);
+        assert_eq!(ring.len(), 3);
+
+        let mut out = Vec::new();
+        assert_eq!(ring.drain_into(&mut out, 2), 2);
+        assert_eq!(ring.len(), 1);
+    }
+
+    #[test]
+    fn test_clear_drops_pending_samples() {
+        let ring = SampleRing::new(8);
+        assert_eq!(ring.push_slice(&[1.0, 2.0, 3.0]), 3);
+        ring.clear();
+        assert!(ring.is_empty());
+
+        // 清空后写入的数据仍能被正常读出(指针没有被打乱)
+        assert_eq!(ring.push_slice(&[9.0]), 1);
+        let mut out = Vec::new();
+        assert_eq!(ring.drain_into(&mut out, 8), 1);
+        assert_eq!(out, vec![9.0]);
+    }
+
     #[test]
     fn test_concurrent_producer_consumer_preserves_order() {
         use std::sync::Arc;

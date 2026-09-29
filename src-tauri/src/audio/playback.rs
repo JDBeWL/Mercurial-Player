@@ -6,10 +6,11 @@
 //! 预计算查找表避免热路径上的数学运算
 //! 无锁设计减少线程竞争
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "android"))]
 use super::decode_push::decode_and_push_to_wasapi;
 use super::decoder::{LockFreeSymphoniaSource, SymphoniaDecoder};
 use super::dsp::soft_clip_fast;
+use super::queue;
 use super::sample_ring::SampleRing;
 use super::spectrum::{SpectrumAnalyzer, now_ms};
 use crate::error::AppError;
@@ -19,13 +20,12 @@ use super::{FADE_IN_MS, FADE_IN_ON_SEEK_MS};
 use crate::AppState;
 use crate::equalizer::{EQ_BAND_COUNT, EqSettings};
 use rodio::Source;
-use std::fs::File;
 use std::io::BufReader;
 // AtomicBool 供 VisualizationSource 通知频谱分析线程退出
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 // ============================================================================
 // 预计算查找表
@@ -44,6 +44,9 @@ pub(super) fn emit_track_ended(
     app: &AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     app.emit("track-ended", TrackEndedEvent {})?;
+    // 阶段 3.0：Android 上 App 进入后台后 WebView 的 JS 会被节流/冻结，
+    // `track-ended` 可能无人处理，交由 Rust 侧队列接管推进（桌面端内部直接返回）。
+    queue::handle_track_ended(app, &app.state::<AppState>());
     Ok(())
 }
 
@@ -58,6 +61,8 @@ pub(super) fn emit_playback_position(
     position: f32,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     app.emit("playback-position", PlaybackPositionEvent { position })?;
+    // 通知栏/MediaSession 的进度基准（仅内存原子量，无额外开销）
+    queue::note_position(position);
     Ok(())
 }
 
@@ -160,7 +165,7 @@ impl EqProcessor {
         self.process_one(input, channel, self.cached_preamp_multiplier)
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "android"))]
     #[inline(always)]
     pub(super) fn process_sample_cached(&mut self, input: f32, channel: usize) -> f32 {
         if !self.cached_enabled {
@@ -169,7 +174,7 @@ impl EqProcessor {
         self.process_one(input, channel, self.cached_preamp_multiplier)
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "android"))]
     pub(super) const fn is_enabled(&self) -> bool {
         self.cached_enabled
     }
@@ -428,7 +433,7 @@ impl<I: Source<Item = f32> + Send> Source for VisualizationSource<I> {
 /// 播放音轨（共享模式）
 pub fn play_track_shared(
     app: &AppHandle,
-    state: &State<AppState>,
+    state: &AppState,
     path: &str,
     position: Option<f32>,
 ) -> Result<(), AppError> {
@@ -475,7 +480,7 @@ pub fn play_track_shared(
         }
         Err(e) => {
             log::warn!("Symphonia decoder failed, fallback to rodio: {e}");
-            let file = File::open(path).map_err(|e| e.to_string())?;
+            let file = crate::android_saf::open_media_file(path)?;
             Box::new(
                 VisualizationSource::new(
                     rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?,
@@ -530,8 +535,11 @@ pub fn play_track_shared(
 ///
 /// `start_playback`：是否在预填充后立即启动音频流。为 `false` 时仅加载并
 /// 预缓冲解码数据而不 start（解码线程持续填充），用于热切换时保持暂停状态；
-/// 之后用户点击 resume 会走 `wasapi.resume()` 从缓冲处开始播放。
-#[cfg(windows)]
+/// 之后用户点击 resume 会走独占播放器的 `resume()` 从缓冲处开始播放。
+///
+/// Windows（WASAPI 独占）与 Android（AAudio 独占）共用这一份实现：
+/// 两者的方法签名一致，差异只在下面 `ensure_format` 那一步。
+#[cfg(any(windows, target_os = "android"))]
 pub async fn play_track_exclusive(
     app: &AppHandle,
     state: &State<'_, AppState>,
@@ -592,6 +600,25 @@ pub async fn play_track_exclusive(
     }
     let _ = decoder.prefill_buffer();
     let (src_sr, src_ch) = (decoder.sample_rate(), decoder.channels());
+
+    // Android：AAudio 独占流不接受任意采样率，必须按曲目原生速率重建一次。
+    // 设备支持原生速率时 = 位完美直出；不支持时退到最接近的一档（解码线程重采样）。
+    // Windows 不需要：WASAPI 独占的格式在 initialize 时已与设备协商好。
+    #[cfg(target_os = "android")]
+    let (target_sr, target_ch) = {
+        let (rate, channels) = {
+            let guard = lock_or_log!(player.output.wasapi_player.lock());
+            let player_ref = guard.as_ref().ok_or("AAudio player not initialized")?;
+            player_ref
+                .ensure_format(src_sr, src_ch.get())
+                .map_err(|e| format!("Failed to align AAudio format: {e}"))?
+        };
+        log::info!(
+            "AAudio Exclusive: {path} 原生 {src_sr}Hz/{src_ch}ch -> 输出 {rate}Hz/{channels}ch"
+        );
+        (rate, channels)
+    };
+
     log::debug!("Source: {src_sr}Hz, {src_ch} ch -> Target: {target_sr}Hz, {target_ch} ch");
 
     let source = LockFreeSymphoniaSource::new(decoder);
@@ -672,7 +699,7 @@ pub async fn play_track_exclusive(
 }
 
 /// 播放音轨（独占模式）
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "android")))]
 pub async fn play_track_exclusive(
     _app: &AppHandle,
     _state: &State<'_, AppState>,
@@ -681,14 +708,14 @@ pub async fn play_track_exclusive(
     _start_playback: bool,
 ) -> Result<(), AppError> {
     Err(AppError::Audio(
-        "Exclusive mode is only supported on Windows".to_string(),
+        "Exclusive mode is only supported on Windows / Android".to_string(),
     ))
 }
 
 /// Seek共享模式
 pub fn seek_track_shared(
     app: &AppHandle,
-    state: &State<AppState>,
+    state: &AppState,
     path: &str,
     time: f32,
 ) -> Result<(), AppError> {
