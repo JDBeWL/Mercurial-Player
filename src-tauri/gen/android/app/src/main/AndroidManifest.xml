@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- 阶段 3：后台播放前台服务（mediaPlayback 类型自 Android 14 / targetSdk 34 起必填） -->
+    <!-- 后台播放前台服务（mediaPlayback 类型自 Android 14 / targetSdk 34 起必填） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- Android 13+ 通知运行时权限 -->

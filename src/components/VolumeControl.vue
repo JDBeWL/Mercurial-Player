@@ -50,7 +50,7 @@ const isCoarsePointer = (): boolean => {
 }
 
 // 触摸设备没有 hover 态，滑块永远出不来，改由喇叭按钮负责展开/收起；
-// 静音仍可通过把音量拖到 0 达到（或再次长按），鼠标设备保持原点击静音行为
+// 静音仍可经滑块拖到 0 达到，鼠标设备保持原来点按钮即静音
 const handleVolumeButtonClick = (): void => {
   if (isCoarsePointer()) {
     if (showVolume.value && openedByTouch.value) {

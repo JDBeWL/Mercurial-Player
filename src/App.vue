@@ -17,9 +17,9 @@
         class="immersive-layer"
         :style="{ '--immersive-bg': immersiveBackground }"
       >
-        <!-- 1. 底层：封面主色背景 -->
+        <!-- 底层：封面主色背景 -->
         <div class="background-layer"></div>
-        <!-- 2. 中层：靠左放大、裁剪的封面，暗化+羽化双通道融入背景 -->
+        <!-- 上层：靠左放大、裁剪的封面，暗化+羽化双通道融入背景 -->
         <div class="cover-mask-layer">
           <img v-if="coverDisplayUrl" :src="coverDisplayUrl" class="full-cover" alt="" />
         </div>
@@ -64,12 +64,10 @@
                 >
                   <span class="material-symbols-rounded">cloud_done</span>
                 </div>
-                <!-- 沉浸封面没有独立的"退出"按钮：点左半区、按 Esc 都能退出
-                     （见 handlePlayerLeftClick / handleCoverKeydown），
-                     而手机竖屏下沉浸封面本来就不可达（点封面是"翻到歌词"）。 -->
-                <!-- 视图切换：只在桌面端出现。手机上没有波形这一态，横屏本来就是"左封面 + 右歌词"双栏
-                     不需要切换，竖屏靠点封面/点歌词空白处切换，顶栏空间宝贵。判据必须用平台（isAndroid）
-                     而不是方向：桌面窗口绝大多数时候也是横屏，用方向判据会把桌面端一起改掉。 -->
+                <!-- 视图切换：只在桌面端出现。波形这一态只有这个按钮能进入，手机上不给入口就等于没有；
+                     手机横屏本来就是"左封面 + 右歌词"双栏不需要切换，竖屏靠点封面/点歌词空白处切换，
+                     而顶栏空间宝贵。判据必须用平台（isAndroid）而不是方向：桌面窗口绝大多数时候也是横屏，
+                     用方向判据会把桌面端一起改掉。 -->
                 <button
                   v-if="!isAndroid"
                   class="icon-button view-toggle-btn"
@@ -398,9 +396,8 @@ const panelView = computed<'lyrics' | 'visualizer'>(() =>
   !isPortrait.value && upperView.value === 'visualizer' ? 'visualizer' : 'lyrics',
 )
 
-// 按钮图标/提示都指向"按下去会看到的那一块"。不能直接拿 upperView 的名字取图标：横屏左栏恒为封面，
-// 右栏在 'cover' 与 'lyrics' 两种状态下渲染的都是歌词（见 panelView），所以横屏的 'cover' 对用户来说
-// 就是"歌词"，图标必须给 lyrics。这套图标桌面端与手机共用，改动会同时影响桌面端。
+// 按钮图标/提示都指向"按下去会看到的那一块"，所以不能直接拿 upperView 的名字取图标：横屏的 'cover'
+// 态右栏渲染的是歌词（见 panelView），图标就必须给 lyrics。这套图标桌面与手机共用。
 const nextUpperViewIcon = computed(() => {
   const next = nextUpperView.value
   if (next === 'visualizer') return 'equalizer'
@@ -470,7 +467,7 @@ watch(isPortrait, (portrait) => {
 })
 
 // Android 系统栏：导航条常驻会在底部留一条白带，一律收起（从边缘滑动仍可临时唤出）；
-// 状态栏在横屏或沉浸封面时收起，与界面控制栏走同一套判据
+// 状态栏在横屏或沉浸封面时收起。控制栏另有 3s 空闲自动隐藏，两者判据不同
 watch(
   [isAndroid, isLandscape, immersiveCover],
   ([android, landscape, immersive]) => {
@@ -488,7 +485,8 @@ const handleLyricsBlankClick = (): void => {
   }
 }
 
-// 沉浸式封面模式下点击左侧区域退出
+// 沉浸式封面没有独立的"退出"按钮：点左半区、按 Esc 都能退出（handleCoverKeydown），
+// 而手机竖屏下沉浸封面本来就不可达（点封面是"翻到歌词"）
 const handlePlayerLeftClick = (): void => {
   if (immersiveCover.value) {
     immersiveCover.value = false

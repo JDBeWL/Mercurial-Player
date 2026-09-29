@@ -65,8 +65,8 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
     // 注册 beforeunload 事件，确保关闭前保存配置（兜底路径,见 flushResourcesOnClose 注释）
     window.addEventListener('beforeunload', handleBeforeUnload)
 
-    // 主关闭路径:拦截窗口关闭请求,等待异步清理(配置 flush / 播放器 / 插件)
-    // 完成后再销毁窗口,确保数据落盘。beforeunload 无法保证异步 IPC 被等待
+    // 主关闭路径：拦截关闭请求，等异步清理（配置 flush / 播放器 / 插件）完成后再销毁窗口，
+    // 确保数据落盘 —— beforeunload 的局限见 flushResourcesOnClose 注释
     try {
       unlistenCloseRequested = await getCurrentWindow().onCloseRequested(async (event) => {
         if (isClosing) {
@@ -220,9 +220,7 @@ export function useAppLifecycle(options: UseAppLifecycleOptions): void {
       lyricsFontScaleWatch()
       lyricsFontScaleWatch = null
     }
-    // 强制保存待处理的配置。
-    // 每一步异步清理都独立兜错:任一失败都不能中断后续清理,
-    // 否则 beforeunload 监听与音轨监听会泄漏
+    // 每步异步清理独立兜错：任一失败都不能中断后续清理，否则监听器会泄漏
     try {
       await configStore.flushPendingSave()
     } catch (error) {

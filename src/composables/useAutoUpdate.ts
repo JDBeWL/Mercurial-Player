@@ -7,8 +7,7 @@ import logger from '@/utils/logger'
  * 自动更新 Composable
  *
  * 检查/安装流程复用 Tauri v2 plugin-updater（自动读取 tauri.conf.json 中的
- * updater.endpoints/pubkey），下载阶段走后端 updater_download 命令的
- * 多线程分片下载（HTTP Range 并发请求），签名校验通过后安装。
+ * updater.endpoints/pubkey），下载与签名校验见 `downloadAndInstall`。
  */
 
 /** updater_check 命令返回的更新信息 */

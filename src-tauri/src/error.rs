@@ -1,6 +1,5 @@
-//! 应用统一错误类型 [`AppError`]：命令层序列化成 Display 字符串，与历史 `Result<T, String>`
-//! 在 IPC 上的表现一致，前端契约不变。`From<String>` 与 `From<AppError> for String` 双向转换
-//! 保证新旧签名互通：字符串错误经 `?` 进入 `Other` 变体，旧签名也能直接用 `?` 接收 `AppError`。
+//! 应用统一错误类型 [`AppError`]：序列化为 Display 字符串，与历史 `Result<T, String>` 的 IPC
+//! 表现一致，前端契约不变。`From<String>` 与 `From<AppError> for String` 双向转换让新旧签名互通。
 //!
 //! ## 示例
 //!
@@ -19,9 +18,7 @@
 
 use std::fmt;
 
-// Tauri 要求 command 的错误类型实现 Serialize。这里序列化为 Display 字符串，与历史
-// `Result<T, String>` 在 IPC 上的表现完全一致；将来要结构化错误只需改这一处。
-
+// Tauri 要求 command 的错误类型实现 Serialize
 impl serde::Serialize for AppError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -32,8 +29,6 @@ impl serde::Serialize for AppError {
 }
 
 /// 应用统一错误类型
-///
-/// 覆盖项目中常见的错误分类，每个变体携带足够上下文以便诊断。
 #[derive(Debug)]
 pub enum AppError {
     /// 文件/目录 IO 错误
@@ -52,7 +47,7 @@ pub enum AppError {
     Path(String),
     /// 插件加载/执行/卸载错误
     Plugin(String),
-    /// 全文索引（Tantivy）操作错误
+    /// 检索索引操作错误
     Index(String),
     /// 其他未分类错误
     Other(String),

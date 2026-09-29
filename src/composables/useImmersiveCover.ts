@@ -15,10 +15,8 @@ import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
  *
  * - 优先在专用 worker 线程执行（解码 + 裁剪 + Lanczos 放大），主线程零阻塞，
  *   避免切歌瞬间与歌词首帧渲染争抢主线程。
- * - worker 不可用（创建失败 / 运行报错 / OffscreenCanvas 不支持）时回退
- *   主线程路径（Lanczos 在主线程同步执行，功能不中断但可能短暂卡顿）。
- * - 源图本身足够大（无需放大）时直接使用原始 URL，浏览器缩小显示质量足够。
- * - 任何一步失败都回退原始 URL，功能不中断。
+ * - worker 不可用（创建失败 / 运行报错 / OffscreenCanvas 不支持）时回退主线程同步执行，
+ *   功能不中断但可能短暂卡顿；再失败或源图已够大（无需放大）则直接用原始 URL。
  * - 处理期间先展示原始 URL，完成后无缝替换，避免封面闪空。
  */
 

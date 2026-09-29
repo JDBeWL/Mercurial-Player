@@ -78,9 +78,9 @@ struct Shared {
     fade_dir: AtomicU8,
     fade_left: AtomicUsize,
     fade_total: AtomicUsize,
-    /// 淡出走完后要交给看门狗的动作（PENDING_*）
+    /// 淡出结束时由回调转交给 `pending` 的动作（命令线程写入，可置回 PENDING_NONE 取消）
     fade_action: AtomicU8,
-    /// 淡出完成后待执行的动作
+    /// 淡出完成后待看门狗执行的动作
     pending: AtomicU8,
     underruns: AtomicU64,
     disconnected: AtomicBool,
@@ -668,13 +668,13 @@ fn fade_frames(duration_ms: u32, sample_rate: u32) -> usize {
     ((sample_rate as u64 * duration_ms as u64) / 1000) as usize
 }
 
-/// 按设备上报的编码挑一个格式：优先 32 位浮点（解码器输出本身就是 f32，
-/// 免一次量化），其次是 32 位 / 24 位整数，最后 16 位。
+/// 按设备上报的编码挑一个格式：优先 float（解码器输出本身就是 f32，免一次量化），
+/// 其次是整数位深，最后 16 位。取值见 `android.media.AudioFormat.ENCODING_*`。
 fn pick_format(device: &OutputDeviceInfo) -> ffi::aaudio_format_t {
     const ENCODING_PCM_16BIT: i32 = 2;
     const ENCODING_PCM_FLOAT: i32 = 4;
-    const ENCODING_PCM_24BIT: i32 = 6;
-    const ENCODING_PCM_32BIT: i32 = 7;
+    const ENCODING_PCM_24BIT_PACKED: i32 = 21;
+    const ENCODING_PCM_32BIT: i32 = 22;
 
     if device.encodings.is_empty() {
         // 设备没上报：float 在 AAudio 上总是可用（必要时由框架转换）
@@ -684,7 +684,7 @@ fn pick_format(device: &OutputDeviceInfo) -> ffi::aaudio_format_t {
         ffi::AAUDIO_FORMAT_PCM_FLOAT
     } else if device.encodings.contains(&ENCODING_PCM_32BIT) {
         ffi::AAUDIO_FORMAT_PCM_I32
-    } else if device.encodings.contains(&ENCODING_PCM_24BIT) {
+    } else if device.encodings.contains(&ENCODING_PCM_24BIT_PACKED) {
         ffi::AAUDIO_FORMAT_PCM_I24_PACKED
     } else if device.encodings.contains(&ENCODING_PCM_16BIT) {
         ffi::AAUDIO_FORMAT_PCM_I16

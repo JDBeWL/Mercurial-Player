@@ -30,8 +30,13 @@ package-lock.json
 
 # Tauri updater 签名私钥（绝对不能提交）
 *.key
-~/
+
+# tauri build 生成的中间目录
 .tauri/
+
+# 脚本把 "~" 当字面量路径创建出来的目录
+~/
+
 # Scripts - 忽略本地工具脚本，但保留构建相关的 sync-version.mjs
 # (package.json 的 version:sync 脚本依赖它)
 scripts/*
@@ -40,8 +45,9 @@ scripts/*
 # ============================================================================
 # Android / Tauri 移动端
 # ============================================================================
-# gen/android 只提交手工维护的部分（MainActivity / SafBridge / PlaybackService /
-# MediaBridge / AndroidManifest.xml / build.gradle.kts / proguard-rules.pro）。
+# gen/android 只提交手工维护的部分：MainActivity / SafBridge / PlaybackService / MediaBridge /
+# AudioBridge / FontScaleBridge 六个 Kotlin，加上 AndroidManifest.xml、两个 build.gradle.kts、
+# settings.gradle、gradle.properties、proguard-rules.pro 与 res/ 下的 XML 图标。
 # Tauri 自带的 gen/android/.gitignore 已排除 generated/、*.so、local.properties、build。
 
 # tauri android init 可再生成的脚手架
@@ -60,7 +66,7 @@ src-tauri/gen/android/app/src/main/res/mipmap-xxxhdpi/*.png
 # 打包时拷贝到 assets 的前端产物（自包含 APK 用）
 src-tauri/gen/android/app/src/main/assets/
 
-# 图标预览图（scripts/gen-android-icons.py --preview 的可再生产物）
+# 图标生成脚本的预览产物（脚本本身在 scripts/* 里，不入库）
 icon-preview.png
 __pycache__/
 
@@ -71,6 +77,3 @@ key.properties
 keystore.properties
 *.apk
 *.aab
-
-# 本地 agent 工作区（会话记忆等，不入库）
-.workbuddy/

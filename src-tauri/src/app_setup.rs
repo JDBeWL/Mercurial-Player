@@ -1,6 +1,4 @@
-//! Tauri 应用启动装配
-//!
-//! 包含 setup 回调、播放器创建与任务栏钩子,保持 main() 精简。
+//! Tauri 应用启动装配：setup 回调、播放器创建与任务栏钩子。
 
 use crate::{AppState, system};
 

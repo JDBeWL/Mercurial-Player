@@ -26,8 +26,8 @@
       </div>
     </div>
 
-    <!-- 已播 / 总时长。桌面靠悬停气泡显示时间，触摸设备没有 hover，竖屏下把这一行常显出来，否则手机上
-         完全看不到播放进度时间。位置刻意留在进度条下方 18px：进度条的热区（::before）向下探了 14px，
+    <!-- 已播 / 总时长。桌面靠悬停气泡显示时间，手指没有 hover，手机竖屏下把这一行常显出来，否则完全
+         看不到播放进度时间。位置刻意留在进度条下方 18px：进度条的热区（::before）向下探了 14px，
          贴着放的话点时间文字会误触成"拖动进度条"。 -->
     <div class="progress-time-row">
       <span class="progress-time">{{ formatTime(displayTime) }}</span>
@@ -154,7 +154,7 @@ const handlePointerUp = (event: PointerEvent) => {
   margin-bottom: 8px;
 }
 
-/* 时间行：桌面不占位（时间只在悬停气泡里出现），竖屏才由媒体查询打开 */
+/* 时间行：桌面不占位（时间只在悬停气泡里出现），只有手机竖屏由下面的 [data-mobile] 规则打开 */
 .progress-time-row {
   display: none;
 }
@@ -192,7 +192,7 @@ const handlePointerUp = (event: PointerEvent) => {
   bottom: -10px;
 }
 
-/* 触摸设备（手机/平板）：22px 的有效高度对手指太薄，扩到 32px 便于点按拖动。
+/* 触摸设备（手机/平板）：20px 的热区对手指太薄，扩到 28px 便于点按拖动。
    高度保持 0 不变，只把热区往下探出去一点，不影响布局。 */
 @media (pointer: coarse) {
   .progress-bar-wrapper::before {

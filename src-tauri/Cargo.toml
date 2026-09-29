@@ -140,7 +140,7 @@ struct_field_names = "allow"      # LyricsLayout 字段都以 _rect 结尾,语�
 struct_excessive_bools = "allow"  # SharedLyricState 需要多个状态标志
 # 框架生成代码
 large_stack_frames = "allow"      # Tauri宏生成
-too_many_lines = "allow"          # main函数需要初始化很多东西
+too_many_lines = "allow"          # lib.rs 的 run() 需要初始化很多东西
 used_underscore_binding = "allow" # Tauri setup回调
 # 代码风格偏好
 collapsible_if = "allow"          # 有时分开写更清晰

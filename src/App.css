@@ -39,7 +39,6 @@
   height: 100%;
 }
 
-/* 下一首过渡 */
 .album-art-slide-next-enter-from {
   transform: translateX(20%) scale(0.9);
   opacity: 0;
@@ -50,7 +49,6 @@
   opacity: 0;
 }
 
-/* 上一首过渡 */
 .album-art-slide-prev-enter-from {
   transform: translateX(-20%) scale(0.9);
   opacity: 0;
@@ -110,7 +108,6 @@
   flex: 1;
   display: flex;
   gap: max(10px, min((41vw - 600px), 2vw));
-  /* margin-bottom: 8px; */
   min-height: 0;
   /* .view-controls-container 是绝对定位的，需要这一层做定位基准
      （原来它挂在 .player-right 上，那个元素自带 position: relative） */
@@ -164,7 +161,7 @@
   text-shadow: 0 0px 1px rgba(0, 0, 0, 0.1);
 }
 
-/* 右下角：桌面歌词与音量，右边距与左侧一致 */
+/* 右下角：播放列表、桌面歌词与音量 */
 .side-controls {
   flex: 1;
   display: flex;
@@ -174,9 +171,9 @@
   padding-right: 8px;
 }
 
-/* 窄屏（≈手机竖屏）：保留"上/下一首 + 播放/暂停"的中枢，收侧栏。不要把 .audio-info-corner /
-   .side-controls 整个 display:none，两侧同时塌掉会让控制按钮整组左偏，而且等于把播放列表入口一起
-   藏了。做法是两侧都保留 flex:1 的占位，只把里面的内容收起来，播放控制依旧居中。 */
+/* 窄屏（≤640px，含手机竖屏）：保留"上/下一首 + 播放/暂停"的中枢，收侧栏。不要把
+   .audio-info-corner / .side-controls 整个 display:none，两侧同时塌掉会让控制按钮整组左偏，
+   而且等于把播放列表入口一起藏了。做法是两侧都保留 flex:1 的占位，只把里面的内容收起来。 */
 @media (max-width: 640px) {
   .audio-info-text {
     display: none;
@@ -187,7 +184,7 @@
     padding-right: 0;
   }
 
-  /* 手机上音量交给系统按键，悬浮滑块没有 hover 可用，留着也点不出来 */
+  /* 音量滑块靠 hover 展开，窄窗里没有空间也没有 hover。Android 根本不渲染它（见 App.vue） */
   .side-controls :deep(.volume-control-container) {
     display: none;
   }
@@ -324,7 +321,7 @@
   height: 40px;
   border: none;
   border-radius: 50%;
-  /* 前一条是在 WebView 110（不支持 color-mix）下的可见兜底 */
+  /* 下一条 color-mix 在 WebView 110 上不被支持，整条被丢弃时由这句兜底 */
   background-color: var(--md-sys-color-primary);
   background-color: color-mix(in srgb, var(--md-sys-color-primary) 75%, transparent);
   color: var(--md-sys-color-on-primary);
@@ -394,7 +391,7 @@
 }
 
 .cover-menu-item:hover {
-  /* 前一条是 WebView 110（不支持 color-mix）下的兜底 */
+  /* 下一条 color-mix 在 WebView 110 上不被支持，整条被丢弃时由这句兜底 */
   background-color: rgba(128, 128, 128, 0.16);
   background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
 }
@@ -700,8 +697,8 @@
   }
 }
 
-/* 专辑封面右下角的"提取封面"按钮靠 mousemove 判定（见 useAlbumArtInteraction），
-   手指没有 hover，按钮永远出不来。触摸设备上改为常显。 */
+/* "提取封面"按钮靠 mousemove 判定显隐（见 useAlbumArtInteraction），无 hover 能力的触屏设备上
+   永远出不来，改为常显。Android 不渲染这个按钮，走长按封面菜单（见 App.vue）。 */
 @media (hover: none) {
   .extract-cover-btn {
     opacity: 1;
@@ -716,15 +713,11 @@
 
 /* 竖屏（手机）：上部区域收成单面板 + 大封面 + 贴手的控制区；横屏与桌面仍走双栏。方向之外还要加
    [data-mobile='true'] 守卫，桌面把窗口拉成窄高同样命中 (orientation: portrait)，这些规则只属于手机。
-   本块放在文件最末尾并用 [data-upper-view=...] 提升特异性：同特异性下要后写的才胜出。 */
-
-/* 曲目信息（标题/艺术家）竖屏横屏都在顶栏的 .nav-center 里，
-   这里不再有第二份，见 AppHeader.vue。 */
+   本块放在文件最末尾并用 [data-upper-view=...] 提升特异性：同特异性下要后写的才胜出。
+   曲目信息（标题/艺术家）竖屏横屏都只在顶栏 .nav-center 一份，见 AppHeader.vue。 */
 
 @media (orientation: portrait) {
-  /* 顶栏：竖屏的曲目信息不再一刀切隐藏，歌词态要显示（"标题和艺术家放顶部"），封面态才收起来
-     （那时它贴在进度条上方）。显隐由 App.vue 算出后经 AppHeader 的 track-info-visible 传入，这里
-     不再用 CSS 覆盖；顶栏内部的重排见 AppHeader.vue 的竖屏块。 */
+  /* 顶栏内部的重排见 AppHeader.vue 的竖屏块，这里不再覆盖它的显隐 */
 
   /* 上部区域单面板：封面态下 .player-left 不参与拉伸（见下面的 flex: 0 0 auto），配合
      justify-content: center 让封面在剩余空间里垂直居中；歌词态 .player-right 是 flex: 1
@@ -777,18 +770,18 @@
     top: 2px;
   }
 
-  /* 控制区：底部不再顶到屏幕边缘。这里不要再给左右 padding：本行六个按钮（5 个主按钮 + 播放列表）
-     宽度已经接近满宽，再塞 8px 内缩会让整行比通栏的时间行窄一圈，侧边占位被压没、播放列表被迫与
-     循环按钮贴死。去掉 padding 后本行两端与时间行对齐。 */
+  /* 控制区：底部不再顶到屏幕边缘。这里不要再给左右 padding：本行五颗按钮（PlayerControls 的 4 颗
+     + 播放列表）宽度已经接近满宽，再塞 8px 内缩会让整行比通栏的时间行窄一圈，侧边占位被压没、
+     播放列表被迫与循环按钮贴死。去掉 padding 后本行两端与时间行对齐。 */
   .controls-area {
     padding: 0;
     margin-top: 4px;
     margin-bottom: 4px;
   }
 
-  /* 六个按钮的间距统一为 14px（.controls-row 的 gap 也是 14px）。三条规则配合：收掉竖屏下已经空掉的
-     .audio-info-corner（音频信息改由时间行的 time-middle 插槽承担）、把 .side-controls 收成内容宽、
-     间距挂在按钮自己身上（按钮不渲染时挂容器上会留一段空档）。三条都带 [data-mobile='true'] 守卫。 */
+  /* 五颗按钮的间距统一为 14px（.controls-row 的 gap 也是 14px）。三条规则配合：竖屏下空掉的
+     .audio-info-corner 整块收起（音频信息改由时间行的 time-middle 插槽承担）、把 .side-controls 收成
+     内容宽、间距挂在按钮自己身上（按钮不渲染时挂容器上会留一段空档）。三条都带 [data-mobile='true'] 守卫。 */
   .controls-area[data-mobile='true'] .audio-info-corner {
     display: none;
   }
@@ -801,7 +794,7 @@
     margin-left: 14px;
   }
 
-  /* 底部一行的按钮尺寸在这里统一定义：PlayerControls 的 5 个主按钮和 .side-controls 里的播放列表分属
+  /* 底部一行的按钮尺寸在这里统一定义：PlayerControls 的 4 颗主按钮和 .side-controls 里的播放列表分属
      两个组件，各写一份就会出现播放列表比其它按钮小一圈。必须用 :deep()：App.css 是 `<style scoped src>`，
      `A :deep(B)` 编译成 `A[data-v-x] B`，才能穿过子组件的 scoped 边界并拿到更高特异性。 */
   .controls-area[data-mobile='true'] :deep(.icon-button) {
@@ -814,9 +807,9 @@
     height: 64px;
   }
 
-  /* 音频信息在竖屏统一由进度条那一行的 time-middle 插槽承担（见 ProgressBar.vue），控制栏左下角这份
-     要收起来，避免同屏出现两遍。只收起文字本身、保留 .audio-info-corner 的 flex:1 占位 —— 两侧同时
-     塌掉会让控制按钮整组往左偏。 */
+  /* 竖屏不显示左下角那份音频信息（手机上已由时间行的 time-middle 插槽承担，见 ProgressBar.vue）。
+     只收文字、不动 .audio-info-corner 的 flex:1 占位：两侧同时塌掉会让控制按钮整组左偏。
+     Android 上整个 corner 已被上面的 [data-mobile] 规则收起，这里管的是桌面窄高窗口。 */
   .audio-info-text {
     display: none;
   }

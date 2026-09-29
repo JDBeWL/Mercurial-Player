@@ -73,10 +73,8 @@ const { isAndroid } = usePlatform()
 const { isPortrait } = useOrientation()
 
 /**
- * 手机竖屏：面板拆成「列表 → 详情」两级。
- * 480px 宽放不下"左栏 280px + 右内容"的并排布局，而原来的窄屏降级（一排横向
- * tab）又因为 .nav-item 没重置 width:100% 而彻底失效——10 个 tab 各撑满整行，
- * 用户只能看到第一个（详见 SettingsNav 的样式注释）。
+ * 手机竖屏：面板拆成「列表 → 详情」两级。480px 宽放不下"左栏 280px + 右内容"的并排布局，
+ * 而窄屏降级出来的一排横向 tab 又因 .nav-item 没重置 width:100% 而失效（见 SettingsNav）。
  * 桌面端与横屏不走这里，behavior 不变。
  */
 const isMobilePortrait = computed<boolean>(() => isAndroid.value && isPortrait.value)
@@ -189,11 +187,7 @@ const currentTabLabel = computed<string>(
 }
 
 /* ===== 手机竖屏：列表 ↔ 详情 两级 =====
-   上面那条 768px 规则把面板改成纵向堆叠（导航横跨整行），在 480px 宽的竖屏下
-   仍然不可用：横跨整行的是一排横向 tab，而 .nav-item 没重置 width:100%，
-   10 个 tab 各撑满整行 → 排成 10 屏宽，用户只看得到一个空胶囊（实测截图）。
-   这里换成手机上标准的「整屏列表 → 详情」，导航的列表形态见 SettingsNav。
-
+   来由见 isMobilePortrait 的注释，导航的列表形态见 SettingsNav。
    用 [data-mobile='true'] 守卫：@media (orientation: portrait) 在桌面把窗口
    拉成窄高时同样会命中，不加守卫会把桌面端的并排布局一起改掉。 */
 @media (orientation: portrait) {

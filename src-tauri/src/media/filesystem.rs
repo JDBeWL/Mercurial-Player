@@ -366,7 +366,7 @@ pub fn read_lyrics_file_internal(path: &str) -> Result<String, AppError> {
 pub fn write_lyrics_file_internal(path: &str, content: &str) -> Result<(), AppError> {
     validate_lyrics_path(path)?;
     if android_saf::is_content_uri(path) {
-        // SAF 无法通过 fd 写回（需 ContentResolver 打开写模式），退化为只读提示
+        // 歌词写入没有接 SAF 的写 fd（android_saf::open_write_file），content URI 一律拒绝
         return Err("无法写入 SAF 管理的歌词文件".to_string().into());
     }
 

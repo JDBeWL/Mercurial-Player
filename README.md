@@ -12,7 +12,7 @@
 ![你会做梦吗](/FORREADME.png)
 
 <h3 align="center">
-   是基于Tauri开发的音乐播放器。
+   是基于Tauri开发的音乐播放器，支持 Windows 与 Android。
 </h3>
 
 <p align="center">
@@ -26,10 +26,10 @@
 ## 音频播放
 
 - [x] 支持格式：Symphonia支持什么就支持什么
-- [x] 支持的播放方式：共享模式下面使用rodio(rodio已内部使用Symphonia解码)，在Windows平台上特殊支持WASAPI独占模式访问
+- [x] 支持的播放方式：共享模式下面使用rodio(rodio已内部使用Symphonia解码)，Windows平台上特殊支持WASAPI独占模式访问，Android上支持AAudio独占直出USB DAC（位完美）
 - [x] 切换设备：支持在断开，手动切换下自动切换输出设备，WASAPI独占模式也能通过监听事件实现在共享模式和独占模式的切换，不需要切换下一首，无论是在播放中还是没有播放情况下这个功能基本可用。
 - [x] 高采样率支持：Rubato能提供什么样的重采样就大概有什么采样
-- [x] EQ均衡器：这个功能到底怎么写更好，总是炸
+- [x] EQ均衡器：多段参数均衡，处理链内置在解码路径里
 - [x] 淡入淡出：切歌时平滑过渡（独占模式50ms淡出），pause/resume消除爆音（30ms淡入淡出）
 - [x] WASAPI独占模式音频加速解码：Windows下的WASAPI独占模式下特殊支持SIMD处理部分数据，如果不支持会fallback到SSE2加速。在不支持软件模拟的ARM64环境下，或不支持SSE2的64位的桌面X86处理器平台在支持WASAPI且能驱动这个WebView2的Windows环境中（~~按道理任何x86_64的CPU都应该支持这个SSE2吧，如果有当我什么都没说~~），这种情况将fallback到不加速
 
@@ -37,14 +37,14 @@
 
 - [x] 多格式支持：LRC、ASS
 - [x] 自动加载：根据音频文件名自动查找匹配的歌词文件
-- [x] 在线歌词：从网易云音乐Web API获取歌词
+- [x] 在线歌词：从网易云、QQ音乐、酷狗、LRCLIB 获取
 - [x] 歌词样式：支持传统的播放器的滚动歌词和一种更加消耗资源的滚动歌词显示方式
 - [x] 歌词对齐：左/中/右
 - [x] 歌词偏移
 - [x] 点击歌词跳转
 - [x] 卡拉OK逐字高亮（ASS格式）
 - [x] 双语歌词显示
-- [x] 歌词字体可选：内置霞鹜文楷屏幕版（LXGW WenKai Screen）与程序默认的Noto Sans，支持软件同级 `fonts/` 目录动态加载与构建期打包（`src/assets/fonts/lyrics/`）自定义字体，也可选系统字体
+- [x] 歌词字体可选：内置霞鹜文楷屏幕版（LXGW WenKai Screen）与程序默认的Noto Sans，桌面端支持软件同级 `fonts/` 目录动态加载与构建期打包（`src/assets/fonts/lyrics/`）自定义字体，也可选系统字体
 - [x] 桌面歌词
 
 ## 播放控制
@@ -70,7 +70,7 @@
 - [x] 元数据读取（单次采样精度、比特率、封面、标题、艺术家）
 - [x] 按文件夹创建播放列表
 - [x] 批量元数据获取优化
-- [x] 全文搜索：基于Tantivy索引歌曲、艺术家、专辑
+- [x] 搜索：按标题/艺术家/专辑/文件名匹配，带防抖
 
 ## 界面
 
@@ -78,6 +78,14 @@
 - [x] 主题颜色系统
 - [x] Mini模式
 - [x] 中文/English
+
+## 移动端（Android）
+
+- [x] 后台播放前台服务 + 通知栏/耳机线控（MediaSession）
+- [x] SAF 授权目录读取音乐，content URI 经 fd 桥接解码
+- [x] AAudio 独占输出（USB DAC 位完美）
+- [x] 竖屏/横屏布局自适应，系统栏随横屏与沉浸封面隐藏
+- [x] 应用内界面字号（覆盖系统字体大小）
 
 ## 配置
 
@@ -142,7 +150,8 @@
 | Winreg               | 0.56  | 注册表访问（读取系统字体列表）                                  |
 | Rubato               | 4.0   | 音频重采样                                                      |
 | Lofty                | 0.24  | 音频元数据读取                                                  |
-| Tantivy              | 0.26  | 全文搜索引擎                                                    |
+| JNI                  | 0.21  | Android 侧调用 Kotlin 桥（SAF / 前台服务 / 系统栏 / 字号）      |
+| ndk-context          | 0.1   | Android 应用上下文（cpal/AAudio 取 AudioManager）               |
 | Rayon                | 1.x   | 并行数据处理                                                    |
 | Spectrum Analyzer    | 1.7   | 频谱分析                                                        |
 | Walkdir              | 2.x   | 目录遍历                                                        |
@@ -164,6 +173,9 @@
    - Windows: 访问 [rustup.rs](https://rustup.rs/) 下载安装
    - 安装后运行 `rustup update` 确保版本最新
 3. **Tauri 依赖** - 参考 [Tauri 官方文档](https://tauri.app/start/prerequisites/)
+4. **Android（可选，仅构建移动端时）** - Android Studio 与 SDK/NDK（版本以
+   `src-tauri/gen/android/app/build.gradle.kts` 为准）、`cargo install cargo-ndk`，
+   以及 `rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android`
 
 ## 开发环境
 
@@ -176,17 +188,25 @@ pnpm run tauri dev
 
 # 仅启动Vite开发环境（可以看看UI就行了）
 pnpm run dev
+
+# 在已连接的 Android 设备/模拟器上调试
+pnpm run tauri android dev
 ```
 
 ## 打包构建
 
 ```bash
+# 桌面端
 pnpm run tauri build
+
+# Android（首次克隆后需要先 pnpm run tauri android init 生成 gradle wrapper 与图标位图）
+pnpm run tauri android build --apk
 ```
 
 # 注意
 
-本程序为Tauri框架设计的应用，严重依赖WebView，但是程序可以以单文件运行，但是程序仍然会释放一些目录在程序同级目录下。
+本程序为Tauri框架设计的应用，严重依赖WebView。桌面端可以单文件运行，但仍会在程序同级目录释放
+`data/`、`logs/`、`plugins/` 等目录（便携化）；Android 端这些目录落在应用私有数据目录里。
 
 **法律声明**：本项目在线歌词功能仅用于技术研究。本软件不提供、不存储任何受版权保护的音乐文件。请在当地法律允许的范围内使用。
 

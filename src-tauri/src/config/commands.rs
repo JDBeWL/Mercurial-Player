@@ -80,13 +80,9 @@ pub fn load_config(state: State<AppState>) -> Result<AppConfig, AppError> {
 pub fn save_config(state: State<AppState>, mut config: AppConfig) -> Result<(), AppError> {
     // 读-改-写必须在同一把写锁内完成,否则与 save_last_session 等并发时会互相覆盖
     state.config_manager.update_config(|current| {
-        // last_session 由后端 save_last_session / clear_last_session 独立管理,
-        // 前端负载不含该字段;若直接落盘会把已记录的播放会话抹掉
         if config.last_session.is_none() {
             config.last_session.clone_from(&current.last_session);
         }
-        // preferred_device_id 仅由后端 set_audio_device 管理(设置页选择),
-        // 前端整包保存不含该字段;缺失时沿用现有值
         if config.audio.preferred_device_id.is_none() {
             config
                 .audio

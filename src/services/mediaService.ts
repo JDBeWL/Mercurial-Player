@@ -1,7 +1,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 
 // convertFileSrc 是纯路径转换工具（不发起 IPC），随媒体类调用一并从这里导出，
-// 使组件不再直接依赖 @tauri-apps/api/core
+// 组件经此使用就不必直接 import @tauri-apps/api/core（存量文件里仍有不少直接 import）
 export { convertFileSrc }
 
 /** 获取曲目封面缓存路径（无封面时返回 null） */

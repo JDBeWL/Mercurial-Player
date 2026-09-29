@@ -52,7 +52,6 @@ export function useAlbumArtInteraction(
     }
   }
 
-  // 处理专辑封面鼠标移动事件，检测是否在右下角区域
   const handleAlbumArtMouseMove = (event: MouseEvent): void => {
     if (!currentTrack.value || !currentTrack.value.coverPath) {
       showExtractButton.value = false
@@ -64,12 +63,10 @@ export function useAlbumArtInteraction(
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
 
-    // 定义右下角区域（右下角80x80像素区域）
     const cornerSize = 80
     showExtractButton.value = x >= rect.width - cornerSize && y >= rect.height - cornerSize
   }
 
-  // 鼠标离开封面区域时隐藏按钮
   const handleAlbumArtMouseLeave = (): void => {
     showExtractButton.value = false
   }

@@ -161,9 +161,8 @@ export interface UIConfig {
   showSettings: boolean
   showConfigPanel: boolean
   miniMode: boolean
-  /* 界面字号倍率，1 = 设计稿原始大小，桌面端读取但不生效。只有 Android 生效：WebView 会把系统
-     「字体大小」乘到所有 CSS px 字号上，固定像素布局会被撑变形。原生侧直接接管 WebView 的
-     textZoom（它才是倍率的唯一来源），系统设置因此被整体覆盖，应用内这一项是唯一来源。 */
+  /* 界面字号倍率，1 = 设计稿原始大小。只有 Android 生效（原生侧接管 WebView textZoom，
+     原理见 useAppFontScale），桌面端读取但不生效 */
   fontScale?: number
 }
 

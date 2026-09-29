@@ -80,9 +80,8 @@
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.display') }}</h4>
 
-      <!-- 界面字号：只有 Android 真正生效。系统「字体大小」会被 WebView 乘到所有 CSS px 字号
-           上，而本应用是固定像素布局、容器盒子不跟着长，故由原生侧接管 textZoom 整体覆盖，这里
-           成为字号的唯一来源。桌面端仍显示该项，但后端是 no-op。 -->
+      <!-- 界面字号：只有 Android 真正生效（原生侧接管 WebView textZoom，原理见 useAppFontScale）。
+           桌面端仍显示该项，但后端是 no-op。 -->
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.interfaceFontSize') }}</span>
@@ -705,7 +704,6 @@ onMounted(() => {
 }
 
 .cache-size-value {
-  /* min-width: 60px; */
   text-align: right;
   font-size: 14px;
   font-weight: 500;
@@ -722,7 +720,6 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* min-width: 200px; */
 }
 
 .cache-path-value {
@@ -732,7 +729,6 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  /* max-width: 200px; */
 }
 
 .cache-path-btn {

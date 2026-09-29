@@ -1,6 +1,4 @@
-//! WASAPI独占模式音频播放实现
-//!
-//! 这个模块实现了WASAPI独占模式音频输出。
+//! WASAPI 独占模式音频输出与渲染线程
 
 use crate::error::AppError;
 use crossbeam_channel::{Receiver, Sender, bounded};
@@ -26,17 +24,14 @@ pub enum AudioCommand {
     ClearBuffer,
     Shutdown,
     /// 带淡出的停止(用于切歌/退出场景)
-    /// 参数:淡出时长(毫秒)
     StopWithFadeOut {
         duration_ms: u32,
     },
     /// 带淡出的暂停(用于用户暂停)
-    /// 参数:淡出时长(毫秒)
     PauseWithFadeOut {
         duration_ms: u32,
     },
     /// 带淡入的恢复(用于用户恢复)
-    /// 参数:淡入时长(毫秒)
     ResumeWithFadeIn {
         duration_ms: u32,
     },
@@ -77,19 +72,15 @@ impl std::fmt::Debug for AudioCommand {
 enum FadeState {
     /// 无淡入淡出,fade_factor = 1.0
     Idle,
-    /// 正在淡出
-    /// target_factor: 目标系数(通常为 0.0)
-    /// remaining_frames: 剩余帧数
-    /// total_frames: 总帧数(用于计算进度)
-    /// on_complete: 淡出完成后的动作
+    /// 正在淡出：fade_factor 从当前值线性走向 target_factor（通常为 0.0），
+    /// 走完 remaining_frames 后执行 on_complete
     FadingOut {
         target_factor: f32,
         remaining_frames: usize,
         total_frames: usize,
         on_complete: FadeAction,
     },
-    /// 正在淡入
-    /// target_factor: 目标系数(通常为 1.0)
+    /// 正在淡入：target_factor 通常为 1.0
     FadingIn {
         target_factor: f32,
         remaining_frames: usize,
@@ -122,31 +113,26 @@ pub enum AudioResponse {
 // Android 的 AAudio 独占通道与命令层共用同一套状态语义。
 pub use crate::audio::PlaybackState;
 
-// 无锁 SPSC 采样环形缓冲
-
 /// SPSC 环形缓冲容量(采样数)
 ///
-/// 按最坏情况一次性预分配:覆盖立体声 ≤384kHz、6声道 ≤192kHz 等所有现实的
-/// 独占模式设备格式。生产者按 2 秒水位门控(decode_push),容量远大于门控
-/// 阈值即可;固定预分配避免了设备初始化后跨线程重设容量的问题。
+/// 按最坏情况一次性预分配:覆盖立体声 ≤384kHz、6声道 ≤192kHz 等所有现实的独占模式格式。
+/// 生产者按 2 秒水位门控(decode_push),容量远大于该阈值即可；固定预分配也避免了设备初始化
+/// 之后还要跨线程重设容量。
 const SPSC_RING_CAPACITY: usize = 384_000 * 2 * 4;
 
 /// 无锁 SPSC(单生产者/单消费者)采样环形缓冲
 ///
-/// 替代 `Mutex<VecDeque<f32>>`:WASAPI 渲染回调与解码推送线程不再竞争
-/// 互斥锁,消除实时音频路径上的内核态等待与优先级反转风险(Windows 上
-/// 争用的 std::sync::Mutex 会陷入内核,渲染线程被抢占即产生 xrun/爆音)。
+/// 渲染回调与解码线程不争互斥锁：Windows 上 `std::sync::Mutex` 争用会陷入内核，
+/// 渲染线程被抢占即产生 xrun/爆音。
 ///
 /// 线程契约:
-/// - [`push_slice`](Self::push_slice) 仅由生产者线程(解码推送线程)调用;
-/// - [`pop_slice`](Self::pop_slice) 仅由消费者线程(WASAPI 音频线程)调用;
-/// - [`clear`](Self::clear) 允许生产者/音频/宿主线程调用(tail 快进到
-///   head 使缓冲立即为空;与 push/pop 并发时语义为"最终清空",与旧实现
-///   持锁清空在停止场景下行为等价);
-/// - [`len`](Self::len) 可从任意线程调用,返回近似水位(供水位门控)。
+/// - [`push_slice`](Self::push_slice) 仅生产者（解码推送线程）调用;
+/// - [`pop_slice`](Self::pop_slice) 仅消费者（WASAPI 音频线程）调用;
+/// - [`clear`](Self::clear) 任意线程可调用，与 push/pop 并发时语义为「最终清空」;
+/// - [`len`](Self::len) 任意线程可调用，返回近似水位（供水位门控）。
 ///
-/// 内存序:head 的 store(Release)/load(Acquire) 配对保证消费者能看到已
-/// 发布的数据;tail 同理。单调递增计数器以 `usize` 计,远不会回绕。
+/// 内存序:head 的 store(Release)/load(Acquire) 配对保证消费者能看到已发布的数据，tail 同理。
+/// 计数器单调递增，以 `usize` 计不会回绕。
 struct SpscSampleRing {
     /// 内部可变性:生产者/消费者访问不相交区间(见各方法的 SAFETY 说明)
     buf: UnsafeCell<Box<[f32]>>,
@@ -586,7 +572,7 @@ fn audio_thread_main(
                 }
             }
             Ok(AudioCommand::Pause) => {
-                // 兼容接口:不带淡出的暂停(仅用于内部需要立即暂停的场景)
+                // 无淡出版暂停：用户关闭淡入淡出时走这里
                 if let Some(ref client) = audio_client {
                     let _ = client.stop_stream();
                     is_playing = false;
@@ -596,7 +582,7 @@ fn audio_thread_main(
                 }
             }
             Ok(AudioCommand::Resume) => {
-                // 兼容接口:不带淡入的恢复
+                // 无淡出版恢复：同上
                 if let Some(ref client) = audio_client {
                     if client.start_stream().is_ok() {
                         is_playing = true;
@@ -1091,9 +1077,7 @@ mod simd_convert {
         }
     }
 
-    // ============================================================
     // SIMD 优化: f32 → i16/i32 字节流
-    // ============================================================
     // 三层分发架构(运行时由 is_x86_feature_detected! 选择):
     // 1. AVX2 + FMA path (Haswell 2013+ / Zen 2017+) - 一次 8/16 个 f32,最快
     // 2. SSE2 path (所有 x86_64 CPU,含老至强) - 一次 4/8 个 f32,中等加速
@@ -1193,10 +1177,7 @@ mod simd_convert {
         }
     }
 
-    // ============================================================
-    // SSE2 path: 所有 x86_64 CPU 的兜底加速(baseline feature)
-    // 一次处理 4/8 个 f32,适用范围: 老 Xeon(Nehalem/Westmere/Sandy/Ivy Bridge)等
-    // ============================================================
+    // SSE2 path: 所有 x86_64 CPU 的兜底加速(baseline feature),一次处理 4/8 个 f32
 
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "sse2")]

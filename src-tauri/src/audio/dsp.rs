@@ -3,6 +3,7 @@
 //! 软削波与 preamp 预计算查找表、Hann 窗、多通道转换。
 //! 共享模式(VisualizationSource)与独占模式(解码推送线程)共用。
 
+/// 软削波查找表大小（覆盖 0.0 到 2.0，精度 0.001）
 const SOFT_CLIP_TABLE_SIZE: usize = 2001;
 
 /// 预计算的软削波查找表

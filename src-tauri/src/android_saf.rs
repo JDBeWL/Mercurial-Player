@@ -75,7 +75,6 @@ mod android_impl {
     }
 
     /// 枚举已授权树下的音频文件
-    /// @return Vec<SafEntry>
     pub fn list_audio_files(tree_uri: &str) -> Result<Vec<SafEntry>, AppError> {
         let json = jni_call_string("listAudioFiles", &[tree_uri])?;
         parse_audio_entry_list(&json)

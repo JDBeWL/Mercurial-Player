@@ -31,8 +31,7 @@ const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
 #[cfg(any(windows, target_os = "android"))]
 pub(super) fn decode_and_push_to_wasapi(
     mut source: LockFreeSymphoniaSource,
-    // 独占播放器（平台别名：Windows = WASAPI 独占，Android = AAudio 独占）。
-    // 参数名沿用 wasapi，改一次要动几十处调用。
+    // 独占播放器（见 [`crate::app_state::PlatformPlayer`]），参数名沿用早期的 wasapi 叫法
     wasapi: Arc<Mutex<Option<crate::app_state::PlatformPlayer>>>,
     app: AppHandle,
     generation: Arc<AtomicU64>,
@@ -52,7 +51,7 @@ pub(super) fn decode_and_push_to_wasapi(
         Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
         WindowFunction,
     };
-    // 记录启动时的代际,循环中检测代际变化即退出(替代 stop 布尔标志)
+    // 记录启动时的代际,循环中检测代际变化即退出
     let my_generation = generation.load(Ordering::SeqCst);
     if generation.load(Ordering::SeqCst) != my_generation
         || thread_id_ref.load(Ordering::SeqCst) != my_id
@@ -69,7 +68,7 @@ pub(super) fn decode_and_push_to_wasapi(
     let resample_ratio = target_sr as f64 / src_sr as f64;
     let mut eq_update_counter: u32 = 0;
     let mut resampler: Option<Async<f32>> = if need_resample {
-        // rubato 4.0: 用 builder 模式构造 SincInterpolationParameters
+        // SincInterpolationParameters 走 builder 模式构造
         let params = SincInterpolationParameters::new(128, WindowFunction::BlackmanHarris2)
             .f_cutoff(0.925)
             .interpolation(SincInterpolationType::Linear)
@@ -91,8 +90,8 @@ pub(super) fn decode_and_push_to_wasapi(
     // 精确计算最大输出缓冲区大小
     let max_output_frames = ((chunk_size as f64 * resample_ratio).ceil() as usize).max(chunk_size);
     let mut output_buffer: Vec<f32> = Vec::with_capacity(max_output_frames * target_ch as usize);
-    // rubato 4.0: 预分配输出帧 buffer (复用,避免每次循环堆分配)
-    // 每通道预留 max_output_frames + chunk_size 作为安全余量 (rubato 启动延迟可能导致首帧输出更多)
+    // 预分配输出帧 buffer 复用,避免每次循环堆分配;
+    // 每通道预留 max_output_frames + chunk_size 作安全余量 (rubato 启动延迟可能让首帧输出更多)
     let output_frames_capacity = max_output_frames + chunk_size;
     let mut output_frames_resampled: Vec<Vec<f32>> =
         vec![Vec::with_capacity(output_frames_capacity); src_ch as usize];
@@ -258,10 +257,10 @@ pub(super) fn decode_and_push_to_wasapi(
                         last_sample * fade
                     }));
                 }
-                // rubato 4.0: 用 SequentialSliceOfVecs adapter 包装输入输出
+                // 用 SequentialSliceOfVecs adapter 包装输入输出
                 match SequentialSliceOfVecs::new(&input_frames, src_ch as usize, chunk_size) {
                     Ok(input_adapter) => {
-                        // 清空并预分配输出 buffer
+                        // 清空并复用输出 buffer
                         for ch in &mut output_frames_resampled {
                             ch.clear();
                             ch.resize(output_frames_capacity, 0.0);
@@ -298,7 +297,6 @@ pub(super) fn decode_and_push_to_wasapi(
                 // EOF情况下 - 直接借用 input_frames,避免 clone
                 Cow::Borrowed(&input_frames)
             } else {
-                // rubato 4.0: 正常路径
                 let frames_in = input_frames[0].len();
                 match SequentialSliceOfVecs::new(&input_frames, src_ch as usize, frames_in) {
                     Ok(input_adapter) => {

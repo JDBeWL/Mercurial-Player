@@ -69,7 +69,7 @@ impl RepeatMode {
 
 /// 播放队列
 ///
-/// 所有字段由前端通过 `set_play_queue` 同步，桌面端不启用 `auto_advance`。
+/// tracks/repeat/auto_advance 由前端经 `set_play_queue` 整条同步，index 两端都会更新。
 #[derive(Debug, Default)]
 pub struct PlaybackQueue {
     /// 已按最终播放顺序排列的曲目（随机序由前端算好）

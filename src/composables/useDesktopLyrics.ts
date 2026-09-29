@@ -405,8 +405,7 @@ export function useDesktopLyrics() {
   })
 
   onUnmounted(() => {
-    // 引用计数 -1,只有最后一个组件卸载时才真正清理全局资源,
-    // 避免先卸载的组件停掉其他仍挂载组件共享的监听器
+    // 引用计数 -1，归零才清理（原因见 refCount 声明处）
     refCount--
     if (refCount > 0) return
 

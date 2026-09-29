@@ -40,9 +40,7 @@ impl SampleRing {
 
     /// 生产者:写入一个采样。缓冲满时丢弃该采样并返回 `false`。
     ///
-    /// 不等待、不覆盖未读数据
-    /// 音频线程必须能在确定时间内返回
-    /// 偶发丢采样远好于让音频回调阻塞
+    /// 不等待、不覆盖未读数据：音频回调必须在确定时间内返回，偶发丢采样远好于阻塞。
     #[inline]
     pub fn push(&self, sample: f32) -> bool {
         let w = self.written.load(Ordering::Relaxed);
@@ -216,7 +214,7 @@ mod tests {
         assert_eq!(out, vec![1.0]);
     }
 
-    /// 并发生产/消费:采样必须严格保序,不丢不重(Acquire/Release 配对出错时最易暴露)
+    /// 批量写入:写满时截断到剩余容量,不覆盖尚未被读走的数据
     #[test]
     fn test_push_slice_writes_sequentially_and_stops_when_full() {
         let ring = SampleRing::new(4);
@@ -255,6 +253,7 @@ mod tests {
         assert_eq!(out, vec![9.0]);
     }
 
+    /// 并发生产/消费:采样必须严格保序,不丢不重(Acquire/Release 配对出错时最易暴露)
     #[test]
     fn test_concurrent_producer_consumer_preserves_order() {
         use std::sync::Arc;

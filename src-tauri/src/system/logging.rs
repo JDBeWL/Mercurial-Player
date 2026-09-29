@@ -1,14 +1,10 @@
 //! 前端日志落盘
 //!
-//! 前端 [`crate::utils/logger`] 通过 `write_log` 命令将日志写入磁盘:
-//! - `mercurial-player.log`:当前这次运行的日志
-//! - `mercurial-player-prev.log`:上一次运行的日志(启动时轮转)
+//! 前端 `src/utils/logger.ts` 通过 `write_log` 命令把日志写进主程序同级的 `logs/`：
+//! - `mercurial-player.log`：当前这次运行
+//! - `mercurial-player-prev.log`：上一次运行（启动时轮转）
 //!
-//! 日志目录为主程序同级的 `logs/` 文件夹(与 plugins/、screenshots/ 一致),
-//! 便携式安装时随程序目录一起移动、删除。
-//!
-//! 轮转在 [`init_log_rotation`](setup 阶段)执行:若上次运行的日志存在,
-//! 先删除旧 prev 再将当前日志重命名为 prev,随后开始写入新的当前日志。
+//! 轮转在 setup 阶段执行：若上次运行的日志存在，先删旧 prev 再把当前日志重命名为 prev。
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -27,9 +23,7 @@ const PREV_LOG_FILE: &str = "mercurial-player-prev.log";
 /// 当前日志文件路径(setup 阶段初始化;未初始化时 write_log 静默丢弃)
 static LOG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
-/// 主程序同级 logs/ 目录(与 plugins/、screenshots/ 的解析方式一致)
-///
-/// Android：current_exe() 位于只读 APK 内，改写应用数据目录下的 logs/
+/// 日志目录：主程序同级 `logs/`；Android 走 data_dir_override（应用数据目录）
 fn log_dir() -> Result<PathBuf, AppError> {
     if let Some(dir) = crate::config::data_dir_override() {
         return Ok(dir.join("logs"));

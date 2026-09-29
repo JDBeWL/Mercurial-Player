@@ -1,23 +1,17 @@
-//! 音频模块
+//! 音频模块：解码、播放（共享 rodio / 平台独占）、设备管理与频谱。
 //!
-//! 提供音频播放、解码、设备管理等功能。
-
-pub mod commands;
-
-// 锁序约定（避免死锁）：`AudioOutputState` 各锁按下面的全局顺序获取，需要同时持有多个锁
-// 的代码必须遵守此顺序，并尽量缩小临界区、避免在持锁期间执行 IPC/文件 IO：
-//
-//   sink → output_stream → target_volume → exclusive_mode → wasapi_player
-//        → current_device_name → current_path
-//
-// 独占播放器的采样缓冲 SampleRing 是无锁 SPSC，不参与锁序：渲染/解码/宿主线程只经原子
-// 计数访问，持有 wasapi_player 锁期间操作它不构成锁序嵌套。
-// 可视化数据(spectrum_data)与 device_monitor/equalizer 相互独立，不与上述锁同栈嵌套。
-//
-// 核心路径（音频线程等）用 `lock_or_log!`：锁中毒自动恢复，不中断播放；
-// 命令边界用 [`LockOrErr`]：把获取锁失败转成描述性错误返回给前端。
-
-// 共享常量
+//! 锁序约定（避免死锁）：`AudioOutputState` 各锁按下面的全局顺序获取，需要同时持有多个锁
+//! 的代码必须遵守此顺序，并尽量缩小临界区、避免在持锁期间执行 IPC/文件 IO：
+//!
+//!   sink → output_stream → target_volume → exclusive_mode → wasapi_player
+//!        → current_device_name → current_path
+//!
+//! 采样环 `SampleRing`（频谱、AAudio）与 `SpscSampleRing`（WASAPI 独占）是无锁 SPSC，
+//! 不参与锁序：渲染/解码/宿主线程只经原子计数访问，持锁期间操作它们不构成嵌套。
+//! 可视化数据(spectrum_data)与 device_monitor/equalizer 相互独立，不与上述锁同栈嵌套。
+//!
+//! 核心路径（音频线程等）用 `lock_or_log!`：锁中毒自动恢复，不中断播放；
+//! 命令边界用 [`LockOrErr`]：把获取锁失败转成描述性错误返回给前端。
 
 /// 共享模式播放/恢复时的淡入时长(毫秒)。
 /// 播放起点没有对应的淡出,用稍长淡入掩盖可能的爆音。
@@ -38,6 +32,8 @@ pub enum PlaybackState {
     /// 带淡出的暂停中:已请求 PauseWithFadeOut,音频线程仍在淡出,完成后转为 Paused
     Pausing,
 }
+
+pub mod commands;
 
 #[cfg(any(windows, target_os = "android"))]
 pub mod decode_push;

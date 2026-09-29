@@ -220,8 +220,8 @@ pub const fn get_platform() -> &'static str {
 
 /// 设置应用内「界面字号」倍率（`1.0` = 设计稿原始大小）
 ///
-/// Android 上会抵消 WebView 对系统字号的放大再乘上该倍率（详见
-/// [`crate::app_font_scale`] 的模块注释）；桌面端为 no-op。
+/// Android 上把 WebView 的 `textZoom` 直接写成 `100 × 倍率`，从而覆盖系统字号
+/// （原理见 [`crate::app_font_scale`] 的模块注释）；桌面端为 no-op。
 #[command]
 pub fn set_app_font_scale(scale: f32) -> Result<(), AppError> {
     crate::app_font_scale::set_app_font_scale(scale)
@@ -294,8 +294,7 @@ fn display_frequency(display: &display_info::DisplayInfo) -> u32 {
 }
 
 /// 枚举显示器在当前分辨率下支持的全部刷新率（升序去重）。
-/// display_info 0.5 只暴露当前模式，多挡位需按平台 API 自行枚举；
-/// 非 Windows 平台暂无现成依赖，回落为仅当前挡位。
+/// display_info 0.5 只暴露当前模式，多挡位需按平台 API 自行枚举。
 #[cfg(desktop)]
 #[cfg(windows)]
 #[allow(unsafe_code)] // EnumDisplaySettingsExW 是 unsafe Win32 API
@@ -340,6 +339,7 @@ fn enumerate_refresh_rates(display: &display_info::DisplayInfo) -> Vec<u32> {
     rates.into_iter().collect()
 }
 
+/// 非 Windows 没有现成的枚举依赖，返回空列表，由调用方补上当前挡位
 #[cfg(desktop)]
 #[cfg(not(windows))]
 fn enumerate_refresh_rates(_display: &display_info::DisplayInfo) -> Vec<u32> {

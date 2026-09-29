@@ -9,14 +9,15 @@
 - `字体名-700.ttf` → 指定字重（100~900，同一字体族可有多个字重文件）
 - `字体名-Bold.ttf` → 英文权重名后缀（Adobe / Google Fonts 官方包的原名可直接使用：
   Thin/ExtraLight/Light/Regular/Medium/SemiBold/Bold/ExtraBold/Black/Heavy）
-- `字体名-VF.otf` → 可变字体，注册为 100~900 全字重区间（推荐，一个文件覆盖全部字重）
+- `字体名-VF.*` → 可变字体（`-VF` 后缀与扩展名无关，如 `Noto Sans SC-VF.woff2`），
+  注册为 100~900 全字重区间（推荐，一个文件覆盖全部字重）
 
 文件名（去掉扩展名和字重后缀）即字体族名，也会作为选择器中的显示名，
 因此建议直接用中文命名，例如 `霞鹜文楷.ttf`、`思源黑体-VF.otf`。
 
 支持格式：`.ttf` / `.otf` / `.woff` / `.woff2`
 
-TTC/OTC 字体集合不支持打包目录，请放入软件同级的 `fonts/` 目录——
+TTC/OTC 字体集合不支持打包目录，请放入软件同级的 `fonts/` 目录（桌面端，按可执行文件位置解析）——
 应用会把集合内的成员自动提取为单字体缓存文件（族名与字重来自字体
 内部 name/OS2 表，如 `Source Han Sans SC-700.ttf`），无需手动转换。
 

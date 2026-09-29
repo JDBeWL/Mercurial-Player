@@ -647,7 +647,7 @@ export const usePlayerStore = defineStore('player', {
       if (this._isDestroyed || !this.currentTrack) return
 
       // Android：后台时 WebView 的 JS 会被节流/冻结，`track-ended` 可能延迟甚至
-      // 无人处理，自动切歌已下沉到 Rust 播放队列（阶段 3.0）。这里直接让位，
+      // 无人处理，自动切歌已下沉到 Rust 播放队列。这里直接让位，
       // 由 `queue-track-changed` 事件同步 UI，避免前后端各切一次导致跳曲。
       if (await isAndroid()) {
         logger.debug('Android: 自动切歌由 Rust 队列接管，跳过前端 _onEnded')

@@ -22,7 +22,8 @@ pub struct OutputDeviceInfo {
     /// 设备支持的声道数
     #[serde(default)]
     pub channel_counts: Vec<u16>,
-    /// `AudioFormat` 编码（ENCODING_PCM_16BIT = 2 / 24BIT = 6 / 32BIT = 7 / FLOAT = 4）
+    /// `android.media.AudioFormat` 的 ENCODING_* 数值（PCM_16BIT=2 / PCM_FLOAT=4 /
+    /// PCM_24BIT_PACKED=21 / PCM_32BIT=22）
     #[serde(default)]
     pub encodings: Vec<i32>,
 }

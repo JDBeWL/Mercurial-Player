@@ -13,6 +13,9 @@ my-plugin/
 └── README.md        # 插件说明（可选）
 ```
 
+目录名必须与 `manifest.id` 完全一致，否则后端 `read_manifest` 直接拒绝加载；
+`id` 只允许 `[A-Za-z0-9_-]`，`version` 需为 `x.y.z`。
+
 **内置插件（TypeScript）：**
 
 ```
@@ -155,12 +158,17 @@ export const myPlugin: BuiltinPluginDefinition = {
 
 ### 代码检查
 
-插件代码在加载时会进行安全检查，以下模式会被拒绝：
+插件代码在加载时会做静态检查，命中以下模式只记录告警、**不阻断加载**（正则黑名单可被等价
+变形绕过，真正的安全边界是 Worker 沙箱 + CSP + 宿主侧 API 白名单）：
 
 - 访问 `__proto__`、`constructor`、`prototype` 进行原型链攻击
 - 使用 `fromCharCode`、`fromCodePoint` 构造字符串绕过检测
 - 动态 `import()` 语句
 - 过多的动态属性访问（方括号语法）
+
+以上只是部分示例，完整黑名单（`eval`/`Function`/`window`/`fetch`/`Worker`/`Proxy`/Reflect 等
+40 余条与阈值规则）见 `src/plugins/pluginSandbox.ts`。其中的 1MB 体积上限同样以抛错形式抛出，
+被 `pluginLoader.ts` 一并按告警处理，不阻断加载。
 
 ## 可用权限
 
@@ -542,11 +550,18 @@ manifest.json:
 {
   "id": "lyrics-share",
   "name": "歌词截图分享",
-  "version": "1.0.0",
+  "version": "1.3.1",
   "author": "Your Name",
   "description": "生成歌词分享图片",
   "main": "index.js",
-  "permissions": ["player:read", "storage", "ui:extend"]
+  "permissions": [
+    "player:read",
+    "storage",
+    "ui:extend",
+    "file:write",
+    "clipboard:write",
+    "theme:read"
+  ]
 }
 ```
 
@@ -941,6 +956,12 @@ export const playCountPlugin: BuiltinPluginDefinition = {
    - 直接集成到应用中
    - 作为插件开发示例
 
+9. **apiRegistry.ts** - 「动作 → 权限」映射的单一事实来源
+   - 主线程 `pluginAPI.ts`（权威校验）与沙箱侧 `workerCore.ts`（预检）共用同一张表
+
+10. **shortcutManager.ts** - 插件快捷键
+    - 监听全局键盘事件，分发插件注册的快捷键，并做冲突检测
+
 ### 插件类型对比
 
 | 特性     | 外部插件 (JavaScript) | 内置插件 (TypeScript) |
@@ -1030,18 +1051,21 @@ interface PluginInstance {
   [key: string]: unknown // 自定义方法
 }
 
-// 权限枚举
-enum PluginPermission {
-  PLAYER_READ = 'player:read',
-  PLAYER_CONTROL = 'player:control',
-  LIBRARY_READ = 'library:read',
-  LYRICS_PROVIDER = 'lyrics:provider',
-  UI_EXTEND = 'ui:extend',
-  VISUALIZER = 'visualizer',
-  THEME = 'theme',
-  STORAGE = 'storage',
-  NETWORK = 'network',
-}
+// 权限清单（as const 对象，不是 enum）
+export const PluginPermission = {
+  PLAYER_READ: 'player:read',
+  PLAYER_CONTROL: 'player:control',
+  LIBRARY_READ: 'library:read',
+  LYRICS_PROVIDER: 'lyrics:provider',
+  UI_EXTEND: 'ui:extend',
+  VISUALIZER: 'visualizer',
+  THEME: 'theme',
+  THEME_READ: 'theme:read',
+  STORAGE: 'storage',
+  FILE_WRITE: 'file:write',
+  CLIPBOARD_WRITE: 'clipboard:write',
+  NETWORK: 'network',
+} as const
 ```
 
 ### 开发内置插件
@@ -1128,6 +1152,10 @@ export default function (api) {
 2. 点击「打开插件目录」
 3. 将插件文件夹复制到该目录
 4. 点击「刷新」或重启应用
+
+插件基目录按平台解析（`src-tauri/src/plugins/manager.rs` 的 `plugin_base_dir()`）：桌面端是
+可执行文件同级的 `plugins/`；Android 的 `current_exe()` 在只读 APK 内，改用应用私有数据目录，
+因此外部插件实际只在桌面端可手工投放。
 
 ### 内置插件开发
 

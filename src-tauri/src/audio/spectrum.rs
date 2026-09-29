@@ -34,13 +34,9 @@ pub(super) fn emit_spectrum_update(
     Ok(())
 }
 
-/// 根据采样率计算最佳FFT缓冲区大小
-/// 目标是保持约~43ms的分析窗口（2048@48kHz）
+/// 根据采样率取约 43ms 分析窗口的 FFT 大小（2 的幂，2048@48kHz）
 #[must_use]
 pub(super) const fn calculate_fft_size(sample_rate: u32) -> usize {
-    // 基准：48kHz使用2048样本 ≈ 42.7ms
-    // 公式：fft_size = sample_rate * 0.0427
-    // FFT大小必须是2的幂次
     match sample_rate {
         0..=32000 => 1024,       // ≤32kHz: 1024 样本
         32001..=64000 => 2048,   // 44.1k/48k: 2048 样本

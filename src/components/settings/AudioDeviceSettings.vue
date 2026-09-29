@@ -9,8 +9,8 @@
       </button>
     </div>
 
-    <!-- Android：输出路由由系统统一管理（扬声器/蓝牙/有线耳机自动切换），
-         列表里只会枚举出若干个同名的手机型号，选了也没效果，直接不展示 -->
+    <!-- Android：输出路由由系统统一管理（扬声器/蓝牙/有线耳机自动切换），后端也只上报默认设备，
+         选择没有意义，直接不展示列表 -->
     <div v-if="isAndroidPlatform" class="capability-notice platform-notice">
       <span class="material-symbols-rounded">speaker_phone</span>
       <p>{{ $t('config.audioDeviceManagedBySystem') }}</p>

@@ -1,7 +1,7 @@
 //! 上次播放会话恢复
 //!
 //! 启动时根据配置中的 last_session 进行校验并恢复:
-//! - L1: 文件存在 (Path::exists)
+//! - L1: 文件存在（桌面 `Path::exists`；SAF content URI 交由打开时校验）
 //! - L2: 文件大小 + 修改时间一致 (检测被替换)
 //!
 //! 文件不存在: 静默清除记录 (前端负责从播放列表移除)
@@ -18,17 +18,11 @@ use tauri::{AppHandle, State};
 
 /// save_last_session 写盘节流间隔
 ///
-/// 限制两次实际写盘之间的最小间隔,避免在大型播放列表 (数千首曲目) 场景下
-/// 每次 pause/切歌都触发全量序列化 + 文件 I/O 造成开销。
-///
-/// 权衡: 若程序在节流窗口内退出,最后一次未落盘的更新会丢失。
-/// 播放器场景下可接受 (下次启动最多回退到 SAVE_THROTTLE_DURATION 前的状态)。
+/// 大型播放列表（数千首）下每次 pause/切歌都要全量序列化 + 落盘，用它兜住开销。
+/// 代价：程序在窗口内退出会丢掉最后一次更新，下次启动最多回退这么多。
 const SAVE_THROTTLE_DURATION: Duration = Duration::from_secs(5);
 
 /// 上次实际写盘时间,用于 save_last_session 节流
-///
-/// 使用 static + std::sync::Mutex 实现,无需修改 AppState 结构。
-/// Mutex::new 在 Rust 1.63+ 支持 const 上下文,可直接初始化 static。
 static LAST_SAVE_TIME: Mutex<Option<Instant>> = Mutex::new(None);
 /// 当前 Unix 时间 (秒)
 fn now_secs() -> u64 {
@@ -88,15 +82,14 @@ pub struct ResumeResult {
 
 /// 校验并恢复上次播放会话
 ///
-/// 调用流程: 前端启动时调用此命令 -> 根据返回结果决定 UI 状态和是否调用 play_track
+/// 命令内部完成 `play_track_*` 派发并暂停在 `position`，前端只按 status 决定 UI。
 pub async fn try_resume_last_session(
     app: &AppHandle,
     state: &State<'_, AppState>,
 ) -> Result<ResumeResult, AppError> {
-    // 取出会话记录: 「读-改-写」在写锁内一次完成,避免与 save_last_session
-    // 等并发时丢失更新。本段是同步代码,唯一的 .await 在下方 play_track_*
-    // 处 —— std 互斥锁守卫绝不能跨 await 持有 (会让 Future 非 Send 且可死锁),
-    // 因此后续写回另起一个临界区。
+    // 取出会话记录：「读-改-写」在写锁内一次完成，避免与 save_last_session 并发丢更新。
+    // 下面的各提前返回都不再写回——此时 last_session 已是 None。
+    // std 锁守卫不能跨 await，所以成功路径的写回另起临界区。
     let session = match state
         .config_manager
         .update_config(|config| config.last_session.take())?
@@ -126,7 +119,6 @@ pub async fn try_resume_last_session(
             session.saved_at,
             now
         );
-        // 记录已在上面的 update_config 中取出并落盘 (last_session = None)
         return Ok(ResumeResult {
             resumed: false,
             track_path: None,
@@ -150,8 +142,7 @@ pub async fn try_resume_last_session(
             session.track_path
         );
         // 静默清除记录 - 前端通过 status="not_found" 决定是否从播放列表移除
-        // 但不在此处直接操作播放列表 (播放列表管理在前端 store 中)
-        // (记录已在 update_config 中取出并落盘)
+        // (播放列表管理在前端 store 中，后端不直接动它)
         return Ok(ResumeResult {
             resumed: false,
             track_path: Some(session.track_path),
@@ -171,8 +162,7 @@ pub async fn try_resume_last_session(
     let (actual_size, actual_mtime) = if let Some(meta) = get_file_metadata(&session.track_path) {
         meta
     } else {
-        // 文件存在但无法读取 metadata (权限问题等)
-        // 视为不可用,清除记录 (记录已在 update_config 中取出并落盘)
+        // 文件存在但无法读取 metadata (权限问题等)，视为不可用
         log::warn!(
             "Failed to read file metadata for last session: {}",
             session.track_path
@@ -207,19 +197,17 @@ pub async fn try_resume_last_session(
         session.position_secs
     };
 
-    // 更新 session 中的位置和文件元数据,然后写回配置 (保持记录新鲜)
+    // 写回刷新后的记录：独立临界区，不与下方的 .await 重叠
     let mut updated_session = session;
     updated_session.position_secs = resume_position;
     updated_session.file_size = actual_size;
     updated_session.file_mtime = actual_mtime;
     updated_session.saved_at = now;
-    // 写回配置 (保持记录新鲜):独立的临界区,不与下方的 .await 重叠
     let _ = state.config_manager.update_config(|config| {
         config.last_session = Some(updated_session.clone());
     });
 
-    // 调用 play_track 恢复播放
-    // 根据 exclusive_mode 标志派发到对应路径
+    // 按 exclusive_mode 派发到对应播放路径
     let exclusive_mode = state
         .player
         .output
@@ -244,9 +232,8 @@ pub async fn try_resume_last_session(
 
     match play_result {
         Ok(()) => {
-            // play_track_* 已开始播放,立即 pause 让 UI 处于暂停状态
-            // 这样启动恢复后用户看到的是"暂停在 position"的 UI,
-            // 点击播放按钮时只需调用 resume_track 即可从该位置继续
+            // play_track_* 已在播放，立即 pause：恢复后 UI 停在「暂停于 position」，
+            // 用户点播放只需 resume_track 从该位置继续
             if let Err(e) = pause_playback(state) {
                 log::warn!("Failed to pause after resume (playback may still be running): {e}");
                 // 不视为致命错误,仍然返回 resumed=true

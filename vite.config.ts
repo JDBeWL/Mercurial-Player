@@ -39,13 +39,13 @@ export default defineConfig({
           : 'safari17',
     minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_DEBUG,
-    // 启用压缩和优化
+    // 每个 JS chunk 配一份独立 CSS，按需加载
     cssCodeSplit: true,
     cssMinify: true,
     chunkSizeWarningLimit: 600,
     // 每次构建前清空输出目录，避免旧产物残留
     emptyOutDir: true,
-    // 启用 brotli 压缩预生成
+    // 构建日志不打印 gzip/brotli 体积（本地 Tauri 打包用不上，还拖慢构建）
     reportCompressedSize: false,
     rollupOptions: {
       output: {
@@ -72,12 +72,10 @@ export default defineConfig({
           if (id.includes('node_modules/@material/material-color-utilities/')) {
             return 'material-colors'
           }
-          // 字体资源
           if (id.includes('node_modules/@fontsource')) {
             return 'fonts'
           }
         },
-        // 优化 chunk 文件名
         chunkFileNames: 'assets/[name]-[hash].js',
         entryFileNames: 'assets/[name]-[hash].js',
         assetFileNames: (assetInfo) => {
@@ -91,7 +89,7 @@ export default defineConfig({
           return 'assets/[name]-[hash][extname]'
         },
       },
-      // Tree-shaking 优化
+      // 假定模块无副作用，让未使用的导出能被彻底摇掉
       treeshake: {
         moduleSideEffects: false,
         propertyReadSideEffects: false,
@@ -103,7 +101,6 @@ export default defineConfig({
       '@': resolve(import.meta.dirname, './src'),
     },
   },
-  // 优化依赖预构建
   optimizeDeps: {
     include: [
       'vue',

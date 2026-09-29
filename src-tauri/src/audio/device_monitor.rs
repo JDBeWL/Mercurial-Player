@@ -1,23 +1,20 @@
 //! 音频设备监听模块
 //!
-//! 监听音频设备的连接和断开事件、设备断开时自动切换到其他可用设备，
-//! 以及系统默认输出设备变化（包括无插拔时用户在系统设置中主动切换）时跟随切换。
+//! 监听设备插拔、断开后自动切换到其他可用设备，以及系统默认输出变化
+//! （无插拔、用户在系统设置里主动切换）时跟随切换。Android 上 AAudio 的设备枚举语义与桌面
+//! 不同，插拔/切换事件不适用，监听整体降级为 no-op。
 //!
-//! 默认（所有平台）使用 cpal 轮询实现。Windows 平台的 IMMNotificationClient 事件驱动
-//! 实现保留在 `windows_impl` 模块中，通过 `imm-notification` feature 启用
-//! （在 `DeviceMonitor::start` 中按 cfg 分发）；
-//! 但由于 COM 回调触发和 previous_default 状态同步存在运行时可靠性问题，
-//! 默认关闭以保证功能稳定。
+//! 桌面各平台默认用 cpal 轮询实现。Windows 的 IMMNotificationClient 事件驱动实现保留在
+//! `windows_impl`，由 `imm-notification` feature 启用（`DeviceMonitor::start` 里按 cfg 分发）；
+//! 因 COM 回调触发与 previous_default 状态同步存在运行时可靠性问题，默认关闭。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-// Duration / Emitter / HostTrait / get_device_friendly_name 只有轮询与 Windows 事件
-// 实现用到;Android 上监听已降级 no-op,这些 import 一并按平台门控。
+// 轮询实现与 Windows 事件实现专用的 import：Android 上监听已降级 no-op，
+// 启用 imm-notification 后轮询实现不参与编译（windows_impl 自带同名导入），故按平台与 feature 门控。
 #[cfg(not(target_os = "android"))]
 use cpal::traits::HostTrait;
-// Duration / Emitter 只有轮询实现用到;启用 imm-notification 后该实现不参与编译,
-// windows_impl 内部有自己的同名导入。
 #[cfg(all(
     not(target_os = "android"),
     not(all(target_os = "windows", feature = "imm-notification"))
@@ -66,9 +63,7 @@ impl DeviceMonitor {
 
         self.is_running.store(true, Ordering::SeqCst);
 
-        // Android：AAudio 设备枚举语义与桌面不同（插拔/切换事件不适用），
-        // 且 cpal 枚举 loop 在移动端无意义，直接降级为 no-op。
-        // 桌面端代码包在 cfg(not) 中，避免 Android 下 unreachable 警告。
+        // Android 上降级为 no-op（原因见模块注释）；桌面代码包在 cfg(not) 里，避免不可达警告。
         #[cfg(not(target_os = "android"))]
         {
             let is_running = Arc::clone(&self.is_running);
@@ -127,7 +122,7 @@ impl Drop for DeviceMonitor {
     }
 }
 
-// 基于 cpal 的轮询实现（所有平台共用）
+// 基于 cpal 的轮询实现（桌面各平台）
 
 /// 监听设备变更的主循环
 ///

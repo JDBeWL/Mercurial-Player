@@ -7,18 +7,13 @@ import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
  * 从封面图片提取主色，用于沉浸式封面模式的背景填充。
  *
  * 两种取色风格（mode 参数）：
- * - 'album' 专辑主题色：整张封面均匀取样，K‑Means 选出最具代表性且美观的主题色。
- * - 'fusion' 封面融合：只取封面最右侧约 20% 的羽化条带做加权平均，
- *   背景色与封面右缘一致，封面"沉入"背景的过渡最无痕（对部分封面视觉最佳）。
+ * - 'album' 专辑主题色：整张封面均匀取样，K‑Means 选出最具代表性且美观的主题色
+ *   （偏中等亮度与高彩度，抑制过暗/过亮和灰色）。
+ * - 'fusion' 封面融合：只取封面最右侧 5%（x >= 0.95）的羽化条带求平均，背景色与封面右缘一致，
+ *   封面"沉入"背景的过渡最无痕。
  *
- * 通用优化点：
- * 1. 种子初始化：采用 K‑means++ 从所有像素中均匀选取初始簇心，替代粗糙的 4bit 桶聚合。
- * 2. K‑Means 迭代：增加收敛判断，提前终止以减少无效计算。
- * 3. 打分策略（album 模式）：更偏重中等亮度（L 0.25~0.45）和高彩度，抑制过暗/过亮及灰色。
- * 4. 色域映射：在 OKLab 空间保持色相，通过二分查找最大合法彩度，避免 RGB 溢出。
- * 5. 鲁棒性：处理纯色、透明过多等极端情况，返回安全后备色。
- * 6. 取样区域与显示一致：按 object-fit: cover + object-position: left center
- *    裁剪后再取样，非方形图取到的就是实际显示的区域。
+ * 取样前先按 object-fit: cover + object-position: left center 裁剪，取到的就是实际显示的区域；
+ * 结果在 OKLab 里保持色相、二分查找最大合法彩度，避免 RGB 溢出。纯色/透明过多时返回后备色。
  */
 export function useDominantColor(
   coverPath: Ref<string | undefined | null>,

@@ -593,9 +593,8 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   }
 }
 
-/* 竖屏（手机）：侧滑抽屉改为整屏。450px 的固定宽度在竖屏下会露出右侧背景，
-   手机上看起来像"没铺满的浮层"，而整屏列表才是手机上的正常形态。
-   与上面的 480px 规则分开写：那是按宽度收窄，这里是按方向。 */
+/* 竖屏（手机）：450px 定宽抽屉会露出右侧背景，看起来像没铺满的浮层，改成整屏。
+   与上面的 480px 规则分开写：那是按宽度收窄，这里是按方向 */
 @media (orientation: portrait) {
   .music-library[data-mobile='true'] {
     width: 100vw;

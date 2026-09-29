@@ -1,4 +1,4 @@
-//! 元数据缓存持久化。
+//! 元数据缓存：磁盘 JSON 持久化 + 进程内 `MEMORY_CACHE`
 
 use crate::error::AppError;
 use crate::security::is_sensitive_path;
@@ -225,9 +225,9 @@ pub fn clear_metadata_cache() -> Result<(), AppError> {
     Ok(())
 }
 
-/// 获取缓存统计信息(以磁盘缓存文件为准,与清理操作的目标一致)
+/// 缓存统计 (条目数, 磁盘占用字节数)
 ///
-/// 占用取文件字节数:前端按 KB/MB 展示,不能只统计结构体在栈上的大小。
+/// 占用取缓存文件字节数：前端按 KB/MB 展示，且清理操作针对的就是这个文件。
 pub fn get_metadata_cache_stats() -> (usize, u64) {
     let cache_path = metadata_cache_path();
     let total_size = fs::metadata(&cache_path).map(|m| m.len()).unwrap_or(0);

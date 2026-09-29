@@ -27,8 +27,6 @@ pub struct AudioDeviceInfo {
 /// 来保持与 wasapi crate 的一致性，同时也能显示完整的设备名称给用户。
 pub fn get_device_friendly_name(device: &cpal::Device) -> Option<String> {
     let desc = device.description().ok()?;
-    // cpal 0.17 WASAPI 后端：当 DeviceDesc 存在且与 FriendlyName 不同时，
-    // FriendlyName 被放到 extended[0]。我们优先使用它。
     if let Some(friendly) = desc.extended().first() {
         Some(friendly.clone())
     } else {
@@ -111,12 +109,12 @@ fn check_wasapi_exclusive_support(device_name: &str) -> bool {
 //                         {0.0.0.00000000}.{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}
 //   - macOS (CoreAudio) : kAudioDevicePropertyDeviceUID,跨重启/重插保持稳定
 //   - Linux (ALSA)      : PCM 名,如 hw:CARD=PCH,DEV=0
+// Android 走 AAudio，输出设备由系统接管，不参与这里的设备选择。
 // 用户手动选择的设备以 `DeviceId` 的字符串形式("host:id")落盘
 // (config.audio.preferredDeviceId),启动时再解析回具体设备。
 //
 // 注意:标识是机器绑定的,换机器或重装驱动后可能失效,此时静默回退到系统默认设备。
-// 同样的芯片安装的驱动可能会被系统认为是同样设备，如CX31993的公版方案没有明确要求PID唯一，
-// 可能会出现不同设备的标识相同的情况，这是已知的问题。
+// 同芯片的公版方案（如 CX31993 未要求 PID 唯一）可能让不同设备得到相同标识，属已知问题。
 
 /// 枚举全部输出设备,返回 (device_id, friendly_name) 列表。
 ///

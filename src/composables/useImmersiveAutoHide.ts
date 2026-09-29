@@ -79,7 +79,7 @@ export function useImmersiveAutoHide(immersiveCover: Ref<boolean>): {
       immersiveControlsVisible.value = true
       immersivePointerY = -1
       // 这里必须用 Pointer Events：Android WebView 上手指不会产生 mousemove，
-      // 一旦缩进自动隐藏就再也唤不回来（手机也没有 Esc），等于被困在沉浸模式里。
+      // 一旦收起自动隐藏就再也唤不回来（手机也没有 Esc），等于被困在沉浸模式里。
       // pointerdown 覆盖"点一下唤出"，pointermove 覆盖拖动手势
       window.addEventListener('pointermove', handleImmersivePointerMove, { passive: true })
       window.addEventListener('pointerdown', handleImmersivePointerDown, { passive: true })

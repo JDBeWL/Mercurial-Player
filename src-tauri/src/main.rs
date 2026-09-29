@@ -1,8 +1,6 @@
 //! Mercurial Player - 主入口（二进制壳）
 //!
-//! 全部启动逻辑位于库的 [`mercurial_player::run`]，
-//! 这样 Tauri 的 Android/iOS 移动端入口
-//! （[`tauri::mobile_entry_point`] 生成的 JNI `Rust.create()`）能复用同一套初始化。
+//! 启动逻辑全在 [`mercurial_player::run`]，移动端入口（`mobile_entry_point`）才能复用同一套初始化。
 //!
 //! Copyright (C) 2026  JDBeWL
 //!

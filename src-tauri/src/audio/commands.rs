@@ -1,6 +1,7 @@
-//! 音频相关的 Tauri 命令
+//! 音频相关的 Tauri 命令：播放控制、设备管理、独占模式切换。
 //!
-//! 包含播放控制、设备管理等命令。
+//! 约定：命令层一律用 `lock()` 阻塞等待而不是 `try_lock()`——播放期间解码线程会周期性
+//! 持锁，try_lock 必然偶发失败，而用户操作不该因此报错。各调用点的注释只写具体理由。
 use crate::error::AppError;
 
 use super::device::{AudioDeviceInfo, get_all_audio_devices};
@@ -122,7 +123,7 @@ pub fn pause_playback(state: &AppState) -> Result<(), AppError> {
 
 #[command]
 pub fn pause_track(app: AppHandle, state: State<AppState>) -> Result<(), AppError> {
-    // 用 lock() 阻塞等待,避免热切换期间用户操作失败
+    // 避免热切换期间用户操作失败
     let exclusive_mode = state
         .player
         .output
@@ -267,7 +268,7 @@ pub fn set_volume(state: State<AppState>, volume: f32) -> Result<(), AppError> {
     // 取消任何正在进行的淡入淡出,避免 fade 线程覆盖用户新设置的音量
     state.player.fade.generation.fetch_add(1, Ordering::SeqCst);
 
-    // 用 lock() 阻塞等待:用户拖动音量滑块时不应失败,即使热切换期间也只需等几十毫秒
+    // 用户拖动音量滑块时不应失败，热切换期间也只需等几十毫秒
     let exclusive_mode = state
         .player
         .output
@@ -313,7 +314,7 @@ pub async fn seek_track(
     state: State<'_, AppState>,
     time: f32,
 ) -> Result<(), AppError> {
-    // 用 lock() 阻塞等待:用户拖动进度条时不应失败
+    // 用户拖动进度条时不应失败
     let path = state
         .player
         .track
@@ -358,7 +359,7 @@ pub async fn set_audio_device(
 ) -> Result<(), AppError> {
     log::info!("Attempting to switch to audio device: {device_name}");
 
-    // 用 lock() 阻塞等待:播放期间切换设备不应失败
+    // 播放期间切换设备不应失败
     let exclusive_mode = state
         .player
         .output
@@ -419,8 +420,8 @@ async fn switch_to_wasapi_exclusive(
 ) -> Result<(), AppError> {
     log::info!("Switching to WASAPI exclusive mode for device: {device_name}");
 
-    // 1. 停止并清理旧的 cpal sink,同时记录当前播放路径与是否在播放
-    // 用 lock() 阻塞等待:播放期间解码线程会周期性持有这些锁
+    // 停止并清理旧的 cpal sink,同时记录当前播放路径与是否在播放
+    // 解码线程会周期性持有这些锁
     let (is_playing, current_path) = {
         let is_playing = {
             let old_player = state.player.output.sink.lock().lock_or_err("player")?;
@@ -439,8 +440,8 @@ async fn switch_to_wasapi_exclusive(
         (is_playing, current_path)
     };
 
-    // 3. 确保旧的 WASAPI 播放器被正确清理
-    // 用 lock() 阻塞等待:切换期间解码线程会周期性持有此锁
+    // 确保旧的 WASAPI 播放器被正确清理
+    // 切换期间解码线程会周期性持有此锁
     {
         let mut old_wasapi = state
             .player
@@ -489,8 +490,9 @@ async fn switch_to_wasapi_exclusive(
                 *device_name_guard = device_name.to_string();
             }
 
-            // 直接调 play_track_exclusive 而不走 play_track 派发：此时 exclusive_mode 仍是旧值
-            // false，用命令派发会被错误路由到共享模式。切换前若为暂停则传 start_playback=false。
+            // 绕过 play_track 直接调用：exclusive_mode 此刻还是切换前的值（本函数由开关
+            // 路径调用时仍是 false），走派发会被路由到共享模式。切换前若为暂停则传
+            // start_playback=false。
             if let Some(path) = current_path {
                 play_track_exclusive(app, state, &path, current_time, is_playing).await?;
                 // play_track_exclusive 不会读 target_volume,需要手动同步音量
@@ -547,8 +549,8 @@ async fn switch_to_shared_mode(
 ) -> Result<(), AppError> {
     log::info!("Switching to shared mode for device: {device_name}");
 
-    // 1. 先记录当前播放状态和路径 (在停止旧播放器前)
-    // 用 lock() 阻塞等待:播放期间解码线程会周期性持有这些锁,try_lock 会失败
+    // 先记录当前播放状态和路径（在停止旧播放器前）
+    // 解码线程会周期性持有这些锁，try_lock 必失败
     let (is_playing, volume, current_path) = {
         // 独占模式下真正在播的是独占播放器（Windows=WASAPI，Android=AAudio），
         // cpal sink 在切独占时已被 stop/clear，它的 is_paused() 不代表当前状态。
@@ -590,7 +592,7 @@ async fn switch_to_shared_mode(
     };
 
     // 先停止并 drop 独占播放器,释放设备：必须在打开新的 cpal stream 之前完成，否则设备仍被占用
-    // 用 lock() 阻塞等待:解码线程会周期性持有此锁调用 push_samples 等
+    // 解码线程周期性持锁调用 push_samples 等
     {
         let mut wasapi_guard = state
             .player
@@ -662,8 +664,8 @@ async fn switch_to_shared_mode(
 
     let new_player = rodio::Player::connect_new(new_mixer_sink.mixer());
 
-    // 5. 替换播放器
-    // 用 lock() 阻塞等待:确保热切换期间能成功替换播放器
+    // 替换播放器
+    // 热切换期间必须成功替换播放器
     {
         let mut player_guard = state.player.output.sink.lock().lock_or_err("player")?;
         *player_guard = new_player;
@@ -696,8 +698,8 @@ async fn switch_to_shared_mode(
     }
 
     if let Some(path) = current_path {
-        // 直接调 play_track_shared 而不走 play_track 派发：此时 exclusive_mode 仍是旧值 true，
-        // 派发会走到已被 take() 走的独占播放器上
+        // 绕过 play_track 直接调用：exclusive_mode 此刻仍是切换前的值，派发会走到已被
+        // take() 走的独占播放器上
         play_track_shared(app, state, &path, current_time)?;
         // play_track_shared 末尾总是 play();若切换前为暂停状态需重新暂停,
         // 保持暂停,点击恢复时才从该位置继续播放(音源 fade_in 从 0 开始,不会爆音)
@@ -721,7 +723,7 @@ pub async fn toggle_exclusive_mode(
 ) -> Result<(), AppError> {
     log::info!("Toggling exclusive mode: {enabled}");
 
-    // 用 lock() 阻塞等待:用户切换独占模式时不应失败,即使播放期间
+    // 用户切换独占模式时不应失败，即使正在播放
     let prev_exclusive = state
         .player
         .output
@@ -811,6 +813,7 @@ pub fn get_exclusive_mode(state: State<AppState>) -> Result<bool, AppError> {
 
 #[command]
 #[allow(clippy::branches_sharing_code)] // 非 Windows 下 if/else 均返回 "standard",但 Windows 下有不同分支
+// Android 的独占生效与否不由这里上报，走 get_audio_route
 pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInfo, AppError> {
     let current_device_name = state
         .player

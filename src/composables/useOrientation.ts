@@ -43,8 +43,8 @@ export interface OrientationInfo {
   isLandscape: ComputedRef<boolean>
 }
 
-/** 屏幕方向信息。竖屏下播放主界面切成单面板形态（封面/歌词二选一），横屏与桌面窗口仍是
- *  左封面 + 右歌词的双栏；这是**方向**而非平台判定，桌面把窗口拉成窄高同样走竖屏形态。 */
+/** 屏幕方向信息。这是**方向**判定而非平台判定：桌面把窗口拉成窄高同样算竖屏。
+ *  竖屏对应的单面板形态（封面/歌词二选一）只在 Android 上生效，CSS 规则都带 [data-mobile] 守卫。 */
 export function useOrientation(): OrientationInfo {
   // 挂载前先同步一次：模块首次加载与组件挂载之间方向可能已经变了
   sync()

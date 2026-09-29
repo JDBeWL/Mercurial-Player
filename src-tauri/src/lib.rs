@@ -1,6 +1,4 @@
-//! Mercurial Player - 库模块
-//!
-//! 导出所有公共模块和类型。
+//! Mercurial Player 库入口：模块导出、共享状态定义与 `run()`。
 
 /// 获取锁, poison 错误时记录日志并返回内部数据(而非 panic)
 ///
@@ -33,14 +31,13 @@ pub mod system;
 mod app_setup;
 mod app_state;
 
-// Android 平台初始化（cpal AAudio 需要 ndk_context）
+// Android：ndk_context 注入（cpal/AAudio 取 AudioManager 用）与 JNI 回调桥
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "android")]
 mod android_jni;
 
-// 应用更新模块依赖 tauri-plugin-updater 的桌面安装流程；移动端的安装路径未经验证前不参与编译，
-// 避免未验证的移动端注册/安装行为
+// 更新器依赖桌面安装流程，移动端未验证前不参与编译
 #[cfg(desktop)]
 pub mod updater;
 
@@ -57,7 +54,7 @@ use equalizer::GlobalEqualizer;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
 
-/// 非 Windows 平台的占位类型
+/// 无独占能力平台（非 Windows、非 Android）的占位类型
 #[cfg(not(any(windows, target_os = "android")))]
 #[derive(Debug)]
 pub struct Placeholder;
@@ -116,9 +113,7 @@ pub struct AudioOutputState {
     pub current_device_name: Arc<Mutex<String>>,
     /// 是否启用独占模式
     pub exclusive_mode: Arc<Mutex<bool>>,
-    /// 独占/直出播放器：Windows = WASAPI 独占，Android = AAudio 独占（USB DAC 位完美），其余为占位实现
-    /// （见 [`crate::app_state::PlatformPlayer`]）。字段名沿用最早只有 WASAPI 时的叫法，
-    /// 但它装的是「当前平台的独占播放器」。
+    /// 独占/直出播放器：字段名沿用早期只有 WASAPI 时的叫法，实际装的是 [`crate::app_state::PlatformPlayer`]
     pub wasapi_player: Arc<Mutex<Option<PlatformPlayer>>>,
 }
 
@@ -129,8 +124,6 @@ pub struct TrackState {
 }
 
 /// 可视化相关状态
-///
-/// 波形/频谱数据 + FFT 计算参数
 pub struct VisualizationState {
     /// 频谱数据（用于可视化）
     pub spectrum_data: Arc<Mutex<Vec<f32>>>,
@@ -157,15 +150,13 @@ pub struct FadeControl {
     pub enabled: Arc<AtomicBool>,
 }
 
-/// 播放器状态
-///
-/// 按职责域拆分为子结构体,每个子结构体负责一组内聚的字段
+/// 播放器状态，按职责域分组
 pub struct PlayerState {
     /// 音频输出 (sink/流/音量/设备/独占模式/独占播放器)
     pub output: AudioOutputState,
-    /// 当前曲目 (source/path)
+    /// 当前曲目路径
     pub track: TrackState,
-    /// 可视化 (波形/频谱/FFT 参数)
+    /// 频谱数据与目标帧率
     pub visualization: VisualizationState,
     /// 解码线程管理
     pub decode: DecodeThreadState,
@@ -177,9 +168,7 @@ pub struct PlayerState {
     pub fade: FadeControl,
 }
 
-/// 应用程序状态
-///
-/// 包含整个应用程序的全局状态
+/// 应用全局状态
 pub struct AppState {
     /// 播放器状态
     pub player: PlayerState,
@@ -191,10 +180,7 @@ pub struct AppState {
 
 use cpal::traits::HostTrait;
 
-/// 应用启动入口（桌面与移动端共用）
-///
-/// - 桌面端：由 `main.rs` 调用；
-/// - Android/iOS：由 Tauri 生成的 JNI `Rust.create()` 调用（`mobile_entry_point` 宏）。
+/// 应用启动入口：桌面由 `main.rs` 调用，移动端由 `mobile_entry_point` 生成的 JNI `Rust.create()` 调用
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Android：current_exe() 位于只读 APK 内，必须在首个 ConfigManager 创建前
@@ -325,9 +311,8 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_store::Builder::new().build());
 
-    // 桌面端专属插件与状态：
-    // - tauri-plugin-global-shortcut 官方支持表标注 Android/iOS 不支持（当前应用内也无调用方）
-    // - tauri-plugin-updater 移动端安装流程未验证，桌面端行为不变，移动端回归待阶段 5
+    // 桌面端专属插件：global-shortcut 官方不支持 Android/iOS（前端也只在桌面注册），
+    // updater 的移动端安装流程未验证
     #[cfg(desktop)]
     let builder = builder.manage(updater::PendingUpdate::new());
     #[cfg(desktop)]

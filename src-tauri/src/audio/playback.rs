@@ -1,10 +1,6 @@
-//! 音频播放模块
+//! 音频播放模块：共享模式（rodio）与独占模式的解码推送、频谱采样环、淡入淡出。
 //!
-//! 提供音频播放、暂停、恢复、音量控制等功能。
-//!
-//! 使用SIMD友好的批量处理
-//! 预计算查找表避免热路径上的数学运算
-//! 无锁设计减少线程竞争
+//! 热路径按批量处理，软削波走 [`super::dsp`] 的预计算查找表。
 
 #[cfg(any(windows, target_os = "android"))]
 use super::decode_push::decode_and_push_to_wasapi;
@@ -27,9 +23,6 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-// 预计算查找表
-
-/// 软削波查找表大小（覆盖0.0到2.0范围，精度0.001）
 /// 批量处理块大小（对齐到SIMD友好的边界）
 const BATCH_SIZE: usize = 64;
 
@@ -42,8 +35,8 @@ pub(super) fn emit_track_ended(
     app: &AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     app.emit("track-ended", TrackEndedEvent {})?;
-    // 阶段 3.0：Android 上 App 进入后台后 WebView 的 JS 会被节流/冻结，
-    // `track-ended` 可能无人处理，交由 Rust 侧队列接管推进（桌面端内部直接返回）。
+    // Android 进入后台后 WebView 的 JS 会被节流/冻结，`track-ended` 可能无人处理，
+    // 交由 Rust 侧队列接管推进（桌面端内部直接返回）。
     queue::handle_track_ended(app, &app.state::<AppState>());
     Ok(())
 }
@@ -142,10 +135,9 @@ impl EqProcessor {
         soft_clip_fast(sample)
     }
 
-    /// 逐采样处理(独占模式解码线程使用)
-    // 独占模式只有 Windows(WASAPI) 与 Android(AAudio)，其它平台编译时这两个方法无调用方
-    /// 处理单个采样(preamp + biquad + soft_clip),公开供独占模式与 benchmark 复用。
+    /// 处理单个采样(preamp + biquad + soft_clip),公开供独占模式解码线程与 benchmark 复用。
     /// 调用方需保证按交错声道依次调用(channel = 采样在帧内声道下标)。
+    /// 独占模式只有 Windows(WASAPI) 与 Android(AAudio)，其它平台无调用方。
     #[inline(always)]
     pub fn process_sample(&mut self, input: f32, channel: usize) -> f32 {
         if !self.cached_enabled {
@@ -353,10 +345,9 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             return false;
         }
 
-        // 更新EQ设置（每批次检查一次，而不是每512采样）
+        // 每 8 批（512 采样）刷新一次 EQ 设置：try_read 拿不到就跳过，不阻塞音频线程
         self.eq_update_counter += 1;
         if self.eq_update_counter >= 8 {
-            // 每8批次 = 512采样
             self.eq_update_counter = 0;
             if let Ok(s) = self.eq_settings.try_read() {
                 self.eq_processor.update_settings(&s);
@@ -525,14 +516,13 @@ pub async fn play_track_exclusive(
     start_playback: bool,
 ) -> Result<(), AppError> {
     let player = &state.player;
-    // 递增代际计数器取消旧解码推送线程(替代 stop 布尔标志,避免 70ms 窗口内状态不一致)
+    // 递增代际计数器取消旧解码推送线程（布尔标志会有约 70ms 的状态不一致窗口）
     player.decode.generation.fetch_add(1, Ordering::SeqCst);
     let new_thread_id = player.decode.id.fetch_add(1, Ordering::SeqCst) + 1;
     {
         if let Some(ref wasapi) = *lock_or_log!(player.output.wasapi_player.lock()) {
-            // 切歌淡出:50ms 平滑过渡到静音,消除 audible click
-            // 音频线程内部完成淡出后会自动 stop_stream + clear_buffer
-            // fade 禁用时直接 stop + clear_buffer
+            // 切歌淡出 50ms，音频线程淡出完成后自行 stop_stream + clear_buffer；
+            // 关闭淡入淡出时直接 stop + clear_buffer
             if player.fade.enabled.load(Ordering::SeqCst) {
                 let _ = wasapi.stop_with_fade_out(50);
             } else {

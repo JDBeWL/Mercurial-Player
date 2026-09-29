@@ -317,7 +317,7 @@ watch(showOverflowMenu, (visible) => {
   color: var(--md-sys-color-error);
 }
 
-/* 真正窄的屏幕上（手机竖屏）没法两全其美：左侧按钮群本身就占掉大半宽度，
+/* 窗口窄到 640px 以下（手机竖屏）没法两全其美：左侧按钮群本身就占掉大半宽度，
    再把曲名塞进同一行就只能剩几十像素。这时才退化成两行——第一行按钮、第二行曲名。
    栅格版的"两行"要用 grid-template-areas 表达，flex 的 order/flex-basis 在栅格里不生效。 */
 @media (max-width: 640px) {
@@ -386,8 +386,7 @@ watch(showOverflowMenu, (visible) => {
     padding: 0 8px;
   }
 
-  /* 桌面窄高窗口的窗口按钮与溢出菜单互斥（v-if 条件不同），可共用第 3 列 */
-  .nav-bar[data-mobile='true'] .nav-right,
+  /* 溢出菜单按钮占第 3 列。.nav-right（窗口按钮）在 Android 上不渲染，不必参与栅格 */
   .nav-bar[data-mobile='true'] .nav-overflow-btn {
     grid-area: 1 / 3;
   }

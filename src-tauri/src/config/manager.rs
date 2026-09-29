@@ -96,8 +96,8 @@ impl Default for VisualizerConfig {
 
 /// 上次播放会话信息
 ///
-/// 启动时通过 L1 (文件存在) + L2 (size+mtime 一致) 校验,
-/// 通过则恢复到 position_secs;文件不存在则从播放列表移除并清除本字段
+/// 启动时通过 L1(文件存在) + L2(size+mtime 一致) 校验，通过则恢复到 position_secs；
+/// 不通过则清除本字段，是否从播放列表移除由前端决定
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LastSession {

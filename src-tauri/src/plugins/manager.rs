@@ -1,5 +1,4 @@
-//! 插件管理器
-//! 处理插件的文件系统操作
+//! 插件管理器：按平台解析插件基目录、枚举目录、读取 manifest 与卸载。
 use crate::error::AppError;
 
 use crate::security::{is_safe_relative_path, is_simple_filename, is_within_dir};
@@ -29,7 +28,7 @@ const fn default_auto_activate() -> bool {
     true
 }
 
-/// 插件目录：桌面与可执行文件同级；Android 的 .so 在只读 APK 里，只能放数据目录
+/// 插件目录：桌面与可执行文件同级；Android 的 `current_exe()` 在只读 APK 内，改用应用数据目录
 pub fn get_plugins_dir() -> Result<PathBuf, AppError> {
     let plugins_dir = plugin_base_dir()?.join("plugins");
 

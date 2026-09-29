@@ -1,6 +1,4 @@
-//! 配置模块
-//!
-//! 提供应用程序配置的管理功能。
+//! 配置模块：`AppConfig` 定义与读写落盘（[`manager::ConfigManager`]）。
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -15,7 +13,7 @@ pub use manager::{AppConfig, ConfigManager};
 ///
 /// 桌面端配置文件/数据文件落主程序同级 `data/`（便携化）；Android 的
 /// `current_exe()` 位于只读的 APK 内，必须改写到应用数据目录。
-/// 由 `app_setup::init` 在启动时按平台设置，未设置时保持原逻辑。
+/// 由 `lib.rs::run`（首个 ConfigManager 之前）与 `app_setup::init` 设置，未设置时保持原逻辑。
 static DATA_DIR_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
 
 /// 设置全局数据目录（仅应在启动装配时调用一次）

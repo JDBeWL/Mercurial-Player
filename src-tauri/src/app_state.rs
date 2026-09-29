@@ -1,6 +1,4 @@
-//! 应用状态组装
-//!
-//! 独立于 Tauri Builder 的 [`AppState`] 构建逻辑,保持 main() 精简。
+//! 应用状态组装：独立于 Tauri Builder 的 [`AppState`] 构建逻辑。
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
@@ -24,13 +22,9 @@ use crate::{
     audio::{DeviceMonitor, PlaybackQueue},
 };
 
-/// 跨平台的"独占/直出"播放器类型别名
-///
-/// - Windows：WASAPI 独占
-/// - Android：AAudio 独占（USB DAC 位完美）
-/// - 其它：占位实现（所有方法返回错误）
-///
-/// 三者共用同一套方法签名，命令层与解码推送线程因此不必按平台分支。
+/// 跨平台的"独占/直出"播放器类型别名：Windows = WASAPI 独占，Android = AAudio 独占
+/// （USB DAC 位完美），其它 = 占位实现。三者共用同一套方法签名，命令层与解码推送线程因此
+/// 不必按平台分支。
 #[cfg(windows)]
 pub type PlatformPlayer = WasapiExclusivePlayback;
 #[cfg(target_os = "android")]

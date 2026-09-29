@@ -1,12 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 
-/** 获取当前平台标识（windows / macos / linux） */
+/** 获取当前平台标识（windows / macos / linux / android） */
 export function getPlatform(): Promise<string> {
   return invoke<string>('get_platform')
 }
 
-/** 设置应用内界面字号倍率（1 = 设计稿原始大小）。只有 Android 会真正生效：WebView 会把系统「字体
- *  大小」放大到所有 CSS px 字号上，原生侧先抵消它、再乘上这里给的倍率；桌面端后端是 no-op。 */
+/** 设置应用内界面字号倍率（1 = 设计稿原始大小）。只有 Android 生效，原理见 useAppFontScale；
+ *  桌面端后端是 no-op。 */
 export function setAppFontScale(scale: number): Promise<void> {
   return invoke<void>('set_app_font_scale', { scale })
 }

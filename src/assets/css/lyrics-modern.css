@@ -42,31 +42,25 @@
 }
 
 .lyrics-style-modern .lyrics:hover {
-  /* background-color: rgba(255, 255, 255, 0.04);*/
   opacity: 0.75;
-  /* filter: blur(0px); */
 }
 
 /* 暗色模式下hover保持原透明度 */
 [data-theme='dark'] .lyrics-style-modern .lyrics:hover {
   background-color: transparent;
   opacity: 0.85;
-  /* filter: blur(0px); */
 }
 
 .lyrics-style-modern .lyrics.active {
   color: var(--md-sys-color-primary, #fff);
   opacity: 1;
   filter: blur(0px);
-  /* font-size: 36px; */
   transform: scale(1);
-  /* 放大 */
 }
 
 /* 暗色模式下活动歌词 */
 [data-theme='dark'] .lyrics-style-modern .lyrics.active {
   opacity: 1;
-  /* filter: blur(0px); */
 }
 
 /* --lyrics-scale：「歌词设置」里的「歌词字号」写在根元素上的倍率（默认 1）。

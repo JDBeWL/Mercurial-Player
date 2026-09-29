@@ -151,8 +151,8 @@ import { detectLyricLanguage, type LyricLanguage } from '@/utils/languageDetect'
 export default {
   name: 'LyricsDisplay',
   components: { KaraokeLine, LyricsCandidatePicker },
-  // 竖屏下"点歌词区域的空白处返回封面"由父组件（App.vue）实现：
-  // 组件内部才知道哪些元素是可点的，所以判断放在这里，父组件只负责响应。
+  // 竖屏下"点歌词区域的空白处返回封面"：只有组件内部知道哪些元素是可点的，
+  // 所以判定在这里，动作交给父组件（App.vue）响应
   emits: ['blankClick'],
   setup(_props, { emit }) {
     const playerStore = usePlayerStore()
