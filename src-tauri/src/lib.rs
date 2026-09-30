@@ -192,8 +192,9 @@ pub fn run() {
     {
         match android::saf::get_app_data_dir() {
             Ok(Some(dir)) if !dir.is_empty() => {
-                log::info!("Android data dir override (early): {dir}");
-                config::set_data_dir_override(std::path::PathBuf::from(dir));
+                if config::set_data_dir_override(std::path::PathBuf::from(&dir)) {
+                    log::info!("Android data dir override (early): {dir}");
+                }
             }
             other => log::warn!("Failed to resolve Android app data dir early: {other:?}"),
         }
@@ -207,7 +208,13 @@ pub fn run() {
         log::error!("Failed to initialize config files: {e}");
     }
 
-    let config = config_manager.load_config().ok();
+    let config = match config_manager.load_config() {
+        Ok(config) => Some(config),
+        Err(e) => {
+            log::warn!("读取配置失败，本次启动按默认设置: {e}");
+            None
+        }
+    };
     let fade_enabled = config
         .as_ref()
         .map(|c| c.audio.fade_enabled)

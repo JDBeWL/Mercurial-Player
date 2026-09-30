@@ -348,8 +348,10 @@ impl EqPersister {
     }
 
     fn mark_dirty(&self) {
-        // 发送失败仅说明线程已退出(进程收尾),静默忽略
-        let _ = self.tx.send(PersistMsg::Ping);
+        // 发送失败说明 eq-persister 线程已退出：之后的 EQ 改动都不会再落盘，必须留痕
+        if self.tx.send(PersistMsg::Ping).is_err() {
+            log::error!("eq-persister 线程已停止，EQ 设置无法落盘");
+        }
     }
 }
 
@@ -358,7 +360,9 @@ impl Drop for EqPersister {
         // 发送 Stop 并等待线程退出(线程会先处理完已排队的 Ping 再做最后落盘)
         let _ = self.tx.send(PersistMsg::Stop);
         if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+            if thread.join().is_err() {
+                log::error!("eq-persister 线程异常退出，最后一次 EQ 落盘可能未完成");
+            }
         }
     }
 }

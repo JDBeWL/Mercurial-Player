@@ -203,9 +203,11 @@ pub async fn try_resume_last_session(
     updated_session.file_size = actual_size;
     updated_session.file_mtime = actual_mtime;
     updated_session.saved_at = now;
-    let _ = state.config_manager.update_config(|config| {
+    if let Err(e) = state.config_manager.update_config(|config| {
         config.last_session = Some(updated_session.clone());
-    });
+    }) {
+        log::warn!("写回归档位置失败，下次启动可能从错误位置续播: {e}");
+    }
 
     // 按 exclusive_mode 派发到对应播放路径
     let exclusive_mode = state
@@ -254,9 +256,11 @@ pub async fn try_resume_last_session(
         Err(e) => {
             log::error!("Failed to resume last session playback: {e}");
             // 播放失败也清除记录,避免下次启动又失败
-            let _ = state.config_manager.update_config(|config| {
+            if let Err(e) = state.config_manager.update_config(|config| {
                 config.last_session = None;
-            });
+            }) {
+                log::warn!("清除失效的续播记录失败，下次启动仍会重试该曲目: {e}");
+            }
             Ok(ResumeResult {
                 resumed: false,
                 track_path: None,

@@ -297,9 +297,11 @@ defineExpose({ open })
   transition: all 0.2s;
 }
 
-.close-btn:hover {
-  background-color: var(--md-sys-color-surface-variant);
-  color: var(--md-sys-color-on-surface);
+@media (hover: hover) {
+  .close-btn:hover {
+    background-color: var(--md-sys-color-surface-variant);
+    color: var(--md-sys-color-on-surface);
+  }
 }
 
 /* 颜色分类标签 */
@@ -324,9 +326,11 @@ defineExpose({ open })
   transition: all 0.2s;
 }
 
-.category-chip:hover {
-  background-color: var(--md-sys-color-surface-variant);
-  border-color: var(--md-sys-color-outline);
+@media (hover: hover) {
+  .category-chip:hover {
+    background-color: var(--md-sys-color-surface-variant);
+    border-color: var(--md-sys-color-outline);
+  }
 }
 
 .category-chip.active {
@@ -359,10 +363,12 @@ defineExpose({ open })
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.color-preset:hover {
-  transform: scale(1.1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  z-index: 1;
+@media (hover: hover) {
+  .color-preset:hover {
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    z-index: 1;
+  }
 }
 
 .color-preset.selected {
@@ -497,8 +503,10 @@ defineExpose({ open })
   border-radius: 3px;
 }
 
-.color-presets::-webkit-scrollbar-thumb:hover {
-  background: var(--md-sys-color-outline);
+@media (hover: hover) {
+  .color-presets::-webkit-scrollbar-thumb:hover {
+    background: var(--md-sys-color-outline);
+  }
 }
 
 /* 手机竖屏：触发按钮收进顶栏溢出菜单，面板改成贴底抽屉（原来相对按钮绝对定位，窄屏上会向右溢出）。

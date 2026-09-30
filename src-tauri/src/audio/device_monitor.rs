@@ -92,7 +92,9 @@ impl DeviceMonitor {
     pub fn stop(&mut self) {
         self.is_running.store(false, Ordering::SeqCst);
         if let Some(thread) = self.monitor_thread.take() {
-            let _ = thread.join();
+            if thread.join().is_err() {
+                log::error!("设备监听线程异常退出，热插拔自动切换已失效");
+            }
         }
     }
 

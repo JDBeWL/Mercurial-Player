@@ -2,11 +2,6 @@
   <div class="equalizer-settings">
     <div class="content-header">
       <h3>{{ $t('config.equalizer') }}</h3>
-      <div class="header-actions">
-        <button class="icon-button" :title="$t('config.reset')" @click="resetEq">
-          <span class="material-symbols-rounded">restart_alt</span>
-        </button>
-      </div>
     </div>
 
     <!-- EQ 开关 -->
@@ -55,7 +50,15 @@
 
     <!-- 频段滑块 -->
     <div class="bands-section">
-      <label class="section-label">{{ $t('config.eqBands') }}</label>
+      <!-- 重置放在频段这一行的右侧：它抹平的就是这些滑块，跟着标题走比挂在页头更容易被看到，
+           竖屏下也不会留出一条只漂着一个图标的空行 -->
+      <div class="bands-header">
+        <label class="section-label">{{ $t('config.eqBands') }}</label>
+        <button class="text-button" @click="resetEq">
+          <span class="material-symbols-rounded">restart_alt</span>
+          {{ $t('config.reset') }}
+        </button>
+      </div>
       <div class="bands-container">
         <div v-for="(band, index) in bands" :key="index" class="band-control">
           <div class="band-value">
@@ -356,29 +359,6 @@ onMounted(() => {
   color: var(--md-sys-color-on-surface);
 }
 
-.header-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.icon-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border: none;
-  border-radius: var(--md-sys-shape-corner-large, 12px);
-  background: none;
-  cursor: pointer;
-  color: var(--md-sys-color-on-surface-variant);
-  transition: all 0.2s ease;
-}
-
-.icon-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
-}
-
 /* EQ 开关 */
 .eq-toggle {
   display: flex;
@@ -392,8 +372,10 @@ onMounted(() => {
   transition: background-color 0.2s;
 }
 
-.eq-toggle:hover {
-  background-color: var(--md-sys-color-surface-container-high);
+@media (hover: hover) {
+  .eq-toggle:hover {
+    background-color: var(--md-sys-color-surface-container-high);
+  }
 }
 
 .toggle-info {
@@ -443,8 +425,10 @@ onMounted(() => {
   transition: all 0.2s;
 }
 
-.preset-chip:hover {
-  background-color: var(--md-sys-color-surface-container);
+@media (hover: hover) {
+  .preset-chip:hover {
+    background-color: var(--md-sys-color-surface-container);
+  }
 }
 
 .preset-chip.active {
@@ -527,9 +511,11 @@ onMounted(() => {
   opacity: 1;
 }
 
-.slider.horizontal:hover .slider-thumb {
-  transform: translate(-50%, -50%) scale(1.1);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+@media (hover: hover) {
+  .slider.horizontal:hover .slider-thumb {
+    transform: translate(-50%, -50%) scale(1.1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  }
 }
 
 .slider.horizontal.dragging .slider-thumb {
@@ -546,6 +532,18 @@ onMounted(() => {
 /* 频段部分 */
 .bands-section {
   margin-bottom: 24px;
+}
+
+.bands-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+/* 行高由这一行统一管，标签自带的下边距会把按钮一起压低 */
+.bands-header .section-label {
+  margin-bottom: 0;
 }
 
 .bands-container {
@@ -632,9 +630,11 @@ onMounted(() => {
   opacity: 1;
 }
 
-.slider.vertical:hover .slider-thumb {
-  transform: translate(-50%, 50%) scale(1.15);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+@media (hover: hover) {
+  .slider.vertical:hover .slider-thumb {
+    transform: translate(-50%, 50%) scale(1.15);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  }
 }
 
 .slider.vertical.dragging .slider-thumb {

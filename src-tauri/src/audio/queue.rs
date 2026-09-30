@@ -268,6 +268,10 @@ fn play_queue_track(
     track: &TrackSnapshot,
     reason: &str,
 ) -> Result<(), AppError> {
+    // 移动端：按用户偏好对齐本首的输出模式（"下一首生效"在这里落地）
+    #[cfg(target_os = "android")]
+    super::commands::sync_exclusive_mode_from_config(state);
+
     let exclusive = state
         .player
         .output
@@ -293,6 +297,8 @@ fn play_queue_track(
                 queue.set_index(index);
             }
             emit_queue_changed(&app, Some(index), Some(track), &reason);
+            // 新曲目从零起算，理由见 note_playback_started
+            note_position(0.0);
             sync_media_session(&app, &state);
         });
         return Ok(());
@@ -303,21 +309,33 @@ fn play_queue_track(
         queue.set_index(index);
     }
     emit_queue_changed(app, Some(index), Some(track.clone()), reason);
+    // 新曲目从零起算，理由见 note_playback_started
+    note_position(0.0);
     sync_media_session(app, state);
     Ok(())
 }
 
 /// 播放开始后同步队列下标与（Android）通知栏：前端任何切歌都走这里，
 /// 保证队列下标与通知栏始终跟随实际播放的曲目。
-pub fn note_playback_started(app: &AppHandle, state: &AppState, path: &str) {
+///
+/// `start_position` 是本首的起点（秒，None 表示从头播），用来重设 MediaSession 的进度基准。
+pub fn note_playback_started(
+    app: &AppHandle,
+    state: &AppState,
+    path: &str,
+    start_position: Option<f32>,
+) {
     if let Ok(mut queue) = state.player.queue.lock() {
         queue.sync_index_by_path(path);
     }
+    // 进度基准必须紧贴同步写：缓存里此刻还是上一首的位置，而系统会拿它按 speed 往下推算，
+    // 锁屏/通知栏就表现为比实际快一整首。放在起播之前写也会被上一首分析线程的尾帧盖掉。
+    note_position(start_position.unwrap_or(0.0));
     sync_media_session(app, state);
 }
 
-/// 媒体控制动作（通知栏 / MediaSession / 耳机线控共用入口），与前端操作走同一套播放函数。
-/// 注意：本入口只驱动共享模式的 rodio sink，不走独占播放器分支。
+/// 媒体控制动作（通知栏 / MediaSession / 耳机线控共用入口），与前端操作走同一套播放函数：
+/// 按 `exclusive_mode` 分流到独占或共享输出，两种模式下按键都有效。
 pub fn media_control(
     app: &AppHandle,
     state: &AppState,
@@ -325,24 +343,33 @@ pub fn media_control(
     position: Option<f32>,
 ) -> Result<(), AppError> {
     match action {
-        "play" => super::commands::resume_playback(state),
-        "pause" => super::commands::pause_playback(state),
+        "play" => super::commands::resume_any(app, state),
+        "pause" => super::commands::pause_any(app, state),
         "toggle" => {
-            let paused = state
-                .player
-                .output
-                .sink
-                .lock()
-                .lock_or_err("player")
-                .map(|sink| sink.is_paused())?;
-            if paused {
-                super::commands::resume_playback(state)
+            let playing = super::commands::is_output_playing(state);
+            log::debug!("媒体按键 toggle: 当前在播={playing}");
+            if playing {
+                super::commands::pause_any(app, state)
             } else {
-                super::commands::pause_playback(state)
+                super::commands::resume_any(app, state)
             }
         }
         "stop" => {
-            super::commands::pause_playback(state)?;
+            super::commands::pause_any(app, state)?;
+            #[cfg(any(windows, target_os = "android"))]
+            {
+                let guard = state
+                    .player
+                    .output
+                    .wasapi_player
+                    .lock()
+                    .lock_or_err("exclusive player")?;
+                if let Some(player) = guard.as_ref() {
+                    if let Err(e) = player.stop() {
+                        log::warn!("独占输出停止失败: {e}");
+                    }
+                }
+            }
             if let Ok(sink) = state.player.output.sink.lock().lock_or_err("player") {
                 sink.stop();
             }
@@ -362,6 +389,38 @@ pub fn media_control(
             let Some(path) = path else {
                 return Err(AppError::Audio("当前没有正在播放的曲目".to_string()));
             };
+            let exclusive_mode = state
+                .player
+                .output
+                .exclusive_mode
+                .lock()
+                .lock_or_err("exclusive mode")
+                .map(|g| *g)?;
+            if exclusive_mode {
+                // 独占模式的 seek 靠重建输出流完成（异步），而媒体控制入口是同步回调，
+                // 这里交给异步运行时，失败只记日志（按键没有可返回给系统的错误通道）
+                let app_clone = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_clone.state::<AppState>();
+                    if let Err(e) = super::playback::play_track_exclusive(
+                        &app_clone,
+                        &state,
+                        &path,
+                        Some(position),
+                        true,
+                    )
+                    .await
+                    {
+                        log::error!("独占模式媒体控制 seek 失败: {e}");
+                        return;
+                    }
+                    // 独占的 seek 是重建输出流，与共享分支一样要把进度基准挪到跳转目标，
+                    // 否则通知栏继续按跳转前的位置推算
+                    note_position(position);
+                    sync_media_session(&app_clone, &state);
+                });
+                return Ok(());
+            }
             super::playback::seek_track_shared(app, state, &path, position)?;
             sync_media_session(app, state);
             Ok(())
@@ -395,13 +454,7 @@ pub fn media_control(
                 let queue = state.player.queue.lock().lock_or_err("playback queue")?;
                 (queue.index(), queue.current().cloned())
             };
-            let playing = state
-                .player
-                .output
-                .sink
-                .lock()
-                .map(|sink| !sink.is_paused())
-                .unwrap_or(false);
+            let playing = super::commands::is_output_playing(state);
             let _ = app.emit(
                 "playback-state-sync",
                 serde_json::json!({

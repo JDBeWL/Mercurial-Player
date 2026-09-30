@@ -32,6 +32,9 @@ const WATCHDOG_INTERVAL_MS: u64 = 20;
 /// 看门狗替回调收尾的宽限（毫秒）：回调正常时会在 duration_ms 内走完斜坡，
 /// 超过 duration + 本宽限仍未推进，说明回调已经停摆（流暂停/断开）
 const FADE_FALLBACK_GRACE_MS: u64 = 100;
+/// 数据回调单次请求的交错采样上限：约 192kHz/立体声 85ms，
+/// 覆盖常见设备的 burst 值，回调内据此免扩容
+const AAUDIO_SCRATCH_CAPACITY: usize = 32_768;
 
 /// `PlaybackState` 的原子编码（状态要能在音频回调里更新，不能用 Mutex）
 const ST_UNINITIALIZED: u8 = 0;
@@ -49,6 +52,33 @@ const fn state_from_code(c: u8) -> PlaybackState {
         ST_STOPPING => PlaybackState::Stopping,
         ST_PAUSING => PlaybackState::Pausing,
         _ => PlaybackState::Uninitialized,
+    }
+}
+
+/// 状态码的日志文本：仅在状态迁移日志里用
+const fn state_text(code: u8) -> &'static str {
+    match code {
+        ST_UNINITIALIZED => "Uninitialized",
+        ST_STOPPED => "Stopped",
+        ST_PLAYING => "Playing",
+        ST_PAUSED => "Paused",
+        ST_STOPPING => "Stopping",
+        ST_PAUSING => "Pausing",
+        _ => "Unknown",
+    }
+}
+
+/// 状态迁移的唯一入口：这个原子量必须与 AAudio 流的真实状态一致，媒体按键与
+/// `set_usb_dac_exclusive` 都按它判断"当前是否在播"。看门狗落地 pause/stop 之后
+/// 也必须走这里，否则状态会永远停在 Pausing/Stopping。
+fn transition_state(state: &AtomicU8, new: u8) {
+    let old = state.swap(new, Ordering::SeqCst);
+    if old != new {
+        log::debug!(
+            "AAudio 播放器状态: {} -> {}",
+            state_text(old),
+            state_text(new)
+        );
     }
 }
 
@@ -92,6 +122,9 @@ struct Shared {
     disconnected: AtomicBool,
     /// 流是否处于可写状态（关闭/重建期间置 false）
     running: AtomicBool,
+    /// 与播放器共享的对外状态量：看门狗落地 pause/stop 后要把它从 Pausing/Stopping
+    /// 推进到 Paused/Stopped，否则命令层永远看不到淡出真正完成
+    state: Arc<AtomicU8>,
 }
 
 /// 传给 AAudio 的 userData。
@@ -128,7 +161,7 @@ pub struct AaudioExclusivePlayer {
     sample_rate: AtomicU32,
     channels: AtomicU32,
     volume: AtomicU32,
-    state: AtomicU8,
+    state: Arc<AtomicU8>,
     /// 独占是否真的生效（开流后由 AAudio 回报的 sharing mode 确认）
     exclusive_confirmed: AtomicBool,
 }
@@ -194,7 +227,7 @@ impl AaudioExclusivePlayer {
             sample_rate: AtomicU32::new(0),
             channels: AtomicU32::new(0),
             volume: AtomicU32::new(1.0f32.to_bits()),
-            state: AtomicU8::new(ST_UNINITIALIZED),
+            state: Arc::new(AtomicU8::new(ST_UNINITIALIZED)),
             exclusive_confirmed: AtomicBool::new(false),
         }
     }
@@ -303,10 +336,13 @@ impl AaudioExclusivePlayer {
             underruns: AtomicU64::new(0),
             disconnected: AtomicBool::new(false),
             running: AtomicBool::new(false),
+            state: Arc::clone(&self.state),
         });
         let ctx = Arc::new(Ctx {
             shared: Arc::clone(&shared),
-            scratch: UnsafeCell::new(Vec::with_capacity(8192)),
+            // 回调请求量由 AAudio 决定，按足够大的单次上限预分配，
+            // 使正常回调路径上的 resize 只改 len 不触发扩容
+            scratch: UnsafeCell::new(Vec::with_capacity(AAUDIO_SCRATCH_CAPACITY)),
         });
 
         // SAFETY: builder 由 AAudio_createStreamBuilder 成功创建；以下 setter
@@ -380,7 +416,7 @@ impl AaudioExclusivePlayer {
         self.sample_rate.store(actual_rate, Ordering::SeqCst);
         self.channels
             .store(actual_channels as u32, Ordering::SeqCst);
-        self.state.store(ST_STOPPED, Ordering::SeqCst);
+        self.set_state(ST_STOPPED);
 
         *lock_or_log!(self.inner.lock()) = Some(Arc::new(Inner {
             stream: AtomicPtr::new(stream),
@@ -413,7 +449,7 @@ impl AaudioExclusivePlayer {
             }
         }
         drop(inner); // ctx 也随之释放（close 已保证回调不再运行）
-        self.state.store(ST_UNINITIALIZED, Ordering::SeqCst);
+        self.set_state(ST_UNINITIALIZED);
         self.exclusive_confirmed.store(false, Ordering::SeqCst);
     }
 
@@ -457,6 +493,9 @@ impl AaudioExclusivePlayer {
                             log::info!("AAudio requestPause -> {}", unsafe {
                                 ffi::result_to_text(r)
                             });
+                            // 命令线程只置到 Pausing，真正暂停发生在这里：必须把状态推进，
+                            // 否则按键/路由判断会一直以为还在 Pausing 而重复 requestStart
+                            transition_state(&shared.state, ST_PAUSED);
                         }
                         PENDING_STOP if !stream.is_null() => {
                             // SAFETY: 同上
@@ -465,6 +504,7 @@ impl AaudioExclusivePlayer {
                             }
                             shared.ring.clear();
                             shared.written.store(0, Ordering::Relaxed);
+                            transition_state(&shared.state, ST_STOPPED);
                         }
                         _ => {}
                     }
@@ -494,7 +534,7 @@ impl AaudioExclusivePlayer {
         shared.fade_action.store(PENDING_NONE, Ordering::SeqCst);
         shared.pending.store(PENDING_STOP, Ordering::SeqCst);
         shared.ring.clear();
-        self.state.store(ST_STOPPED, Ordering::SeqCst);
+        self.set_state(ST_STOPPED);
         Ok(())
     }
 
@@ -514,7 +554,7 @@ impl AaudioExclusivePlayer {
         shared.fade_dir.store(FADE_IDLE, Ordering::SeqCst);
         shared.fade_left.store(0, Ordering::SeqCst);
         shared.pending.store(PENDING_PAUSE, Ordering::SeqCst);
-        self.state.store(ST_PAUSED, Ordering::SeqCst);
+        self.set_state(ST_PAUSED);
         Ok(())
     }
 
@@ -577,6 +617,10 @@ impl AaudioExclusivePlayer {
     #[must_use]
     pub fn state(&self) -> PlaybackState {
         state_from_code(self.state.load(Ordering::SeqCst))
+    }
+
+    fn set_state(&self, new: u8) {
+        transition_state(&self.state, new);
     }
 
     #[must_use]
@@ -649,7 +693,7 @@ impl AaudioExclusivePlayer {
         }
         // 起播成功后才发布 running：失败时流根本没在跑，置了会让回调与解码线程都以为可写
         inner.ctx.shared.running.store(true, Ordering::Release);
-        self.state.store(ST_PLAYING, Ordering::SeqCst);
+        self.set_state(ST_PLAYING);
         Ok(())
     }
 
@@ -677,14 +721,11 @@ impl AaudioExclusivePlayer {
             );
             shared.fade_dir.store(FADE_OUT, Ordering::SeqCst);
         }
-        self.state.store(
-            if action == FadeAction::Pause {
-                ST_PAUSING
-            } else {
-                ST_STOPPING
-            },
-            Ordering::SeqCst,
-        );
+        self.set_state(if action == FadeAction::Pause {
+            ST_PAUSING
+        } else {
+            ST_STOPPING
+        });
     }
 }
 

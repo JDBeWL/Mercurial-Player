@@ -126,6 +126,23 @@ html.theme-fading *::after {
   flex-direction: column;
 }
 
+/* 触屏上不禁用文本选中的话，手指按下稍微移动一点就会开始选词（界面里冒出选中高亮
+   和拖拽手柄），看起来就像按钮被长按卡住。播放器没有需要复制的正文，输入框除外。
+   只按悬停能力判断、不动桌面端：桌面拖选是有意操作，没有这个副作用。 */
+@media (hover: none) {
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  input,
+  textarea,
+  .selectable {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}
+
 .material-symbols-rounded {
   font-family: 'Material Symbols Rounded', sans-serif;
   font-weight: normal;
@@ -187,12 +204,14 @@ html.theme-fading *::after {
   transition: all 0.2s ease;
 }
 
-.filled-button:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--md-sys-color-on-surface) 8%,
-    var(--md-sys-color-secondary-container)
-  );
+@media (hover: hover) {
+  .filled-button:hover {
+    background-color: color-mix(
+      in srgb,
+      var(--md-sys-color-on-surface) 8%,
+      var(--md-sys-color-secondary-container)
+    );
+  }
 }
 
 .filled-button:active {
@@ -231,8 +250,10 @@ html.theme-fading *::after {
   transition: opacity var(--transition-fast);
 }
 
-.text-button:hover::before {
-  opacity: 1;
+@media (hover: hover) {
+  .text-button:hover::before {
+    opacity: 1;
+  }
 }
 
 .text-button .material-symbols-rounded {
@@ -249,9 +270,13 @@ html.theme-fading *::after {
   padding: 0;
 }
 
-.icon-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
-  color: var(--md-sys-color-on-surface);
+/* 触屏上没有真正的悬停，:hover 会在点过之后一直粘着（看起来像选中的痕迹残留）。
+   共享按钮/列表项的悬停反馈只在支持悬停的设备上启用。 */
+@media (hover: hover) {
+  .icon-button:hover {
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+    color: var(--md-sys-color-on-surface);
+  }
 }
 
 .icon-button.active {
@@ -273,12 +298,16 @@ html.theme-fading *::after {
   transition: background-color 0.2s ease;
 }
 
-.play-button:hover {
-  background-color: var(--md-sys-color-hover-overlay);
+@media (hover: hover) {
+  .play-button:hover {
+    background-color: var(--md-sys-color-hover-overlay);
+  }
 }
 
-.remove-button:hover {
-  background-color: var(--md-sys-color-error-hover);
+@media (hover: hover) {
+  .remove-button:hover {
+    background-color: var(--md-sys-color-error-hover);
+  }
 }
 
 .play-button .material-symbols-rounded {
@@ -331,12 +360,14 @@ ThemeSelector {
   transition: transform var(--transition-normal) var(--ease-out-expo);
 }
 
-.list-item:hover {
-  background-color: var(--primary-alpha-5);
-}
+@media (hover: hover) {
+  .list-item:hover {
+    background-color: var(--primary-alpha-5);
+  }
 
-.list-item:hover::before {
-  transform: scaleY(1);
+  .list-item:hover::before {
+    transform: scaleY(1);
+  }
 }
 
 .list-item.selected {
@@ -378,10 +409,12 @@ ThemeSelector {
   border: 1px solid transparent;
 }
 
-.chip:hover {
-  background-color: var(--primary-alpha-10);
-  border-color: var(--md-sys-color-outline-variant);
-  transform: translateY(-1px);
+@media (hover: hover) {
+  .chip:hover {
+    background-color: var(--primary-alpha-10);
+    border-color: var(--md-sys-color-outline-variant);
+    transform: translateY(-1px);
+  }
 }
 
 .chip.selected {
@@ -393,6 +426,46 @@ ThemeSelector {
 .chip .material-symbols-rounded {
   font-size: 18px;
   margin-right: 8px;
+}
+
+/* ===== 触屏按压态 =====
+   上面那批 :hover 现在都关在 @media (hover: hover) 里（触屏上 :hover 会粘住，
+   点完一直亮着，看着像长按没松），而 -webkit-tap-highlight-color 又是 transparent、
+   原生水波纹也没有 —— 手机上就变成"按下去毫无反应"。这里给同一批共享类补 :active。
+   带 button 前缀的那几个类定义在各组件的 scoped 样式里，scoped 基础规则的选择器
+   自带 [data-v-*] 属性、权重与全局同名类相同却后注入，不加一层元素名会被它压掉。 */
+@media (hover: none) {
+  .icon-button:active,
+  .play-button:active,
+  .list-item:active {
+    background-color: var(--md-sys-color-hover-overlay);
+  }
+
+  .remove-button:active {
+    background-color: var(--md-sys-color-error-hover);
+  }
+
+  .text-button:active::before {
+    opacity: 1;
+  }
+
+  button.segment:active,
+  button.preset-chip:active,
+  button.category-chip:active {
+    background-color: var(--md-sys-color-hover-overlay);
+  }
+
+  button.filled-tonal-button:active {
+    background-color: color-mix(
+      in srgb,
+      var(--md-sys-color-on-surface) 12%,
+      var(--md-sys-color-secondary-container)
+    );
+  }
+
+  .chip:active {
+    background-color: var(--primary-alpha-10);
+  }
 }
 
 /* =========================================
@@ -451,9 +524,11 @@ ThemeSelector {
   transition: all var(--transition-fast) var(--ease-out-expo);
   opacity: 0;
 }
-.slider:hover .slider-thumb {
-  opacity: 1;
-  transform: translateX(-50%) scale(1.1);
+@media (hover: hover) {
+  .slider:hover .slider-thumb {
+    opacity: 1;
+    transform: translateX(-50%) scale(1.1);
+  }
 }
 .slider:active .slider-thumb {
   box-shadow: var(--shadow-medium);
@@ -551,8 +626,10 @@ ThemeSelector {
   border-radius: 4px;
   transition: background var(--transition-fast);
 }
-::-webkit-scrollbar-thumb:hover {
-  background: var(--md-sys-color-outline);
+@media (hover: hover) {
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--md-sys-color-outline);
+  }
 }
 
 /* Material Design 3 Select Dropdown Styles */
@@ -593,8 +670,10 @@ select.md3-select {
   --dropdown-icon-color: var(--md-sys-color-on-surface-variant);
 }
 
-select.md3-select:hover {
-  --dropdown-icon-color: var(--md-sys-color-on-surface);
+@media (hover: hover) {
+  select.md3-select:hover {
+    --dropdown-icon-color: var(--md-sys-color-on-surface);
+  }
 }
 
 select.md3-select:focus {

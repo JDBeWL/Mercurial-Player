@@ -699,8 +699,10 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   contain: layout style paint;
 }
 
-.list-item:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+@media (hover: hover) {
+  .list-item:hover {
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+  }
 }
 
 .list-item:active {
@@ -879,12 +881,14 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   transition: all 0.2s ease;
 }
 
-.filled-button:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--md-sys-color-on-surface) 8%,
-    var(--md-sys-color-primary-container)
-  );
+@media (hover: hover) {
+  .filled-button:hover {
+    background-color: color-mix(
+      in srgb,
+      var(--md-sys-color-on-surface) 8%,
+      var(--md-sys-color-primary-container)
+    );
+  }
 }
 
 .text-button {
@@ -901,8 +905,10 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   gap: 4px;
 }
 
-.text-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+@media (hover: hover) {
+  .text-button:hover {
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+  }
 }
 
 .sort-button {

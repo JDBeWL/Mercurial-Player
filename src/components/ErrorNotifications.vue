@@ -62,9 +62,11 @@ const { errorNotifications, removeError } = useErrorNotification()
   transition: all 0.2s ease;
 }
 
-.error-notification:hover {
-  transform: translateX(-4px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+@media (hover: hover) {
+  .error-notification:hover {
+    transform: translateX(-4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
 }
 
 .error-notification--error {
@@ -117,8 +119,10 @@ const { errorNotifications, removeError } = useErrorNotification()
   flex-shrink: 0;
 }
 
-.error-close:hover {
-  opacity: 1;
+@media (hover: hover) {
+  .error-close:hover {
+    opacity: 1;
+  }
 }
 
 .error-close .material-symbols-rounded {

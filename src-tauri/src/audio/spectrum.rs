@@ -20,6 +20,10 @@ use super::eq_processor::EqProcessor;
 use super::sample_ring::SampleRing;
 use crate::equalizer::EqSettings;
 
+/// 频谱 bin 数量：分析端分箱、平滑与前端可视化的柱数三方必须一致
+/// (`app_state.rs` 的 `spectrum_data`、`VisualizerPanel.vue` 的 `SPECTRUM_SIZE`)
+pub(crate) const SPECTRUM_BINS: usize = 128;
+
 /// 频谱更新事件 - 简化结构减少序列化开销
 #[derive(Debug, serde::Serialize, Clone)]
 pub struct SpectrumUpdateEvent {
@@ -85,8 +89,8 @@ impl SpectrumAnalyzer {
             buffer: Vec::with_capacity(fft_size),
             fft_buffer: vec![0.0; fft_size],
             hann_window: precompute_hann_window(fft_size),
-            spectrum_buffer: vec![0.0; 128],
-            prev_spectrum: vec![0.0; 128],
+            spectrum_buffer: vec![0.0; SPECTRUM_BINS],
+            prev_spectrum: vec![0.0; SPECTRUM_BINS],
             fft_size,
             sample_rate,
             last_fft_time: 0,
@@ -184,10 +188,9 @@ impl SpectrumAnalyzer {
                 self.spectrum_buffer.fill(0.0);
 
                 // AE风格：线性频率分布
-                const NUM_BINS: usize = 128;
                 const FREQ_MIN: f32 = 20.0;
                 const FREQ_MAX: f32 = 16000.0;
-                const FREQ_STEP: f32 = (FREQ_MAX - FREQ_MIN) / NUM_BINS as f32;
+                const FREQ_STEP: f32 = (FREQ_MAX - FREQ_MIN) / SPECTRUM_BINS as f32;
 
                 for (freq, value) in spectrum.data() {
                     let f = freq.val();
@@ -196,7 +199,7 @@ impl SpectrumAnalyzer {
                     }
 
                     let bin = ((f - FREQ_MIN) / FREQ_STEP).floor() as usize;
-                    let bin = bin.min(NUM_BINS - 1);
+                    let bin = bin.min(SPECTRUM_BINS - 1);
 
                     let v = value.val();
                     if v > self.spectrum_buffer[bin] {
@@ -205,7 +208,7 @@ impl SpectrumAnalyzer {
                 }
 
                 // AE风格的平滑：快速上升，缓慢下降
-                for i in 0..128 {
+                for i in 0..SPECTRUM_BINS {
                     let target = self.spectrum_buffer[i];
                     let current = self.prev_spectrum[i];
 
@@ -291,7 +294,9 @@ fn spawn_spectrum_thread(
         fn emit_ended_once(app: Option<&AppHandle>, eof: &AtomicBool) {
             if eof.swap(false, Ordering::SeqCst) {
                 if let Some(app) = app {
-                    let _ = emit_track_ended(app);
+                    if let Err(e) = emit_track_ended(app) {
+                        log::warn!("track-ended 发送失败，自动续播可能中断: {e}");
+                    }
                 }
             }
         }

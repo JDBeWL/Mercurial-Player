@@ -14,6 +14,17 @@ use super::cache::{
 };
 use super::cover::extract_cover_to_cache;
 
+/// 提取封面到缓存；失败只意味着没有封面（显示降级），但必须留下原因
+fn extract_cover_logged(audio_path: &str, picture: &lofty::picture::Picture) -> Option<String> {
+    match extract_cover_to_cache(Path::new(audio_path), picture) {
+        Ok(path) => Some(path),
+        Err(e) => {
+            log::debug!("提取封面失败 {audio_path}: {e}");
+            None
+        }
+    }
+}
+
 /// 打开媒体文件并读取标签（本地路径 / Android SAF content URI）
 pub(super) fn open_tagged_file(path: &str) -> Result<lofty::file::TaggedFile, AppError> {
     if !saf::is_content_uri(path) {
@@ -129,7 +140,7 @@ pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, AppErr
         if let Ok(tagged_file) = open_tagged_file(path) {
             if let Some(tag) = tagged_file.primary_tag() {
                 if let Some(picture) = tag.pictures().first() {
-                    cached.cover_path = extract_cover_to_cache(Path::new(path), picture).ok();
+                    cached.cover_path = extract_cover_logged(path, picture);
                 }
             }
         }
@@ -146,7 +157,7 @@ pub fn get_track_metadata_with_cover(path: &str) -> Result<TrackMetadata, AppErr
     if let Ok(tagged_file) = open_tagged_file(path) {
         if let Some(tag) = tagged_file.primary_tag() {
             if let Some(picture) = tag.pictures().first() {
-                metadata.cover_path = extract_cover_to_cache(Path::new(path), picture).ok();
+                metadata.cover_path = extract_cover_logged(path, picture);
             }
         }
     }
@@ -214,7 +225,7 @@ fn get_track_metadata_with_options(
 
         if include_cover {
             if let Some(picture) = tag.pictures().first() {
-                metadata.cover_path = extract_cover_to_cache(Path::new(path), picture).ok();
+                metadata.cover_path = extract_cover_logged(path, picture);
             }
         }
     }

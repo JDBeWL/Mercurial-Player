@@ -73,7 +73,10 @@ pub fn build_app_state(
                 current_path: Arc::new(Mutex::new(None)),
             },
             visualization: VisualizationState {
-                spectrum_data: Arc::new(Mutex::new(vec![0.0; 128])),
+                spectrum_data: Arc::new(Mutex::new(vec![
+                    0.0;
+                    crate::audio::spectrum::SPECTRUM_BINS
+                ])),
                 target_fps: Arc::new(AtomicU64::new(60)), // 默认60fps
             },
             decode: DecodeThreadState {

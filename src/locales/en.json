@@ -120,7 +120,7 @@
     }
   },
   "config": {
-    "title": "Configuration",
+    "title": "Settings",
     "directoryScan": "Directory Scan",
     "enableSubdirectoryScan": "Enable subdirectory scanning",
     "maxDepth": "Maximum scan depth",
@@ -243,6 +243,7 @@
     "usbDacExclusiveDesc": "When a USB audio device is connected, bypass system mixing and resampling and output at the track's native sample rate",
     "usbDacNotConnected": "No USB audio device detected: this toggle becomes available once a DAC is plugged in",
     "usbDacFallback": "Could not open an exclusive stream on this device; fell back to shared mode (usually the device is busy or does not accept the sample rate)",
+    "usbDacTakesEffectNextTrack": "Output mode changed: this track keeps playing as-is, and the new mode applies from the next track",
     "usbDacActive": "Exclusive output active",
     "currentOutputRoute": "Current output",
     "outputSampleRate": "Output sample rate",
@@ -414,7 +415,8 @@
       "releaseNotes": "Release Notes",
       "noReleaseNotes": "No release notes available",
       "downloading": "Downloading...",
-      "installing": "Installing..."
+      "installing": "Installing...",
+      "noUpdateAvailable": "No update available to download"
     },
     "unknown": "Unknown",
     "developerSection": "Developer",

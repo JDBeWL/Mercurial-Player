@@ -10,6 +10,18 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// RT 循环单轮搬运的交错采样上限：16384 约合 48kHz 立体声 170ms，
+/// 大于任何实际设备周期，据此一次分配到位后循环内不再扩容
+const RT_CHUNK_SAMPLES: usize = 16_384;
+
+/// 把结果送回等待方；发送失败说明对方已超时放弃，记一条日志再丢弃，
+/// 否则调用方只会看到一个误导性的"超时"
+fn respond(tx: &Sender<AudioResponse>, response: AudioResponse) {
+    if let Err(e) = tx.send(response) {
+        log::warn!("音频线程应答未送达（等待方可能已超时放弃）: {e}");
+    }
+}
+
 /// 淡入淡出状态机(音频线程内部维护,不阻塞主线程)
 #[derive(Debug, Clone, Copy)]
 enum FadeState {
@@ -35,7 +47,6 @@ pub(super) fn audio_thread_main(
     command_rx: Receiver<AudioCommand>,
     response_tx: Sender<AudioResponse>,
     state: Arc<Mutex<PlaybackState>>,
-    _volume: Arc<Mutex<f32>>,
     is_running: Arc<AtomicBool>,
     sample_buffer: Arc<SpscSampleRing>,
     samples_written: Arc<AtomicU64>,
@@ -59,10 +70,9 @@ pub(super) fn audio_thread_main(
     // 欠载统计与节流上报
     let mut underrun_logger = UnderrunLogger::new();
 
-    // 复用缓冲区:避免每次 WASAPI 回调都堆分配(每秒~100次)
-    // 容量按 48kHz/10ms/立体声 ≈ 960 samples 估算,预分配 4096 避免初次扩容
-    let mut reusable_samples: Vec<f32> = Vec::with_capacity(4096);
-    let mut reusable_bytes: Vec<u8> = Vec::with_capacity(4096 * 4);
+    // 复用缓冲区:按 RT_CHUNK_SAMPLES 一次给足,循环内只做 clear+resize(不触发扩容)
+    let mut reusable_samples: Vec<f32> = vec![0.0; RT_CHUNK_SAMPLES];
+    let mut reusable_bytes: Vec<u8> = vec![0; RT_CHUNK_SAMPLES * 4];
 
     log::info!("WASAPI audio thread started");
 
@@ -309,27 +319,32 @@ fn handle_initialize(
                         *render_client = Some(rc);
                         *event_handle = Some(eh);
                         *audio_client = Some(client);
-                        let _ = response_tx.send(AudioResponse::Initialized {
-                            sample_rate: sr,
-                            channels: ch,
-                            device_name: name,
-                        });
+                        respond(
+                            response_tx,
+                            AudioResponse::Initialized {
+                                sample_rate: sr,
+                                channels: ch,
+                                device_name: name,
+                            },
+                        );
                     }
                     Err(e) => {
-                        let _ = response_tx.send(AudioResponse::InitFailed(format!(
-                            "Failed to get event handle: {e:?}"
-                        )));
+                        respond(
+                            response_tx,
+                            AudioResponse::InitFailed(format!("Failed to get event handle: {e:?}")),
+                        );
                     }
                 },
                 Err(e) => {
-                    let _ = response_tx.send(AudioResponse::InitFailed(format!(
-                        "Failed to get render client: {e:?}"
-                    )));
+                    respond(
+                        response_tx,
+                        AudioResponse::InitFailed(format!("Failed to get render client: {e:?}")),
+                    );
                 }
             }
         }
         Err(e) => {
-            let _ = response_tx.send(AudioResponse::InitFailed(e.to_string()));
+            respond(response_tx, AudioResponse::InitFailed(e.to_string()));
         }
     }
 }
@@ -355,7 +370,12 @@ fn process_audio_output(
         if eh.wait_for_event(5).is_ok() {
             if let Ok(frames_available) = client.get_available_space_in_frames() {
                 if frames_available > 0 {
-                    let samples_needed = frames_available as usize * current_channels as usize;
+                    let channels = usize::from(current_channels.max(1));
+                    // 单轮处理量封顶在复用缓冲区内，多出的空间留给下一轮，
+                    // 这样 RT 循环里不会再出现堆分配
+                    let frames_available =
+                        frames_available.min((RT_CHUNK_SAMPLES / channels).max(1) as u32);
+                    let samples_needed = frames_available as usize * channels;
 
                     // 无锁批量取走采样,不足部分填 0(欠载)
                     reusable_samples.clear();
@@ -383,10 +403,7 @@ fn process_audio_output(
                         .is_ok()
                     {
                         // 更新已写入硬件的采样数
-                        samples_written.fetch_add(
-                            (frames_available as usize * current_channels as usize) as u64,
-                            Ordering::SeqCst,
-                        );
+                        samples_written.fetch_add(samples_needed as u64, Ordering::SeqCst);
                         return frames_available as usize;
                     }
                     *is_playing = false;

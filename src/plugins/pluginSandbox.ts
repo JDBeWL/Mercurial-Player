@@ -65,7 +65,7 @@ export interface PluginSandbox {
 /**
  * 创建安全的 console 代理(log/info 映射到 info,其余映射到同级方法)
  */
-export function createSafeConsole(log: PluginAPI['log']): SafeConsole {
+function createSafeConsole(log: PluginAPI['log']): SafeConsole {
   return {
     log: log.info,
     info: log.info,
@@ -92,7 +92,7 @@ interface SafeTimers {
  *
  * pluginSandbox 与 pluginLoader 原本各自维护一份逐行同构的实现,现统一到此处。
  */
-export function createSafeTimers(onError: (error: unknown) => void): SafeTimers {
+function createSafeTimers(onError: (error: unknown) => void): SafeTimers {
   const timers = new Set<number>()
   const intervals = new Set<number>()
 

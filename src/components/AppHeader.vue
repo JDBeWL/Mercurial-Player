@@ -396,10 +396,11 @@ watch(showOverflowMenu, (visible) => {
     display: block;
   }
 
-  /* 设置面板打开时顶栏让出中间那块曲名（面板自带标题，同屏两份是重复信息）。
-     用 visibility 而不是 display —— 保留它在栅格里的占位，进出设置时两侧按钮不跳。 */
-  .nav-bar[data-mobile='true'][data-settings-open='true'] .nav-center {
-    visibility: hidden;
+  /* 设置面板打开时整行让位：面板自己那一条头部（Settings 的 mobile-app-bar）已经把返回、
+     标题和这里的明暗/主题色入口都收进去了，两行摞在一起会有两个返回键，还白吃 60px 高度。
+     状态栏的避让不受影响 —— safe-area 的 padding 挂在 #app 上，不在这一行里。 */
+  .nav-bar[data-mobile='true'][data-settings-open='true'] {
+    display: none;
   }
 }
 
@@ -439,8 +440,10 @@ watch(showOverflowMenu, (visible) => {
   cursor: pointer;
 }
 
-.overflow-item:hover {
-  background-color: var(--md-sys-color-surface-variant);
+@media (hover: hover) {
+  .overflow-item:hover {
+    background-color: var(--md-sys-color-surface-variant);
+  }
 }
 
 .overflow-item .material-symbols-rounded {

@@ -179,8 +179,10 @@ const removeFolder = async (index: number): Promise<void> => {
   transition: background-color 0.2s ease;
 }
 
-.folder-item:hover {
-  background-color: var(--md-sys-color-surface-container-high);
+@media (hover: hover) {
+  .folder-item:hover {
+    background-color: var(--md-sys-color-surface-container-high);
+  }
 }
 
 .folder-icon {
@@ -235,12 +237,14 @@ const removeFolder = async (index: number): Promise<void> => {
   font-size: 20px;
 }
 
-.filled-tonal-button:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--md-sys-color-on-surface) 8%,
-    var(--md-sys-color-secondary-container)
-  );
+@media (hover: hover) {
+  .filled-tonal-button:hover {
+    background-color: color-mix(
+      in srgb,
+      var(--md-sys-color-on-surface) 8%,
+      var(--md-sys-color-secondary-container)
+    );
+  }
 }
 
 .icon-button {
@@ -257,16 +261,20 @@ const removeFolder = async (index: number): Promise<void> => {
   transition: all 0.2s ease;
 }
 
-.icon-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+@media (hover: hover) {
+  .icon-button:hover {
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+  }
 }
 
 .icon-button.danger {
   color: var(--md-sys-color-error);
 }
 
-.icon-button.danger:hover {
-  background-color: var(--md-sys-color-error-container);
-  color: var(--md-sys-color-on-error-container);
+@media (hover: hover) {
+  .icon-button.danger:hover {
+    background-color: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
 }
 </style>

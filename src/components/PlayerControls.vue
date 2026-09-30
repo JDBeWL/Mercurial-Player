@@ -100,12 +100,14 @@ const playModeTitle = computed<string>(() => {
   transition: all 0.2s ease;
 }
 
-.play-button:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--md-sys-color-on-surface) 8%,
-    var(--md-sys-color-secondary-container)
-  );
+@media (hover: hover) {
+  .play-button:hover {
+    background-color: color-mix(
+      in srgb,
+      var(--md-sys-color-on-surface) 8%,
+      var(--md-sys-color-secondary-container)
+    );
+  }
 }
 
 .play-button .material-symbols-rounded {

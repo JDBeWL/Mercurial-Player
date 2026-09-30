@@ -80,7 +80,7 @@ export function getAudioRoute(): Promise<AudioRouteInfo> {
   return invoke<AudioRouteInfo>('get_audio_route')
 }
 
-/** 开关 USB DAC 独占（位完美）输出；currentTime 用于切换后从原位置续播 */
-export function setUsbDacExclusive(enabled: boolean, currentTime: number): Promise<void> {
-  return invoke<void>('set_usb_dac_exclusive', { enabled, currentTime })
+/** 开关 USB DAC 独占（位完美）输出；移动端只记模式，下一首生效 */
+export function setUsbDacExclusive(enabled: boolean): Promise<void> {
+  return invoke<void>('set_usb_dac_exclusive', { enabled })
 }

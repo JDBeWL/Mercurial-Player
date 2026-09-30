@@ -596,8 +596,10 @@ onMounted(() => {
   transition: background-color 0.2s ease;
 }
 
-.setting-item:hover {
-  background-color: var(--md-sys-color-surface-container);
+@media (hover: hover) {
+  .setting-item:hover {
+    background-color: var(--md-sys-color-surface-container);
+  }
 }
 
 .setting-info {
@@ -641,8 +643,10 @@ onMounted(() => {
   transition: background-color 0.2s ease;
 }
 
-.number-btn:hover:not(:disabled) {
-  background-color: var(--md-sys-color-surface-container);
+@media (hover: hover) {
+  .number-btn:hover:not(:disabled) {
+    background-color: var(--md-sys-color-surface-container);
+  }
 }
 
 .number-btn:disabled {
@@ -690,8 +694,10 @@ onMounted(() => {
   transition: transform 0.2s ease;
 }
 
-.cache-slider::-webkit-slider-thumb:hover {
-  transform: scale(1.1);
+@media (hover: hover) {
+  .cache-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+  }
 }
 
 .cache-slider::-moz-range-thumb {
@@ -744,8 +750,10 @@ onMounted(() => {
   justify-content: center;
 }
 
-.cache-path-btn:hover {
-  background-color: var(--md-sys-color-primary-container);
+@media (hover: hover) {
+  .cache-path-btn:hover {
+    background-color: var(--md-sys-color-primary-container);
+  }
 }
 
 .cache-path-btn .material-symbols-rounded {
@@ -765,9 +773,11 @@ onMounted(() => {
   transition: all 0.2s ease;
 }
 
-.clear-cache-btn:hover:not(:disabled) {
-  background-color: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
+@media (hover: hover) {
+  .clear-cache-btn:hover:not(:disabled) {
+    background-color: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
 }
 
 .clear-cache-btn:disabled {

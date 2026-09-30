@@ -11,6 +11,9 @@ use super::queue::{self, RepeatMode};
 #[cfg(windows)]
 use super::wasapi::WasapiExclusivePlayback;
 
+#[cfg(any(windows, target_os = "android"))]
+use super::PlaybackState;
+
 use crate::AppState;
 use crate::config::manager::TrackSnapshot;
 
@@ -77,6 +80,10 @@ pub async fn play_track(
     path: String,
     position: Option<f32>,
 ) -> Result<(), AppError> {
+    // 移动端：按用户偏好对齐本首的输出模式（"下一首生效"在这里落地）
+    #[cfg(target_os = "android")]
+    sync_exclusive_mode_from_config(&state);
+
     let exclusive_mode = state
         .player
         .output
@@ -90,7 +97,7 @@ pub async fn play_track(
     } else {
         play_track_shared(&app, &state, &path, position)
     }?;
-    queue::note_playback_started(&app, &state, &path);
+    queue::note_playback_started(&app, &state, &path, position);
     Ok(())
 }
 
@@ -153,6 +160,8 @@ pub fn pause_any(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
                 return Err(AppError::Audio("WASAPI player not initialized".to_string()));
             }
             drop(guard);
+            // 独占分支也要刷新通知栏/MediaSession，否则系统侧一直以为还在播放
+            queue::sync_media_session(app, state);
             return Ok(());
         }
         #[cfg(not(any(windows, target_os = "android")))]
@@ -174,6 +183,12 @@ pub fn pause_track(app: AppHandle, state: State<AppState>) -> Result<(), AppErro
 
 #[command]
 pub fn resume_track(app: AppHandle, state: State<AppState>) -> Result<(), AppError> {
+    resume_any(&app, &state)
+}
+
+/// 恢复播放，按 exclusive_mode 自动分流。`resume_track` 命令与媒体控制入口共用，
+/// 否则通知栏/耳机按键在独占模式下只会驱动共享 sink（表现为按了没反应）。
+pub fn resume_any(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
     let exclusive_mode = state
         .player
         .output
@@ -201,6 +216,7 @@ pub fn resume_track(app: AppHandle, state: State<AppState>) -> Result<(), AppErr
                 return Err(AppError::Audio("WASAPI player not initialized".to_string()));
             }
             drop(guard);
+            queue::sync_media_session(app, state);
             return Ok(());
         }
         #[cfg(not(any(windows, target_os = "android")))]
@@ -210,9 +226,71 @@ pub fn resume_track(app: AppHandle, state: State<AppState>) -> Result<(), AppErr
             ));
         }
     }
-    resume_playback(&state)?;
-    queue::sync_media_session(&app, &state);
+    resume_playback(state)?;
+    queue::sync_media_session(app, state);
     Ok(())
+}
+
+/// 输出端当前是否真的在出声：独占模式看独占播放器状态，共享模式看 rodio sink 暂停位。
+/// 前端与 `playback-state-sync` 需要的是"实际有没有声音"，不是共享 sink 的暂停位。
+#[must_use]
+pub fn is_output_playing(state: &AppState) -> bool {
+    let exclusive_mode = state
+        .player
+        .output
+        .exclusive_mode
+        .lock()
+        .map(|g| *g)
+        .unwrap_or(false);
+
+    #[cfg(any(windows, target_os = "android"))]
+    if exclusive_mode {
+        return state
+            .player
+            .output
+            .wasapi_player
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|p| p.state() == PlaybackState::Playing))
+            .unwrap_or(false);
+    }
+    #[cfg(not(any(windows, target_os = "android")))]
+    let _ = exclusive_mode;
+
+    state
+        .player
+        .output
+        .sink
+        .lock()
+        .map(|sink| !sink.is_paused())
+        .unwrap_or(false)
+}
+
+/// 回收独占输出播放器：停流、清缓冲、丢弃实例（没有则什么都不做）。
+///
+/// 独占流会占住 USB DAC，移动端"下一首生效"把它留到下一首之前，所以走共享播放的
+/// 入口必须先调它，否则旧流一直握着设备。
+pub(crate) fn release_exclusive_player(state: &AppState) {
+    let taken = lock_or_log!(state.player.output.wasapi_player.lock()).take();
+    if let Some(player) = taken {
+        let _ = player.stop();
+        let _ = player.clear_buffer();
+    }
+}
+
+/// 移动端"下一首生效"：在开始播放一首新曲目之前，把实际输出模式对齐到用户偏好。
+///
+/// `exclusive_mode` 的语义是"这一首正在用的输出"，配置里的 `usb_dac_exclusive` 才是
+/// 用户想要的模式；两者只在切歌时对齐。切开关当刻不改标志，pause/resume/seek 才不会
+/// 把命令发给另一条根本没在出声的链路。
+#[cfg(target_os = "android")]
+pub(crate) fn sync_exclusive_mode_from_config(state: &AppState) {
+    let wanted = state
+        .config_manager
+        .load_config()
+        .map(|c| c.audio.usb_dac_exclusive && super::aaudio::usb_dac_available().unwrap_or(false))
+        .unwrap_or(false);
+    *lock_or_log!(state.player.output.exclusive_mode.lock()) = wanted;
 }
 
 /// 共享模式恢复播放（供 `resume_track` 命令与媒体控制入口复用）
@@ -396,10 +474,13 @@ pub async fn set_audio_device(
 
             match device_id {
                 Some(id) => {
-                    let _ = state.config_manager.update_config(|config| {
+                    if let Err(e) = state.config_manager.update_config(|config| {
                         config.audio.preferred_device_id = Some(id.clone());
-                    });
-                    log::info!("Remembered preferred audio device: {id}");
+                    }) {
+                        log::warn!("保存首选输出设备失败，下次启动不会自动选中它: {e}");
+                    } else {
+                        log::info!("Remembered preferred audio device: {id}");
+                    }
                 }
                 None => {
                     log::debug!(
@@ -519,7 +600,9 @@ async fn switch_to_wasapi_exclusive(
                     .lock()
                     .lock_or_err("WASAPI player")?;
                 if let Some(ref wasapi) = *wasapi_guard {
-                    let _ = wasapi.set_volume(vol);
+                    if let Err(e) = wasapi.set_volume(vol) {
+                        log::warn!("独占模式音量未送达渲染线程，可能仍以原增益输出: {e}");
+                    }
                 }
             }
 
@@ -578,8 +661,7 @@ async fn switch_to_shared_mode(
                     .wasapi_player
                     .lock()
                     .lock_or_err("exclusive player")?;
-                g.as_ref()
-                    .map(|p| p.state() == crate::audio::PlaybackState::Playing)
+                g.as_ref().map(|p| p.state() == PlaybackState::Playing)
             }
         };
         let (sink_playing, vol) = {
@@ -801,9 +883,13 @@ pub async fn toggle_exclusive_mode(
             // 切换失败,回滚配置
             log::error!("Failed to hot-switch exclusive mode to {enabled}: {e}");
             // 回滚:独立临界区 (上方的 .await 已完成,锁不跨 await 持有)
-            let _ = state.config_manager.update_config(|config| {
+            if let Err(rollback_err) = state.config_manager.update_config(|config| {
                 config.audio.exclusive_mode = prev_exclusive;
-            });
+            }) {
+                log::error!(
+                    "回滚独占模式配置失败，磁盘配置可能与实际输出模式不一致（下次启动仍按独占打开）: {rollback_err}"
+                );
+            }
             Err(format!(
                 "Failed to switch exclusive mode: {e}. The device may be in use by another application."
             ).into())
@@ -1040,122 +1126,64 @@ pub fn get_audio_route() -> Result<serde_json::Value, AppError> {
     ))
 }
 
-/// 开关 USB DAC 独占（位完美）输出（Android），与 Windows 的 `toggle_exclusive_mode` 同类操作。
-/// 开则建 AAudio 独占流并把播放切过去，关则收流回落共享模式；同一首曲目按 `current_time` 续播。
+/// 开关 USB DAC 独占（位完美）输出（Android）。
+///
+/// 移动端按"下一首生效"：这里只记模式，不在当前曲目中途交接输出链路 —— 热切换要么两条
+/// 链路同时出声，要么新流没启动就静音，还会让前端播放态与实际输出脱节。
+/// 打开时独占流由 `play_track_exclusive` 在下一首开始前按需建立；关闭时若当前没在出声
+/// 就立即回收（独占流会占住 USB DAC），正在播则留给下一首走共享前回收。
 #[cfg(target_os = "android")]
 #[command]
-pub async fn set_usb_dac_exclusive(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    enabled: bool,
-    current_time: Option<f32>,
-) -> Result<(), AppError> {
-    use super::aaudio::AaudioExclusivePlayer;
+pub fn set_usb_dac_exclusive(state: State<'_, AppState>, enabled: bool) -> Result<(), AppError> {
+    // 必须在改标志之前取：is_output_playing 按"当前"模式决定读哪条链路
+    let was_playing = is_output_playing(&state);
 
-    log::info!("切换 USB DAC 独占输出: {enabled}");
-
-    let prev = state
-        .player
-        .output
-        .exclusive_mode
-        .lock()
-        .lock_or_err("exclusive mode")
-        .map(|g| *g)?;
-    if prev == enabled {
+    // 幂等判断按"用户偏好"而不是当前输出标志：后者在切歌前会刻意滞后于偏好
+    let prev_preference = state
+        .config_manager
+        .load_config()
+        .map(|c| c.audio.usb_dac_exclusive)
+        .unwrap_or(false);
+    if prev_preference == enabled {
         return Ok(());
     }
 
-    let current_path = state
+    // `exclusive_mode` 表示"当前这一首正在用的输出"，不是用户想要的模式：有曲目在
+    // 加载/播放时不能改它，否则 pause/resume/seek 会发给一条根本没在出声的链路
+    // （表现为刚开独占就 resume_track → "播放器未初始化"）。它由
+    // `sync_exclusive_mode_from_config` 在下一首开始时对齐。
+    let has_track = state
         .player
         .track
         .current_path
         .lock()
-        .lock_or_err("current path")?
-        .clone();
-    // 开独占前正在播的是 cpal sink；关独占前正在播的是 AAudio 流，
-    // 那时 sink 早已被 stop/clear，只读它会得到过时状态。
-    let was_playing = if enabled {
-        state
-            .player
-            .output
-            .sink
-            .lock()
-            .lock_or_err("player")
-            .map(|sink| !sink.is_paused())
-            .unwrap_or(false)
-    } else {
-        state
-            .player
-            .output
-            .wasapi_player
-            .lock()
-            .lock_or_err("exclusive player")
-            .map(|g| {
-                g.as_ref()
-                    .is_some_and(|p| p.state() == crate::audio::PlaybackState::Playing)
-            })
-            .unwrap_or(false)
-    };
-
-    if enabled {
-        let player = AaudioExclusivePlayer::new();
-        // 设备由 initialize 自行挑选当前 USB 音频设备
-        player.initialize(None)?;
+        .lock_or_err("current path")
+        .map(|p| p.is_some())
+        .unwrap_or(false);
+    if !has_track {
         *state
             .player
             .output
-            .wasapi_player
+            .exclusive_mode
             .lock()
-            .lock_or_err("exclusive player")? = Some(player);
-    } else {
-        let taken = state
-            .player
-            .output
-            .wasapi_player
-            .lock()
-            .lock_or_err("exclusive player")?
-            .take();
-        if let Some(player) = taken {
-            let _ = player.stop();
-            let _ = player.clear_buffer();
-        }
+            .lock_or_err("exclusive mode")? = enabled;
     }
-
-    *state
-        .player
-        .output
-        .exclusive_mode
-        .lock()
-        .lock_or_err("exclusive mode")? = enabled;
 
     state.config_manager.update_config(|config| {
         config.audio.usb_dac_exclusive = enabled;
     })?;
 
-    // 有曲目在播就按新模式续播（暂停状态下只预缓冲，等用户点恢复）
-    if let Some(path) = current_path {
-        if enabled {
-            // 同文件顶部已 use 这两个函数,写全路径会触发 unused_qualifications
-            play_track_exclusive(&app, &state, &path, current_time, was_playing).await?;
-        } else {
-            play_track_shared(&app, &state, &path, current_time)?;
-            if !was_playing {
-                pause_playback(&state)?;
-            }
-        }
+    if !enabled && !was_playing {
+        release_exclusive_player(&state);
     }
 
+    log::info!("USB DAC 独占输出已设为 {enabled}（下一首生效）");
     Ok(())
 }
 
 #[cfg(not(target_os = "android"))]
 #[command]
-pub async fn set_usb_dac_exclusive(
-    _app: AppHandle,
-    _state: State<'_, AppState>,
-    _enabled: bool,
-    _current_time: Option<f32>,
-) -> Result<(), AppError> {
+pub fn set_usb_dac_exclusive(_state: State<'_, AppState>, _enabled: bool) -> Result<(), AppError> {
     Err(AppError::Audio(
         "USB DAC 独占输出仅在 Android 上提供".to_string(),
     ))

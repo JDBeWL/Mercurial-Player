@@ -153,7 +153,9 @@ pub fn on_audio_route_changed(app: &tauri::AppHandle) {
     *exclusive = false;
     drop(exclusive);
 
-    let _ = crate::audio::queue::media_control(app, &state, "pause", None);
+    if let Err(e) = crate::audio::queue::media_control(app, &state, "pause", None) {
+        log::warn!("独占流失效后暂停失败，前端状态可能仍停留在播放: {e}");
+    }
     // 共享模式的输出是启动时按当时的默认设备开的，同样不会自愈。
     // 趁已经暂停把它按当前默认设备重建，否则拔掉 DAC 后共享播放会一直没声音。
     if let Err(e) = crate::audio::rebuild_shared_sink(&state) {

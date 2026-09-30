@@ -844,8 +844,10 @@ onMounted(() => {
   transition: all 0.2s ease;
 }
 
-.icon-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+@media (hover: hover) {
+  .icon-button:hover {
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+  }
 }
 
 .icon-button .material-symbols-rounded {
@@ -862,8 +864,10 @@ onMounted(() => {
   transition: background-color 0.2s ease;
 }
 
-.setting-item:hover {
-  background-color: var(--md-sys-color-surface-container);
+@media (hover: hover) {
+  .setting-item:hover {
+    background-color: var(--md-sys-color-surface-container);
+  }
 }
 
 .setting-info {
@@ -930,8 +934,10 @@ onMounted(() => {
   transition: transform 0.2s ease;
 }
 
-.font-size-slider::-webkit-slider-thumb:hover {
-  transform: scale(1.1);
+@media (hover: hover) {
+  .font-size-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+  }
 }
 
 .font-size-slider::-moz-range-thumb {
@@ -974,8 +980,10 @@ onMounted(() => {
   transition: all 0.2s ease;
 }
 
-.preset-btn:hover {
-  background: var(--md-sys-color-surface-container);
+@media (hover: hover) {
+  .preset-btn:hover {
+    background: var(--md-sys-color-surface-container);
+  }
 }
 
 .preset-btn.active {
@@ -1034,8 +1042,10 @@ onMounted(() => {
   transition: background-color 0.2s ease;
 }
 
-.provider-row:hover {
-  background-color: var(--md-sys-color-surface-container);
+@media (hover: hover) {
+  .provider-row:hover {
+    background-color: var(--md-sys-color-surface-container);
+  }
 }
 
 .provider-name {

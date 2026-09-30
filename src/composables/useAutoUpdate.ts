@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import i18n from '@/i18n'
 import logger from '@/utils/logger'
 
 /**
@@ -88,7 +89,7 @@ const checkForUpdates = async () => {
  */
 const downloadAndInstall = async () => {
   if (!updateAvailable.value) {
-    error.value = 'No update available to download'
+    error.value = i18n.global.t('config.update.noUpdateAvailable')
     return
   }
 

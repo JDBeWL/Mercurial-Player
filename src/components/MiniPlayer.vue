@@ -314,8 +314,10 @@ const exitMiniMode = (): void => {
   font-size: 22px;
 }
 
-.cover-container:hover .cover-overlay {
-  opacity: 1;
+@media (hover: hover) {
+  .cover-container:hover .cover-overlay {
+    opacity: 1;
+  }
 }
 
 /* 信息和控制样式 */
@@ -375,8 +377,10 @@ const exitMiniMode = (): void => {
   transition: all 0.15s ease;
 }
 
-.icon-button:hover:not(:disabled) {
-  background-color: var(--md-sys-color-surface-variant);
+@media (hover: hover) {
+  .icon-button:hover:not(:disabled) {
+    background-color: var(--md-sys-color-surface-variant);
+  }
 }
 
 .icon-button:active:not(:disabled) {
@@ -399,9 +403,11 @@ const exitMiniMode = (): void => {
   margin: 0 2px;
 }
 
-.icon-button.play-pause:hover {
-  background-color: var(--md-sys-color-primary);
-  filter: brightness(1.1);
+@media (hover: hover) {
+  .icon-button.play-pause:hover {
+    background-color: var(--md-sys-color-primary);
+    filter: brightness(1.1);
+  }
 }
 
 .icon-button.play-pause .material-symbols-rounded {
@@ -424,8 +430,10 @@ const exitMiniMode = (): void => {
   touch-action: none;
 }
 
-.progress-bar-container:hover {
-  height: 5px;
+@media (hover: hover) {
+  .progress-bar-container:hover {
+    height: 5px;
+  }
 }
 
 .progress-fill {

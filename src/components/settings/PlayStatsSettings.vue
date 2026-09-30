@@ -995,8 +995,10 @@ onUnmounted(() => {
     color 0.2s ease;
 }
 
-.segmented .segment:hover {
-  background-color: var(--md-sys-color-surface-container-high);
+@media (hover: hover) {
+  .segmented .segment:hover {
+    background-color: var(--md-sys-color-surface-container-high);
+  }
 }
 
 .segmented .segment.active {
@@ -1029,12 +1031,14 @@ onUnmounted(() => {
   font-size: 20px;
 }
 
-.filled-tonal-button:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--md-sys-color-on-surface) 8%,
-    var(--md-sys-color-secondary-container)
-  );
+@media (hover: hover) {
+  .filled-tonal-button:hover {
+    background-color: color-mix(
+      in srgb,
+      var(--md-sys-color-on-surface) 8%,
+      var(--md-sys-color-secondary-container)
+    );
+  }
 }
 
 /* ---------- 清除确认条 ---------- */
@@ -1237,8 +1241,10 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-.search-clear:hover {
-  background-color: var(--md-sys-color-surface-container-high);
+@media (hover: hover) {
+  .search-clear:hover {
+    background-color: var(--md-sys-color-surface-container-high);
+  }
 }
 
 .search-clear .material-symbols-rounded {
@@ -1314,8 +1320,10 @@ onUnmounted(() => {
   background-color: var(--md-sys-color-surface-container-highest);
 }
 
-.trend-col:hover .trend-bar {
-  filter: brightness(1.12);
+@media (hover: hover) {
+  .trend-col:hover .trend-bar {
+    filter: brightness(1.12);
+  }
 }
 
 .trend-label {
@@ -1602,8 +1610,10 @@ onUnmounted(() => {
   margin-right: 0;
 }
 
-.text-button:hover {
-  background-color: var(--md-sys-color-primary-container);
+@media (hover: hover) {
+  .text-button:hover {
+    background-color: var(--md-sys-color-primary-container);
+  }
 }
 
 .text-button.danger {

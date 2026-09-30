@@ -101,9 +101,17 @@ const onSelect = (id: string): void => {
   transition: all 0.2s ease;
 }
 
-/* 原为 surface-container-highest：主题不输出该角色，声明静默失效、等于无反馈 */
-.nav-item:hover {
-  background-color: var(--md-sys-color-hover-overlay);
+/* 触屏上没有真正的悬停：不加 hover: hover 守卫的话，点过的行会一直停在
+   :hover 态，看起来像"选中留下的痕迹"（原为 surface-container-highest：
+   主题不输出该角色，声明静默失效、等于无反馈） */
+@media (hover: hover) {
+  .nav-item:hover {
+    background-color: var(--md-sys-color-hover-overlay);
+  }
+
+  .icon-button:hover {
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+  }
 }
 
 .nav-item.active {
@@ -131,10 +139,6 @@ const onSelect = (id: string): void => {
   cursor: pointer;
   color: var(--md-sys-color-on-surface-variant);
   transition: all 0.2s ease;
-}
-
-.icon-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
 }
 
 @media (max-width: 768px) {
@@ -174,6 +178,10 @@ const onSelect = (id: string): void => {
    既看不出还有多少页、也点不准。这里换成手机上最标准的「列表 → 详情」两级，
    竖屏下这一栏就是整屏的入口列表（由 Settings.vue 控制与详情的互斥）。
 
+   形态照 Google Play 的设置页：平铺单行、图标 + 文字、不给选中项铺胶囊底色。
+   栅格：容器左右 8px + 行内 8px → 图标落在 16px，图标后 16px → 文字落在 56px，
+   与 Settings 头部行的标题同一条竖线。
+
    用 [data-mobile='true'] 守卫：@media (orientation: portrait) 在桌面
    把窗口拉成窄高时同样会命中，不加守卫会把桌面端的导航形态一起改掉。 */
 @media (orientation: portrait) {
@@ -186,25 +194,44 @@ const onSelect = (id: string): void => {
     border-bottom: none;
   }
 
+  /* 标题与关闭按钮由 Settings 的头部行统一提供（顶栏此时也已隐藏），这一行整条撤掉 */
   .settings-nav[data-mobile='true'] .nav-header {
-    padding: 8px 20px 12px;
+    display: none;
   }
 
   .settings-nav[data-mobile='true'] .nav-items {
     display: block;
     overflow-x: hidden;
     overflow-y: auto;
-    padding: 0 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    padding: 4px 8px calc(8px + env(safe-area-inset-bottom, 0px));
     gap: 0;
   }
 
-  /* 触摸目标给到 56px，并按行分隔而不是靠间距 */
+  /* 52px 行高：够手指点，又不至于翻两屏才看完一页入口 */
   .settings-nav[data-mobile='true'] .nav-item {
     width: 100%;
-    min-height: 56px;
-    padding: 12px 16px;
-    margin-bottom: 2px;
-    font-size: 15px;
+    min-height: 52px;
+    gap: 16px;
+    padding: 8px;
+    margin-bottom: 0;
+    border-radius: 12px;
+    color: var(--md-sys-color-on-surface);
+    font-size: 16px;
+    font-weight: 400;
+  }
+
+  .settings-nav[data-mobile='true'] .nav-item .material-symbols-rounded {
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  /* 两级导航里"哪一项是当前项"没有意义（点一下就进详情），常驻的 secondary-container
+     胶囊只会像一处没擦干净的选中痕迹 —— 只保留按压那一瞬间的反馈 */
+  .settings-nav[data-mobile='true'] .nav-item.active {
+    background-color: transparent;
+  }
+
+  .settings-nav[data-mobile='true'] .nav-item:active {
+    background-color: var(--md-sys-color-hover-overlay);
   }
 
   /* 覆盖上面 768px 那条的 display:none —— 手机上纯图标完全看不出是哪一页 */

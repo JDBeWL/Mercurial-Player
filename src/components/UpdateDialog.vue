@@ -373,8 +373,10 @@ const onDismiss = () => {
   text-decoration: none;
 }
 
-.markdown-body :deep(a:hover) {
-  text-decoration: underline;
+@media (hover: hover) {
+  .markdown-body :deep(a:hover) {
+    text-decoration: underline;
+  }
 }
 
 .markdown-body :deep(strong) {
@@ -479,8 +481,10 @@ const onDismiss = () => {
   border-radius: 3px;
 }
 
-.dialog-content::-webkit-scrollbar-thumb:hover,
-.notes-content::-webkit-scrollbar-thumb:hover {
-  background: var(--md-sys-color-outline);
+@media (hover: hover) {
+  .dialog-content::-webkit-scrollbar-thumb:hover,
+  .notes-content::-webkit-scrollbar-thumb:hover {
+    background: var(--md-sys-color-outline);
+  }
 }
 </style>

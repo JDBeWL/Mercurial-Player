@@ -11,7 +11,7 @@
  */
 import { PluginPermission, type PluginPermissionType } from './pluginTypes'
 
-export const API_ACTION_PERMISSIONS = {
+const API_ACTION_PERMISSIONS = {
   // ---------- 播放器 ----------
   'player.getState': PluginPermission.PLAYER_READ,
   'player.getLyrics': PluginPermission.PLAYER_READ,
@@ -86,8 +86,6 @@ export const API_ACTION_PERMISSIONS = {
   'utils.dataURLToBlob': null,
   'utils.generateId': null,
 } as const satisfies Record<string, PluginPermissionType | null>
-
-export type PluginAction = keyof typeof API_ACTION_PERMISSIONS
 
 /**
  * 查询动作所需权限。未登记的动作视为内部错误(防手抖新增动作忘登记)。

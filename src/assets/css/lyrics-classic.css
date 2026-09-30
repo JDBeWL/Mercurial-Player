@@ -21,8 +21,10 @@
   transform-origin: var(--align-origin, left center);
 }
 
-.lyrics-style-classic .lyrics:hover {
-  background-color: var(--md-sys-color-surface-variant);
+@media (hover: hover) {
+  .lyrics-style-classic .lyrics:hover {
+    background-color: var(--md-sys-color-surface-variant);
+  }
 }
 
 /* will-change 仅应用于 active 行,避免所有歌词行都被提升为独立 GPU 合成层 */

@@ -159,7 +159,6 @@ impl WasapiExclusivePlayback {
         let sample_rate = Arc::new(AtomicU32::new(48000));
 
         let state_clone = Arc::clone(&state);
-        let volume_clone = Arc::clone(&volume);
         let is_running_clone = Arc::clone(&is_running);
         let sample_buffer_clone = Arc::clone(&sample_buffer);
         let samples_written_clone = Arc::clone(&samples_written);
@@ -170,7 +169,6 @@ impl WasapiExclusivePlayback {
                 command_rx,
                 response_tx,
                 state_clone,
-                volume_clone,
                 is_running_clone,
                 sample_buffer_clone,
                 samples_written_clone,

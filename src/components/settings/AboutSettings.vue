@@ -483,9 +483,11 @@ onMounted(() => {
   transition: all 0.2s ease;
 }
 
-.link-arrow:hover {
-  background-color: var(--md-sys-color-surface-container-high);
-  color: var(--md-sys-color-primary);
+@media (hover: hover) {
+  .link-arrow:hover {
+    background-color: var(--md-sys-color-surface-container-high);
+    color: var(--md-sys-color-primary);
+  }
 }
 
 .tech-categories {
@@ -593,13 +595,17 @@ onMounted(() => {
   z-index: 2;
 }
 
-.tech-link-btn:hover {
-  background-color: var(--md-sys-color-surface-container-high);
-  color: var(--md-sys-color-primary);
+@media (hover: hover) {
+  .tech-link-btn:hover {
+    background-color: var(--md-sys-color-surface-container-high);
+    color: var(--md-sys-color-primary);
+  }
 }
 
-.tech-link-btn:hover .material-symbols-rounded {
-  color: var(--md-sys-color-primary);
+@media (hover: hover) {
+  .tech-link-btn:hover .material-symbols-rounded {
+    color: var(--md-sys-color-primary);
+  }
 }
 
 .tech-link-btn .material-symbols-rounded {
@@ -631,9 +637,11 @@ onMounted(() => {
   z-index: 1;
 }
 
-.license-external-link:hover {
-  background-color: var(--md-sys-color-surface-container-high);
-  color: var(--md-sys-color-primary);
+@media (hover: hover) {
+  .license-external-link:hover {
+    background-color: var(--md-sys-color-surface-container-high);
+    color: var(--md-sys-color-primary);
+  }
 }
 
 .license-external-link .material-symbols-rounded {
@@ -727,8 +735,10 @@ onMounted(() => {
   align-self: flex-start;
 }
 
-.license-details-toggle:hover {
-  background-color: var(--md-sys-color-surface-container-high);
+@media (hover: hover) {
+  .license-details-toggle:hover {
+    background-color: var(--md-sys-color-surface-container-high);
+  }
 }
 
 .license-details-toggle .material-symbols-rounded {
@@ -745,8 +755,10 @@ onMounted(() => {
   transition: background-color 0.2s ease;
 }
 
-.setting-item:hover {
-  background-color: var(--md-sys-color-surface-container);
+@media (hover: hover) {
+  .setting-item:hover {
+    background-color: var(--md-sys-color-surface-container);
+  }
 }
 
 .setting-info {

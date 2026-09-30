@@ -167,7 +167,7 @@ describe('useAutoUpdate > downloadAndInstall', () => {
 
     await downloadAndInstall()
 
-    expect(error.value).toBe('No update available to download')
+    expect(error.value).toBe('当前没有可下载的更新')
     expect(isDownloading.value).toBe(false)
     expect(mockInvoke).not.toHaveBeenCalledWith('updater_download')
   })

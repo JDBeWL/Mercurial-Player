@@ -15,6 +15,11 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : TauriActivity() {
+  // TauriActivity 把它覆盖成 false，于是返回键直接 finish() 掉 Activity：在应用里按返回
+  // 会一步跳回桌面。打开后 wry 会装 OnBackPressedCallback，返回先走 webview.goBack()，
+  // 前端（Settings.vue）用 history 条目实现"详情页 → 列表页 → 关闭设置 → 再返回才退出"。
+  override val handleBackNavigation: Boolean = true
+
   companion object {
     init {
       System.loadLibrary("mercurial_player_lib")

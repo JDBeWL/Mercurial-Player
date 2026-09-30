@@ -625,12 +625,14 @@ export default {
   transition: all 0.2s ease;
 }
 
-.fetch-lyrics-btn:hover:not(:disabled) {
-  background-color: color-mix(
-    in srgb,
-    var(--md-sys-color-on-surface) 8%,
-    var(--md-sys-color-secondary-container)
-  );
+@media (hover: hover) {
+  .fetch-lyrics-btn:hover:not(:disabled) {
+    background-color: color-mix(
+      in srgb,
+      var(--md-sys-color-on-surface) 8%,
+      var(--md-sys-color-secondary-container)
+    );
+  }
 }
 
 .fetch-lyrics-btn:disabled {
@@ -656,8 +658,10 @@ export default {
   transition: opacity 0.3s ease;
 }
 
-.lyrics-wrapper:hover .lyrics-bottom-bar {
-  opacity: 1;
+@media (hover: hover) {
+  .lyrics-wrapper:hover .lyrics-bottom-bar {
+    opacity: 1;
+  }
 }
 
 .plugin-action-buttons {
@@ -685,9 +689,11 @@ export default {
   transition: all 0.2s ease;
 }
 
-.action-btn:hover {
-  background-color: var(--md-sys-color-surface-container-highest);
-  color: var(--md-sys-color-primary);
+@media (hover: hover) {
+  .action-btn:hover {
+    background-color: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-primary);
+  }
 }
 
 .action-btn .material-symbols-rounded {
@@ -718,8 +724,10 @@ export default {
   transition: background-color 0.2s ease;
 }
 
-.offset-btn:hover {
-  background-color: var(--md-sys-color-surface-container-highest);
+@media (hover: hover) {
+  .offset-btn:hover {
+    background-color: var(--md-sys-color-surface-container-highest);
+  }
 }
 
 .offset-btn .material-symbols-rounded {
@@ -738,8 +746,10 @@ export default {
   transition: background-color 0.2s ease;
 }
 
-.offset-value:hover {
-  background-color: var(--md-sys-color-surface-container-highest);
+@media (hover: hover) {
+  .offset-value:hover {
+    background-color: var(--md-sys-color-surface-container-highest);
+  }
 }
 
 .lyrics-spacer-up {

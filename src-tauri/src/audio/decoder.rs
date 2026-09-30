@@ -124,6 +124,8 @@ pub struct LockFreeSymphoniaSource {
     cached_total_duration: Option<Duration>,
     chunk_buffer: Vec<f32>,
     chunk_pos: usize,
+    /// 是否处于供给停滞态：仅在进入该态时打一条日志，避免逐块刷屏
+    stalled: bool,
 }
 
 impl LockFreeSymphoniaSource {
@@ -183,7 +185,24 @@ impl LockFreeSymphoniaSource {
             cached_total_duration: total_duration,
             chunk_buffer: Vec::with_capacity(16384),
             chunk_pos: 0,
+            stalled: false,
         }
+    }
+    /// 非实时消费者（独占输出的解码推送线程）用的取数：需要补块且通道为空时做有界等待，
+    /// 让本线程与解码线程保持同节奏，避免把成段静音灌进输出环形缓冲。
+    /// cpal 回调线程必须用 [`Iterator::next`]，那里不能阻塞。
+    pub fn next_paced(&mut self) -> Option<f32> {
+        const MAX_STALL_WAITS: u32 = 3;
+        if self.chunk_pos >= self.chunk_buffer.len() {
+            for _ in 0..MAX_STALL_WAITS {
+                let finished = self.producer_finished.load(Ordering::Acquire);
+                if finished || self.receiver.as_ref().is_some_and(|r| !r.is_empty()) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(2));
+            }
+        }
+        self.next()
     }
 }
 
@@ -202,24 +221,24 @@ impl Iterator for LockFreeSymphoniaSource {
         self.chunk_buffer.clear();
         self.chunk_pos = 0;
 
-        // next() 跑在 cpal 回调线程上，这里不能无限等：解码停滞（慢盘/网络盘）时
-        // 有界等待 30ms，之后先吐静音维持流，真正的结束仍由 producer_finished/断连判定
-        const MAX_STALL_WAITS: u32 = 3;
-        let mut stall_waits = 0u32;
-        let first = loop {
-            match receiver.recv_timeout(Duration::from_millis(10)) {
-                Ok(s) => break Some(s),
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                    if self.producer_finished.load(Ordering::Acquire) && receiver.is_empty() {
-                        break None;
-                    }
-                    stall_waits += 1;
-                    if stall_waits >= MAX_STALL_WAITS {
+        // next() 跑在 cpal 回调线程上，一律不阻塞：取不到数据就吐静音维持输出流，
+        // 真正的结束仍由 producer_finished + 通道排空判定
+        let first = match receiver.try_recv() {
+            Ok(s) => {
+                self.stalled = false;
+                Some(s)
+            }
+            Err(crossbeam_channel::TryRecvError::Disconnected) => None,
+            Err(crossbeam_channel::TryRecvError::Empty) => {
+                if self.producer_finished.load(Ordering::Acquire) && receiver.is_empty() {
+                    None
+                } else {
+                    if !self.stalled {
                         log::debug!("解码器供给停滞,以静音维持输出流");
-                        break Some(0.0);
                     }
+                    self.stalled = true;
+                    Some(0.0)
                 }
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break None,
             }
         }?;
 

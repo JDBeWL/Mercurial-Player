@@ -113,8 +113,10 @@ const toggleSetting = async (
   transition: background-color 0.2s ease;
 }
 
-.setting-item:hover {
-  background-color: var(--md-sys-color-surface-container);
+@media (hover: hover) {
+  .setting-item:hover {
+    background-color: var(--md-sys-color-surface-container);
+  }
 }
 
 .setting-info {
@@ -144,9 +146,11 @@ const toggleSetting = async (
   box-shadow: none;
 }
 
-.md3-input:hover {
-  border-color: var(--md-sys-color-on-surface);
-  background-color: var(--md-sys-color-surface-container);
+@media (hover: hover) {
+  .md3-input:hover {
+    border-color: var(--md-sys-color-on-surface);
+    background-color: var(--md-sys-color-surface-container);
+  }
 }
 
 .md3-input:focus {

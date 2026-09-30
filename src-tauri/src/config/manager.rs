@@ -642,7 +642,11 @@ impl ConfigManager {
             Ok(Some(config)) => {
                 if Self::is_plugin_store_wrapped(&config_path) {
                     log::info!("检测到旧 plugin-store 包装格式,重写为裸格式: {config_path}");
-                    let _ = Self::save_config_to_file(&config, &config_path);
+                    if let Err(e) = Self::save_config_to_file(&config, &config_path) {
+                        // 新格式没写成就不删旧目录：否则两边都可能剩下不可用的配置
+                        log::error!("重写裸格式配置失败，保留旧配置目录以便回退: {e}");
+                        return;
+                    }
                 }
                 Self::remove_legacy_config_dir(legacy_dir);
                 return;

@@ -29,6 +29,9 @@ pub fn play_track_shared(
     let player = &state.player;
     // 取消任何正在进行的淡入淡出,防止其 on_complete(pause) 在新歌播放后执行
     player.fade.generation.fetch_add(1, Ordering::SeqCst);
+    // 上一首可能还挂在独占输出上（移动端"下一首生效"留下的旧流）：走共享前回收，
+    // 否则它会一直占着 USB DAC
+    super::commands::release_exclusive_player(state);
     // 先读取 target_volume 再锁 sink,避免嵌套锁死锁风险
     let vol = *lock_or_log!(player.output.target_volume.lock());
     {
@@ -130,6 +133,17 @@ pub async fn play_track_exclusive(
     // 递增代际计数器取消旧解码推送线程（布尔标志会有约 70ms 的状态不一致窗口）
     player.decode.generation.fetch_add(1, Ordering::SeqCst);
     let new_thread_id = player.decode.id.fetch_add(1, Ordering::SeqCst) + 1;
+    // 独占输出接管前必须停掉共享 sink：在播放中把输出切到独占（设置页开关）时共享链路
+    // 还在播同一首，两条解码同时出声，听感就是两遍重叠
+    lock_or_log!(player.output.sink.lock()).stop();
+    // 移动端"下一首生效"：切开关时不预建流，到这里才按需创建。提前建流会占住 DAC，
+    // 让切换前已经在播的共享输出没声
+    #[cfg(target_os = "android")]
+    if lock_or_log!(player.output.wasapi_player.lock()).is_none() {
+        let created = crate::audio::aaudio::AaudioExclusivePlayer::new();
+        created.initialize(None)?;
+        *lock_or_log!(player.output.wasapi_player.lock()) = Some(created);
+    }
     {
         if let Some(ref wasapi) = *lock_or_log!(player.output.wasapi_player.lock()) {
             // 切歌淡出 50ms，音频线程淡出完成后自行 stop_stream + clear_buffer；

@@ -120,7 +120,7 @@
     }
   },
   "config": {
-    "title": "配置",
+    "title": "设置",
     "directoryScan": "目录扫描",
     "enableSubdirectoryScan": "启用子目录扫描",
     "maxDepth": "最大扫描深度",
@@ -263,6 +263,7 @@
     "usbDacExclusiveDesc": "检测到 USB 音频设备时绕过系统混音与重采样，按曲目原生采样率直出",
     "usbDacNotConnected": "未检测到 USB 音频设备：插上 DAC 后这个开关才可用",
     "usbDacFallback": "这台设备没能开成独占流，已回落共享模式（多为被其它应用占用或不支持该采样率）",
+    "usbDacTakesEffectNextTrack": "已切换输出模式：当前这首继续按原方式播放，下一首生效",
     "usbDacActive": "独占已生效",
     "currentOutputRoute": "当前输出",
     "outputSampleRate": "输出采样率",
@@ -414,7 +415,8 @@
       "releaseNotes": "更新说明",
       "noReleaseNotes": "暂无更新说明",
       "downloading": "下载中...",
-      "installing": "安装中..."
+      "installing": "安装中...",
+      "noUpdateAvailable": "当前没有可下载的更新"
     },
     "unknown": "未知",
     "developerSection": "开发者",

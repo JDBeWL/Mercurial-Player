@@ -253,8 +253,10 @@ onMounted(() => {
   transition: background-color 0.2s ease;
 }
 
-.setting-item:hover {
-  background-color: var(--md-sys-color-surface-container);
+@media (hover: hover) {
+  .setting-item:hover {
+    background-color: var(--md-sys-color-surface-container);
+  }
 }
 
 .setting-info {
@@ -323,9 +325,11 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.action-btn:hover:not(:disabled) {
-  background-color: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
+@media (hover: hover) {
+  .action-btn:hover:not(:disabled) {
+    background-color: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
 }
 
 .action-btn:disabled {
@@ -338,8 +342,10 @@ onMounted(() => {
   color: var(--md-sys-color-on-error);
 }
 
-.action-btn.danger:hover:not(:disabled) {
-  background-color: var(--md-sys-color-error-container);
-  color: var(--md-sys-color-on-error-container);
+@media (hover: hover) {
+  .action-btn.danger:hover:not(:disabled) {
+    background-color: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
 }
 </style>

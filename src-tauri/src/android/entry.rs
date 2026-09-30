@@ -117,13 +117,9 @@ pub fn notify_media_session(_app: &tauri::AppHandle, state: &crate::AppState) {
     let has_track = queue.current().is_some();
     drop(queue);
 
-    let playing = state
-        .player
-        .output
-        .sink
-        .lock()
-        .map(|sink| !sink.is_paused())
-        .unwrap_or(false);
+    // 必须按实际输出模式判断：独占模式下共享 sink 一直是暂停的，只看它会让 MediaSession
+    // 永远报告 PAUSED，于是框架把每次 PLAY_PAUSE 都翻成 onPlay，对已启动的流反复 requestStart
+    let playing = crate::audio::commands::is_output_playing(state);
 
     // 通知封面：复用前端使用的封面缓存路径（可能为相对/沙箱路径）
     let cover_path = current_path

@@ -179,8 +179,10 @@ const getVolumeIcon = () => {
   border-radius: 4px;
 }
 
-.volume-slider-popup .slider:hover .slider-track {
-  background-color: rgba(0, 0, 0, 0.15);
+@media (hover: hover) {
+  .volume-slider-popup .slider:hover .slider-track {
+    background-color: rgba(0, 0, 0, 0.15);
+  }
 }
 
 .volume-slider-popup .slider.dragging .slider-track {
@@ -210,8 +212,10 @@ const getVolumeIcon = () => {
   margin-bottom: -7px;
 }
 
-.volume-slider-popup .slider-thumb:hover {
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+@media (hover: hover) {
+  .volume-slider-popup .slider-thumb:hover {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  }
 }
 
 .volume-slider-popup .slider.dragging .slider-thumb {

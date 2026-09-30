@@ -187,9 +187,11 @@ const handleOtherSelectOpen = (event: Event): void => {
   box-sizing: border-box;
 }
 
-.md3-select-trigger:hover {
-  border-color: var(--md-sys-color-on-surface);
-  background-color: var(--md-sys-color-surface-container);
+@media (hover: hover) {
+  .md3-select-trigger:hover {
+    border-color: var(--md-sys-color-on-surface);
+    background-color: var(--md-sys-color-surface-container);
+  }
 }
 
 .md3-select-wrapper.is-focused .md3-select-trigger,
@@ -302,8 +304,10 @@ const handleOtherSelectOpen = (event: Event): void => {
   pointer-events: none;
 }
 
-.md3-select-option:hover::before {
-  opacity: 1;
+@media (hover: hover) {
+  .md3-select-option:hover::before {
+    opacity: 1;
+  }
 }
 
 .md3-select-option:active::before {
@@ -387,7 +391,9 @@ const handleOtherSelectOpen = (event: Event): void => {
   border-radius: 4px;
 }
 
-.md3-select-dropdown-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--md-sys-color-outline);
+@media (hover: hover) {
+  .md3-select-dropdown-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--md-sys-color-outline);
+  }
 }
 </style>

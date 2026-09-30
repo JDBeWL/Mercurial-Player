@@ -1,9 +1,10 @@
 <template>
   <div class="tab-content">
     <div class="content-header">
-      <h3>
-        {{ $t('config.plugins') }}
-        <!-- 外置插件沙箱与来源安全提示 -->
+      <h3>{{ $t('config.plugins') }}</h3>
+      <div class="header-actions">
+        <!-- 外置插件沙箱与来源安全提示。放在动作区而不是标题里：竖屏的面板头部行会整条隐藏
+             面板自己的 h3，问号跟着 h3 就一起没了 -->
         <span class="help-tooltip">
           <button
             class="help-tooltip__trigger"
@@ -17,8 +18,6 @@
             {{ $t('plugin.sandboxNotice') }}
           </span>
         </span>
-      </h3>
-      <div class="header-actions">
         <button class="filled-tonal-button" @click="openPluginsFolder">
           <span class="material-symbols-rounded">folder_open</span>
           {{ $t('config.openPluginsFolder') }}
@@ -213,12 +212,11 @@ onMounted(async () => {
   color: var(--md-sys-color-on-surface);
 }
 
-/* 沙箱与来源安全提示 (标题右侧问号按钮,hover 显示气泡) */
+/* 沙箱与来源安全提示 (动作区最左侧的问号按钮,hover 显示气泡) */
 .help-tooltip {
   position: relative;
   display: inline-flex;
-  vertical-align: middle;
-  margin-left: 6px;
+  align-items: center;
 }
 
 .help-tooltip__trigger {
@@ -244,9 +242,10 @@ onMounted(async () => {
 
 .help-tooltip__bubble {
   position: absolute;
-  top: 100%;
-  left: calc(100% + 8px);
-  transform: translateY(-4px);
+  /* 气泡挂在按钮下方并右对齐到按钮：问号现在处于动作区的最左/靠右边缘，
+     原来"向右展开"会顶出窗口 */
+  top: calc(100% + 6px);
+  right: 0;
   width: max-content;
   max-width: 320px;
   padding: 10px 14px;
@@ -281,8 +280,25 @@ onMounted(async () => {
   margin-bottom: 4px;
 }
 
+/* 竖屏：问号在靠右的动作区里，320px 宽的气泡无论向左还是向右展开都会溢出屏幕。
+   改成贴着视口左右 16px 的横条；top 必须退回 auto —— 固定定位下 100% 是视口高度，
+   继承过来的 calc(100% + 6px) 会把气泡甩到屏幕外，auto 才让它落在按钮下方的静态位置。 */
+@media (orientation: portrait) {
+  .help-tooltip__bubble {
+    position: fixed;
+    /* 用视口坐标而不是静态位置：固定定位的静态位置只到动作行的顶部，靠 margin 往下挪
+       在实测里对不上。128 = 头部行 64 + 内容上内边距 16 + 按钮 40 + 余量 8 */
+    top: calc(env(safe-area-inset-top, 0px) + 128px);
+    right: 16px;
+    left: 16px;
+    width: auto;
+    max-width: none;
+  }
+}
+
 .header-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
 }
 
@@ -443,12 +459,14 @@ onMounted(async () => {
   transition: all 0.2s ease;
 }
 
-.filled-tonal-button:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--md-sys-color-on-surface) 8%,
-    var(--md-sys-color-secondary-container)
-  );
+@media (hover: hover) {
+  .filled-tonal-button:hover {
+    background-color: color-mix(
+      in srgb,
+      var(--md-sys-color-on-surface) 8%,
+      var(--md-sys-color-secondary-container)
+    );
+  }
 }
 
 .icon-button {
@@ -465,16 +483,20 @@ onMounted(async () => {
   transition: all 0.2s ease;
 }
 
-.icon-button:hover {
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+@media (hover: hover) {
+  .icon-button:hover {
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+  }
 }
 
 .icon-button.danger {
   color: var(--md-sys-color-error);
 }
 
-.icon-button.danger:hover {
-  background-color: var(--md-sys-color-error-container);
-  color: var(--md-sys-color-on-error-container);
+@media (hover: hover) {
+  .icon-button.danger:hover {
+    background-color: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
 }
 </style>

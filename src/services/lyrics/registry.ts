@@ -33,7 +33,7 @@ export const LYRIC_PROVIDERS: LyricProviderDescriptor[] = [
 ]
 
 /** 按 id 查来源描述符；未知 id 返回默认方法的外来源兜底 null */
-export function getProviderDescriptor(id: LyricsProviderId): LyricProviderDescriptor | null {
+function getProviderDescriptor(id: LyricsProviderId): LyricProviderDescriptor | null {
   return LYRIC_PROVIDERS.find((p) => p.id === id) ?? null
 }
 

@@ -41,14 +41,18 @@
   filter: blur(0.4px);
 }
 
-.lyrics-style-modern .lyrics:hover {
-  opacity: 0.75;
+@media (hover: hover) {
+  .lyrics-style-modern .lyrics:hover {
+    opacity: 0.75;
+  }
 }
 
 /* 暗色模式下hover保持原透明度 */
-[data-theme='dark'] .lyrics-style-modern .lyrics:hover {
-  background-color: transparent;
-  opacity: 0.85;
+@media (hover: hover) {
+  [data-theme='dark'] .lyrics-style-modern .lyrics:hover {
+    background-color: transparent;
+    opacity: 0.85;
+  }
 }
 
 .lyrics-style-modern .lyrics.active {

@@ -187,7 +187,9 @@ pub(super) fn decode_and_push_to_wasapi(
             }
         };
         if stopped {
-            let _ = emit_track_ended(&app);
+            if let Err(e) = emit_track_ended(&app) {
+                log::warn!("track-ended 发送失败，自动续播可能中断: {e}");
+            }
         }
     };
 
@@ -206,7 +208,9 @@ pub(super) fn decode_and_push_to_wasapi(
         interleaved.clear();
         let mut eof = false;
         for _ in 0..samples_needed {
-            if let Some(s) = source.next() {
+            // 本线程不是实时回调，用带节奏的取数：通道暂时为空时等解码线程追上，
+            // 而不是把静音直接灌满输出环形缓冲
+            if let Some(s) = source.next_paced() {
                 interleaved.push(s);
             } else {
                 eof = true;

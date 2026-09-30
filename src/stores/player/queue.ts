@@ -53,7 +53,7 @@ function orderedTracks(store: PlayerStore): TrackSnapshot[] {
 }
 
 /** 同步队列到 Rust（Android 开启自动推进，桌面端关闭） */
-export async function syncPlayQueue(store: PlayerStore): Promise<void> {
+async function syncPlayQueue(store: PlayerStore): Promise<void> {
   if (store._isDestroyed) return
   try {
     const android = await isAndroid()

@@ -273,8 +273,10 @@ function formatMs(ms: number): string {
   transition: background-color 0.2s ease;
 }
 
-.picker-close:hover {
-  background-color: var(--md-sys-color-hover-overlay);
+@media (hover: hover) {
+  .picker-close:hover {
+    background-color: var(--md-sys-color-hover-overlay);
+  }
 }
 
 .picker-toolbar {
@@ -320,12 +322,14 @@ function formatMs(ms: number): string {
   transition: background-color 0.2s ease;
 }
 
-.picker-auto-btn:hover:not(:disabled) {
-  background-color: color-mix(
-    in srgb,
-    var(--md-sys-color-on-surface) 8%,
-    var(--md-sys-color-secondary-container)
-  );
+@media (hover: hover) {
+  .picker-auto-btn:hover:not(:disabled) {
+    background-color: color-mix(
+      in srgb,
+      var(--md-sys-color-on-surface) 8%,
+      var(--md-sys-color-secondary-container)
+    );
+  }
 }
 
 .picker-auto-btn:disabled {
@@ -383,8 +387,10 @@ function formatMs(ms: number): string {
   transition: background-color 0.2s ease;
 }
 
-.candidate-row:hover {
-  background-color: var(--md-sys-color-hover-overlay);
+@media (hover: hover) {
+  .candidate-row:hover {
+    background-color: var(--md-sys-color-hover-overlay);
+  }
 }
 
 .candidate-check {
@@ -471,12 +477,14 @@ function formatMs(ms: number): string {
   transition: background-color 0.2s ease;
 }
 
-.btn-cancel:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--md-sys-color-on-surface) 8%,
-    var(--md-sys-color-surface-variant)
-  );
+@media (hover: hover) {
+  .btn-cancel:hover {
+    background-color: color-mix(
+      in srgb,
+      var(--md-sys-color-on-surface) 8%,
+      var(--md-sys-color-surface-variant)
+    );
+  }
 }
 
 .btn-apply {

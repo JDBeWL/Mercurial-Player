@@ -120,6 +120,66 @@ jobs:
         working-directory: src-tauri
         run: cargo check --release
 
+  # Android target 的 lint:三个桌面平台腿都编译不到 cfg(target_os = "android")
+  # 代码(AAudio / SAF / java_bridge / MediaSession),这些模块只有交叉到
+  # android target 才会被类型检查和 clippy 覆盖。
+  android-checks:
+    runs-on: ubuntu-latest
+    # 交叉编译只需要 NDK 里的 clang,runner 自带 Android SDK + NDK
+    env:
+      ANDROID_TARGET: aarch64-linux-android
+      API_LEVEL: '24'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+          components: clippy
+
+      - name: Setup Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: android
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      # tauri-build 的构建脚本需要前端产物目录存在
+      - name: Build frontend
+        run: pnpm run build
+
+      - name: Export NDK toolchain for cc-rs
+        run: |
+          set -euo pipefail
+          # runner 上可能装了多个 NDK,取版本号最高的那个
+          NDK="$(ls -d "$ANDROID_HOME"/ndk/*/ | sort -V | tail -1)"
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+          {
+            echo "CC_$ANDROID_TARGET=$TC/bin/clang"
+            echo "CXX_$ANDROID_TARGET=$TC/bin/clang++"
+            echo "AR_$ANDROID_TARGET=$TC/bin/llvm-ar"
+            echo "CFLAGS_$ANDROID_TARGET=--target=$ANDROID_TARGET$API_LEVEL --sysroot=$TC/sysroot"
+            echo "CXXFLAGS_$ANDROID_TARGET=--target=$ANDROID_TARGET$API_LEVEL --sysroot=$TC/sysroot"
+          } >> "$GITHUB_ENV"
+          echo "使用 NDK: $NDK"
+
+      - name: Clippy (android)
+        working-directory: src-tauri
+        run: cargo clippy --target "$ANDROID_TARGET" --lib -- -D warnings
+
   # Tauri 应用构建和发布
   # 仅 tag 推送时构建;非 tag 推送的平台编译验证由 rust-checks 三平台矩阵完成
   build-tauri:

@@ -4,22 +4,35 @@
     :data-mobile="isMobilePortrait ? 'true' : undefined"
     :data-view="mobileView"
   >
+    <!-- 手机竖屏：面板唯一的头部行，列表级与详情级共用（此时顶栏整行隐藏，见 AppHeader）。
+         必须排在导航和内容之前 —— 竖屏下面板是纵向 flex，顺序即上下关系。
+         返回键在详情级是"回列表"、在列表级是"退出设置"，都由 requestBack 按历史层级分派。
+         明暗切换与主题色本来是顶栏（竖屏收进 ⋮ 溢出菜单）的功能，顶栏让位后在这一行补回入口。 -->
+    <div v-if="isMobilePortrait" class="mobile-app-bar">
+      <button class="mobile-back-btn" :title="$t('common.back')" @click="requestBack">
+        <span class="material-symbols-rounded">arrow_back</span>
+      </button>
+      <h2 class="mobile-app-bar-title">{{ $t(barTitleKey) }}</h2>
+      <div class="mobile-app-bar-actions">
+        <button
+          class="icon-button"
+          :title="themeStore.isDarkMode ? $t('nav.theme.light') : $t('nav.theme.dark')"
+          @click="themeStore.toggleDarkMode"
+        >
+          <span class="material-symbols-rounded">{{
+            themeStore.isDarkMode ? 'light_mode' : 'dark_mode'
+          }}</span>
+        </button>
+        <ThemeSelector />
+      </div>
+    </div>
+
     <SettingsNav
       v-model="activeTab"
       :tabs="visibleTabs"
-      @close="configStore.closeConfigPanel"
+      @close="requestBack"
       @select="onTabSelect"
     />
-
-    <!-- 手机竖屏：详情页头（返回 + 当前页名）。放在滚动容器外面，这样它天然不随内容滚动，既不需要
-         sticky，也不需要给自己铺一层不透明底色（本项目 surface-container-* 全族缺失，铺了也是透明，
-         滚动时内容会从下面透出来）。桌面/横屏不渲染这块（v-if），并排的导航栏本身就是返回路径。 -->
-    <div v-if="isMobilePortrait" class="mobile-detail-header">
-      <button class="mobile-back-btn" :title="$t('common.back')" @click="backToList">
-        <span class="material-symbols-rounded">arrow_back</span>
-      </button>
-      <h2 class="mobile-detail-title">{{ $t(currentTabLabel) }}</h2>
-    </div>
 
     <div class="settings-content">
       <FolderSettings v-if="activeTab === 'folders'" />
@@ -38,13 +51,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, defineAsyncComponent, watch } from 'vue'
+import { ref, computed, defineAsyncComponent, onMounted, onUnmounted } from 'vue'
 import { useConfigStore } from '../stores/config'
+import { useThemeStore } from '../stores/theme'
 import { usePlatform } from '../composables/usePlatform'
 import { useOrientation } from '../composables/useOrientation'
 import { pluginManager } from '../plugins'
 import { useDeveloperMode } from '../composables/useDeveloperMode'
 import { SettingsNav } from './settings'
+import ThemeSelector from './ThemeSelector.vue'
 import type { SettingsTab } from '@/types'
 
 // 设置子组件懒加载:
@@ -66,8 +81,8 @@ const AboutSettings = defineAsyncComponent(() => import('./settings/AboutSetting
 const DeveloperSettings = defineAsyncComponent(() => import('./settings/DeveloperSettings.vue'))
 
 const configStore = useConfigStore()
+const themeStore = useThemeStore()
 const { developerMode } = useDeveloperMode()
-const activeTab = ref<string>('folders')
 
 const { isAndroid } = usePlatform()
 const { isPortrait } = useOrientation()
@@ -78,25 +93,64 @@ const { isPortrait } = useOrientation()
  * 桌面端与横屏不走这里，behavior 不变。
  */
 const isMobilePortrait = computed<boolean>(() => isAndroid.value && isPortrait.value)
+// 竖屏列表页不预选任何一项：一进设置就看到第一项带选中底色，会让人误以为
+// 已经停在某一页里。桌面端是并排布局，必须有个默认页，所以仍从 folders 开始。
+const activeTab = ref<string>(isMobilePortrait.value ? '' : 'folders')
 const mobileView = ref<'list' | 'detail'>('list')
+
+/**
+ * 系统返回键做成"应用内后退一级"。
+ *
+ * MainActivity 打开了 wry 的 handleBackNavigation，返回键会先走 webview.goBack()，
+ * 于是每次返回落进这里的 popstate：详情页 → 列表页 → 关闭设置 → 再返回才退出应用。
+ * 我们按层级压入等量的 history 条目（heldEntries 记账），页面自己关不掉时
+ * （比如从顶栏按钮关）在卸载时把多余的条目消费掉，避免留下"按了没反应"的返回。
+ */
+let heldEntries = 0
+const pushEntry = (): void => {
+  history.pushState({ settingsPanel: true }, '')
+  heldEntries += 1
+}
+
+const backOneLevel = (): void => {
+  if (mobileView.value === 'detail') {
+    mobileView.value = 'list'
+    return
+  }
+  configStore.closeConfigPanel()
+}
+
+const onPopState = (): void => {
+  if (heldEntries === 0) return
+  heldEntries -= 1
+  backOneLevel()
+}
+
+/** 页内返回按钮：能交给历史就交给历史，让 popstate 成为唯一改状态的地方 */
+const requestBack = (): void => {
+  if (heldEntries > 0) {
+    history.back()
+    return
+  }
+  configStore.closeConfigPanel()
+}
+
+onMounted(() => {
+  window.addEventListener('popstate', onPopState)
+  pushEntry()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('popstate', onPopState)
+  if (heldEntries > 0) history.go(-heldEntries)
+})
 
 // 用 select 事件而不是 watch(activeTab)：点"当前已选中"的那一项时值没变化，
 // watch 不会触发，用户就卡在列表页进不去详情
 const onTabSelect = (): void => {
   mobileView.value = 'detail'
+  if (isMobilePortrait.value) pushEntry()
 }
-
-const backToList = (): void => {
-  mobileView.value = 'list'
-}
-
-// 每次重新打开设置都从列表开始，而不是停在上次看的详情页
-watch(
-  () => configStore.ui.showConfigPanel,
-  (open) => {
-    if (open) mobileView.value = 'list'
-  },
-)
 
 const baseTabs: SettingsTab[] = [
   { id: 'folders', icon: 'folder', label: 'config.musicFolders' },
@@ -135,6 +189,11 @@ const visibleTabs = computed<SettingsTab[]>(() => {
 /** 竖屏详情页的标题 —— 直接复用导航项的 i18n key，避免两处文案漂移 */
 const currentTabLabel = computed<string>(
   () => visibleTabs.value.find((tab) => tab.id === activeTab.value)?.label ?? '',
+)
+
+/** 头部行只有这一处文案来源：列表级报面板名，详情级报当前页名 */
+const barTitleKey = computed<string>(() =>
+  mobileView.value === 'list' ? 'config.title' : currentTabLabel.value,
 )
 </script>
 
@@ -181,8 +240,8 @@ const currentTabLabel = computed<string>(
   }
 }
 
-/* 竖屏详情页头：只在手机竖屏渲染（模板里 v-if），其余情况不占位 */
-.mobile-detail-header {
+/* 竖屏头部行：只在手机竖屏渲染（模板里 v-if），其余情况不占位 */
+.mobile-app-bar {
   display: none;
 }
 
@@ -197,11 +256,10 @@ const currentTabLabel = computed<string>(
     padding: 0;
   }
 
-  /* 列表页：只留整屏的入口列表；详情页：只留头部 + 内容。
+  /* 列表页：头部行 + 整屏入口列表；详情页：头部行 + 内容。
      .settings-nav 是子组件的根元素，用 :deep 保证选择器一定命中
      （不依赖"子组件根元素继承父 scope id"这一行为） */
   .settings-panel[data-mobile='true'][data-view='list'] .settings-content,
-  .settings-panel[data-mobile='true'][data-view='list'] .mobile-detail-header,
   .settings-panel[data-mobile='true'][data-view='detail'] :deep(.settings-nav) {
     display: none;
   }
@@ -210,30 +268,77 @@ const currentTabLabel = computed<string>(
     padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
   }
 
-  /* 详情页头靠 flex 天然固定在顶部（它在滚动容器之外），不需要 sticky */
-  .mobile-detail-header {
+  /* 头部行已经带了页名，各面板自己的 h3 于是成了第二个标题，竖屏隐藏它。
+     只剩标题的页整条收掉 —— 否则那里会留下一条 24px 的空白带（用户说的"没按钮也占着位置"）；
+     还有动作按钮的页把按钮推到右缘，与头部行的动作区同一条边线。 */
+  .settings-panel[data-mobile='true'][data-view='detail'] :deep(.content-header h3) {
+    display: none;
+  }
+
+  .settings-panel[data-mobile='true'][data-view='detail'] :deep(.content-header) {
+    justify-content: flex-end;
+  }
+
+  .settings-panel[data-mobile='true'][data-view='detail']
+    :deep(.content-header:has(> h3:only-child)) {
+    display: none;
+  }
+
+  /* ===== 头部行 = M3 小号顶部应用栏 =====
+     栅格：图标一律落在 16px（返回箭头在 48px 触摸盒里居中，左外边距 4px），
+     文字一律落在 56px（与 SettingsNav 竖屏列表的标签同一条竖线）。
+     它在滚动容器之外，天然固定不需要 sticky；也不铺不透明底色 ——
+     本项目 surface-container-* 全族缺失，铺了也是透明，滚动时内容会从下面透出来。 */
+  .mobile-app-bar {
     display: flex;
     flex: 0 0 auto;
     align-items: center;
     gap: 4px;
-    padding: 4px 16px 8px;
+    min-height: 64px;
+    padding: 4px 4px 4px 0;
   }
 
-  .mobile-detail-title {
+  .mobile-app-bar-title {
+    flex: 1;
+    min-width: 0;
     margin: 0;
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 500;
     color: var(--md-sys-color-on-surface);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
-  /* 负左边距让图标视觉上与下方内容左对齐，同时保住 44px 的触摸目标 */
-  .mobile-back-btn {
+  .mobile-app-bar-actions {
     display: flex;
+    flex: 0 0 auto;
     align-items: center;
-    justify-content: center;
+    gap: 4px;
+  }
+
+  /* 明暗切换与主题色原来是顶栏（竖屏收进 ⋮）的功能，顶栏让位后由这一行接手，
+     触摸目标从全局的 40px 提到 44px */
+  .mobile-app-bar-actions .icon-button {
     width: 44px;
     height: 44px;
-    margin-left: -10px;
+  }
+
+  /* ThemeSelector 在竖屏会藏起自己的触发按钮、把入口让给顶栏溢出菜单（见其样式）。
+     这里没有那条溢出菜单，按钮要显式放回来；:deep 带上本组件的 scope 属性，
+     选择器权重高于它自己那条，不依赖样式表的先后顺序。 */
+  .mobile-app-bar-actions :deep(.theme-selector[data-mobile='true'] > .icon-button) {
+    display: flex;
+  }
+
+  .mobile-back-btn {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    margin-left: 4px;
     border: none;
     border-radius: 50%;
     background: none;

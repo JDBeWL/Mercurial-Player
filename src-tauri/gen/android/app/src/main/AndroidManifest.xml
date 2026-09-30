@@ -32,11 +32,17 @@
             </intent-filter>
         </activity>
 
-        <!-- 后台播放前台服务：只保活进程并托管 MediaSession/通知，音频仍在 Rust 侧 -->
+        <!-- 后台播放前台服务：只保活进程并托管 MediaSession/通知，音频仍在 Rust 侧。
+             MEDIA_BUTTON intent-filter 必需：androidx 的 MediaButtonReceiver 收到线控按键后
+             按此 filter 解析目标服务，缺少它时找不到服务会抛 IllegalStateException 直接崩溃。 -->
         <service
           android:name=".PlaybackService"
           android:exported="false"
-          android:foregroundServiceType="mediaPlayback" />
+          android:foregroundServiceType="mediaPlayback">
+          <intent-filter>
+            <action android:name="android.intent.action.MEDIA_BUTTON" />
+          </intent-filter>
+        </service>
 
         <!-- 耳机/蓝牙线控：MediaButtonReceiver 转发给 MediaSession -->
         <receiver

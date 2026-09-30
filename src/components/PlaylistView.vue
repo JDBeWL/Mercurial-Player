@@ -494,8 +494,10 @@ const handleListClick = (event: MouseEvent): void => {
   contain: layout style paint;
 }
 
-.list-item:hover {
-  background-color: var(--md-sys-color-hover-overlay);
+@media (hover: hover) {
+  .list-item:hover {
+    background-color: var(--md-sys-color-hover-overlay);
+  }
 }
 
 .list-item.selected {

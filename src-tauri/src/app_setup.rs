@@ -98,9 +98,10 @@ pub fn init(app: &tauri::App) {
         // JNI 反向调用（通知栏 / MediaSession / 耳机线控）需要进程级 AppHandle
         crate::android::set_app_handle(app.handle());
         if let Ok(data_dir) = app.path().app_data_dir() {
-            // config.json / library-cache.json 改写到 <app_data>/data
-            crate::config::set_data_dir_override(data_dir.clone());
-            log::info!("Android data dir override: {}", data_dir.display());
+            // 只作回退：`run()` 的 JNI 目录已先设则此处不生效（见 set_data_dir_override）
+            if crate::config::set_data_dir_override(data_dir.clone()) {
+                log::info!("Android data dir override: {}", data_dir.display());
+            }
         }
         if let Ok(cache_dir) = app.path().app_cache_dir() {
             let media_cache = cache_dir.join("mercurial-player");

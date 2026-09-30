@@ -67,16 +67,16 @@ export default {
     const canvasRef = ref<HTMLCanvasElement | null>(null)
     const visualizerContainer = ref<HTMLElement | null>(null)
     let animationId: number | null = null
-    let audioData = new Float32Array(128)
-    let smoothedAudioData = new Float32Array(128)
+    // bin 数必须与 Rust 侧 audio::spectrum::SPECTRUM_BINS 一致
+    const SPECTRUM_SIZE = 128
+    let audioData = new Float32Array(SPECTRUM_SIZE)
+    let smoothedAudioData = new Float32Array(SPECTRUM_SIZE)
     let spectrumListener: (() => void) | null = null
     let isAnimating = false
     // onMounted 内有 await：注册完成时组件可能已卸载，需要事后自查
     let disposed = false
 
     let pendingSpectrumData: Float32Array | null = null
-
-    const SPECTRUM_SIZE = 128
 
     let cachedGradient: CanvasGradient | null = null
     let lastCanvasHeight = 0

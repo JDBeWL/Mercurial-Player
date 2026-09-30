@@ -311,8 +311,10 @@
   cursor: pointer;
 }
 
-.album-art:hover {
-  transform: scale(1.02);
+@media (hover: hover) {
+  .album-art:hover {
+    transform: scale(1.02);
+  }
 }
 
 /* 提取封面按钮 */
@@ -344,10 +346,12 @@
   pointer-events: auto;
 }
 
-.extract-cover-btn:hover {
-  background-color: var(--md-sys-color-primary);
-  color: var(--md-sys-color-on-primary);
-  transform: scale(1.1);
+@media (hover: hover) {
+  .extract-cover-btn:hover {
+    background-color: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+    transform: scale(1.1);
+  }
 }
 
 /* 手机端：长按封面弹出的动作菜单。
@@ -393,10 +397,12 @@
   cursor: pointer;
 }
 
-.cover-menu-item:hover {
-  /* 下一条 color-mix 在 WebView 110 上不被支持，整条被丢弃时由这句兜底 */
-  background-color: rgba(128, 128, 128, 0.16);
-  background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+@media (hover: hover) {
+  .cover-menu-item:hover {
+    /* 下一条 color-mix 在 WebView 110 上不被支持，整条被丢弃时由这句兜底 */
+    background-color: rgba(128, 128, 128, 0.16);
+    background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+  }
 }
 
 .cover-menu-item .material-symbols-rounded {
@@ -709,8 +715,10 @@
   }
 
   /* 同理，封面自身的放大反馈只会在 hover 时触发，手指点了没反应 */
-  .album-art:hover {
-    transform: none;
+  @media (hover: hover) {
+    .album-art:hover {
+      transform: none;
+    }
   }
 }
 

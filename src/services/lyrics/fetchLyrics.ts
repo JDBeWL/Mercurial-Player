@@ -16,7 +16,7 @@ interface RawCandidate {
 }
 
 /** 单来源取候选（附加来源与所用算法） */
-export async function listCandidates(
+async function listCandidates(
   provider: LyricsProviderId,
   query: LyricQuery,
   settings: ProviderLyricSetting | undefined,

@@ -138,7 +138,11 @@
       </div>
 
       <!-- Android：未插 DAC / 独占没能开成 -->
-      <div v-if="isAndroidPlatform && !audioRoute?.usbConnected" class="capability-notice">
+      <div v-if="isAndroidPlatform && pendingNextTrack" class="capability-notice">
+        <span class="material-symbols-rounded">playlist_play</span>
+        <p>{{ $t('config.usbDacTakesEffectNextTrack') }}</p>
+      </div>
+      <div v-else-if="isAndroidPlatform && !audioRoute?.usbConnected" class="capability-notice">
         <span class="material-symbols-rounded">usb_off</span>
         <p>{{ $t('config.usbDacNotConnected') }}</p>
       </div>
@@ -254,6 +258,8 @@ const currentPlatform = ref<string>('unknown')
 /** Android 输出路由快照；非安卓平台保持 null（后端在非安卓上返回错误） */
 const audioRoute = ref<AudioRouteInfo | null>(null)
 const usbDacExclusiveEnabled = ref(false)
+// 刚切过开关、但当前曲目还在旧输出上：提示"下一首生效"
+const pendingNextTrack = ref(false)
 
 // 平台检测
 const isWindowsPlatform = computed(() => {
@@ -313,10 +319,12 @@ const toggleUsbDacExclusive = async (): Promise<void> => {
   }
   const next = !usbDacExclusiveEnabled.value
   try {
-    await setUsbDacExclusive(next, playerStore.currentTime)
+    await setUsbDacExclusive(next)
     usbDacExclusiveEnabled.value = next
     configStore.setAudioConfig({ usbDacExclusive: next })
     await fetchAudioRoute()
+    // 移动端下首生效：设置与当前实际输出不一致时提示，等下一首切到新链路后自然消失
+    pendingNextTrack.value = audioRoute.value?.exclusiveActive !== next
   } catch (err) {
     logger.error('切换 USB DAC 独占失败:', err)
     error.value = getErrorMessage(err, 'Failed to toggle USB DAC exclusive mode')
@@ -370,6 +378,12 @@ const selectDevice = async (device: AudioDevice): Promise<void> => {
 
 // 检查是否需要重启以应用独占模式设置
 const checkRestartRequired = async (): Promise<void> => {
+  // 只有 Windows 才存在"当前已生效的独占模式"与"配置意向"两套状态。安卓的 exclusive_mode
+  // 跟着 USB DAC 偏好走、并且按"下一首生效"设计，拿它和配置比较会在切歌之后误报"需要重启"。
+  if (!isWindowsPlatform.value) {
+    restartRequired.value = false
+    return
+  }
   try {
     const activeExclusiveMode = await getExclusiveMode()
     // 如果当前活跃状态与 store 中的意向状态不一致，则需要重启
@@ -563,8 +577,10 @@ watch(useExclusiveMode, (newValue: boolean) => {
   transition: all 0.2s ease;
 }
 
-.device-item:hover {
-  background-color: var(--md-sys-color-surface-container-high);
+@media (hover: hover) {
+  .device-item:hover {
+    background-color: var(--md-sys-color-surface-container-high);
+  }
 }
 
 .device-item.active {
@@ -693,12 +709,16 @@ watch(useExclusiveMode, (newValue: boolean) => {
   opacity: 0.6;
 }
 
-.option-item.disabled:hover {
-  background-color: transparent;
+@media (hover: hover) {
+  .option-item.disabled:hover {
+    background-color: transparent;
+  }
 }
 
-.option-item:hover {
-  background-color: var(--md-sys-color-surface-container);
+@media (hover: hover) {
+  .option-item:hover {
+    background-color: var(--md-sys-color-surface-container);
+  }
 }
 
 .option-label {
@@ -893,12 +913,14 @@ watch(useExclusiveMode, (newValue: boolean) => {
   transition: all 0.2s ease;
 }
 
-.filled-tonal-button:hover {
-  background-color: color-mix(
-    in srgb,
-    var(--md-sys-color-on-surface) 8%,
-    var(--md-sys-color-secondary-container)
-  );
+@media (hover: hover) {
+  .filled-tonal-button:hover {
+    background-color: color-mix(
+      in srgb,
+      var(--md-sys-color-on-surface) 8%,
+      var(--md-sys-color-secondary-container)
+    );
+  }
 }
 
 .retry-button {
@@ -916,8 +938,10 @@ watch(useExclusiveMode, (newValue: boolean) => {
   transition: all 0.2s ease;
 }
 
-.retry-button:hover {
-  box-shadow: var(--md-sys-elevation-level1);
+@media (hover: hover) {
+  .retry-button:hover {
+    box-shadow: var(--md-sys-elevation-level1);
+  }
 }
 
 .material-symbols-rounded {
