@@ -330,11 +330,9 @@ impl EqPersister {
                         PersistMsg::Stop => stop = true,
                     }
                     if dirty {
-                        // 先取快照再释放读锁,避免持锁做文件 I/O;
-                        // 用 ok() 直接丢掉 PoisonError(它持有读锁守卫)
-                        if let Some(snapshot) = settings.read().ok().map(|guard| guard.clone()) {
-                            write_eq_settings_file(&path, &snapshot);
-                        }
+                        // 先取快照再释放读锁,避免持锁做文件 I/O
+                        let snapshot = lock_or_log!(settings.read()).clone();
+                        write_eq_settings_file(&path, &snapshot);
                         dirty = false;
                     }
                     if stop {

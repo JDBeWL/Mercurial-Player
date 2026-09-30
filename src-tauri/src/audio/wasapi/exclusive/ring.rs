@@ -104,7 +104,11 @@ impl SpscSampleRing {
     /// 当前缓冲采样数(近似值,供水位检查)
     #[must_use]
     pub(super) fn len(&self) -> usize {
-        self.head.load(Ordering::Acquire) - self.tail.load(Ordering::Acquire)
+        // 必须先 tail 后 head：head 只增、tail 只增，读到 tail 之后读到的 head
+        // 必然 ≥ 它。反过来的话，消费者/第三方线程可能拿到偏小的旧 head 而回绕
+        let tail = self.tail.load(Ordering::Acquire);
+        let head = self.head.load(Ordering::Acquire);
+        head.saturating_sub(tail)
     }
 
     /// 清空缓冲(tail 快进到 head)

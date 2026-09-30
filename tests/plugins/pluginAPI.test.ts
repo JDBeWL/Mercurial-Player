@@ -931,7 +931,7 @@ describe('events API', () => {
 })
 
 describe('network API', () => {
-  it('adds the plugin header and forbids redirects', async () => {
+  it('adds the plugin header and follows redirects', async () => {
     const response = { url: 'https://api.example/ok', ok: true }
     vi.mocked(tauriFetch).mockResolvedValue(response as never)
 
@@ -940,11 +940,13 @@ describe('network API', () => {
     })
 
     expect(result).toBe(response)
+    // redirect 必须是 follow：manual 下响应永不跳转，response.url 恒等于原始地址，
+    // "重定向到非 HTTPS"那道检查就永远命中不了
     expect(tauriFetch).toHaveBeenCalledWith(
       'https://api.example/ok',
       expect.objectContaining({
         headers: { 'X-Custom': '1', 'X-Plugin-Request': 'true' },
-        redirect: 'manual',
+        redirect: 'follow',
       }),
     )
   })

@@ -4,7 +4,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { watch, type WatchStopHandle } from 'vue'
-import type { TrackSnapshot } from '@/types'
+import type { Track, TrackSnapshot } from '@/types'
 import { getPlatform } from '@/services/appService'
 import logger from '@/utils/logger'
 import type { usePlayerStore } from './index'
@@ -73,6 +73,24 @@ export async function syncPlayQueue(store: PlayerStore): Promise<void> {
   }
 }
 
+/** Rust 的 `TrackSnapshot` 用 null 表示"未知"，前端的 `Track` 用 undefined。
+ *  就地做一次归一，别再用 `as never` 把结构校验整个关掉。 */
+function snapshotToTrack(snapshot: TrackSnapshot): Track {
+  return {
+    path: snapshot.path,
+    name: snapshot.title ?? snapshot.path,
+    title: snapshot.title ?? undefined,
+    artist: snapshot.artist ?? undefined,
+    album: snapshot.album ?? undefined,
+    duration: snapshot.duration ?? undefined,
+    bitrate: snapshot.bitrate ?? undefined,
+    sampleRate: snapshot.sampleRate ?? undefined,
+    channels: snapshot.channels ?? undefined,
+    bitDepth: snapshot.bitDepth ?? undefined,
+    format: snapshot.format ?? undefined,
+  }
+}
+
 /** 监听 Rust 侧推进结果，同步 UI（不重复触发播放） */
 export async function setupQueueListener(store: PlayerStore): Promise<UnlistenFn | null> {
   try {
@@ -93,7 +111,7 @@ export async function setupQueueListener(store: PlayerStore): Promise<UnlistenFn
         if (idx >= 0) {
           store.currentTrack = { ...store.playlist[idx]! }
         } else {
-          store.currentTrack = { ...track, name: track.title ?? track.path } as never
+          store.currentTrack = snapshotToTrack(track)
         }
         store.currentTime = 0
         store.duration = track.duration ?? 0

@@ -118,6 +118,32 @@ pub struct WasapiExclusivePlayback {
     samples_written: Arc<AtomicU64>,
 }
 
+/// 解码线程用的无锁写入端，由 `WasapiExclusivePlayback::producer` 取得。
+///
+/// 拿到它之后，推送和水位查询都不再经过 `wasapi_player` 互斥量，
+/// 因此背压等待不会把命令线程（切设备、停止）一起堵死。
+pub struct WasapiProducer {
+    ring: Arc<SpscSampleRing>,
+}
+
+impl WasapiProducer {
+    // 恒为 Ok：签名与 AAudio 侧同名方法对齐，decode_push 是两端共用的代码
+    #[allow(clippy::unnecessary_wraps)]
+    pub fn push_samples(&self, samples: &[f32]) -> Result<(), AppError> {
+        let written = self.ring.push_slice(samples);
+        if written < samples.len() {
+            // 生产者有 2 秒水位门控,正常不应满;截断意味着门控失效(如异常设备格式)
+            log::warn!("SPSC 缓冲已满,截断 {} 采样", samples.len() - written);
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn buffer_size(&self) -> usize {
+        self.ring.len()
+    }
+}
+
 impl WasapiExclusivePlayback {
     #[must_use]
     pub fn new() -> Self {
@@ -284,13 +310,12 @@ impl WasapiExclusivePlayback {
             .map_err(|e| format!("Failed to send volume command: {e}").into())
     }
 
-    pub fn push_samples(&self, samples: &[f32]) -> Result<(), AppError> {
-        let written = self.sample_buffer.push_slice(samples);
-        if written < samples.len() {
-            // 生产者有 2 秒水位门控,正常不应满;截断意味着门控失效(如异常设备格式)
-            log::warn!("SPSC 缓冲已满,截断 {} 采样", samples.len() - written);
+    /// 取无锁写入端，见 [`WasapiProducer`]。WASAPI 的环在构造时就分配，故不会失败。
+    #[must_use]
+    pub fn producer(&self) -> WasapiProducer {
+        WasapiProducer {
+            ring: Arc::clone(&self.sample_buffer),
         }
-        Ok(())
     }
 
     pub fn clear_buffer(&self) -> Result<(), AppError> {

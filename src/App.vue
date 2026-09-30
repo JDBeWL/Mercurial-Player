@@ -210,13 +210,24 @@
                     {{ formattedAudioInfo }}
                   </div>
                 </div>
-                <PlayerControls />
-                <!-- 右下角：播放列表开关、桌面歌词与音量控制 -->
+                <PlayerControls>
+                  <template v-if="playlistButtonInTransport" #after-next>
+                    <!-- 播放列表入口常显（用户要求）：刚装完还没有任何曲目时也要在，否则用户不知道
+                         有这个功能；列表为空时抽屉里显示 playlist.empty -->
+                    <button
+                      class="icon-button"
+                      :class="{ active: showPlaylist }"
+                      :title="$t('playlist.title')"
+                      @click="togglePlaylist"
+                    >
+                      <span class="material-symbols-rounded">queue_music</span>
+                    </button>
+                  </template>
+                </PlayerControls>
+                <!-- 右下角：桌面歌词与音量控制；竖屏时播放列表开关也在这里（见上面的插槽） -->
                 <div class="side-controls">
-                  <!-- 播放列表入口常显（用户要求）：刚装完还没有任何曲目时也要在，否则底部一行的右侧是
-                       空的，用户不知道有这个功能；列表为空时抽屉里显示 playlist.empty。这也让底部一行的
-                       按钮数量恒定，不会因为列表有无而把整行的间距改掉。 -->
                   <button
+                    v-if="!playlistButtonInTransport"
                     class="icon-button"
                     :class="{ active: showPlaylist }"
                     :title="$t('playlist.title')"
@@ -366,6 +377,10 @@ useGlobalKeyboard()
 const showLibrary = ref(false)
 const showPlaylist = ref(false)
 const immersiveCover = ref(false)
+
+// 播放列表按钮的落点：桌面端与手机横屏紧跟「下一曲」（PlayerControls 的 after-next 插槽），
+// 竖屏那一行已接近满宽（见 App.css 的 @media (orientation: portrait)），继续留在右下角那一组
+const playlistButtonInTransport = computed<boolean>(() => !isAndroid.value || isLandscape.value)
 
 // 上部区域当前显示哪一块：封面 / 歌词 / 波形。横屏左栏恒为封面、不参与切换，所以是封面与波形两态；
 // 竖屏只有封面与歌词两态，波形不进竖屏（手机上那块区域留给封面和歌词更值），切换不靠按钮，

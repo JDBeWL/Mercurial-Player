@@ -19,7 +19,7 @@ use super::device::{
     OutputDeviceInfo, find_usb_output_device, pick_channel_count, pick_sample_rate,
 };
 use super::ffi;
-use crate::audio::{PlaybackState, SampleRing};
+use crate::audio::{PlaybackState, SampleRing, spectrum::now_ms};
 use crate::error::AppError;
 
 /// 环形缓冲的目标时长（秒）。独占模式的 buffer 通常很小（低延迟），
@@ -29,6 +29,9 @@ const RING_SECONDS: f32 = 1.5;
 const DEFAULT_FADE_MS: u32 = 30;
 /// 看门狗轮询间隔（毫秒）
 const WATCHDOG_INTERVAL_MS: u64 = 20;
+/// 看门狗替回调收尾的宽限（毫秒）：回调正常时会在 duration_ms 内走完斜坡，
+/// 超过 duration + 本宽限仍未推进，说明回调已经停摆（流暂停/断开）
+const FADE_FALLBACK_GRACE_MS: u64 = 100;
 
 /// `PlaybackState` 的原子编码（状态要能在音频回调里更新，不能用 Mutex）
 const ST_UNINITIALIZED: u8 = 0;
@@ -77,6 +80,9 @@ struct Shared {
     format: AtomicI32,
     fade_dir: AtomicU8,
     fade_left: AtomicUsize,
+    /// 斜坡的挂钟兜底截止时刻（毫秒）。回调不跑时（流已暂停/断开）斜坡会停在半途，
+    /// 看门狗过了这个时刻就替回调收尾。
+    fade_deadline_ms: AtomicU64,
     fade_total: AtomicUsize,
     /// 淡出结束时由回调转交给 `pending` 的动作（命令线程写入，可置回 PENDING_NONE 取消）
     fade_action: AtomicU8,
@@ -133,6 +139,51 @@ impl Default for AaudioExclusivePlayer {
     }
 }
 
+/// 取当前流的共享状态（克隆 Arc，避免长时间持锁）
+fn resolve_shared(inner: &Mutex<Option<Arc<Inner>>>) -> Option<Arc<Shared>> {
+    let guard = lock_or_log!(inner.lock());
+    guard.as_ref().map(|i| Arc::clone(&i.ctx.shared))
+}
+
+/// 解码线程用的无锁写入端，由 `AaudioExclusivePlayer::producer` 取得。
+///
+/// 只在每次调用开头短暂锁 `inner` 取当前 `Shared`（流可能被重建），随后的背压等待
+/// 不持任何锁 —— 否则解码线程会抱着上层 `wasapi_player` 互斥量睡觉，把切设备、
+/// 停止这些命令一起堵死。
+pub struct AaudioProducer {
+    inner: Arc<Mutex<Option<Arc<Inner>>>>,
+}
+
+impl AaudioProducer {
+    pub fn push_samples(&self, samples: &[f32]) -> Result<(), AppError> {
+        let Some(shared) = resolve_shared(&self.inner) else {
+            return Err(AppError::msg("AAudio 播放器未初始化"));
+        };
+        let mut offset = 0;
+        // 背压：缓冲满时等一会儿再推。解码线程不是实时线程，等在这里不会造成爆音，
+        // 而直接丢弃样本会。但流已停/已断开时没人消费，必须退出，否则解码线程永久卡死。
+        while offset < samples.len() {
+            if !shared.running.load(Ordering::Acquire) || shared.disconnected.load(Ordering::SeqCst)
+            {
+                return Ok(());
+            }
+            let written = shared.ring.push_slice(&samples[offset..]);
+            if written == 0 {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                continue;
+            }
+            offset += written;
+        }
+        Ok(())
+    }
+
+    /// 缓冲里尚未被硬件取走的采样数
+    #[must_use]
+    pub fn buffer_size(&self) -> usize {
+        resolve_shared(&self.inner).map_or(0, |s| s.ring.len())
+    }
+}
+
 impl AaudioExclusivePlayer {
     #[must_use]
     pub fn new() -> Self {
@@ -150,11 +201,7 @@ impl AaudioExclusivePlayer {
 
     /// 当前流的共享状态（克隆 Arc，避免长时间持锁）
     fn shared(&self) -> Option<Arc<Shared>> {
-        let guard = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        guard.as_ref().map(|i| Arc::clone(&i.ctx.shared))
+        resolve_shared(&self.inner)
     }
 
     /// 打开独占流。`device` 传设备 id 的字符串形式（与 WASAPI 版本共用同一签名）；
@@ -177,9 +224,7 @@ impl AaudioExclusivePlayer {
     /// 当前流绑定的输出设备快照（无流时为 `None`）
     #[must_use]
     pub fn current_device(&self) -> Option<OutputDeviceInfo> {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        lock_or_log!(self.inner.lock())
             .as_ref()
             .map(|i| i.device.clone())
     }
@@ -252,6 +297,7 @@ impl AaudioExclusivePlayer {
             fade_dir: AtomicU8::new(FADE_IDLE),
             fade_left: AtomicUsize::new(0),
             fade_total: AtomicUsize::new(0),
+            fade_deadline_ms: AtomicU64::new(0),
             fade_action: AtomicU8::new(PENDING_NONE),
             pending: AtomicU8::new(PENDING_NONE),
             underruns: AtomicU64::new(0),
@@ -319,11 +365,13 @@ impl AaudioExclusivePlayer {
                 ffi::AAudioStream_getSharingMode(stream),
             )
         };
-        shared.running.store(true, Ordering::Release);
         shared
             .channels
             .store(actual_channels as u32, Ordering::Relaxed);
         shared.format.store(actual_format, Ordering::Relaxed);
+        // running 是"可以按当前格式收发"的信号，必须最后发布：先置 true 时回调可能拿着
+        // 旧的 channels/format 计算偏移，按错误的采样宽度读写
+        shared.running.store(true, Ordering::Release);
 
         self.exclusive_confirmed.store(
             sharing == ffi::AAUDIO_SHARING_MODE_EXCLUSIVE,
@@ -334,10 +382,7 @@ impl AaudioExclusivePlayer {
             .store(actual_channels as u32, Ordering::SeqCst);
         self.state.store(ST_STOPPED, Ordering::SeqCst);
 
-        *self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(Inner {
+        *lock_or_log!(self.inner.lock()) = Some(Arc::new(Inner {
             stream: AtomicPtr::new(stream),
             ctx,
             device: device.clone(),
@@ -354,11 +399,7 @@ impl AaudioExclusivePlayer {
 
     /// 关闭并释放当前流（close 会等回调结束，因此之后才能释放 ctx）
     fn close_stream(&self) {
-        let taken = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
+        let taken = lock_or_log!(self.inner.lock()).take();
         let Some(inner) = taken else { return };
 
         inner.ctx.shared.running.store(false, Ordering::Release);
@@ -378,10 +419,7 @@ impl AaudioExclusivePlayer {
 
     /// 启动看门狗：执行淡出后的 pause/stop、处理设备断开
     fn start_watchdog(&self) {
-        let mut guard = self
-            .watchdog
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = lock_or_log!(self.watchdog.lock());
         if guard.is_some() {
             return;
         }
@@ -395,6 +433,23 @@ impl AaudioExclusivePlayer {
                 if let Some(inner) = inner_getter.current() {
                     let shared = &inner.ctx.shared;
                     let stream = inner.stream.load(Ordering::Acquire);
+                    // 回调停摆（流已暂停/断开）时斜坡会停在半途，pending 永不落地，
+                    // 状态卡在 Pausing/Stopping。过了兜底截止时刻就替回调收尾
+                    let fade_dir_now = shared.fade_dir.load(Ordering::SeqCst);
+                    if fade_dir_now != FADE_IDLE
+                        && shared.fade_left.load(Ordering::SeqCst) > 0
+                        && shared.fade_deadline_ms.load(Ordering::SeqCst) <= now_ms()
+                    {
+                        log::warn!(
+                            "AAudio 斜坡无人推进（fade_dir={fade_dir_now}），看门狗兜底收尾"
+                        );
+                        shared.fade_dir.store(FADE_IDLE, Ordering::SeqCst);
+                        shared.fade_left.store(0, Ordering::SeqCst);
+                        let action = shared.fade_action.swap(PENDING_NONE, Ordering::SeqCst);
+                        if action != PENDING_NONE {
+                            shared.pending.store(action, Ordering::SeqCst);
+                        }
+                    }
                     match shared.pending.swap(PENDING_NONE, Ordering::SeqCst) {
                         PENDING_PAUSE if !stream.is_null() => {
                             // SAFETY: stream 有效，requestPause 允许在任何线程调用
@@ -485,6 +540,10 @@ impl AaudioExclusivePlayer {
             shared.fade_total.store(frames, Ordering::SeqCst);
             shared.fade_left.store(frames, Ordering::SeqCst);
             shared.fade_action.store(PENDING_NONE, Ordering::SeqCst);
+            shared.fade_deadline_ms.store(
+                now_ms() + duration_ms as u64 + FADE_FALLBACK_GRACE_MS,
+                Ordering::SeqCst,
+            );
             shared.fade_dir.store(FADE_IN, Ordering::SeqCst);
         }
         self.request_start()
@@ -499,26 +558,12 @@ impl AaudioExclusivePlayer {
         Ok(())
     }
 
-    pub fn push_samples(&self, samples: &[f32]) -> Result<(), AppError> {
-        let Some(shared) = self.shared() else {
-            return Err(AppError::msg("AAudio 播放器未初始化"));
-        };
-        let mut offset = 0;
-        // 背压：缓冲满时等一会儿再推。解码线程不是实时线程，等在这里不会造成爆音，
-        // 而直接丢弃样本会。但流已停/已断开时没人消费，必须退出，否则解码线程永久卡死。
-        while offset < samples.len() {
-            if !shared.running.load(Ordering::Acquire) || shared.disconnected.load(Ordering::SeqCst)
-            {
-                return Ok(());
-            }
-            let written = shared.ring.push_slice(&samples[offset..]);
-            if written == 0 {
-                std::thread::sleep(std::time::Duration::from_millis(2));
-                continue;
-            }
-            offset += written;
+    /// 取无锁写入端，见 [`AaudioProducer`]。未初始化时也可取到，写入时报错。
+    #[must_use]
+    pub fn producer(&self) -> AaudioProducer {
+        AaudioProducer {
+            inner: Arc::clone(&self.inner),
         }
-        Ok(())
     }
 
     pub fn clear_buffer(&self) -> Result<(), AppError> {
@@ -583,10 +628,7 @@ impl AaudioExclusivePlayer {
 
     fn request_start(&self) -> Result<(), AppError> {
         let handle = {
-            let guard = self
-                .inner
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let guard = lock_or_log!(self.inner.lock());
             guard.as_ref().map(Arc::clone)
         };
         let Some(inner) = handle else {
@@ -596,7 +638,6 @@ impl AaudioExclusivePlayer {
         if stream.is_null() {
             return Err(AppError::msg("AAudio 流未打开"));
         }
-        inner.ctx.shared.running.store(true, Ordering::Release);
         // SAFETY: stream 有效
         let r = unsafe { ffi::AAudioStream_requestStart(stream) };
         if r != ffi::AAUDIO_OK {
@@ -606,6 +647,8 @@ impl AaudioExclusivePlayer {
                 unsafe { ffi::result_to_text(r) }
             )));
         }
+        // 起播成功后才发布 running：失败时流根本没在跑，置了会让回调与解码线程都以为可写
+        inner.ctx.shared.running.store(true, Ordering::Release);
         self.state.store(ST_PLAYING, Ordering::SeqCst);
         Ok(())
     }
@@ -628,6 +671,10 @@ impl AaudioExclusivePlayer {
             shared.fade_total.store(frames, Ordering::SeqCst);
             shared.fade_left.store(frames, Ordering::SeqCst);
             shared.fade_action.store(action_code, Ordering::SeqCst);
+            shared.fade_deadline_ms.store(
+                now_ms() + duration_ms as u64 + FADE_FALLBACK_GRACE_MS,
+                Ordering::SeqCst,
+            );
             shared.fade_dir.store(FADE_OUT, Ordering::SeqCst);
         }
         self.state.store(
@@ -645,11 +692,7 @@ impl Drop for AaudioExclusivePlayer {
     fn drop(&mut self) {
         self.watchdog_stop.store(true, Ordering::SeqCst);
         // 先取出来再判断：写成 if let 的 scrutinee 会让 MutexGuard 活到整个 if let 结束
-        let watchdog = self
-            .watchdog
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
+        let watchdog = lock_or_log!(self.watchdog.lock()).take();
         if let Some(handle) = watchdog {
             let _ = handle.join();
         }
@@ -862,9 +905,6 @@ struct WatchdogRef {
 
 impl WatchdogRef {
     fn current(&self) -> Option<Arc<Inner>> {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        lock_or_log!(self.inner.lock()).clone()
     }
 }

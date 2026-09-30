@@ -20,8 +20,8 @@ export default defineConfig({
     },
     coverage: {
       provider: 'v8',
-      // 仅统计 .ts;.vue 组件未纳入统计(加进来会让整体覆盖率明显下降)
-      include: ['src/**/*.ts'],
+      // .vue 组件一并统计：CI 的 coverage gate 若只看 .ts，UI 层就落在度量之外
+      include: ['src/**/*.ts', 'src/**/*.vue'],
       exclude: ['src/**/*.d.ts', 'src/types/**', 'src/**/*.test.ts', 'src/**/*.spec.ts'],
       // 关闭运行前后的目录清理:清理会一次性删除 coverage/ 下大量报告文件,
       // 在带批量删除防护的环境中会被拦截并以 Unhandled Error 中断;
@@ -29,10 +29,12 @@ export default defineConfig({
       clean: false,
       cleanAfterRun: false,
       thresholds: {
-        lines: 83,
-        branches: 77,
-        functions: 79,
-        statements: 82,
+        // .vue 后的实测值：lines 87.48 / branches 77.16 / functions 81.68 /
+        // statements 85.88。阈值取实测值再留约 1 个百分点，作为只涨不跌的基线
+        lines: 86,
+        branches: 76,
+        functions: 80,
+        statements: 84,
       },
     },
   },

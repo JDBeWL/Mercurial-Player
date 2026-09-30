@@ -473,15 +473,22 @@ const EMPTY_STATS: PlayCountStats = {
 
 // ============ 数据 ============
 
-/** 数据源 = 插件实例 + 变更信号（手动刷新计数、播放心跳）。心跳每秒推进一次，让进行中
- *  这次播放的时长持续增长；插件存储本身是 reactive 代理，结算后自动重算，无需轮询。 */
+/** 数据源 = 插件实例 + 变更信号（手动刷新计数）。插件存储本身是 reactive 代理，
+ *  结算后自动重算，无需轮询。 */
 const dataSource = computed(() => ({
+  plugin: instance.value,
+  revision: refreshTick.value,
+}))
+
+/** 汇总统计额外挂播放心跳：进行中这一首的时长要每秒推进。榜单/历史/趋势不挂，
+ *  否则每秒都要把全部曲目重排一遍、把 200 行历史重算一遍 */
+const statsSource = computed(() => ({
   plugin: instance.value,
   revision: refreshTick.value + playbackTick.value,
 }))
 
 const stats = computed<PlayCountStats>(() => {
-  const { plugin } = dataSource.value
+  const { plugin } = statsSource.value
   if (!plugin) return EMPTY_STATS
   try {
     return plugin.getStats(range.value)
@@ -530,20 +537,15 @@ const dailySeries = computed<DailyPoint[]>(() => {
 const trendDays = computed(() => range.value ?? TREND_DEFAULT_DAYS)
 
 /**
- * 当前播放列表索引 + 封面映射，可播判断/标题兜底/封面都从这里取。
- * playlist 元素已 markRaw、封面就地分批写入，都不会触发响应式更新，
- * 因此显式依赖 `playlistCoverVersion`（每批封面写完重建索引）。
+ * 当前播放列表索引（path -> Track），可播判断与标题兜底都从这里取。
+ * 只在列表增删时重建：封面是就地分批写进 markRaw 元素的，不影响这份映射。
  */
-const playlistIndex = computed(() => {
+const playlistTracks = computed(() => {
   const tracks = new Map<string, Track>()
-  const covers = new Map<string, string>()
   for (const track of playerStore.playlist) {
     tracks.set(track.path, track)
-    if (track.coverPath) {
-      covers.set(track.path, convertFileSrc(track.coverPath))
-    }
   }
-  return { tracks, covers, coverVersion: playerStore.playlistCoverVersion }
+  return tracks
 })
 
 const currentPath = computed(() => playerStore.currentTrack?.path ?? '')
@@ -555,8 +557,18 @@ const currentPath = computed(() => playerStore.currentTrack?.path ?? '')
 const lazyCovers = shallowRef<Map<string, string>>(new Map())
 const coverRequested = new Set<string>()
 
-const coverUrlFor = (path: string): string | undefined =>
-  playlistIndex.value.covers.get(path) ?? lazyCovers.value.get(path)
+/**
+ * 列表内曲目按需转换封面 URL，只算当前真正渲染到的那几行。
+ * 早先随 `playlistCoverVersion` 整表重建 covers，每写完 10 张就重扫全列表，
+ * 一万首曲目约等于 10^7 次 Map.set；这里靠版本号做渲染触发、不再建索引。
+ */
+const coverUrlFor = (path: string): string | undefined => {
+  // 建立响应式依赖：每批封面写完，模板里用到的行要重新求值
+  void playerStore.playlistCoverVersion
+  const coverPath = playlistTracks.value.get(path)?.coverPath
+  if (coverPath) return convertFileSrc(coverPath)
+  return lazyCovers.value.get(path)
+}
 
 const loadMissingCovers = (paths: string[]): void => {
   const pending = paths.filter((path) => !coverUrlFor(path) && !coverRequested.has(path))
@@ -834,8 +846,8 @@ const extractFileName = (path: string): string => {
 /** 元信息优先取插件留存的曲目信息，其次查当前播放列表，最后退回文件名 */
 const displayTitle = (item: { path: string; title?: string }): string =>
   item.title ||
-  playlistIndex.value.tracks.get(item.path)?.title ||
-  playlistIndex.value.tracks.get(item.path)?.displayTitle ||
+  playlistTracks.value.get(item.path)?.title ||
+  playlistTracks.value.get(item.path)?.displayTitle ||
   extractFileName(item.path)
 
 const formatPercentValue = (value: number): string => `${Math.round(value * 10) / 10}%`
@@ -869,7 +881,7 @@ const formatRelative = (timestamp: number): string => {
   return date.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-const isPlayable = (path: string): boolean => playlistIndex.value.tracks.has(path)
+const isPlayable = (path: string): boolean => playlistTracks.value.has(path)
 const isCurrent = (path: string): boolean => currentPath.value !== '' && currentPath.value === path
 
 // ============ 操作 ============
@@ -880,7 +892,7 @@ const refresh = (): void => {
 }
 
 const playFromStats = async (path: string): Promise<void> => {
-  const track = playlistIndex.value.tracks.get(path)
+  const track = playlistTracks.value.get(path)
   if (!track) {
     showError(t('config.trackNotInPlaylist'), 'warning', 3000)
     return

@@ -1,7 +1,8 @@
 //! 安全校验工具
 //!
 //! 提供路径与文件名的统一校验，防止路径穿越、任意文件读写等攻击。
-//! 所有检查均为词法检查，可直接用于前端传入的参数。
+//! 除 [`is_within_dir`] / [`is_within_music_dirs`] 需要 canonicalize 外，其余检查均为
+//! 词法检查，可直接用于前端传入的参数。
 
 use std::path::Path;
 
@@ -109,6 +110,22 @@ pub fn is_within_dir(path: &Path, base: &Path) -> bool {
     }
 }
 
+/// 目录扫描类命令的白名单门禁：路径必须是已登记的 `music_directories` 之一或其子目录。
+///
+/// `is_sensitive_path` 只是黑名单，挡不住"传一个用户从没添加过的目录"，而整树枚举加元数据
+/// 回传正是被攻破的渲染进程最想要的能力。Android 的 SAF 树 URI 本身就代表用户授权，放行。
+/// 目录不存在时 `is_within_dir` 返回 false，因此卸载的外置盘会自然被拒。
+#[must_use]
+pub fn is_within_music_dirs(path: &str, music_dirs: &[String]) -> bool {
+    if crate::android::saf::is_content_uri(path) {
+        return true;
+    }
+    let target = Path::new(path);
+    music_dirs
+        .iter()
+        .any(|dir| is_within_dir(target, Path::new(dir)))
+}
+
 /// 判断路径的扩展名（不区分大小写）是否在白名单内
 #[must_use]
 pub fn has_allowed_extension(path: &str, allowed: &[&str]) -> bool {
@@ -121,6 +138,7 @@ pub fn has_allowed_extension(path: &str, allowed: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn test_sensitive_paths() {
@@ -142,6 +160,31 @@ mod tests {
         // 边界匹配：不应误伤 library 等相似前缀
         assert!(!is_sensitive_path("/library/books"));
         assert!(!is_sensitive_path("C:\\windows personal\\x"));
+    }
+
+    #[test]
+    fn test_is_within_music_dirs() {
+        let tag = std::process::id();
+        let base = std::env::temp_dir().join(format!("mp_music_base_{tag}"));
+        let inside = base.join("rock");
+        let outside = std::env::temp_dir().join(format!("mp_music_outside_{tag}"));
+        fs::create_dir_all(&inside).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+
+        let dirs = vec![base.to_string_lossy().into_owned()];
+        assert!(is_within_music_dirs(&base.to_string_lossy(), &dirs));
+        assert!(is_within_music_dirs(&inside.to_string_lossy(), &dirs));
+        assert!(!is_within_music_dirs(&outside.to_string_lossy(), &dirs));
+        // 相似前缀不算在册：/tmp/mp_music_base 不能覆盖 /tmp/mp_music_basedir
+        let lookalike = std::env::temp_dir().join(format!("mp_music_basedir_{tag}"));
+        fs::create_dir_all(&lookalike).unwrap();
+        assert!(!is_within_music_dirs(&lookalike.to_string_lossy(), &dirs));
+        // 一个目录都没登记时，任何路径都不可扫描
+        assert!(!is_within_music_dirs(&inside.to_string_lossy(), &[]));
+
+        for dir in [&base, &outside, &lookalike] {
+            let _ = fs::remove_dir_all(dir);
+        }
     }
 
     #[test]

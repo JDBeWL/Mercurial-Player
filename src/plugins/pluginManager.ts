@@ -106,10 +106,13 @@ class PluginManager {
   private _playerWatcherStop: WatchStopHandle | null
   // Worker 沙箱宿主注册表 (外置插件;停用即 terminate,卸载时移除)
   private workerHosts: Map<string, PluginWorkerHost>
+  // 每个插件的激活代数:deactivate/uninstall 递增它来作废在途的 activate 结果
+  private activationGens: Map<string, number>
 
   constructor() {
     this.plugins = reactive(new Map()) as Map<string, Plugin>
     this.instances = new Map()
+    this.activationGens = new Map()
     this.extensions = reactive({
       lyricsProviders: [],
       visualizers: [],
@@ -260,6 +263,9 @@ class PluginManager {
     }
 
     plugin.state = PluginState.LOADING
+    // 本次激活的代数快照：在途期间若被 deactivate/uninstall 递增，结果就必须丢弃
+    const generation = (this.activationGens.get(pluginId) ?? 0) + 1
+    this.activationGens.set(pluginId, generation)
 
     try {
       const api = createPluginAPI(pluginId, plugin.permissions, this)
@@ -279,6 +285,22 @@ class PluginManager {
 
       if (instance && typeof instance.activate === 'function') {
         await sandbox.execute(() => instance.activate!())
+      }
+
+      // 内置插件的 await 打断不了（只有 Worker 能被 terminate），所以在这里验收：
+      // 激活期间被停用过，这份实例绝不能登记，否则就是带着活定时器的僵尸插件
+      if (this.activationGens.get(pluginId) !== generation) {
+        logger.warn(`插件 ${pluginId} 在激活期间已被停用，丢弃这次激活结果`)
+        try {
+          if (instance && typeof instance.deactivate === 'function') {
+            await sandbox.execute(() => instance.deactivate!())
+          }
+        } catch (deactivateError) {
+          logger.warn(`丢弃插件实例时 deactivate 失败: ${pluginId}`, deactivateError)
+        }
+        sandbox.cleanup()
+        this.cleanupPluginExtensions(pluginId)
+        return
       }
 
       this.instances.set(pluginId, { instance, api, sandbox })
@@ -312,6 +334,9 @@ class PluginManager {
     if (!plugin) return
 
     if (plugin.state === PluginState.LOADING) {
+      // 作废在途激活：Worker 插件靠 terminate 打断，内置插件打不断，
+      // 只能靠代数让它在提交点自己放弃结果（见 activate 的验收分支）
+      this.activationGens.set(pluginId, (this.activationGens.get(pluginId) ?? 0) + 1)
       // 强制终止:插件在激活流程中挂起(init/runMain 超时或死循环)。
       // terminate 会 reject 挂起的 activate Promise,其 catch 分支会置 ERROR;
       // 这里同步置 ERROR 保证 deactivate 返回后状态立即可用

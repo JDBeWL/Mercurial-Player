@@ -1,15 +1,18 @@
 //! Mercurial Player 库入口：模块导出、共享状态定义与 `run()`。
 
-/// 获取锁, poison 错误时记录日志并返回内部数据(而非 panic)
+/// 取锁；中毒时记录 error 后继续使用其中的数据。
 ///
-/// 支持 `Mutex::lock()`、`RwLock::read()`、`RwLock::write()`，
-/// 三者均返回 `Result<T, PoisonError<T>>`。
+/// 适用于 `Mutex::lock()`、`RwLock::read()`、`RwLock::write()`，三者均返回
+/// `Result<T, PoisonError<T>>`。release 构建是 `panic = "abort"`，进程不会带着中毒锁
+/// 继续跑，所以这条分支只可能在 dev 构建命中——命中即说明另有线程 panic 过，数据一致性
+/// 已无从保证，因此按 error 记录而不是声称"已自动恢复"。
+/// 命令边界别用它，改用 [`LockOrErr`] 把失败如实返回给前端。
 macro_rules! lock_or_log {
     ($lock:expr) => {
         match $lock {
             Ok(guard) => guard,
             Err(poisoned) => {
-                log::warn!("锁中毒, 自动恢复: {}", poisoned);
+                log::error!("锁中毒(其它线程曾 panic),继续使用其数据: {poisoned}");
                 poisoned.into_inner()
             }
         }

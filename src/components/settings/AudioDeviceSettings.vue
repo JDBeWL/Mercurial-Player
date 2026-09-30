@@ -325,6 +325,8 @@ const toggleUsbDacExclusive = async (): Promise<void> => {
 
 /** USB DAC 插拔由后端广播；在设置页打开时顺手刷新一次 */
 let unlistenRoute: UnlistenFn | null = null
+// onMounted 里有一串 await，listen() 完成时组件可能已卸载，需要事后自查
+let mountedCleanupDone = false
 
 // 获取音频设备列表
 const fetchAudioDevices = async (): Promise<void> => {
@@ -500,9 +502,11 @@ onMounted(async () => {
 
   if (isAndroidPlatform.value) {
     try {
-      unlistenRoute = await listen('audio-route-changed', () => {
+      const unlisten = await listen('audio-route-changed', () => {
         void fetchAudioRoute()
       })
+      if (mountedCleanupDone) unlisten()
+      else unlistenRoute = unlisten
     } catch (err) {
       logger.warn('订阅输出路由变化事件失败:', err)
     }
@@ -510,6 +514,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  mountedCleanupDone = true
   unlistenRoute?.()
   unlistenRoute = null
 })

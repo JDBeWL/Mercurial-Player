@@ -13,11 +13,23 @@ use super::metadata::{
     get_track_metadata_internal, set_cover_cache_path,
 };
 use crate::AppState;
+use crate::security::is_within_music_dirs;
 use tauri::{State, command};
+
+/// 扫描前先按已登记的音乐目录收口，避免被攻破的渲染进程拿任意目录做整树枚举
+fn ensure_scannable(music_dirs: &[String], path: &str) -> Result<(), AppError> {
+    if is_within_music_dirs(path, music_dirs) {
+        Ok(())
+    } else {
+        Err(AppError::msg("安全限制：该目录不在已添加的音乐目录内"))
+    }
+}
 
 /// 读取指定目录中的子目录列表
 #[command]
-pub fn read_directory(path: String) -> Result<Vec<String>, AppError> {
+pub fn read_directory(state: State<'_, AppState>, path: String) -> Result<Vec<String>, AppError> {
+    let music_dirs = state.config_manager.load_config()?.music_directories;
+    ensure_scannable(&music_dirs, &path)?;
     read_dir(&path)
 }
 
@@ -26,7 +38,12 @@ pub fn read_directory(path: String) -> Result<Vec<String>, AppError> {
 /// 扫描是 CPU + IPC 密集型（Android 上还要逐个走 SAF fd 桥），放到阻塞线程池执行，
 /// 避免占用主线程导致界面卡死。
 #[command]
-pub async fn get_audio_files(path: String) -> Result<Playlist, AppError> {
+pub async fn get_audio_files(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Playlist, AppError> {
+    let music_dirs = state.config_manager.load_config()?.music_directories;
+    ensure_scannable(&music_dirs, &path)?;
     tauri::async_runtime::spawn_blocking(move || get_audio_files_from_dir(&path))
         .await
         .map_err(|e| AppError::msg(format!("扫描任务异常退出: {e}")))?
@@ -39,6 +56,9 @@ pub async fn get_all_audio_files(
     paths: Vec<String>,
 ) -> Result<Vec<Playlist>, AppError> {
     let config = state.config_manager.load_config()?;
+    for path in &paths {
+        ensure_scannable(&config.music_directories, path)?;
+    }
     tauri::async_runtime::spawn_blocking(move || get_all_audio_files_from_dirs(&paths, &config))
         .await
         .map_err(|e| AppError::msg(format!("批量扫描任务异常退出: {e}")))?

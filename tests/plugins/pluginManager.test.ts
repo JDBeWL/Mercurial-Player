@@ -237,7 +237,7 @@ describe('pluginAPI - 权限门禁 (最小权限原则)', () => {
       'https://example.com',
       expect.objectContaining({
         headers: expect.objectContaining({ 'X-Plugin-Request': 'true', 'X-A': '1' }),
-        redirect: 'manual',
+        redirect: 'follow',
       }),
     )
   })

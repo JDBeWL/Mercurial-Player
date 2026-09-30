@@ -262,4 +262,29 @@ describe('PlayerControls.vue', () => {
       expect(icon.text()).toContain('shuffle')
     })
   })
+
+  describe('after-next 插槽', () => {
+    it('插槽内容排在「下一曲」之后，是控制行的最后一项', () => {
+      storeRef.current = createMockStore()
+      const withSlot = mount(PlayerControls, {
+        slots: { 'after-next': '<button class="icon-button">queue_music</button>' },
+        global: { mocks: { $t: (key: string) => key } },
+      })
+      expect(withSlot.findAll('.controls-row > button').map((b) => b.text())).toEqual([
+        'repeat',
+        'skip_previous',
+        'play_arrow',
+        'skip_next',
+        'queue_music',
+      ])
+    })
+
+    it('不传插槽时控制行仍是原来的四颗按钮', () => {
+      storeRef.current = createMockStore()
+      const withoutSlot = mount(PlayerControls, {
+        global: { mocks: { $t: (key: string) => key } },
+      })
+      expect(withoutSlot.findAll('.controls-row > button')).toHaveLength(4)
+    })
+  })
 })

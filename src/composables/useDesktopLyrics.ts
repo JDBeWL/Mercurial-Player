@@ -24,6 +24,8 @@ const stopFns: Array<() => void> = []
 const unlistenFns: Array<() => void> = []
 // listen() 是异步注册:若卸载先于 Promise resolve,直接调用 unlisten 而不是 push 进数组
 let listenersDisposed = false
+// 在途的 update_desktop_lyric IPC 完成时可能已经卸载，靠它阻止回调再排下一帧
+let updatesStopped = false
 
 // 引用计数:跟踪当前有多少组件正在使用本 composable。
 // 只有最后一个组件卸载时 (refCount 归零) 才真正清理全局监听器/watcher,
@@ -194,7 +196,7 @@ async function updateDesktopLyrics() {
 }
 
 function scheduleDesktopLyricsUpdate() {
-  if (updateFrameId !== null) return
+  if (updateFrameId !== null || updatesStopped) return
 
   updateFrameId = window.requestAnimationFrame(() => {
     updateFrameId = null
@@ -220,7 +222,7 @@ function scheduleDesktopLyricsUpdate() {
 }
 
 function startDesktopLyricsPolling() {
-  if (updateIntervalId !== null) return
+  if (updateIntervalId !== null || updatesStopped) return
   updateIntervalId = window.setInterval(() => {
     scheduleDesktopLyricsUpdate()
   }, 16) // 60 FPS
@@ -303,6 +305,7 @@ export function useDesktopLyrics() {
   if (!isInitialized) {
     isInitialized = true
     listenersDisposed = false
+    updatesStopped = false
 
     const registerListener = (promise: Promise<() => void>) => {
       void promise.then((unlisten) => {
@@ -410,10 +413,15 @@ export function useDesktopLyrics() {
     if (refCount > 0) return
 
     stopDesktopLyricsPolling()
+    updatesStopped = true
     if (updateFrameId !== null) {
       window.cancelAnimationFrame(updateFrameId)
       updateFrameId = null
     }
+    // 模块级在途状态必须一起复位：残留的 updateInFlight/updateQueued 会让下一轮初始化
+    // 的第一帧被当成"已有请求在跑"而永久跳过
+    updateInFlight = false
+    updateQueued = false
     // 停止所有 watcher
     stopFns.forEach((fn) => fn())
     stopFns.length = 0

@@ -121,8 +121,9 @@ pub fn pause_playback(state: &AppState) -> Result<(), AppError> {
     Ok(())
 }
 
-#[command]
-pub fn pause_track(app: AppHandle, state: State<AppState>) -> Result<(), AppError> {
+/// 暂停当前播放，按 exclusive_mode 自动分流。`pause_track` 命令与启动恢复路径共用，
+/// 避免两处行为漂移（曾经只有 Windows 分支，Android 独占模式暂停会失败）。
+pub fn pause_any(app: &AppHandle, state: &AppState) -> Result<(), AppError> {
     // 避免热切换期间用户操作失败
     let exclusive_mode = state
         .player
@@ -161,9 +162,14 @@ pub fn pause_track(app: AppHandle, state: State<AppState>) -> Result<(), AppErro
             ));
         }
     }
-    pause_playback(&state)?;
-    queue::sync_media_session(&app, &state);
+    pause_playback(state)?;
+    queue::sync_media_session(app, state);
     Ok(())
+}
+
+#[command]
+pub fn pause_track(app: AppHandle, state: State<AppState>) -> Result<(), AppError> {
+    pause_any(&app, &state)
 }
 
 #[command]
@@ -403,8 +409,12 @@ pub async fn set_audio_device(
             }
         }
 
+        // 监听线程正在枚举设备时不阻塞本次切换：跳过只让它记住的"当前设备"暂时不准，
+        // 下轮枚举会纠正，但必须在日志里留痕，不能静默
         if let Ok(monitor) = state.player.device_monitor.try_lock() {
             monitor.update_current_device(device_name);
+        } else {
+            log::warn!("设备监听器正忙,本次未更新当前设备({device_name})");
         }
     }
 
@@ -592,7 +602,7 @@ async fn switch_to_shared_mode(
     };
 
     // 先停止并 drop 独占播放器,释放设备：必须在打开新的 cpal stream 之前完成，否则设备仍被占用
-    // 解码线程周期性持锁调用 push_samples 等
+    // 解码线程只在取写入端句柄时短暂碰这把锁（背压等待已不持锁），所以这里不会被拖住
     {
         let mut wasapi_guard = state
             .player
@@ -778,9 +788,11 @@ pub async fn toggle_exclusive_mode(
                     .lock_or_err("exclusive mode")?;
                 *guard = enabled;
             }
-            // 更新设备监听器 (best-effort,失败不影响切换结果)
+            // 更新设备监听器 (监听线程枚举中时跳过,不影响切换结果;跳过要留痕)
             if let Ok(monitor) = state.player.device_monitor.try_lock() {
                 monitor.update_current_device(device_name);
+            } else {
+                log::warn!("设备监听器正忙,独占切换后未同步当前设备");
             }
             log::info!("Successfully hot-switched exclusive mode to {enabled}");
             Ok(())
@@ -805,7 +817,7 @@ pub fn get_exclusive_mode(state: State<AppState>) -> Result<bool, AppError> {
         .player
         .output
         .exclusive_mode
-        .try_lock()
+        .lock()
         .lock_or_err("exclusive mode")
         .map(|g| *g)
         .map_err(AppError::from)
@@ -819,7 +831,7 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
         .player
         .output
         .current_device_name
-        .try_lock()
+        .lock()
         .lock_or_err("current device name")?
         .clone();
 
@@ -832,8 +844,8 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
     let supports_exclusive_mode = {
         #[cfg(windows)]
         {
-            super::wasapi::check_device_exclusive_support(Some(&current_device_name))
-                .unwrap_or(false)
+            // 探测失败就如实报错，不要退化成"这台设备不支持独占"
+            super::wasapi::check_device_exclusive_support(Some(&current_device_name))?
         }
         #[cfg(not(windows))]
         {
@@ -844,7 +856,7 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
         .player
         .output
         .exclusive_mode
-        .try_lock()
+        .lock()
         .lock_or_err("exclusive mode")
         .map(|g| *g)?;
 
@@ -855,9 +867,9 @@ pub fn get_current_audio_device(state: State<AppState>) -> Result<AudioDeviceInf
                 .player
                 .output
                 .wasapi_player
-                .try_lock()
-                .map(|g| g.is_some())
-                .unwrap_or(false);
+                .lock()
+                .lock_or_err("WASAPI player")?
+                .is_some();
             if wasapi_active {
                 "exclusive"
             } else {

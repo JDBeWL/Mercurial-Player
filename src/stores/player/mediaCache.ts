@@ -71,10 +71,25 @@ export async function cachePlaylistMetadata(store: PlayerStore, playlist: Track[
   logger.debug(`Cached metadata for ${cached} tracks`)
 }
 
+/**
+ * 取/建背景批量任务的取消令牌。
+ *
+ * 与 `_cachePlaylistMetadata` 共用同一个 controller：`setPlaylist`、恢复会话、cleanup
+ * 处的一次 abort 就能同时停掉元数据缓存与封面加载，不必各自再维护一个。
+ */
+function ensureAbortController(store: PlayerStore): AbortController {
+  const existing = store._cacheAbortController
+  if (existing && !existing.signal.aborted) return existing
+  const controller = new AbortController()
+  store._cacheAbortController = controller
+  return controller
+}
+
 export async function loadPlaylistCovers(store: PlayerStore, playlist: Track[]): Promise<void> {
   if (!playlist || playlist.length === 0) return
 
   const metadataCache = store._getMetadataCache()
+  const { signal } = ensureAbortController(store)
 
   // 封面加载后不再依赖响应式 mutation 传播:逐条修改 track.coverPath 仅用于
   // currentTrack 同步与元数据缓存,列表 UI 通过 pendingCoverUpdates +
@@ -83,17 +98,24 @@ export async function loadPlaylistCovers(store: PlayerStore, playlist: Track[]):
   // 批量加载封面路径，每次处理 10 首歌曲
   const BATCH_SIZE = 10
   for (let i = 0; i < playlist.length; i += BATCH_SIZE) {
+    if (signal.aborted || store._isDestroyed) {
+      logger.debug(`Cover loading aborted before index ${i}`)
+      return
+    }
     const batch = playlist.slice(i, i + BATCH_SIZE)
     let foundInBatch = 0
 
     // 并行加载这一批的封面
     await Promise.all(
       batch.map(async (track) => {
+        if (signal.aborted || store._isDestroyed) return
         if (!track.coverPath) {
           try {
             const coverPath = await invoke<string | null>('get_track_cover_path', {
               path: track.path,
             })
+            // 回写前再判一次：这一批进行中途可能已经换列表或 cleanup
+            if (signal.aborted || store._isDestroyed) return
             if (coverPath) {
               // 先同步当前曲目,再写列表条目(顺序不能反):
               // playlist 已 markRaw,元素不再是响应式代理,就地写 track.coverPath 不会触发渲染;

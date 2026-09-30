@@ -4,7 +4,7 @@ use crate::error::AppError;
 use crate::security::is_sensitive_path;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::UNIX_EPOCH;
 
@@ -358,6 +358,24 @@ struct CacheFileInfo {
     last_accessed: u64,
 }
 
+/// 封面缓存文件的形状：`<十进制哈希>.<封面扩展名>`（见 cover.rs 的写入端）。
+///
+/// 缓存根目录允许用户指到任意非敏感路径，清理逻辑若不加判别就变成了
+/// "该目录里任意文件的批量删除"，因此只认自己写出来的这种文件名。
+fn is_cover_cache_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let Some((stem, ext)) = name.rsplit_once('.') else {
+        return false;
+    };
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "png" | "gif" | "webp" | "bmp" | "jpg"
+    ) && !stem.is_empty()
+        && stem.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// 清理过期的缓存文件
 fn clean_expired_cache_files() -> Result<usize, AppError> {
     let cache_dir = cover_cache_dir();
@@ -378,7 +396,7 @@ fn clean_expired_cache_files() -> Result<usize, AppError> {
         let entry = entry.map_err(|e| format!("读取目录条目失败: {e}"))?;
         let path = entry.path();
 
-        if path.is_file() {
+        if path.is_file() && is_cover_cache_file(&path) {
             if let Ok(metadata) = fs::metadata(&path) {
                 if let Ok(modified) = metadata.modified() {
                     if let Ok(duration) = modified.duration_since(UNIX_EPOCH) {
@@ -418,7 +436,7 @@ fn get_cache_files_sorted() -> Result<Vec<CacheFileInfo>, AppError> {
         let entry = entry.map_err(|e| format!("读取目录条目失败: {e}"))?;
         let path = entry.path();
 
-        if path.is_file() {
+        if path.is_file() && is_cover_cache_file(&path) {
             if let Ok(metadata) = fs::metadata(&path) {
                 let size = metadata.len();
                 let last_accessed = metadata

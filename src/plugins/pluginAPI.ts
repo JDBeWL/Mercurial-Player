@@ -83,6 +83,24 @@ function canvasToBlob(
 }
 
 /**
+ * Blob → base64（去掉 data URL 前缀）。
+ *
+ * 截图走 IPC 传给 Rust 时，数字数组会让每个字节膨胀成 ~4 个 JSON 字符（2MB 图片 → ~8MB），
+ * base64 只有 ~1.33 倍；而且 Tauri 在 Android 上不支持 raw IPC body，base64 是唯一选择。
+ */
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = String(reader.result)
+      resolve(dataUrl.slice(dataUrl.indexOf(',') + 1))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('图片编码失败'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+/**
  * 解析 data URL 并解码为 Blob
  * @param options.mimeType 显式指定 MIME 类型(跳过 dataURL 头部解析,如 saveImage 的格式参数)
  * @param options.fallbackMime dataURL 头部解析失败时使用的默认 MIME 类型
@@ -194,7 +212,8 @@ export function createPluginAPI(
         requireAction('player.getState')
         const store = getPlayerStore()
         return {
-          currentTrack: store.currentTrack ? JSON.parse(JSON.stringify(store.currentTrack)) : null,
+          // Track 全是标量字段，浅拷贝即完整快照；JSON 往返每次都要重新序列化一遍对象
+          currentTrack: store.currentTrack ? { ...store.currentTrack } : null,
           isPlaying: store.isPlaying,
           currentTime: store.currentTime,
           duration: store.duration,
@@ -652,13 +671,15 @@ export function createPluginAPI(
         }
 
         try {
+          // redirect 用 follow：manual 的话响应永不跟随跳转，response.url 恒等于原始
+          // https 地址，下面那道"重定向到非 HTTPS"的检查就是空转
           const response = await tauriFetch(url, {
             ...options,
             headers: {
               ...options.headers,
               'X-Plugin-Request': 'true', // 不暴露具体插件ID
             },
-            redirect: 'manual', // 防止重定向绕过HTTPS检查
+            redirect: 'follow',
           })
 
           // 检查最终URL是否仍为HTTPS
@@ -803,10 +824,12 @@ export function createPluginAPI(
           throw new Error('不支持的图片格式')
         }
 
-        const arrayBuffer = await blob.arrayBuffer()
-        const data = Array.from(new Uint8Array(arrayBuffer))
+        const dataB64 = await blobToBase64(blob)
 
-        const filePath = await invoke<string>('save_screenshot', { filename: defaultName, data })
+        const filePath = await invoke<string>('save_screenshot', {
+          filename: defaultName,
+          dataB64,
+        })
         logger.info(`[Plugin:${pluginId}] 图片已保存: ${filePath}`)
         return filePath
       },

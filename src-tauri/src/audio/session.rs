@@ -234,7 +234,7 @@ pub async fn try_resume_last_session(
         Ok(()) => {
             // play_track_* 已在播放，立即 pause：恢复后 UI 停在「暂停于 position」，
             // 用户点播放只需 resume_track 从该位置继续
-            if let Err(e) = pause_playback(state) {
+            if let Err(e) = crate::audio::commands::pause_any(app, state) {
                 log::warn!("Failed to pause after resume (playback may still be running): {e}");
                 // 不视为致命错误,仍然返回 resumed=true
             }
@@ -271,54 +271,6 @@ pub async fn try_resume_last_session(
             })
         }
     }
-}
-
-/// 暂停当前播放 (用于启动恢复后立即暂停)
-///
-/// 复用与 pause_track 命令相同的逻辑,但不通过 #[command] 包装
-fn pause_playback(state: &State<AppState>) -> Result<(), AppError> {
-    let exclusive_mode = state
-        .player
-        .output
-        .exclusive_mode
-        .lock()
-        .map(|g| *g)
-        .map_err(|e| format!("Failed to acquire exclusive mode lock: {e}"))?;
-
-    if exclusive_mode {
-        #[cfg(windows)]
-        {
-            let guard = state
-                .player
-                .output
-                .wasapi_player
-                .lock()
-                .map_err(|e| format!("Failed to acquire WASAPI player lock: {e}"))?;
-            if let Some(ref wasapi) = *guard {
-                wasapi.pause()?;
-            } else {
-                return Err(AppError::Audio("WASAPI player not initialized".to_string()));
-            }
-            drop(guard);
-            return Ok(());
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = exclusive_mode;
-            return Err(AppError::Audio(
-                "Exclusive mode is only supported on Windows".to_string(),
-            ));
-        }
-    }
-    let player = state
-        .player
-        .output
-        .sink
-        .lock()
-        .map_err(|e| format!("Failed to acquire player lock: {e}"))?;
-    player.pause();
-    drop(player);
-    Ok(())
 }
 
 /// 保存上次播放会话

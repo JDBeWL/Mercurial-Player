@@ -235,6 +235,7 @@ export const usePlayerStore = defineStore('player', {
 
       if (
         this._trackEndedUnlisten ||
+        this._queueUnlisten ||
         this._positionUnlisten ||
         this._taskbarPreviousUnlisten ||
         this._taskbarPlayPauseUnlisten ||
@@ -432,9 +433,17 @@ export const usePlayerStore = defineStore('player', {
 
       this._isLoading = true
 
-      applyPreparedTrack(this, prepareTrack(this, track, resolvedPath))
+      try {
+        applyPreparedTrack(this, prepareTrack(this, track, resolvedPath))
 
-      await startPlayback(this, track, resolvedPath, requestId)
+        await startPlayback(this, track, resolvedPath, requestId)
+      } finally {
+        // _isLoading 只由 playTrack 置位，也必须由 playTrack 复位：prepareTrack/
+        // applyPreparedTrack 在 startPlayback 之前抛错时，没有人替它收尾
+        if (this._activePlayRequestId === requestId) {
+          this._isLoading = false
+        }
+      }
     },
 
     pause(): void {
@@ -906,6 +915,7 @@ export const usePlayerStore = defineStore('player', {
         unlisten?.()
       }
       this._trackEndedUnlisten = null
+      this._queueUnlisten = null
       this._positionUnlisten = null
       this._taskbarPreviousUnlisten = null
       this._taskbarPlayPauseUnlisten = null

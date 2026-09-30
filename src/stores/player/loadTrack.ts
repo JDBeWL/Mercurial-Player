@@ -156,6 +156,7 @@ export function applyPreparedTrack(store: PlayerStore, prepared: PreparedTrack):
 /**
  * 起播：串行等 pause 完成后再 play_track（带超时），避免 pause 晚于 play 返回把新曲目立即暂停。
  * 失败时上报错误并按需顺延下一首；过期请求（已被新的 playTrack 取代）直接放弃。
+ * `_isLoading` 由调用方 playTrack 统一复位，这里不负责收尾。
  */
 export async function startPlayback(
   store: PlayerStore,
@@ -226,10 +227,6 @@ export async function startPlayback(
       }, AUTO_NEXT_TRACK_DELAY_MS)
       // 保存定时器ID以便在cleanup时清理
       store._nextTrackTimeoutId = nextTrackTimeoutId
-    }
-  } finally {
-    if (store._activePlayRequestId === requestId) {
-      store._isLoading = false
     }
   }
 }

@@ -2,6 +2,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 
 use super::manager::{self, PluginManifest};
 use crate::security::{has_allowed_extension, is_simple_filename};
@@ -17,6 +19,8 @@ pub fn list_plugins() -> Result<Vec<String>, AppError> {
 const SCREENSHOT_EXTENSIONS: [&str; 4] = ["png", "jpg", "jpeg", "webp"];
 /// 单张截图大小上限(插件可经 file.saveImage 无限制写入,防止刷爆磁盘)
 const MAX_SCREENSHOT_BYTES: usize = 32 * 1024 * 1024;
+/// base64 编码后的对应上限（4 字符表示 3 字节，再留一行换行的余量）
+const MAX_ENCODED_SCREENSHOT_BYTES: usize = MAX_SCREENSHOT_BYTES.div_ceil(3) * 4 + 4;
 /// 截图目录总配额(达到后拒绝新增,提示用户清理)
 const SCREENSHOTS_DIR_QUOTA_BYTES: u64 = 512 * 1024 * 1024;
 
@@ -59,15 +63,35 @@ fn screenshots_dir_size(dir: &Path) -> u64 {
         .sum()
 }
 
+/// 解码插件传来的截图字节。
+///
+/// 用 base64 而不是 raw IPC body：Tauri 在 Android 上不支持 `InvokeBody::Raw`
+/// （`tauri::ipc::InvokeBody` 文档明写，枚举永远是 Json），而 base64 仍远好于数字数组
+/// ——后者每个字节要 ~4 个 JSON 字符，2MB 图片会被放大到 ~8MB，base64 是 ~2.7MB。
+fn decode_screenshot_data(data_b64: &str) -> Result<Vec<u8>, AppError> {
+    // 先按编码长度拦一道，免得为超大输入白跑一次解码
+    if data_b64.len() > MAX_ENCODED_SCREENSHOT_BYTES {
+        return Err(AppError::Plugin(format!(
+            "截图数据过大 (编码后 {} 字符, 上限 {MAX_SCREENSHOT_BYTES} 字节)",
+            data_b64.len()
+        )));
+    }
+    BASE64_STANDARD
+        .decode(data_b64)
+        .map_err(|e| AppError::Plugin(format!("截图数据不是合法 base64: {e}")))
+}
+
 /// 保存截图到程序目录下的 screenshots 文件夹
 #[command]
-pub fn save_screenshot(filename: &str, data: Vec<u8>) -> Result<String, AppError> {
+pub fn save_screenshot(filename: &str, data_b64: String) -> Result<String, AppError> {
     // 校验文件名：必须为简单文件名且为图片扩展名，防止路径穿越任意写
     if !is_simple_filename(filename) || !has_allowed_extension(filename, &SCREENSHOT_EXTENSIONS) {
         return Err(AppError::Plugin(
             "非法的截图文件名（仅允许 png/jpg/jpeg/webp）".to_string(),
         ));
     }
+
+    let data = decode_screenshot_data(&data_b64)?;
 
     // 单张大小上限
     if data.len() > MAX_SCREENSHOT_BYTES {
@@ -151,4 +175,33 @@ pub fn open_screenshots_directory() -> Result<(), AppError> {
         .map_err(|e| format!("无法打开目录: {e}"))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_screenshot_data_round_trips() {
+        let raw: Vec<u8> = (0..512).map(|i| (i % 256) as u8).collect();
+        let encoded = BASE64_STANDARD.encode(&raw);
+        assert_eq!(decode_screenshot_data(&encoded).unwrap(), raw);
+    }
+
+    #[test]
+    fn decode_screenshot_data_rejects_garbage() {
+        assert!(matches!(
+            decode_screenshot_data("这不是 base64!!"),
+            Err(AppError::Plugin(_))
+        ));
+    }
+
+    #[test]
+    fn decode_screenshot_data_rejects_oversized_input() {
+        let huge = "A".repeat(MAX_ENCODED_SCREENSHOT_BYTES + 1);
+        assert!(matches!(
+            decode_screenshot_data(&huge),
+            Err(AppError::Plugin(_))
+        ));
+    }
 }

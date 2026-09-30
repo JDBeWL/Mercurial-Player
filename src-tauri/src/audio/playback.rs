@@ -217,24 +217,24 @@ pub async fn play_track_exclusive(
 
     std::thread::spawn(move || {
         thread_started_clone.store(true, Ordering::SeqCst);
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            decode_and_push_to_wasapi(
-                source,
-                wasapi_clone,
-                app_clone,
-                generation,
-                thread_id,
-                new_thread_id,
-                src_sr,
-                src_ch.get(),
-                target_sr,
-                target_ch,
-                eq_settings,
-                spectrum_data,
-                target_fps,
-                start_pos,
-            );
-        }));
+        // 不包 catch_unwind：release 构建是 panic="abort"，接不住；debug 下接住也只会
+        // 把解码线程的 bug 变成"这首歌静音了"，现场什么都不留
+        decode_and_push_to_wasapi(
+            source,
+            wasapi_clone,
+            app_clone,
+            generation,
+            thread_id,
+            new_thread_id,
+            src_sr,
+            src_ch.get(),
+            target_sr,
+            target_ch,
+            eq_settings,
+            spectrum_data,
+            target_fps,
+            start_pos,
+        );
     });
 
     // 等待解码线程启动

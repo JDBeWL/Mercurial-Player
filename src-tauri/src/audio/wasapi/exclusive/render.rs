@@ -8,7 +8,7 @@ use crossbeam_channel::{Receiver, Sender};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// 淡入淡出状态机(音频线程内部维护,不阻塞主线程)
 #[derive(Debug, Clone, Copy)]
@@ -65,6 +65,9 @@ pub(super) fn audio_thread_main(
     let mut reusable_bytes: Vec<u8> = Vec::with_capacity(4096 * 4);
 
     log::info!("WASAPI audio thread started");
+
+    // 淡入淡出按挂钟时间推进的上一跳时刻
+    let mut last_fade_tick = Instant::now();
 
     while is_running.load(Ordering::SeqCst) {
         match command_rx.try_recv() {
@@ -230,7 +233,7 @@ pub(super) fn audio_thread_main(
         if is_playing {
             // 应用 fade_factor:实际音量 = current_volume * fade_factor
             let effective_volume = current_volume * fade_factor;
-            let frames_processed = process_audio_output(
+            process_audio_output(
                 audio_client.as_ref(),
                 render_client.as_ref(),
                 event_handle.as_ref(),
@@ -246,22 +249,31 @@ pub(super) fn audio_thread_main(
                 &mut reusable_bytes,
                 &mut underrun_logger,
             );
-            // 按实际处理的帧数推进淡入淡出剩余帧计数
-            if frames_processed > 0 {
-                match &mut fade_state {
-                    FadeState::FadingOut {
-                        remaining_frames, ..
-                    }
-                    | FadeState::FadingIn {
-                        remaining_frames, ..
-                    } => {
-                        *remaining_frames = remaining_frames.saturating_sub(frames_processed);
-                    }
-                    FadeState::Idle => {}
-                }
-            }
         } else {
             thread::sleep(Duration::from_millis(10));
+        }
+
+        // 按挂钟时间推进淡入淡出，不按已处理帧数：设备未起播或停转时一帧都处理不了，
+        // 按帧计数会让 Stop/Pause 的淡出动作永不落地，状态卡在 Stopping/Pausing
+        let elapsed_frames = {
+            let now = Instant::now();
+            let elapsed = now.duration_since(last_fade_tick);
+            last_fade_tick = now;
+            let sr = sample_rate_atomic.load(Ordering::Relaxed).max(1);
+            (elapsed.as_micros() as u64 * sr as u64 / 1_000_000) as usize
+        };
+        if elapsed_frames > 0 {
+            match &mut fade_state {
+                FadeState::FadingOut {
+                    remaining_frames, ..
+                }
+                | FadeState::FadingIn {
+                    remaining_frames, ..
+                } => {
+                    *remaining_frames = remaining_frames.saturating_sub(elapsed_frames);
+                }
+                FadeState::Idle => {}
+            }
         }
     }
 

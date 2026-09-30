@@ -71,6 +71,8 @@ export default {
     let smoothedAudioData = new Float32Array(128)
     let spectrumListener: (() => void) | null = null
     let isAnimating = false
+    // onMounted 内有 await：注册完成时组件可能已卸载，需要事后自查
+    let disposed = false
 
     let pendingSpectrumData: Float32Array | null = null
 
@@ -338,14 +340,18 @@ export default {
       // 监听频谱更新事件（后端以60fps发送）
       // 数据先缓存，由requestAnimationFrame按屏幕刷新率消费
       try {
-        spectrumListener = await listen<{ data: Float32Array }>('spectrum-update', (event) => {
+        const unlisten = await listen<{ data: Float32Array }>('spectrum-update', (event) => {
           if (event.payload && event.payload.data) {
             pendingSpectrumData = event.payload.data
           }
         })
+        if (disposed) unlisten()
+        else spectrumListener = unlisten
       } catch (error) {
         logger.error('Failed to setup spectrum listener:', error)
       }
+
+      if (disposed) return
 
       // 根据当前播放状态决定是否启动动画
       if (playerStore.isPlaying) {
@@ -355,12 +361,12 @@ export default {
       }
     })
 
-    onUnmounted(async () => {
+    onUnmounted(() => {
+      disposed = true
       window.removeEventListener('resize', resizeCanvas)
-      if (animationId) cancelAnimationFrame(animationId)
-      if (spectrumListener) {
-        spectrumListener()
-      }
+      stopAnimation()
+      spectrumListener?.()
+      spectrumListener = null
     })
 
     return {

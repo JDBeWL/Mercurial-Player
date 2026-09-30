@@ -619,9 +619,13 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       if (finished) endSession()
     }
 
+    // 暂停/空闲时不累计收听时长，也就没必要每 3 秒醒一次
+    let lastObservedPlaying = false
+
     const pollPlayerState = async (): Promise<void> => {
       try {
         const state = api.player.getState()
+        lastObservedPlaying = state.isPlaying
         handlePlaybackState(state.currentTrack, state.isPlaying, state.currentTime, state.duration)
       } catch {
         // 播放器尚未就绪时忽略本轮轮询
@@ -829,7 +833,10 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         api.events.on('player:stateChanged', stateChangedCallback)
 
         await pollPlayerState()
-        pollingInterval = setInterval(() => void pollPlayerState(), POLL_INTERVAL_MS)
+        pollingInterval = setInterval(() => {
+          if (!lastObservedPlaying) return
+          void pollPlayerState()
+        }, POLL_INTERVAL_MS)
       },
 
       deactivate(): void {

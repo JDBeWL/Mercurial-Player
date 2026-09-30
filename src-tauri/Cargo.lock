@@ -2627,7 +2627,7 @@ dependencies = [
 
 [[package]]
 name = "mercurial-player"
-version = "1.6.0-1"
+version = "1.6.0-2"
 dependencies = [
  "audioadapter-buffers",
  "base64 0.22.1",

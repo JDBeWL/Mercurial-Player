@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::AppState;
 use crate::config::manager::TrackSnapshot;
@@ -256,7 +256,11 @@ pub fn handle_track_ended(app: &AppHandle, state: &AppState) {
     }
 }
 
-/// 播放队列中指定下标的曲目，并同步 UI / 通知栏
+/// 播放队列中指定下标的曲目，并同步 UI / 通知栏。
+///
+/// 独占模式开着时必须走独占起播路径，否则后台自动推进会把用户从独占输出上悄悄摘下来
+/// （表现为切到下一首就变成系统混音）。独占起播是 async，而这里可能跑在解码/分析线程上
+/// （见 [`handle_track_ended`]），所以那条分支整段丢给 Tauri 异步运行时执行。
 fn play_queue_track(
     app: &AppHandle,
     state: &AppState,
@@ -264,6 +268,36 @@ fn play_queue_track(
     track: &TrackSnapshot,
     reason: &str,
 ) -> Result<(), AppError> {
+    let exclusive = state
+        .player
+        .output
+        .exclusive_mode
+        .lock()
+        .lock_or_err("exclusive mode")
+        .map(|g| *g)?;
+
+    if exclusive {
+        let app = app.clone();
+        let path = track.path.clone();
+        let track = track.clone();
+        let reason = reason.to_string();
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<AppState>();
+            if let Err(e) =
+                super::playback::play_track_exclusive(&app, &state, &path, None, true).await
+            {
+                log::error!("队列自动推进(独占模式)失败: {e}");
+                return;
+            }
+            if let Ok(mut queue) = state.player.queue.lock() {
+                queue.set_index(index);
+            }
+            emit_queue_changed(&app, Some(index), Some(track), &reason);
+            sync_media_session(&app, &state);
+        });
+        return Ok(());
+    }
+
     super::playback::play_track_shared(app, state, &track.path, None)?;
     if let Ok(mut queue) = state.player.queue.lock() {
         queue.set_index(index);

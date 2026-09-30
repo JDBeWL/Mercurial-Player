@@ -351,10 +351,12 @@ describe('file API', () => {
       expect(result).toBe('/shots/cover.png')
       const [, payload] = vi.mocked(invoke).mock.calls[0] as [
         string,
-        { filename: string; data: number[] },
+        { filename: string; dataB64: string },
       ]
       expect(payload.filename).toBe('cover.png')
-      expect(payload.data.length).toBe(3) // 'png'
+      // 载荷是 base64 字符串，不再是数字数组（后者每个字节要 ~4 个 JSON 字符）
+      expect(typeof payload.dataB64).toBe('string')
+      expect(atob(payload.dataB64)).toBe('png')
     })
 
     it('maps the jpg extension to image/jpeg', async () => {
@@ -380,7 +382,7 @@ describe('file API', () => {
       await api().file.saveImage(new Blob(['png']))
       expect(invoke).toHaveBeenCalledWith('save_screenshot', {
         filename: 'image.png',
-        data: [112, 110, 103],
+        dataB64: 'cG5n', // 'png'
       })
     })
 

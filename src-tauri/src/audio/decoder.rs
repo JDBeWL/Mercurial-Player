@@ -202,12 +202,21 @@ impl Iterator for LockFreeSymphoniaSource {
         self.chunk_buffer.clear();
         self.chunk_pos = 0;
 
+        // next() 跑在 cpal 回调线程上，这里不能无限等：解码停滞（慢盘/网络盘）时
+        // 有界等待 30ms，之后先吐静音维持流，真正的结束仍由 producer_finished/断连判定
+        const MAX_STALL_WAITS: u32 = 3;
+        let mut stall_waits = 0u32;
         let first = loop {
             match receiver.recv_timeout(Duration::from_millis(10)) {
                 Ok(s) => break Some(s),
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                     if self.producer_finished.load(Ordering::Acquire) && receiver.is_empty() {
                         break None;
+                    }
+                    stall_waits += 1;
+                    if stall_waits >= MAX_STALL_WAITS {
+                        log::debug!("解码器供给停滞,以静音维持输出流");
+                        break Some(0.0);
                     }
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break None,

@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capability for the main window",
+  "description": "Default capability for the main window. Renderer file reads are confined to the system temp dir by fs:scope-temp-recursive; a capability-level \"scope\" block is not part of Tauri's capability schema and is dropped by codegen, so scoping must be expressed on the permission entry itself.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -44,23 +44,5 @@
         { "url": "https://github-releases.githubusercontent.com/*" }
       ]
     }
-  ],
-  "scope": {
-    "allow": ["$TEMP/mercurial-player/**"],
-    "deny": [
-      "$HOME/.ssh/**",
-      "$HOME/.gnupg/**",
-      "$HOME/.config/**",
-      "$APPCONFIG/**",
-      "C:/Windows/**",
-      "C:/Program Files/**",
-      "C:/Program Files (x86)/**",
-      "/etc/**",
-      "/usr/**",
-      "/System/**",
-      "/proc/**",
-      "/sys/**",
-      "/boot/**"
-    ]
-  }
+  ]
 }

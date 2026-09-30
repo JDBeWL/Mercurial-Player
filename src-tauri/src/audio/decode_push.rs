@@ -361,33 +361,35 @@ pub(super) fn decode_and_push_to_wasapi(
             // 可视化:推送采样同时计算频谱并发送 spectrum-update
             spectrum_analyzer.push_and_maybe_emit(final_out, &spectrum_data, &target_fps, &app);
 
-            // 等待缓冲区有空间。水位查询与推送都只触碰 SPSC 环形缓冲的原子计数(无互斥锁)，
-            // 不与音频渲染线程竞争；外层 wasapi 锁仅用于访问播放器实例。
-            let max_buffer = target_sr as usize * target_ch as usize * 2;
-            loop {
+            // 写入端句柄：外层锁只用于取播放器实例本身，拿到后水位等待与推送都不持锁。
+            // 若在持锁期间等背压，会把切设备/停止这些命令线程一起堵死。
+            let producer = {
+                let guard = lock_or_log!(wasapi.lock());
+                guard.as_ref().map(|p| p.producer())
+            };
+
+            if let Some(producer) = producer {
+                let max_buffer = target_sr as usize * target_ch as usize * 2;
+                loop {
+                    if generation.load(Ordering::SeqCst) != my_generation
+                        || thread_id_ref.load(Ordering::SeqCst) != my_id
+                    {
+                        break;
+                    }
+                    if producer.buffer_size() < max_buffer {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                    // 等待时继续发送播放位置
+                    emit_position(&mut last_position_emit_time);
+                }
                 if generation.load(Ordering::SeqCst) != my_generation
                     || thread_id_ref.load(Ordering::SeqCst) != my_id
                 {
                     break;
                 }
-                let has_space = lock_or_log!(wasapi.lock())
-                    .as_ref()
-                    .is_none_or(|p| p.buffer_size() < max_buffer);
-                if has_space {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(10));
-                // 等待时继续发送播放位置
-                emit_position(&mut last_position_emit_time);
-            }
-            if generation.load(Ordering::SeqCst) != my_generation
-                || thread_id_ref.load(Ordering::SeqCst) != my_id
-            {
-                break;
-            }
 
-            if let Some(ref p) = *lock_or_log!(wasapi.lock()) {
-                if p.push_samples(final_out).is_err() {
+                if producer.push_samples(final_out).is_err() {
                     break;
                 }
             }

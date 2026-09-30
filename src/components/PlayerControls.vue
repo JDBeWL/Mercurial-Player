@@ -39,6 +39,10 @@
       >
         <span class="material-symbols-rounded">skip_next</span>
       </button>
+
+      <!-- 附加按钮（播放列表）由宿主插到这里：桌面端与手机横屏这一行有富余宽度，让它跟传输键成组；
+           竖屏已经接近满宽，宿主会把它留在右侧那一组 -->
+      <slot name="after-next" />
     </div>
   </div>
 </template>

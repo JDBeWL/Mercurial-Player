@@ -6,6 +6,7 @@
 
 import { reactive } from 'vue'
 import logger from '../utils/logger'
+import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
 
 // 插件存储的 localStorage key 前缀
 export const PLUGIN_STORAGE_PREFIX = 'mercurial-plugin-storage-'
@@ -45,6 +46,8 @@ export function createPluginStorage(pluginId: string): PluginPersistentStorage {
 
   const storage = reactive(savedData)
   const maxStorageSize = 1024 * 1024
+  // 配额告急时每个数组至少保留的条数（保留最近的，历史靠前者丢弃）
+  const QUOTA_KEEP_TAIL = 10
   let saveTimeout: ReturnType<typeof setTimeout> | null = null
   // 保存串行化队列: 保证写入按顺序执行,flush 可保证追加一次保存
   let saveQueue: Promise<void> = Promise.resolve()
@@ -66,18 +69,38 @@ export function createPluginStorage(pluginId: string): PluginPersistentStorage {
       localStorage.setItem(storageKey, JSON.stringify(target))
     } catch (e) {
       if ((e as Error).name === 'QuotaExceededError') {
-        logger.error(`插件 ${pluginId} 存储空间不足`)
-        // 紧急清理策略
+        // 紧急清理策略：只保留每个数组的最后 QUOTA_KEEP_TAIL 条
+        const dropped: string[] = []
         for (const key of Object.keys(target)) {
           if (Array.isArray(target[key])) {
-            target[key] = (target[key] as unknown[]).slice(-10)
+            const arr = target[key] as unknown[]
+            if (arr.length > QUOTA_KEEP_TAIL) {
+              target[key] = arr.slice(-QUOTA_KEEP_TAIL)
+              dropped.push(`${key}(少了 ${arr.length - QUOTA_KEEP_TAIL} 条)`)
+            }
           }
         }
+        let lostEverything = false
         try {
           localStorage.setItem(storageKey, JSON.stringify(target))
         } catch {
           localStorage.removeItem(storageKey)
+          lostEverything = true
         }
+        // 截断会销毁插件自己的历史数据（如播放统计），只写 console 等于没人知道，
+        // 必须走统一的错误出口让用户看到
+        errorHandler.handle(
+          new Error(lostEverything ? '存储已清空' : `已截断 ${dropped.length} 个数组`),
+          {
+            type: ErrorType.CONFIG_SAVE_ERROR,
+            severity: ErrorSeverity.HIGH,
+            context: { pluginId, truncated: dropped.join(', ') || '(无)' },
+            userMessage: lostEverything
+              ? `插件 ${pluginId} 的本地存储已满，数据已全部清除`
+              : `插件 ${pluginId} 的本地存储已满，已丢弃部分历史数据：${dropped.join('、')}`,
+            showToUser: true,
+          },
+        )
       } else {
         logger.warn(`保存插件 ${pluginId} 存储失败:`, e)
       }
