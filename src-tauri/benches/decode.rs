@@ -6,7 +6,7 @@
 //! 输出: target/criterion/decode/report/index.html
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use mercurial_player::audio::SymphoniaDecoder;
+use mercurial_player_lib::audio::SymphoniaDecoder;
 use std::io::Write;
 
 /// 生成测试用 WAV 文件 (sine wave)

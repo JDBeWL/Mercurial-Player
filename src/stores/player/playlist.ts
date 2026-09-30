@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import logger from '@/utils/logger'
 import type { Track } from '@/types'
-import type { usePlayerStore } from './player'
+import type { usePlayerStore } from './index'
 import { adjustShuffleAfterRemove } from './shuffle'
 
 /**

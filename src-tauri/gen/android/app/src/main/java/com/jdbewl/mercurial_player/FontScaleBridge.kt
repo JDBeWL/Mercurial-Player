@@ -10,7 +10,7 @@ import java.lang.ref.WeakReference
 
 /**
  * 应用内「界面字号」桥：把 `WebSettings.textZoom` 写成 `100 × appScale`，从而覆盖系统字号。
- * 只乘 appScale、**不要除 fontScale**：系统字号就是 textZoom 的初值，不是叠在外的乘子（原理见 app_font_scale.rs）。
+ * 只乘 appScale、**不要除 fontScale**：系统字号就是 textZoom 的初值，不是叠在外的乘子（原理见 android/font_scale.rs）。
  */
 object FontScaleBridge {
     private const val TAG = "FontScaleBridge"

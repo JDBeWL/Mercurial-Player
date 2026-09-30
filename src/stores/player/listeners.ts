@@ -3,8 +3,8 @@ import { register, unregisterAll, isRegistered } from '@tauri-apps/plugin-global
 import logger from '@/utils/logger'
 import i18n from '@/i18n'
 import errorHandler, { ErrorType, ErrorSeverity } from '@/utils/errorHandler'
-import { isAndroid } from './playerQueue'
-import type { usePlayerStore } from './player'
+import { isAndroid } from './queue'
+import type { usePlayerStore } from './index'
 
 /**
  * Player store 的监听器设置函数,从 player.ts 抽离以降低单文件复杂度。

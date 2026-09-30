@@ -1,5 +1,6 @@
 //! Android JNI 通用封装：`with_jni` / `app_class` 与几个静态方法调用助手，
-//! 供 `android_saf`（Rust→Kotlin）与 `android`（Kotlin→Rust）共用。仅 Android 目标编译。
+//! 供 `saf`/`font_scale`/`system_ui`（Rust→Kotlin）与本模块 `entry`（Kotlin→Rust）共用。
+//! 仅 Android 目标编译。
 #![allow(unsafe_code)] // JNI 指针与 JavaVM 构造必须使用 unsafe，见各调用点 SAFETY 注释
 
 use crate::error::AppError;
@@ -108,7 +109,7 @@ pub fn jni_call_void_string(class_name: &str, method: &str, arg: &str) -> Result
     })
 }
 
-/// 调用任意类的 `(float) -> void` 静态方法，供「界面字号」使用（见 [`crate::app_font_scale`]）。
+/// 调用任意类的 `(float) -> void` 静态方法，供「界面字号」使用（见 [`crate::android::font_scale`]）。
 /// 用 float 签名而不是让 Kotlin 再解析一遍字符串。
 pub fn jni_call_void_float(class_name: &str, method: &str, value: f32) -> Result<(), AppError> {
     with_jni(|env| {

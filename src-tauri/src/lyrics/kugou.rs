@@ -1,8 +1,8 @@
 //! 酷狗音乐歌词来源
 
 use crate::error::AppError;
+use crate::http_client::{get, read_response_text, send_with_retry};
 use crate::lyrics::{LyricCandidate, LyricQuery, LyricsData};
-use crate::media::http_client::{get, read_response_text, send_with_retry};
 use base64::Engine;
 use md5::{Digest, Md5};
 use serde::Deserialize;

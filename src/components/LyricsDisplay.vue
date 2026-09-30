@@ -145,7 +145,7 @@ import type { ActionButton } from '@/plugins/pluginManager'
 import logger from '@/utils/logger'
 import KaraokeLine from './KaraokeLine.vue'
 import LyricsCandidatePicker from './lyrics/LyricsCandidatePicker.vue'
-import type { LyricCandidate, LyricKind } from '@/utils/lyricProviders'
+import type { LyricCandidate, LyricKind } from '@/services/lyrics'
 import { detectLyricLanguage, type LyricLanguage } from '@/utils/languageDetect'
 
 export default {

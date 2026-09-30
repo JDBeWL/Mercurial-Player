@@ -1,9 +1,10 @@
-//! 网易云音乐歌词 API
+//! 网易云音乐歌词 provider
 //!
 //! 提供从网易云音乐搜索和获取歌词的功能
 
 use crate::error::AppError;
-use crate::media::http_client::{get, post, read_response_text, send_with_retry};
+use crate::http_client::{get, post, read_response_text, send_with_retry};
+use crate::lyrics::LyricsData;
 use serde::{Deserialize, Serialize};
 use tauri_plugin_http::reqwest::header::{
     ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, HeaderMap, HeaderValue, REFERER, USER_AGENT,
@@ -34,17 +35,6 @@ struct LyricResponse {
 #[derive(Debug, Deserialize)]
 struct LyricContent {
     lyric: Option<String>,
-}
-
-/// 返回给前端的歌词数据
-#[derive(Debug, Clone, Serialize)]
-pub struct LyricsData {
-    pub lrc: String,
-    pub tlyric: String,
-    pub romalrc: String,
-    /// ASS 逐字歌词（原文逐字 + 译文/罗马音普通行），空表示无逐字
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub karaoke: String,
 }
 
 /// 返回给前端的搜索结果

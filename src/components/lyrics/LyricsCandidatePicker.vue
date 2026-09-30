@@ -87,9 +87,9 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { usePlayerStore } from '@/stores/player'
 import { useConfigStore } from '@/stores/config'
-import type { LyricCandidate, LyricKind } from '@/utils/lyricProviders'
-import { buildPreviewLyric } from '@/utils/lyricProviders'
-import { LYRIC_PROVIDERS } from '@/utils/lyricProviders'
+import type { LyricCandidate, LyricKind } from '@/services/lyrics'
+import { buildPreviewLyric } from '@/services/lyrics'
+import { LYRIC_PROVIDERS } from '@/services/lyrics'
 import MD3Select from '../MD3Select.vue'
 
 const props = defineProps<{

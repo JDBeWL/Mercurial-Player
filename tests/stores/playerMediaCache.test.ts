@@ -6,7 +6,7 @@ import {
   takeCoverUpdates,
   cachePlaylistMetadata,
   loadPlaylistCovers,
-} from '@/stores/playerMediaCache'
+} from '@/stores/player/mediaCache'
 
 const track = (path: string, extra: Partial<Track> = {}): Track =>
   ({ path, name: path, ...extra }) as unknown as Track

@@ -102,8 +102,8 @@ fn save_metadata_cache(cache: &MetadataCache) -> Result<(), AppError> {
 
 /// 获取文件的修改时间（content URI 没有可 stat 的路径，从 SAF fd 上取）
 fn get_file_modified_time(path: &str) -> Option<u64> {
-    let metadata = if crate::android_saf::is_content_uri(path) {
-        crate::android_saf::open_media_file(path)
+    let metadata = if crate::android::saf::is_content_uri(path) {
+        crate::android::saf::open_media_file(path)
             .ok()?
             .metadata()
             .ok()?

@@ -141,7 +141,7 @@ pub fn clear_font_caches() -> Result<super::fonts::FontCacheStats, AppError> {
     #[cfg(windows)]
     {
         // 桌面歌词未初始化时无内存缓存可清，忽略错误
-        let _ = crate::taskbar::desktop_lyrics::invalidate_font_caches();
+        let _ = crate::desktop_lyrics::invalidate_font_caches();
     }
     Ok(super::fonts::FontCacheStats {
         extract_cache_bytes: super::fonts::font_extract_cache_size(),
@@ -221,37 +221,19 @@ pub const fn get_platform() -> &'static str {
 /// 设置应用内「界面字号」倍率（`1.0` = 设计稿原始大小）
 ///
 /// Android 上把 WebView 的 `textZoom` 直接写成 `100 × 倍率`，从而覆盖系统字号
-/// （原理见 [`crate::app_font_scale`] 的模块注释）；桌面端为 no-op。
+/// （原理见 [`crate::android::font_scale`] 的模块注释）；桌面端为 no-op。
 #[command]
 pub fn set_app_font_scale(scale: f32) -> Result<(), AppError> {
-    crate::app_font_scale::set_app_font_scale(scale)
+    crate::android::font_scale::set_app_font_scale(scale)
 }
 
-/// 隐藏/恢复 Android 系统栏（状态栏、导航栏）。桌面端 no-op。
-///
-/// tao 在 Android 上没实现 `set_fullscreen`（源码里直接 warn 后返回），
-/// 所以只能自己经 JNI 交给 `WindowInsetsControllerCompat`。
+/// 隐藏/恢复 Android 系统栏（状态栏、导航栏）。桌面端 no-op，实现见 [`crate::android::system_ui`]。
 #[command]
-#[cfg(target_os = "android")]
 pub fn set_system_ui_hidden(
     hide_status_bars: bool,
     hide_navigation_bars: bool,
 ) -> Result<(), AppError> {
-    crate::android_jni::jni_call_void_two_bools(
-        "com/jdbewl/mercurial_player/MainActivity",
-        "setSystemUiHidden",
-        hide_status_bars,
-        hide_navigation_bars,
-    )
-}
-
-#[command]
-#[cfg(not(target_os = "android"))]
-pub fn set_system_ui_hidden(
-    _hide_status_bars: bool,
-    _hide_navigation_bars: bool,
-) -> Result<(), AppError> {
-    Ok(())
+    crate::android::system_ui::set_system_ui_hidden(hide_status_bars, hide_navigation_bars)
 }
 
 /// 显示器刷新率信息

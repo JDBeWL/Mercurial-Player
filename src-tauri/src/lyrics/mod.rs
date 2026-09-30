@@ -1,8 +1,10 @@
-//! 多来源歌词获取
+//! 多来源歌词获取：netease / lrclib / qq / kugou 各 provider 与共用的返回类型。
 
 pub mod ass;
+pub mod commands;
 pub mod kugou;
 pub mod lrclib;
+pub mod netease;
 pub mod qq;
 pub mod qrc;
 
@@ -10,7 +12,17 @@ use crate::error::AppError;
 use serde::Serialize;
 
 /// 歌词 bundle 统一复用返回类型（原文/翻译/罗马音三字段）
-pub type LyricsData = crate::media::netease::LyricsData;
+///
+/// 定义在 lyrics 而非某个 provider：四个来源与前端契约都共用这一形状。
+#[derive(Debug, Clone, Serialize)]
+pub struct LyricsData {
+    pub lrc: String,
+    pub tlyric: String,
+    pub romalrc: String,
+    /// ASS 逐字歌词（原文逐字 + 译文/罗马音普通行），空表示无逐字
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub karaoke: String,
+}
 
 /// 歌词搜索查询参数
 #[derive(Debug, Clone)]
@@ -71,10 +83,10 @@ async fn netease_candidates(
     } else {
         format!("{} {}", query.title, query.artist)
     };
-    let songs = crate::media::netease::search_songs(&keyword, limit, 0).await?;
+    let songs = netease::search_songs(&keyword, limit, 0).await?;
     let mut out: Vec<LyricCandidate> = Vec::new();
     for song in songs {
-        let Ok(bundle) = crate::media::netease::get_lyrics(&song.id).await else {
+        let Ok(bundle) = netease::get_lyrics(&song.id).await else {
             continue;
         };
         if bundle.lrc.trim().is_empty() {

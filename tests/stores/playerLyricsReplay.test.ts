@@ -48,10 +48,6 @@ vi.mock('@/utils/lyricsParser', () => ({
   findLyricIndex: vi.fn(() => 0),
 }))
 
-vi.mock('@/utils/neteaseApi', () => ({
-  neteaseApi: { searchAndGetLyrics: vi.fn(async () => null) },
-}))
-
 vi.mock('@/stores/config', () => ({
   useConfigStore: vi.fn(() => ({
     audio: { volume: 0.5, exclusiveMode: false, fadeEnabled: true },

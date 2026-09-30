@@ -52,7 +52,7 @@ vi.mock('@/stores/musicLibrary', () => ({
 import { setActivePinia, createPinia, storeToRefs } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { usePlayerStore } from '@/stores/player'
-import { resumeLastSession } from '@/stores/playerSession'
+import { resumeLastSession } from '@/stores/player/session'
 
 const invokeMock = vi.mocked(invoke)
 

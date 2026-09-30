@@ -10,13 +10,10 @@ use super::d2d_resources::{Direct2DState, trim_utf16_nul};
 
 // 以下按钮常量/矩形函数经 renderer 模块 re-export 供 window.rs 使用，
 // 可见性需覆盖 desktop_lyrics 模块
-pub(in crate::taskbar::desktop_lyrics) const CLOSE_BTN_SIZE: i32 = 28;
-pub(in crate::taskbar::desktop_lyrics) const CLOSE_BTN_MARGIN: i32 = 6;
+pub(in crate::desktop_lyrics) const CLOSE_BTN_SIZE: i32 = 28;
+pub(in crate::desktop_lyrics) const CLOSE_BTN_MARGIN: i32 = 6;
 
-pub(in crate::taskbar::desktop_lyrics) fn get_close_btn_rect(
-    window_rect: &RECT,
-    scale: i32,
-) -> RECT {
+pub(in crate::desktop_lyrics) fn get_close_btn_rect(window_rect: &RECT, scale: i32) -> RECT {
     let btn = CLOSE_BTN_SIZE * scale / 96;
     let margin = CLOSE_BTN_MARGIN * scale / 96;
     let spacing = 8 * scale / 96;
@@ -32,10 +29,7 @@ pub(in crate::taskbar::desktop_lyrics) fn get_close_btn_rect(
     }
 }
 
-pub(in crate::taskbar::desktop_lyrics) fn get_lock_btn_rect(
-    window_rect: &RECT,
-    scale: i32,
-) -> RECT {
+pub(in crate::desktop_lyrics) fn get_lock_btn_rect(window_rect: &RECT, scale: i32) -> RECT {
     let btn = CLOSE_BTN_SIZE * scale / 96;
     let margin = CLOSE_BTN_MARGIN * scale / 96;
     let spacing = 8 * scale / 96;

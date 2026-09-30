@@ -1,8 +1,8 @@
 //! Lrclib 歌词来源
 
 use crate::error::AppError;
+use crate::http_client::{get, read_response_text, send_with_retry};
 use crate::lyrics::{LyricCandidate, LyricQuery, LyricsData};
-use crate::media::http_client::{get, read_response_text, send_with_retry};
 use serde::Deserialize;
 
 /// Lrclib 条目（响应字段为 camelCase，需 rename）

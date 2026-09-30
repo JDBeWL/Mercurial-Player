@@ -90,7 +90,7 @@ import {
   setupGlobalShortcuts,
   unregisterGlobalShortcuts,
   setupDeviceListeners,
-} from '@/stores/playerListeners'
+} from '@/stores/player/listeners'
 
 /** 从 setup 函数签名推导 PlayerStore 类型 */
 type PlayerStore = Parameters<typeof setupTrackEndedListener>[0]

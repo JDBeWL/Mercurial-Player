@@ -7,7 +7,7 @@ import { watch, type WatchStopHandle } from 'vue'
 import type { TrackSnapshot } from '@/types'
 import { getPlatform } from '@/services/appService'
 import logger from '@/utils/logger'
-import type { usePlayerStore } from './player'
+import type { usePlayerStore } from './index'
 
 type PlayerStore = ReturnType<typeof usePlayerStore>
 

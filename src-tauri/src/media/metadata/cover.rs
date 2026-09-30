@@ -61,7 +61,7 @@ pub(super) fn extract_cover_to_cache(
 
 /// 获取音频封面缓存路径（按需提取）
 pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, AppError> {
-    if is_sensitive_path(path) && !crate::android_saf::is_content_uri(path) {
+    if is_sensitive_path(path) && !crate::android::saf::is_content_uri(path) {
         return Err("安全限制：不允许访问敏感目录".to_string().into());
     }
 
@@ -94,12 +94,12 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
         return Err("安全限制：不允许访问敏感目录".to_string().into());
     }
 
-    let is_uri = crate::android_saf::is_content_uri(output_path);
+    let is_uri = crate::android::saf::is_content_uri(output_path);
 
     if is_uri {
         // content URI 不是文件路径：`is_sensitive_path` 那类前缀检查对它无从谈起，
         // 扩展名这一关改为回查它的显示名（保存位置由用户在系统选择器里亲自圈定）。
-        let display_name = crate::android_saf::content_uri_display_name(output_path)
+        let display_name = crate::android::saf::content_uri_display_name(output_path)
             .ok_or_else(|| AppError::msg("无法确认保存目标的文件名，请换一个位置再试"))?;
         if !has_allowed_extension(&display_name, &COVER_OUTPUT_EXTENSIONS) {
             return Err(format!(
@@ -138,7 +138,7 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
     if is_uri {
         // fd 写入：File 随作用域结束关闭。注意 URI 上没有"补扩展名"这一步 ——
         // 文件名由保存对话框的 defaultPath 决定，前端已经带上封面真实扩展名。
-        let mut file = crate::android_saf::open_write_file(output_path)?;
+        let mut file = crate::android::saf::open_write_file(output_path)?;
         file.write_all(picture.data())
             .map_err(|e| format!("无法写入文件: {e}"))?;
         file.flush().map_err(|e| format!("无法写入文件: {e}"))?;

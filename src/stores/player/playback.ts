@@ -9,9 +9,9 @@
  * 未随本模块迁出,留在 player.ts。
  */
 import type { Track } from '@/types'
-import { ErrorSeverity } from '../utils/errorHandler'
-import { safeInvoke } from '../utils/safeInvoke'
-import { useConfigStore } from './config'
+import { ErrorSeverity } from '../../utils/errorHandler'
+import { safeInvoke } from '../../utils/safeInvoke'
+import { useConfigStore } from '../config'
 
 /** 播放控制涉及的最小 store 状态(与 Pinia player store 结构兼容) */
 export interface PlayerPlaybackTarget {

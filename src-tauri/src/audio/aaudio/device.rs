@@ -30,7 +30,7 @@ pub struct OutputDeviceInfo {
 
 /// 读取当前全部输出设备
 pub fn query_output_devices() -> Result<Vec<OutputDeviceInfo>, AppError> {
-    let json = crate::android_jni::jni_call_static_string(
+    let json = crate::android::java_bridge::jni_call_static_string(
         "com/jdbewl/mercurial_player/AudioBridge",
         "getOutputDevicesJson",
     )?;

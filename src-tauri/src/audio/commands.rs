@@ -981,7 +981,8 @@ pub fn set_play_queue(
     Ok(())
 }
 
-/// 媒体控制统一入口（通知栏 / MediaSession / 耳机线控 / 蓝牙按键）
+/// 媒体控制统一入口（通知栏 / MediaSession / 耳机线控 / 蓝牙按键）。
+///
 /// `action`: `play` / `pause` / `toggle` / `stop` / `next` / `previous` / `seek`，`position` 仅 seek 需要
 #[command]
 pub fn media_control(
@@ -1015,6 +1016,7 @@ pub fn get_audio_route(state: State<AppState>) -> Result<serde_json::Value, AppE
         .lock()
         .lock_or_err("exclusive player")?;
     let info = super::aaudio::audio_route_info(enabled, guard.as_ref());
+    drop(guard);
     serde_json::to_value(info).map_err(|e| AppError::msg(format!("序列化输出路由失败: {e}")))
 }
 

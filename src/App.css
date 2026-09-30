@@ -1,3 +1,6 @@
+/* App.vue 的 scoped 样式（由 `<style scoped src>` 引入，只作用于根组件的模板），
+   全局令牌与共享类都在 style.css，不要往这里加全局规则。 */
+
 /* 过渡动画 */
 .slide-left-enter-active,
 .slide-left-leave-active {

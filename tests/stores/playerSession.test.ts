@@ -29,7 +29,7 @@ vi.mock('@/stores/musicLibrary', () => ({
 }))
 
 // mock 必须在导入被测模块之前声明
-const { saveLastSessionNow, resumeLastSession } = await import('@/stores/playerSession')
+const { saveLastSessionNow, resumeLastSession } = await import('@/stores/player/session')
 
 const invokeMock = vi.mocked(invoke)
 

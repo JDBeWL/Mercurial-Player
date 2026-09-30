@@ -233,7 +233,7 @@ fn stop_at_queue_end(app: &AppHandle, state: &AppState) {
     sync_media_session(app, state);
 }
 
-/// 曲目自然结束的统一入口，由 `playback::emit_track_ended` 在发出 `track-ended` 之后调用：
+/// 曲目自然结束的统一入口，由 `emit::emit_track_ended` 在发出 `track-ended` 之后调用：
 /// 未开 `auto_advance`（桌面端）立即返回，开则推进队列并播下一首。
 /// 调用方是分析线程而非音频回调，直接推进不会与回调形成锁序环。
 pub fn handle_track_ended(app: &AppHandle, state: &AppState) {

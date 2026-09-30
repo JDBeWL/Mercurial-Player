@@ -7,8 +7,8 @@
 //! 输出: target/criterion/equalizer/report/index.html
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use mercurial_player::audio::EqProcessor;
-use mercurial_player::equalizer::{EQ_BAND_COUNT, EqSettings};
+use mercurial_player_lib::audio::EqProcessor;
+use mercurial_player_lib::equalizer::{EQ_BAND_COUNT, EqSettings};
 
 /// 生成测试用音频采样 (440Hz sine wave)
 fn generate_samples(count: usize, sample_rate: u32) -> Vec<f32> {

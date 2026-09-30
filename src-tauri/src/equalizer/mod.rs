@@ -1,4 +1,7 @@
-//! 均衡器模块：10 段参数均衡，处理链内嵌在解码路径里。
+//! 均衡器模块：10 段参数均衡的系数、设置与预设。
+//!
+//! 播放链路里实际逐采样跑滤波的 `EqProcessor` 在 [`crate::audio::eq_processor`]：
+//! 它要用音频侧的软削波查找表，放这里会让 equalizer 反向依赖 audio。
 
 pub mod commands;
 pub mod processor;

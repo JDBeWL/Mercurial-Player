@@ -12,7 +12,8 @@ use crate::equalizer::EqSettings;
 
 use super::decoder::LockFreeSymphoniaSource;
 use super::dsp::convert_channels_into;
-use super::playback::{EqProcessor, emit_playback_position, emit_track_ended};
+use super::emit::{emit_playback_position, emit_track_ended};
+use super::eq_processor::EqProcessor;
 use super::spectrum::SpectrumAnalyzer;
 
 /// 根据采样率计算解码chunk 大小

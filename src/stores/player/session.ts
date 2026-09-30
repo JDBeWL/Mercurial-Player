@@ -1,8 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import logger from '@/utils/logger'
 import type { Track, ResumeResult, TrackSnapshot } from '@/types'
-import type { usePlayerStore } from './player'
-import { useMusicLibraryStore } from './musicLibrary'
+import type { usePlayerStore } from './index'
+import { useMusicLibraryStore } from '../musicLibrary'
 
 /**
  * Player store 的会话持久化与启动恢复,从 player.ts 抽离以降低单文件复杂度。

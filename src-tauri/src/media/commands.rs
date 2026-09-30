@@ -12,7 +12,6 @@ use super::metadata::{
     flush_metadata_cache, get_metadata_cache_stats, get_track_cover_path_internal,
     get_track_metadata_internal, set_cover_cache_path,
 };
-use super::netease;
 use crate::AppState;
 use tauri::{State, command};
 
@@ -98,40 +97,6 @@ pub fn get_track_cover_path(path: String) -> Result<Option<String>, AppError> {
     get_track_cover_path_internal(&path)
 }
 
-/// 搜索网易云音乐歌曲
-#[command]
-pub async fn netease_search_songs(
-    keyword: String,
-    limit: Option<u32>,
-    offset: Option<u32>,
-) -> Result<Vec<netease::SearchSongResult>, AppError> {
-    netease::search_songs(&keyword, limit.unwrap_or(10), offset.unwrap_or(0)).await
-}
-
-/// 获取网易云音乐歌词
-#[command]
-pub async fn netease_get_lyrics(song_id: String) -> Result<netease::LyricsData, AppError> {
-    netease::get_lyrics(&song_id).await
-}
-
-/// 按来源+方法获取候选歌词（多来源系统统一入口）
-#[command]
-pub async fn lyrics_search_candidates(
-    provider: String,
-    _method: String,
-    title: String,
-    artist: String,
-    duration: i64,
-    limit: Option<u32>,
-) -> Result<Vec<crate::lyrics::LyricCandidate>, AppError> {
-    let query = crate::lyrics::LyricQuery {
-        title,
-        artist,
-        duration_ms: duration,
-    };
-    crate::lyrics::search_candidates(&provider, &_method, &query, limit.unwrap_or(5)).await
-}
-
 /// 提取音频文件的封面并保存到指定路径
 #[command]
 pub fn extract_cover(audio_path: String, output_path: String) -> Result<String, AppError> {
@@ -177,13 +142,13 @@ pub fn get_temp_dir_command() -> String {
 /// 调起系统目录选择器（Android SAF），仅移动端生效；桌面端为 no-op
 #[command]
 pub fn saf_request_pick() -> Result<(), AppError> {
-    crate::android_saf::request_pick_directory()
+    crate::android::saf::request_pick_directory()
 }
 
 /// 获取已保存的音乐目录树 URI（Android SAF；桌面端返回 None）
 #[command]
 pub fn saf_get_saved_tree() -> Result<Option<String>, AppError> {
-    crate::android_saf::get_saved_tree_uri()
+    crate::android::saf::get_saved_tree_uri()
 }
 
 /// 获取 SAF 授权状态（URI + 授权版本号 + 显示名）
@@ -191,12 +156,12 @@ pub fn saf_get_saved_tree() -> Result<Option<String>, AppError> {
 /// 前端轮询 `version` 判断系统选择器是否已返回：重新授权同一个目录时 URI 不变，
 /// 只有 version 会递增（早期版本比较 URI，导致"删掉目录再加同一个"永远加不上）。
 #[command]
-pub fn saf_get_pick_state() -> Result<crate::android_saf::SafPickState, AppError> {
-    crate::android_saf::get_pick_state()
+pub fn saf_get_pick_state() -> Result<crate::android::saf::SafPickState, AppError> {
+    crate::android::saf::get_pick_state()
 }
 
 /// 清除已保存的 SAF 树（移除音乐目录时同步清理，避免残留状态影响重新授权）
 #[command]
 pub fn saf_clear_saved_tree() -> Result<(), AppError> {
-    crate::android_saf::clear_saved_tree()
+    crate::android::saf::clear_saved_tree()
 }

@@ -1,4 +1,5 @@
 //! Android AAudio 独占（位完美）输出：USB DAC 插上时绕过系统混音与重采样，按原生采样率直出。
+//!
 //! [`player`] 的接口与 `WasapiExclusivePlayback` 对齐，命令层与解码推送线程因此完全复用；
 //! [`device`] 经 Kotlin `AudioManager` 查询设备信息，[`ffi`] 是 libaaudio 的 FFI 声明。
 

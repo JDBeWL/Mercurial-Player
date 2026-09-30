@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildFinalLyric, buildPreviewLyric, mergeLyricTexts } from '@/utils/lyricProviders/builder'
+import { buildFinalLyric, buildPreviewLyric, mergeLyricTexts } from '@/services/lyrics/builder'
 
 describe('mergeLyricTexts', () => {
   it('无额外文本时返回原文', () => {

@@ -144,8 +144,8 @@ mod android_impl {
 
     // JNI 封装
 
-    // 共享 JNI 封装：with_jni / app_class 见 crate::android_jni
-    use crate::android_jni::{app_class, with_jni};
+    // 共享 JNI 封装：with_jni / app_class 见 crate::android::java_bridge
+    use crate::android::java_bridge::{app_class, with_jni};
 
     /// 调用 SafBridge 返回 String 的静态方法
     pub fn jni_call_string(method: &str, args: &[&str]) -> Result<String, AppError> {

@@ -16,12 +16,12 @@ macro_rules! lock_or_log {
     };
 }
 
-pub mod android_saf;
-pub mod app_font_scale;
+pub mod android;
 pub mod audio;
 pub mod config;
 pub mod equalizer;
 pub mod error;
+pub mod http_client;
 pub mod lyrics;
 pub mod media;
 pub mod plugins;
@@ -31,15 +31,13 @@ pub mod system;
 mod app_setup;
 mod app_state;
 
-// Android：ndk_context 注入（cpal/AAudio 取 AudioManager 用）与 JNI 回调桥
-#[cfg(target_os = "android")]
-mod android;
-#[cfg(target_os = "android")]
-mod android_jni;
-
 // 更新器依赖桌面安装流程，移动端未验证前不参与编译
 #[cfg(desktop)]
 pub mod updater;
+
+// 桌面歌词悬浮窗（Direct2D 渲染，仅 Windows）
+#[cfg(windows)]
+pub mod desktop_lyrics;
 
 #[cfg(windows)]
 pub mod taskbar;
@@ -180,14 +178,16 @@ pub struct AppState {
 
 use cpal::traits::HostTrait;
 
-/// 应用启动入口：桌面由 `main.rs` 调用，移动端由 `mobile_entry_point` 生成的 JNI `Rust.create()` 调用
+/// 应用启动入口。
+///
+/// 桌面由 `main.rs` 调用，移动端由 `mobile_entry_point` 生成的 JNI `Rust.create()` 调用。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Android：current_exe() 位于只读 APK 内，必须在首个 ConfigManager 创建前
     // 把数据目录 override 指向应用沙箱（config.json 等落盘依赖它）
     #[cfg(target_os = "android")]
     {
-        match android_saf::get_app_data_dir() {
+        match android::saf::get_app_data_dir() {
             Ok(Some(dir)) if !dir.is_empty() => {
                 log::info!("Android data dir override (early): {dir}");
                 config::set_data_dir_override(std::path::PathBuf::from(dir));
@@ -350,11 +350,10 @@ pub fn run() {
             media::commands::get_metadata_cache_stats_command,
             media::commands::get_temp_dir_command,
             media::commands::flush_metadata_cache_command,
-            // 网易云音乐API命令
-            media::commands::netease_search_songs,
-            media::commands::netease_get_lyrics,
-            // 多来源歌词获取命令
-            media::commands::lyrics_search_candidates,
+            // 在线歌词命令
+            lyrics::commands::netease_search_songs,
+            lyrics::commands::netease_get_lyrics,
+            lyrics::commands::lyrics_search_candidates,
             // 播放命令
             audio::commands::play_track,
             audio::commands::pause_track,
@@ -428,19 +427,19 @@ pub fn run() {
             taskbar::commands::set_taskbar_stopped,
             // 桌面歌词命令（Windows Only）
             #[cfg(windows)]
-            taskbar::desktop_lyrics::show_desktop_lyrics,
+            desktop_lyrics::show_desktop_lyrics,
             #[cfg(windows)]
-            taskbar::desktop_lyrics::hide_desktop_lyrics,
+            desktop_lyrics::hide_desktop_lyrics,
             #[cfg(windows)]
-            taskbar::desktop_lyrics::update_desktop_lyric,
+            desktop_lyrics::update_desktop_lyric,
             #[cfg(windows)]
-            taskbar::desktop_lyrics::set_desktop_lyrics_locked,
+            desktop_lyrics::set_desktop_lyrics_locked,
             #[cfg(windows)]
-            taskbar::desktop_lyrics::set_desktop_lyrics_font_size,
+            desktop_lyrics::set_desktop_lyrics_font_size,
             #[cfg(windows)]
-            taskbar::desktop_lyrics::set_desktop_lyrics_font_family,
+            desktop_lyrics::set_desktop_lyrics_font_family,
             #[cfg(windows)]
-            taskbar::desktop_lyrics::set_desktop_lyrics_color_preset,
+            desktop_lyrics::set_desktop_lyrics_color_preset,
             // 前端日志落盘
             system::logging::write_log,
             // 系统版本命令（保留 get_app_version 用于前端显示）

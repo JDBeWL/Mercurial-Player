@@ -46,7 +46,7 @@ vi.mock('@/utils/lyricsParser', () => ({
   default: mockLyricsParser,
 }))
 
-vi.mock('@/utils/lyricProviders', () => ({
+vi.mock('@/services/lyrics', () => ({
   fetchBestLyrics: mockLyricProviders.fetchBestLyrics,
   collectCandidates: mockLyricProviders.collectCandidates,
   buildFinalLyric: mockLyricProviders.buildFinalLyric,

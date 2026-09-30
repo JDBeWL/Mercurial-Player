@@ -11,9 +11,6 @@ pub use windows_impl::*;
 #[cfg(windows)]
 pub mod commands;
 
-#[cfg(windows)]
-pub mod desktop_lyrics;
-
 /// 任务栏播放状态枚举
 ///
 /// 注意: 与 wasapi::PlaybackState 不同,此枚举仅用于任务栏按钮状态显示

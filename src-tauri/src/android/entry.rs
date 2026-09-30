@@ -143,7 +143,7 @@ pub fn notify_media_session(_app: &tauri::AppHandle, state: &crate::AppState) {
         "coverPath": cover_path,
     });
 
-    if let Err(e) = crate::android_jni::jni_call_void_string(
+    if let Err(e) = crate::android::java_bridge::jni_call_void_string(
         "com/jdbewl/mercurial_player/MediaBridge",
         "update",
         &payload.to_string(),

@@ -1,6 +1,6 @@
 //! 音轨元数据提取。
 
-use crate::android_saf;
+use crate::android::saf;
 use crate::error::AppError;
 use crate::security::is_sensitive_path;
 use lofty::prelude::{Accessor, AudioFile, TaggedFileExt};
@@ -16,7 +16,7 @@ use super::cover::extract_cover_to_cache;
 
 /// 打开媒体文件并读取标签（本地路径 / Android SAF content URI）
 pub(super) fn open_tagged_file(path: &str) -> Result<lofty::file::TaggedFile, AppError> {
-    if !android_saf::is_content_uri(path) {
+    if !saf::is_content_uri(path) {
         // 本地路径按扩展名探测，不让内容嗅探改变桌面既有的格式判定
         return Probe::open(Path::new(path))
             .map_err(|e| e.to_string())
@@ -26,7 +26,7 @@ pub(super) fn open_tagged_file(path: &str) -> Result<lofty::file::TaggedFile, Ap
             .map_err(AppError::from);
     }
     // content URI 没有扩展名可用；Probe 0.24+ 需显式 guess_file_type
-    let file = android_saf::open_media_file(path)?;
+    let file = saf::open_media_file(path)?;
     Probe::new(BufReader::new(file))
         .guess_file_type()
         .map_err(|e| e.to_string())
@@ -162,7 +162,7 @@ fn get_track_metadata_with_options(
     path: &str,
     include_cover: bool,
 ) -> Result<TrackMetadata, AppError> {
-    let is_uri = android_saf::is_content_uri(path);
+    let is_uri = saf::is_content_uri(path);
     let file_path = Path::new(path);
 
     let tagged_file = open_tagged_file(path)?;
@@ -181,7 +181,7 @@ fn get_track_metadata_with_options(
     // name 兜底：本地路径取文件名；content URI 解码 document id 取文件名
     // （URI 末段是 URL 编码的 document id，直接展示会变成 primary%3AMusic%2F…）
     let name = if is_uri {
-        android_saf::display_name_from_document_uri(path)
+        saf::display_name_from_document_uri(path)
     } else {
         file_path
             .file_name()

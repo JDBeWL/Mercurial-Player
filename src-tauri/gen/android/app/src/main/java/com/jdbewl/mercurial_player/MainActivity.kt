@@ -17,7 +17,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 class MainActivity : TauriActivity() {
   companion object {
     init {
-      System.loadLibrary("mercurial_player")
+      System.loadLibrary("mercurial_player_lib")
     }
 
     // singleTask 生命周期内只有一个 Activity 实例，静态方法据此取窗口
@@ -35,19 +35,19 @@ class MainActivity : TauriActivity() {
 
     /**
      * 通知栏 / MediaSession / 耳机线控 / 音频焦点 / 拔耳机 的统一入口。
-     * native 实现见 src-tauri/src/android.rs 的 nativeMediaAction。
+     * native 实现见 src-tauri/src/android/entry.rs 的 nativeMediaAction。
      */
     @JvmStatic external fun nativeMediaAction(action: String, positionMs: Long)
 
     /**
      * USB DAC 插拔通知：由 [AudioBridge] 的 `AudioDeviceCallback` 调用。
-     * native 实现见 src-tauri/src/android.rs 的 nativeAudioRouteChanged。
+     * native 实现见 src-tauri/src/android/entry.rs 的 nativeAudioRouteChanged。
      */
     @JvmStatic external fun nativeAudioRouteChanged()
 
     /**
      * 设置应用内界面字号倍率。由 Rust 命令 `set_app_font_scale` 经 JNI 调用
-     * （见 src-tauri/src/app_font_scale.rs），转发给 [FontScaleBridge]。
+     * （见 src-tauri/src/android/font_scale.rs），转发给 [FontScaleBridge]。
      */
     @JvmStatic
     fun setAppFontScale(scale: Float) {

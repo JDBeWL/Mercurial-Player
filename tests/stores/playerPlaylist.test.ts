@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Track } from '@/types'
-import { addTrackNextInPlaylist, removeTrackFromPlaylist } from '@/stores/playerPlaylist'
-import { adjustShuffleAfterRemove } from '@/stores/shuffle'
+import { addTrackNextInPlaylist, removeTrackFromPlaylist } from '@/stores/player/playlist'
+import { adjustShuffleAfterRemove } from '@/stores/player/shuffle'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn().mockResolvedValue(undefined) }))
-vi.mock('@/stores/shuffle', () => ({
+vi.mock('@/stores/player/shuffle', () => ({
   adjustShuffleAfterRemove: vi.fn((_order, pos, history, _index) => ({
     order: [9],
     position: pos,

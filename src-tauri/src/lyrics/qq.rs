@@ -1,8 +1,8 @@
 //! QQ 音乐歌词来源
 
 use crate::error::AppError;
+use crate::http_client::{get, read_response_text, send_with_retry};
 use crate::lyrics::{LyricCandidate, LyricQuery, LyricsData};
-use crate::media::http_client::{get, read_response_text, send_with_retry};
 use serde::Deserialize;
 use tauri_plugin_http::reqwest::header::{HeaderValue, REFERER, USER_AGENT};
 

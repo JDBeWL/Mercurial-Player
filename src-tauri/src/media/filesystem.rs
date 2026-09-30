@@ -1,9 +1,9 @@
 //! 文件系统操作模块：目录读取、文件检查等。
 //! 路径双形态：桌面端为本地绝对路径；Android 为 SAF `content://` URI（分区存储下绝对路径不可用），
-//! 打开文件经 [`crate::android_saf`] 的 fd 桥完成。
+//! 打开文件经 [`crate::android::saf`] 的 fd 桥完成。
 
 use super::metadata::{Playlist, TrackMetadata, flush_metadata_cache, get_track_metadata_internal};
-use crate::android_saf;
+use crate::android::saf;
 use crate::config::AppConfig;
 use crate::error::AppError;
 use crate::security::{has_allowed_extension, is_sensitive_path};
@@ -25,7 +25,7 @@ fn validate_lyrics_path(path: &str) -> Result<(), AppError> {
     if !has_allowed_extension(path, &LYRICS_EXTENSIONS) {
         return Err("仅允许读写歌词文件（.lrc/.ass/.srt）".to_string().into());
     }
-    if !android_saf::is_content_uri(path) && is_sensitive_path(path) {
+    if !saf::is_content_uri(path) && is_sensitive_path(path) {
         return Err("安全限制：不允许访问敏感目录".to_string().into());
     }
     Ok(())
@@ -38,7 +38,7 @@ const MAX_SCAN_DEPTH: usize = 10;
 /// 接受前端 path 的媒体命令入口；canonicalize 失败（路径不存在）视为不安全。
 /// Android SAF 的 `content://` URI 不做本地文件系统校验，直接放行。
 pub fn validate_media_path(path: &str) -> Result<(), AppError> {
-    if android_saf::is_content_uri(path) {
+    if saf::is_content_uri(path) {
         return Ok(());
     }
 
@@ -67,7 +67,7 @@ pub fn validate_media_path(path: &str) -> Result<(), AppError> {
 ///
 /// Android SAF content URI 下不枚举子目录（前端改用系统目录选择器逐层授权），返回空列表。
 pub fn read_dir(path: &str) -> Result<Vec<String>, AppError> {
-    if android_saf::is_content_uri(path) {
+    if saf::is_content_uri(path) {
         return Ok(Vec::new());
     }
     validate_media_path(path)?;
@@ -89,7 +89,7 @@ pub fn read_dir(path: &str) -> Result<Vec<String>, AppError> {
 ///
 /// Android SAF content URI 由 [`scan_content_tree`] 单独处理（`get_all_audio_files_from_dirs` 入口）。
 pub fn get_audio_files_from_dir(path: &str) -> Result<Playlist, AppError> {
-    if android_saf::is_content_uri(path) {
+    if saf::is_content_uri(path) {
         let playlists = scan_content_tree(path, true)?;
         return playlists
             .into_iter()
@@ -138,7 +138,7 @@ pub fn get_all_audio_files_from_dirs(
     let mut all_playlists: Vec<Playlist> = Vec::new();
 
     for path in paths {
-        if android_saf::is_content_uri(path) {
+        if saf::is_content_uri(path) {
             // Android SAF 树：ContentResolver 查询式枚举 + 并行提元数据
             match scan_content_tree(path, config.playlist.folder_based_playlists) {
                 Ok(playlists) => all_playlists.extend(playlists),
@@ -183,11 +183,11 @@ pub fn get_all_audio_files_from_dirs(
 /// 扫描单个 SAF content 树，与桌面端行为对齐：元数据用 rayon 并行提取（fd 桥要经 JNI，串行很慢），
 /// 按相对树根的目录路径分组生成多个播放列表，列表名用可读名（`primary%3AMusic` → `Music`）。
 fn scan_content_tree(tree_uri: &str, folder_based: bool) -> Result<Vec<Playlist>, AppError> {
-    let entries = android_saf::list_audio_files(tree_uri)?;
+    let entries = saf::list_audio_files(tree_uri)?;
     if entries.is_empty() {
         return Ok(Vec::new());
     }
-    let root_name = android_saf::display_name_from_tree_uri(tree_uri);
+    let root_name = saf::display_name_from_tree_uri(tree_uri);
 
     // 并行提取元数据：SAF 打开走 fd 桥（每个线程各自 attach JVM，互不干扰）
     let tracks: Vec<(String, TrackMetadata)> = entries
@@ -330,10 +330,10 @@ fn scan_single_playlist(dir: &Path, max_depth: usize) -> Option<Playlist> {
 /// 检查文件是否存在（敏感路径一律返回 false；content URI 由 SAF 侧判断，视为存在）
 #[must_use]
 pub fn check_file_exists_internal(path: &str) -> bool {
-    if is_sensitive_path(path) && !android_saf::is_content_uri(path) {
+    if is_sensitive_path(path) && !saf::is_content_uri(path) {
         return false;
     }
-    if android_saf::is_content_uri(path) {
+    if saf::is_content_uri(path) {
         return true; // SAF 文件由 ContentResolver 授权后即可读；具体存在性在打开时校验
     }
 
@@ -354,7 +354,7 @@ pub fn check_file_exists_internal(path: &str) -> bool {
 /// 读取歌词文件内容（content URI 走 fd 桥）
 pub fn read_lyrics_file_internal(path: &str) -> Result<String, AppError> {
     validate_lyrics_path(path)?;
-    let mut file = android_saf::open_media_file(path)?;
+    let mut file = saf::open_media_file(path)?;
     let mut content = String::new();
     use std::io::Read;
     file.read_to_string(&mut content)
@@ -365,8 +365,8 @@ pub fn read_lyrics_file_internal(path: &str) -> Result<String, AppError> {
 /// 写入歌词文件内容（Android 上通常写入应用沙箱，content URI 只读）
 pub fn write_lyrics_file_internal(path: &str, content: &str) -> Result<(), AppError> {
     validate_lyrics_path(path)?;
-    if android_saf::is_content_uri(path) {
-        // 歌词写入没有接 SAF 的写 fd（android_saf::open_write_file），content URI 一律拒绝
+    if saf::is_content_uri(path) {
+        // 歌词写入没有接 SAF 的写 fd（saf::open_write_file），content URI 一律拒绝
         return Err("无法写入 SAF 管理的歌词文件".to_string().into());
     }
 

@@ -51,7 +51,7 @@ fn plugin_base_dir() -> Result<PathBuf, AppError> {
 
 #[cfg(target_os = "android")]
 fn plugin_base_dir() -> Result<PathBuf, AppError> {
-    crate::android_saf::get_app_data_dir()?
+    crate::android::saf::get_app_data_dir()?
         .map(PathBuf::from)
         .ok_or_else(|| AppError::Plugin("拿不到应用数据目录".to_string()))
 }

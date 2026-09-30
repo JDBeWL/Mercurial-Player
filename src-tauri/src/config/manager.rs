@@ -45,7 +45,7 @@ pub struct AppConfig {
 pub struct UiConfig {
     #[serde(default)]
     pub mini_mode: bool,
-    /// 界面字号倍率（1.0 = 设计稿原始大小），仅 Android 生效，机制见 [`crate::app_font_scale`]。
+    /// 界面字号倍率（1.0 = 设计稿原始大小），仅 Android 生效，机制见 [`crate::android::font_scale`]。
     /// 必须在这里留字段，否则前端保存时 serde 会静默丢掉它（下次启动回默认值）。
     #[serde(default = "default_font_scale")]
     pub font_scale: f32,

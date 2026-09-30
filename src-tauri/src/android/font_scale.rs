@@ -8,7 +8,7 @@ use crate::error::AppError;
 /// 上下限由 Kotlin 侧统一 clamp（`FontScaleBridge.MIN_SCALE` / `MAX_SCALE`），这里不校验。
 #[cfg(target_os = "android")]
 pub fn set_app_font_scale(scale: f32) -> Result<(), AppError> {
-    crate::android_jni::jni_call_void_float(
+    crate::android::java_bridge::jni_call_void_float(
         "com/jdbewl/mercurial_player/MainActivity",
         "setAppFontScale",
         scale,

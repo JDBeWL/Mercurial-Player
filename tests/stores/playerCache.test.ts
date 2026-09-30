@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LRUCache } from '@/utils/lruCache'
-import { PlayerCacheManager, type TrackMetadata } from '@/stores/playerCache'
+import { PlayerCacheManager, type TrackMetadata } from '@/stores/player/cache'
 
 const metadata = (title: string): TrackMetadata => ({
   title,

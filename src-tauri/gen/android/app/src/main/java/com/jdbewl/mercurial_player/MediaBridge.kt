@@ -6,7 +6,7 @@ import android.os.Looper
 import org.json.JSONObject
 
 /**
- * Rust → Kotlin 的播放状态同步入口：Rust 侧 `android.rs::notify_media_session` 经 JNI 调 [update]。
+ * Rust → Kotlin 的播放状态同步入口：Rust 侧 `android/entry.rs::notify_media_session` 经 JNI 调 [update]。
  * 调用线程可能是分析线程或解码线程，因此统一 post 到主线程再操作 MediaSession/通知。
  * 这里只做「状态同步 + 起停服务」，播放控制与音频句柄都留在 Rust 侧。
  */

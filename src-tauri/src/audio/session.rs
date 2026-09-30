@@ -37,8 +37,8 @@ fn now_secs() -> u64 {
 /// 失败返回 None
 fn get_file_metadata(path: &str) -> Option<(u64, u64)> {
     // content URI 没有可 stat 的路径，只能从 SAF fd 上取
-    let metadata = if crate::android_saf::is_content_uri(path) {
-        crate::android_saf::open_media_file(path)
+    let metadata = if crate::android::saf::is_content_uri(path) {
+        crate::android::saf::open_media_file(path)
             .ok()?
             .metadata()
             .ok()?
@@ -134,7 +134,7 @@ pub async fn try_resume_last_session(
     }
 
     // L1: 文件存在性校验（SAF content URI 视为存在，交由打开时校验）
-    if !crate::android_saf::is_content_uri(&session.track_path)
+    if !crate::android::saf::is_content_uri(&session.track_path)
         && !Path::new(&session.track_path).exists()
     {
         log::info!(

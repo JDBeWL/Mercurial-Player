@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import FileUtils from '@/utils/fileUtils'
 import logger from '@/utils/logger'
 import type { Track } from '@/types'
-import type { usePlayerStore } from './player'
+import type { usePlayerStore } from './index'
 
 /**
  * Player store 的元数据缓存与封面批量加载,从 player.ts 抽离以降低单文件复杂度。

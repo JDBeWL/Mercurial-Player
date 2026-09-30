@@ -383,8 +383,8 @@ import {
 } from '../../utils/bundledFonts'
 import MD3Select from '../MD3Select.vue'
 import SettingSwitch from './SettingSwitch.vue'
-import { LYRIC_PROVIDERS, resolveMethod } from '@/utils/lyricProviders'
-import type { LyricProviderDescriptor } from '@/utils/lyricProviders'
+import { LYRIC_PROVIDERS, resolveMethod } from '@/services/lyrics'
+import type { LyricProviderDescriptor } from '@/services/lyrics'
 import type { LyricsConfig, LyricsProviderId, DesktopLyricsConfig, VisualizerConfig } from '@/types'
 
 // 歌词默认配置：store 缺省时初始化与字段补全共用（与 config store 中的默认值保持一致）

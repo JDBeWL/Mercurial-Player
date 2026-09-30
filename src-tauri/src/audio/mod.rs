@@ -39,6 +39,8 @@ pub mod commands;
 pub mod decode_push;
 pub mod decoder;
 pub mod dsp;
+pub mod emit;
+pub mod eq_processor;
 
 pub mod device;
 pub mod device_monitor;
@@ -58,9 +60,10 @@ pub mod wasapi;
 pub use decoder::{LockFreeSymphoniaSource, SymphoniaDecoder};
 pub use device::AudioDeviceInfo;
 pub use device_monitor::{DeviceChangeEvent, DeviceMonitor};
-pub use playback::{EqProcessor, VisualizationSource};
+pub use eq_processor::EqProcessor;
 pub use queue::{PlaybackQueue, RepeatMode};
 pub use sample_ring::SampleRing;
+pub use spectrum::VisualizationSource;
 
 #[cfg(target_os = "android")]
 pub use aaudio::AaudioExclusivePlayer;

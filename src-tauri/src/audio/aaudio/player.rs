@@ -171,7 +171,7 @@ impl AaudioExclusivePlayer {
         };
 
         let (rate, channels) = self.open_stream(&device_info, None, None)?;
-        Ok((rate, channels, device_info.name.clone()))
+        Ok((rate, channels, device_info.name))
     }
 
     /// 当前流绑定的输出设备快照（无流时为 `None`）
@@ -239,7 +239,7 @@ impl AaudioExclusivePlayer {
         let mut builder: ffi::AAudioStreamBuilder = ptr::null_mut();
         // SAFETY: builder 为输出参数指针，调用成功后由 AAudio 填充
         check(
-            unsafe { ffi::AAudio_createStreamBuilder(&mut builder) },
+            unsafe { ffi::AAudio_createStreamBuilder(&raw mut builder) },
             "createStreamBuilder",
         )?;
 
@@ -290,7 +290,7 @@ impl AaudioExclusivePlayer {
 
         let mut stream: ffi::AAudioStream = ptr::null_mut();
         // SAFETY: builder 有效，stream 为输出参数
-        let mut result = unsafe { ffi::AAudioStreamBuilder_openStream(builder, &mut stream) };
+        let mut result = unsafe { ffi::AAudioStreamBuilder_openStream(builder, &raw mut stream) };
         if result != ffi::AAUDIO_OK {
             // 独占开不出（速率/格式不被接受、被其它应用占用）→ 退共享模式重试一次
             log::warn!(
@@ -304,7 +304,7 @@ impl AaudioExclusivePlayer {
                 ffi::AAudioStreamBuilder_setSharingMode(builder, ffi::AAUDIO_SHARING_MODE_SHARED);
                 ffi::AAudioStreamBuilder_setSampleRate(builder, wanted_rate as i32);
             }
-            result = unsafe { ffi::AAudioStreamBuilder_openStream(builder, &mut stream) };
+            result = unsafe { ffi::AAudioStreamBuilder_openStream(builder, &raw mut stream) };
         }
         // SAFETY: builder 不再使用（stream 已持有资源）
         unsafe { ffi::AAudioStreamBuilder_delete(builder) };
@@ -444,7 +444,8 @@ impl AaudioExclusivePlayer {
     }
 
     pub fn stop_with_fade_out(&self, duration_ms: u32) -> Result<(), AppError> {
-        self.begin_fade_out(duration_ms, FadeAction::Stop)
+        self.begin_fade_out(duration_ms, FadeAction::Stop);
+        Ok(())
     }
 
     pub fn pause(&self) -> Result<(), AppError> {
@@ -463,7 +464,8 @@ impl AaudioExclusivePlayer {
     }
 
     pub fn pause_with_fade_out(&self, duration_ms: u32) -> Result<(), AppError> {
-        self.begin_fade_out(duration_ms, FadeAction::Pause)
+        self.begin_fade_out(duration_ms, FadeAction::Pause);
+        Ok(())
     }
 
     pub fn resume(&self) -> Result<(), AppError> {
@@ -608,9 +610,9 @@ impl AaudioExclusivePlayer {
         Ok(())
     }
 
-    fn begin_fade_out(&self, duration_ms: u32, action: FadeAction) -> Result<(), AppError> {
+    fn begin_fade_out(&self, duration_ms: u32, action: FadeAction) {
         let Some(shared) = self.shared() else {
-            return Ok(());
+            return;
         };
         let frames = fade_frames(duration_ms, self.sample_rate.load(Ordering::SeqCst));
         let action_code = if action == FadeAction::Pause {
@@ -636,19 +638,19 @@ impl AaudioExclusivePlayer {
             },
             Ordering::SeqCst,
         );
-        Ok(())
     }
 }
 
 impl Drop for AaudioExclusivePlayer {
     fn drop(&mut self) {
         self.watchdog_stop.store(true, Ordering::SeqCst);
-        if let Some(handle) = self
+        // 先取出来再判断：写成 if let 的 scrutinee 会让 MutexGuard 活到整个 if let 结束
+        let watchdog = self
             .watchdog
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
+            .take();
+        if let Some(handle) = watchdog {
             let _ = handle.join();
         }
         self.close_stream();
@@ -776,13 +778,13 @@ unsafe extern "C" fn data_callback(
     unsafe {
         match shared.format.load(Ordering::Relaxed) {
             ffi::AAUDIO_FORMAT_PCM_FLOAT => {
-                let out = std::slice::from_raw_parts_mut(audio as *mut f32, need);
+                let out = std::slice::from_raw_parts_mut(audio.cast::<f32>(), need);
                 for (i, dst) in out.iter_mut().enumerate() {
                     *dst = scratch[i] * volume * (fade_start + step * (i / channels) as f32);
                 }
             }
             ffi::AAUDIO_FORMAT_PCM_I32 => {
-                let out = std::slice::from_raw_parts_mut(audio as *mut i32, need);
+                let out = std::slice::from_raw_parts_mut(audio.cast::<i32>(), need);
                 for (i, dst) in out.iter_mut().enumerate() {
                     let v = scratch[i] * volume * (fade_start + step * (i / channels) as f32);
                     *dst = (v.clamp(-1.0, 1.0) * i32::MAX as f32) as i32;
@@ -791,7 +793,7 @@ unsafe extern "C" fn data_callback(
             ffi::AAUDIO_FORMAT_PCM_I24_PACKED => {
                 // 3 字节小端、无对齐：逐样本展开写入
                 let v_scale = 8_388_607.0f32; // 2^23 - 1
-                let out = std::slice::from_raw_parts_mut(audio as *mut u8, need * 3);
+                let out = std::slice::from_raw_parts_mut(audio.cast::<u8>(), need * 3);
                 for i in 0..need {
                     let v = scratch[i] * volume * (fade_start + step * (i / channels) as f32);
                     let q = (v.clamp(-1.0, 1.0) * v_scale) as i32;
@@ -803,7 +805,7 @@ unsafe extern "C" fn data_callback(
             }
             _ => {
                 // I16（未知格式也按 I16 处理，AAudio 不接受时已在 open 阶段回落共享模式）
-                let out = std::slice::from_raw_parts_mut(audio as *mut i16, need);
+                let out = std::slice::from_raw_parts_mut(audio.cast::<i16>(), need);
                 for (i, dst) in out.iter_mut().enumerate() {
                     let v = scratch[i] * volume * (fade_start + step * (i / channels) as f32);
                     *dst = (v.clamp(-1.0, 1.0) * 32767.0) as i16;
@@ -838,16 +840,16 @@ fn write_silence(shared: &Shared, audio: *mut c_void, frames: usize) {
     unsafe {
         match shared.format.load(Ordering::Relaxed) {
             ffi::AAUDIO_FORMAT_PCM_FLOAT => {
-                std::slice::from_raw_parts_mut(audio as *mut f32, n).fill(0.0);
+                std::slice::from_raw_parts_mut(audio.cast::<f32>(), n).fill(0.0);
             }
             ffi::AAUDIO_FORMAT_PCM_I32 => {
-                std::slice::from_raw_parts_mut(audio as *mut i32, n).fill(0);
+                std::slice::from_raw_parts_mut(audio.cast::<i32>(), n).fill(0);
             }
             ffi::AAUDIO_FORMAT_PCM_I24_PACKED => {
-                std::slice::from_raw_parts_mut(audio as *mut u8, n * 3).fill(0);
+                std::slice::from_raw_parts_mut(audio.cast::<u8>(), n * 3).fill(0);
             }
             _ => {
-                std::slice::from_raw_parts_mut(audio as *mut i16, n).fill(0);
+                std::slice::from_raw_parts_mut(audio.cast::<i16>(), n).fill(0);
             }
         }
     }

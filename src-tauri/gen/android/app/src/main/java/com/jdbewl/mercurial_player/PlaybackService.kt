@@ -417,7 +417,7 @@ class PlaybackService : Service() {
     }
   }
 
-  /** 通过 JNI 下发到 Rust（native 实现见 src-tauri/src/android.rs） */
+  /** 通过 JNI 下发到 Rust（native 实现见 src-tauri/src/android/entry.rs） */
   private fun dispatchToRust(action: String, positionMs: Long) {
     runCatching { MainActivity.nativeMediaAction(action, positionMs) }
       .onFailure { e -> android.util.Log.e(TAG, "nativeMediaAction($action) 失败: ${e.message}") }

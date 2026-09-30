@@ -5,7 +5,7 @@ import {
   getNextShuffleIndex,
   getPreviousShuffleIndex,
   adjustShuffleAfterRemove,
-} from '@/stores/shuffle'
+} from '@/stores/player/shuffle'
 
 describe('generateShuffleOrder', () => {
   it('returns an empty sequence for an empty playlist', () => {

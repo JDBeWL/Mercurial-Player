@@ -283,7 +283,7 @@ impl SymphoniaDecoder {
         path: &str,
         buffer_duration_ms: Option<u32>,
     ) -> Result<Self, AppError> {
-        let file = crate::android_saf::open_media_file(path)?;
+        let file = crate::android::saf::open_media_file(path)?;
         let mss = MediaSourceStream::new(
             Box::new(file.try_clone().map_err(|e| e.to_string())?),
             MediaSourceStreamOptions::default(),
@@ -442,7 +442,7 @@ impl SymphoniaDecoder {
     }
 
     fn initialize_decoder(&mut self) -> Result<(), AppError> {
-        let file = crate::android_saf::open_media_file(&self.path)?;
+        let file = crate::android::saf::open_media_file(&self.path)?;
         let mss = MediaSourceStream::new(
             Box::new(file.try_clone().map_err(|e| e.to_string())?),
             MediaSourceStreamOptions::default(),

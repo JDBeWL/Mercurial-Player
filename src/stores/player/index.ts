@@ -3,13 +3,12 @@ import { markRaw } from 'vue'
 import i18n from '@/i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { type UnlistenFn } from '@tauri-apps/api/event'
-import FileUtils from '../utils/fileUtils'
-import { LyricsParser } from '../utils/lyricsParser'
-import logger from '../utils/logger'
-import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
-import { safeInvoke } from '../utils/safeInvoke'
-import { classifyAudioInvokeError } from '../utils/audioErrorClassifier'
-import { useConfigStore } from './config'
+import FileUtils from '../../utils/fileUtils'
+import { LyricsParser } from '../../utils/lyricsParser'
+import logger from '../../utils/logger'
+import errorHandler, { ErrorType, ErrorSeverity } from '../../utils/errorHandler'
+import { safeInvoke } from '../../utils/safeInvoke'
+import { useConfigStore } from '../config'
 import {
   setupTrackEndedListener,
   setupPositionListener,
@@ -17,15 +16,15 @@ import {
   setupGlobalShortcuts,
   setupDeviceListeners,
   unregisterGlobalShortcuts,
-} from './playerListeners'
+} from './listeners'
 import {
   generateShuffleOrder,
   isShuffleOrderValid,
   getNextShuffleIndex,
   getPreviousShuffleIndex,
 } from './shuffle'
-import { PlayerCacheManager } from './playerCache'
-import { saveLastSessionNow, resumeLastSession } from './playerSession'
+import { PlayerCacheManager } from './cache'
+import { saveLastSessionNow, resumeLastSession } from './session'
 import {
   isAndroid,
   setupQueueListener,
@@ -34,26 +33,18 @@ import {
   stopBackgroundHeartbeat,
   stopPlayQueueWatch,
   watchPlayQueue,
-} from './playerQueue'
+} from './queue'
 
-// ============================================================================
-// 常量
-// ============================================================================
-
-/// play_track IPC 的超时(毫秒),超时视为后端无响应并报错
-const PLAY_TRACK_TIMEOUT_MS = 5000
-/// 播放结束自动跳到下一首的延迟(毫秒),给 UI 留出状态刷新窗口
-const AUTO_NEXT_TRACK_DELAY_MS = 100
-
-import { addTrackNextInPlaylist, removeTrackFromPlaylist } from './playerPlaylist'
+import { addTrackNextInPlaylist, removeTrackFromPlaylist } from './playlist'
 import {
   cachePlaylistMetadata,
   loadPlaylistCovers,
   recordCoverUpdate as recordCoverUpdateToMap,
   takeCoverUpdates as takeCoverUpdatesFromMap,
-} from './playerMediaCache'
+} from './mediaCache'
 import type { Track, AudioInfo, LyricLine, RepeatMode, ResumeResult } from '@/types'
-import { seekTrack, setPlayerVolume, togglePlayerMute } from './playerPlayback'
+import { seekTrack, setPlayerVolume, togglePlayerMute } from './playback'
+import { applyPreparedTrack, prepareTrack, resolveTrackPath, startPlayback } from './loadTrack'
 
 interface PlayerState {
   currentTrack: Track | null
@@ -108,7 +99,7 @@ interface PlayerState {
   playlistCoverVersion: number
 }
 
-// 待通知的封面更新队列与批量加载实现见 playerMediaCache.ts
+// 待通知的封面更新队列与批量加载实现见 MediaCache.ts
 
 export const usePlayerStore = defineStore('player', {
   state: (): PlayerState => ({
@@ -287,7 +278,7 @@ export const usePlayerStore = defineStore('player', {
     },
 
     /** 统一设置所有事件监听器 (track-ended / playback-position / taskbar / device / global shortcuts)，
-     *  监听器实现抽离到 playerListeners.ts */
+     *  监听器实现抽离到 Listeners.ts */
     async _setupListeners(): Promise<void> {
       this._trackEndedUnlisten = await setupTrackEndedListener(this)
       this._positionUnlisten = await setupPositionListener(this)
@@ -312,12 +303,12 @@ export const usePlayerStore = defineStore('player', {
       await setupGlobalShortcuts(this)
     },
 
-    /** 立即保存 last_session (无节流,用于 pause/切曲/关闭等关键节点)，实现在 playerSession.ts */
+    /** 立即保存 last_session (无节流,用于 pause/切曲/关闭等关键节点)，实现在 Session.ts */
     async _saveLastSessionNow(): Promise<void> {
       await saveLastSessionNow(this)
     },
 
-    /** 启动时调用，尝试恢复上次播放会话。实现在 playerSession.ts */
+    /** 启动时调用，尝试恢复上次播放会话。实现在 Session.ts */
     async resumeLastSession(): Promise<ResumeResult | null> {
       return resumeLastSession(this)
     },
@@ -413,23 +404,13 @@ export const usePlayerStore = defineStore('player', {
       const requestId = ++this._playRequestId
       this._activePlayRequestId = requestId
 
-      let resolvedPath = track.path
-      let trackExists = await this._checkFileExists(resolvedPath)
-      if (!trackExists && resolvedPath) {
-        const altPath = resolvedPath.includes('/')
-          ? resolvedPath.replace(/\//g, '\\')
-          : resolvedPath.replace(/\\/g, '/')
-        if (altPath !== resolvedPath) {
-          resolvedPath = altPath
-          trackExists = await this._checkFileExists(resolvedPath)
-        }
-      }
+      const { path: resolvedPath, exists } = await resolveTrackPath(this, track)
 
       if (this._activePlayRequestId !== requestId || this._isDestroyed) {
         return
       }
 
-      if (!trackExists) {
+      if (!exists) {
         logger.warn('Track file not found:', resolvedPath)
         const missingIndex = this.playlist.findIndex(
           (t) => t.path === track.path || t.path === resolvedPath,
@@ -451,157 +432,9 @@ export const usePlayerStore = defineStore('player', {
 
       this._isLoading = true
 
-      const metadataCache = this._getMetadataCache()
-      let metadata = metadataCache.get(resolvedPath) ?? metadataCache.get(track.path)
-      if (!metadata) {
-        metadata = {
-          title: track.title || FileUtils.getFileNameWithoutExtension(resolvedPath),
-          artist: track.artist || '',
-          album: track.album || '',
-          duration: track.duration || 0,
-          bitrate: track.bitrate || null,
-          sampleRate: track.sampleRate || null,
-          channels: track.channels || null,
-          bitDepth: track.bitDepth || null,
-          format: track.format || null,
-        }
-      }
+      applyPreparedTrack(this, prepareTrack(this, track, resolvedPath))
 
-      // 是否「同一首歌重新播放」(单曲循环、重复点击当前曲目),决定后面是否重置歌词
-      const isSameTrackReplay = this.currentTrack?.path === resolvedPath
-
-      const resolvedTrack: Track = {
-        ...track,
-        path: resolvedPath,
-        title: metadata.title,
-        artist: metadata.artist,
-        album: metadata.album,
-        duration: metadata.duration,
-        coverPath: track.coverPath, // 保留原始的 coverPath
-      }
-
-      this.currentTrack = resolvedTrack
-
-      // shuffle 模式下,用户手动切曲时同步 _shufflePosition 到新曲目在 _shuffleOrder 中的位置
-      // 如果新曲目不在 _shuffleOrder 中 (顺序失效/外部触发),则作废顺序,下次 nextTrack 时重新生成
-      if (this.isShuffle && this._shuffleOrder.length > 0) {
-        const newIdx = this.currentTrackIndex
-        const pos = this._shuffleOrder.indexOf(newIdx)
-        if (pos >= 0) {
-          this._shufflePosition = pos
-        } else {
-          // 顺序已失效,作废等待下次懒生成
-          this._shuffleOrder = []
-          this._shufflePosition = -1
-        }
-      }
-
-      // 按需加载封面路径（如果还没有）
-      if (!resolvedTrack.coverPath) {
-        logger.debug('Loading cover for track:', resolvedPath)
-        invoke<string | null>('get_track_cover_path', { path: resolvedPath })
-          .then((coverPath) => {
-            logger.debug('Cover path result:', coverPath)
-            if (this.currentTrack?.path === resolvedPath && coverPath) {
-              this.currentTrack.coverPath = coverPath
-              // 同时更新元数据缓存中的封面路径
-              const cachedMetadata = metadataCache.get(resolvedPath)
-              if (cachedMetadata) {
-                cachedMetadata.coverPath = coverPath
-                metadataCache.set(resolvedPath, cachedMetadata)
-              }
-            }
-          })
-          .catch((err) => logger.error('Failed to load cover path:', err))
-      } else {
-        logger.debug('Track already has coverPath:', resolvedTrack.coverPath)
-      }
-      this.duration = metadata.duration || 0
-      this.currentTime = 0
-      // 同一首歌重新播放时 path 未变,useLyrics 的 watcher 不会重新触发,
-      // 在这里清空就再也补不回来(表现为重播后歌词消失)
-      if (!isSameTrackReplay) {
-        this.lyrics = null
-        this.currentLyricIndex = -1
-      }
-      this.audioInfo = {
-        bitrate: metadata.bitrate || null,
-        sampleRate: metadata.sampleRate || null,
-        channels: metadata.channels || null,
-        bitDepth: metadata.bitDepth || null,
-        format: metadata.format || null,
-      }
-
-      // 串行等待 pause 完成后再 play,避免 pause 晚于 play 返回导致新曲目被立即暂停
-      try {
-        await invoke('pause_track')
-      } catch (err) {
-        logger.warn('pause before play:', err)
-      }
-
-      try {
-        logger.info('Playing track:', resolvedPath)
-
-        let timeoutId: ReturnType<typeof setTimeout> | null = null
-        const playPromise = invoke('play_track', { path: resolvedPath })
-        const timeoutPromise = new Promise((_, reject) => {
-          timeoutId = setTimeout(
-            () => reject(new Error(i18n.global.t('errors.playTimeout'))),
-            PLAY_TRACK_TIMEOUT_MS,
-          )
-        })
-
-        try {
-          await Promise.race([playPromise, timeoutPromise])
-        } finally {
-          if (timeoutId) {
-            clearTimeout(timeoutId)
-            timeoutId = null
-          }
-        }
-
-        if (this._activePlayRequestId !== requestId || this._isDestroyed) {
-          return
-        }
-
-        this.isPlaying = true
-        this._updateTaskbarState()
-
-        // 歌词加载不再在此显式触发:useLyrics 的共享 watcher 监听 currentTrack.path
-        // 变化后会统一加载 (缓存 → 本地文件 → 在线获取),单一入口避免双路径竞态
-      } catch (err) {
-        if (this._activePlayRequestId !== requestId || this._isDestroyed) {
-          return
-        }
-
-        const type = classifyAudioInvokeError(err)
-        const handled = errorHandler.handle(err instanceof Error ? err : new Error(String(err)), {
-          type,
-          severity: ErrorSeverity.HIGH,
-          context: { trackPath: resolvedPath, trackName: track.name },
-          showToUser: true,
-        })
-
-        logger.error('Failed to play track:', handled)
-        this.isPlaying = false
-
-        const currentIdx = this.playlist.findIndex(
-          (t) => t.path === track.path || t.path === resolvedPath,
-        )
-        if (this.playlist.length > 1 && currentIdx >= 0 && currentIdx < this.playlist.length - 1) {
-          const nextTrackTimeoutId = setTimeout(() => {
-            if (!this._isDestroyed && this._activePlayRequestId === requestId) {
-              void this.nextTrack()
-            }
-          }, AUTO_NEXT_TRACK_DELAY_MS)
-          // 保存定时器ID以便在cleanup时清理
-          this._nextTrackTimeoutId = nextTrackTimeoutId
-        }
-      } finally {
-        if (this._activePlayRequestId === requestId) {
-          this._isLoading = false
-        }
-      }
+      await startPlayback(this, track, resolvedPath, requestId)
     },
 
     pause(): void {
@@ -814,7 +647,7 @@ export const usePlayerStore = defineStore('player', {
     // --- 播放控制 ---
 
     seek(time: number): void {
-      // 播放控制已抽到 playerPlayback.ts(与 setVolume/toggleMute 同模块),
+      // 播放控制已抽到 Playback.ts(与 setVolume/toggleMute 同模块),
       // 经 safeInvoke 统一走 errorHandler,不再在此重复 invoke 样板
       seekTrack(this, time)
     },
@@ -911,7 +744,7 @@ export const usePlayerStore = defineStore('player', {
     // --- 数据加载 ---
 
     /** 整体替换播放列表。markRaw：上万首 Track 全量深度代理代价极高，列表内改动一律重新赋值（见
-     *  playerPlaylist / playerSession），不依赖数组原地变异触发更新。必须先复制一份再 markRaw，直接
+     *  playlist.ts / session.ts），不依赖数组原地变异触发更新。必须先复制一份再 markRaw，直接
      *  标记入参会连带让调用方的数组（如 musicLibrary 的 playlist.files）失去响应式能力。 */
     _setPlaylist(tracks: Track[]): void {
       this.playlist = markRaw([...tracks])
@@ -950,7 +783,7 @@ export const usePlayerStore = defineStore('player', {
       void this._loadPlaylistCovers(playlist)
     },
 
-    /** 批量缓存播放列表元数据 (实现见 playerMediaCache.ts) */
+    /** 批量缓存播放列表元数据 (实现见 MediaCache.ts) */
     async _cachePlaylistMetadata(playlist: Track[]): Promise<void> {
       await cachePlaylistMetadata(this, playlist)
     },
@@ -966,7 +799,7 @@ export const usePlayerStore = defineStore('player', {
       return takeCoverUpdatesFromMap()
     },
 
-    /** 批量加载播放列表封面 (实现见 playerMediaCache.ts) */
+    /** 批量加载播放列表封面 (实现见 MediaCache.ts) */
     async _loadPlaylistCovers(playlist: Track[]): Promise<void> {
       await loadPlaylistCovers(this, playlist)
     },
