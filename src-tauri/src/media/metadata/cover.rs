@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::cache::cover_cache_dir;
-use super::extractor::open_tagged_file;
+use super::extractor::{get_track_metadata_with_cover, open_tagged_file};
 
 const COVER_OUTPUT_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
 
@@ -67,23 +67,10 @@ pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, AppEr
 
     log::debug!("Getting cover for: {path}");
 
-    let tagged_file = open_tagged_file(path)?;
-
-    let primary_tag = tagged_file.primary_tag();
-    log::debug!("Primary tag exists: {}", primary_tag.is_some());
-
-    let has_picture = primary_tag
-        .map(|tag| !tag.pictures().is_empty())
-        .unwrap_or(false);
-    log::debug!("Has picture: {has_picture}");
-
-    let cover = primary_tag
-        .and_then(|tag| tag.pictures().first())
-        .map(|picture| extract_cover_to_cache(Path::new(path), picture))
-        .transpose()?;
-
-    log::debug!("Cover result: {cover:?}");
-    Ok(cover)
+    // 走带缓存的元数据通路：命中时只比较一次文件 mtime，不再 open_tagged_file。
+    // 对 content URI 而言那次 open 是 binder IPC + 整份标签解析 + 图片解码 + 封面内容哈希，
+    // 而通知栏/MediaSession 每次播放控制都要读封面路径，前端预取封面更是整批地读。
+    Ok(get_track_metadata_with_cover(path)?.cover_path)
 }
 
 /// 提取音频文件的封面并保存到指定路径

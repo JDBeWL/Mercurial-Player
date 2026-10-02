@@ -1023,6 +1023,20 @@ pub fn clear_last_session(state: State<AppState>) -> Result<(), AppError> {
     super::session::clear_last_session(&state)
 }
 
+/// 可视化面板是否在屏。面板是 `spectrum-update` 唯一的订阅者，卸载时把频谱的 FFT、
+/// 序列化与 IPC 整条关掉；应用退到后台由 Kotlin 的 Activity 生命周期另路关闭。
+/// 两者都成立才计算，见 [`crate::audio::spectrum::SpectrumGate`]。
+#[command]
+pub fn set_visualizer_visible(state: State<AppState>, visible: bool) -> Result<(), AppError> {
+    state
+        .player
+        .visualization
+        .spectrum_gate
+        .set_panel_visible(visible);
+    log::debug!("可视化面板可见性: {visible}");
+    Ok(())
+}
+
 /// 目标帧率上限（防止过高频率的 FFT 计算）
 pub const MAX_TARGET_FPS: u32 = 240;
 

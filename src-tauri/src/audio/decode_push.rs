@@ -45,6 +45,7 @@ pub(super) fn decode_and_push_to_wasapi(
     eq_settings: Arc<RwLock<EqSettings>>,
     spectrum_data: Arc<Mutex<Vec<f32>>>,
     target_fps: Arc<AtomicU64>,
+    gate: Arc<super::spectrum::SpectrumGate>,
     start_position: f32,
 ) {
     use audioadapter_buffers::direct::SequentialSliceOfVecs;
@@ -362,8 +363,12 @@ pub(super) fn decode_and_push_to_wasapi(
         };
 
         if !final_out.is_empty() {
-            // 可视化:推送采样同时计算频谱并发送 spectrum-update
-            spectrum_analyzer.push_and_maybe_emit(final_out, &spectrum_data, &target_fps, &app);
+            // 可视化:推送采样同时计算频谱并发送 spectrum-update。
+            // 面板不在屏或应用已到后台时整段跳过 —— FFT、序列化与跨线程投递都省掉，
+            // 重新显示时分析器从零开始积累窗口（约 43ms），不影响正确性。
+            if gate.allowed() {
+                spectrum_analyzer.push_and_maybe_emit(final_out, &spectrum_data, &target_fps, &app);
+            }
 
             // 写入端句柄：外层锁只用于取播放器实例本身，拿到后水位等待与推送都不持锁。
             // 若在持锁期间等背压，会把切设备/停止这些命令线程一起堵死。

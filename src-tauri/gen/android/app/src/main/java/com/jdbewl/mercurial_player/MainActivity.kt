@@ -1,6 +1,7 @@
 package com.jdbewl.mercurial_player
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
@@ -28,8 +29,10 @@ class MainActivity : TauriActivity() {
     // singleTask 生命周期内只有一个 Activity 实例，静态方法据此取窗口
     @Volatile
     private var current: MainActivity? = null
-    // 初始化 Rust 侧 cpal AAudio 依赖的 ndk_context（JavaVM + Activity）
-    @JvmStatic external fun initNdkContext(activity: MainActivity)
+    // 初始化 Rust 侧 cpal AAudio 依赖的 ndk_context（JavaVM + Context）。
+    // 必须传 Application Context：该全局引用会活到进程退出，Activity 却会随进程保活被重建；
+    // 且 ndk-context 0.1.1 不允许重复初始化（二次调用直接断言崩溃），Rust 侧另有一道 Once 保护
+    @JvmStatic external fun initNdkContext(context: Context)
 
     // 由 Rust 侧通过 JNI（call_static_method）调用，转发给 SafBridge 调起系统目录选择器
     @JvmStatic
@@ -49,6 +52,12 @@ class MainActivity : TauriActivity() {
      * native 实现见 src-tauri/src/android/entry.rs 的 nativeAudioRouteChanged。
      */
     @JvmStatic external fun nativeAudioRouteChanged()
+
+    /**
+     * 报告应用前后台，用于关掉后台期间的频谱计算与事件推送。由 [onStart] / [onStop] 调用。
+     * native 实现见 src-tauri/src/android/entry.rs 的 nativeSetForeground。
+     */
+    @JvmStatic external fun nativeSetForeground(foreground: Boolean)
 
     /**
      * 设置应用内界面字号倍率。由 Rust 命令 `set_app_font_scale` 经 JNI 调用
@@ -91,7 +100,8 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     current = this
-    initNdkContext(this)
+    // Application Context 而非 this：ndk_context 的引用是进程级的，不跟 Activity 生命周期
+    initNdkContext(applicationContext)
     SafBridge.init(this)
     MediaBridge.init(this)
     AudioBridge.init(this)
@@ -102,6 +112,22 @@ class MainActivity : TauriActivity() {
   override fun onDestroy() {
     if (current === this) current = null
     super.onDestroy()
+  }
+
+  /**
+   * 可见性上报用 onStart/onStop 而不是 onResume/onPause：弹系统对话框只会 pause，
+   * 界面仍在前面，频谱该继续算。
+   */
+  override fun onStart() {
+    super.onStart()
+    runCatching { nativeSetForeground(true) }
+      .onFailure { e -> android.util.Log.w("MainActivity", "setForeground(true) failed: ${e.message}") }
+  }
+
+  override fun onStop() {
+    runCatching { nativeSetForeground(false) }
+      .onFailure { e -> android.util.Log.w("MainActivity", "setForeground(false) failed: ${e.message}") }
+    super.onStop()
   }
 
   override fun onResume() {

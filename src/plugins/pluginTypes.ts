@@ -41,9 +41,7 @@ export const PluginPermission = {
 
 export type PluginPermissionType = (typeof PluginPermission)[keyof typeof PluginPermission]
 
-// ---------------------------------------------------------------------------
-// 事件订阅白名单
-// ---------------------------------------------------------------------------
+// ---- 事件订阅白名单 ----
 
 /**
  * 插件可订阅的应用事件 → 所需权限。

@@ -53,6 +53,7 @@ import { useLyrics } from '@/composables/useLyrics'
 import { useVisualTime } from '@/composables/useVisualTime'
 import { useLyricsTypography } from '@/composables/useLyricsTypography'
 import { listen } from '@tauri-apps/api/event'
+import { setVisualizerVisible } from '@/services/appService'
 import logger from '@/utils/logger'
 import { detectLyricLanguage } from '@/utils/languageDetect'
 import { supportsColorMix } from '@/utils/cssSupport'
@@ -334,6 +335,11 @@ export default {
     }
 
     onMounted(async () => {
+      // 先申请频谱、后注册监听：反序会让首帧为空。
+      // 卸载时 onUnmounted 的 false 一定晚于本条送达，最终仍是关闭。
+      setVisualizerVisible(true).catch((error) => {
+        logger.warn('Failed to enable spectrum data:', error)
+      })
       window.addEventListener('resize', resizeCanvas)
       resizeCanvas()
 
@@ -363,6 +369,9 @@ export default {
 
     onUnmounted(() => {
       disposed = true
+      setVisualizerVisible(false).catch((error) => {
+        logger.warn('Failed to disable spectrum data:', error)
+      })
       window.removeEventListener('resize', resizeCanvas)
       stopAnimation()
       spectrumListener?.()

@@ -7,15 +7,8 @@
  */
 
 /**
- * 用 Knuth (Fisher-Yates-Knuth) 算法生成洗牌顺序
- * 算法: 从后往前遍历 [n-1..1], 每次从 [0..i] 中随机取一个与 i 交换
- * 时间复杂度 O(n), 空间 O(n), 保证 n! 种排列等概率出现
- *
- * 以当前曲目为起点: 把当前 index 放到序列第 0 位,只对剩余 n-1 首洗牌
- *
- * @param playlistLength 播放列表长度
- * @param currentIndex 当前曲目索引 (-1 表示无)
- * @returns `{ order, position }`,playlistLength 为 0 时返回空序列
+ * Knuth 洗牌：从后往前遍历 [n-1..1]，与 [0..i] 随机位交换，O(n) 且 n! 排列等概率。
+ * 当前曲目会被移到序列第 0 位作为起点。playlistLength 为 0 时返回空序列。
  */
 export function generateShuffleOrder(
   playlistLength: number,
@@ -102,16 +95,7 @@ export function getNextShuffleIndex(
   return { index: currentOrder[currentPosition]!, position: currentPosition, order: currentOrder }
 }
 
-/**
- * 计算 previousTrack 在 shuffle 模式下的上一首索引
- *
- * @param order 当前洗牌序列
- * @param position 当前在序列中的位置
- * @param history 历史栈
- * @param playlistLength 播放列表长度
- * @param currentIndex 当前曲目索引 (用于在序列失效时重新生成)
- * @returns `{ index, position, order, history }`
- */
+/** 优先从历史栈弹出以真正回到上一首；栈空才退化为序列前移。 */
 export function getPreviousShuffleIndex(
   order: number[],
   position: number,

@@ -43,6 +43,7 @@ mod android_impl {
             .get("displayName")
             .and_then(|u| u.as_str())
             .unwrap_or_default();
+        let error = v.get("error").and_then(|u| u.as_str()).unwrap_or_default();
         Ok(SafPickState {
             uri: if uri.is_empty() {
                 None
@@ -54,6 +55,11 @@ mod android_impl {
                 None
             } else {
                 Some(display.to_string())
+            },
+            error: if error.is_empty() {
+                None
+            } else {
+                Some(error.to_string())
             },
         })
     }
@@ -77,45 +83,36 @@ mod android_impl {
     /// 枚举已授权树下的音频文件
     pub fn list_audio_files(tree_uri: &str) -> Result<Vec<SafEntry>, AppError> {
         let json = jni_call_string("listAudioFiles", &[tree_uri])?;
-        parse_audio_entry_list(&json)
+        parse_audio_scan(&json)
     }
 
-    fn parse_audio_entry_list(json: &str) -> Result<Vec<SafEntry>, AppError> {
-        let v: serde_json::Value = serde_json::from_str(json)
+    /// Kotlin `SafBridge.listAudioFiles` 的返回载荷（字段名一一对应，改一边要同步另一边）：
+    /// `files` 为扫描到的条目，`failedDirs` 为读取失败的目录，非空即扫描不完整。
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SafScanPayload {
+        #[serde(default)]
+        files: Vec<SafEntry>,
+        #[serde(default)]
+        failed_dirs: Vec<String>,
+    }
+
+    fn parse_audio_scan(json: &str) -> Result<Vec<SafEntry>, AppError> {
+        // 直接反序列化进 SafEntry。先前是先解成无类型 `Value` 再把字段逐个搬进新 String，
+        // 每个条目要多养一棵 `Map` 加八份临时串；万曲规模的扫库就是十几万次分配，
+        // 而且这些全部发生在从 JNI 取回那串大 JSON 之后紧邻的路径上。
+        let payload: SafScanPayload = serde_json::from_str(json)
             .map_err(|e| AppError::msg(format!("SAF 音频列表 JSON 无效: {e}")))?;
-        let arr = v
-            .as_array()
-            .ok_or_else(|| AppError::msg("SAF 音频列表不是数组"))?;
-        arr.iter()
-            .map(|item| {
-                let uri = item
-                    .get("uri")
-                    .and_then(|u| u.as_str())
-                    .ok_or_else(|| AppError::msg("SAF 条目缺少 uri"))?
-                    .to_string();
-                let name = item
-                    .get("name")
-                    .and_then(|n| n.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let folder = item
-                    .get("folder")
-                    .and_then(|f| f.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let folder_path = item
-                    .get("folderPath")
-                    .and_then(|f| f.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                Ok(SafEntry {
-                    uri,
-                    name,
-                    folder,
-                    folder_path,
-                })
-            })
-            .collect()
+        if !payload.failed_dirs.is_empty() {
+            // 部分目录读取失败时明确报错，而不是把残缺列表当完整扫描交上去：
+            // 调用方据此跳过这棵树并记录失败目录，避免"部分歌曲静默消失"被当成用户删了歌
+            return Err(AppError::msg(format!(
+                "SAF 扫描不完整，{} 个目录读取失败: {}",
+                payload.failed_dirs.len(),
+                payload.failed_dirs.join("、")
+            )));
+        }
+        Ok(payload.files)
     }
 
     /// 打开 content URI，返回包装好的 `File`（fd 所有权在 Rust 侧，随 File drop 关闭）
@@ -305,15 +302,20 @@ pub fn get_app_data_dir() -> Result<Option<String>, AppError> {
 /// SAF 树枚举出的单个音频条目
 ///
 /// `folder` 是直接父目录的显示名，`folder_path` 是相对树根的目录路径（可多级）。
-#[derive(Debug, Clone)]
+/// 字段名与 Kotlin `SafBridge.walkQuery` 写出的 JSON 键一一对应（camelCase），改一边要同步另一边。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SafEntry {
     /// content:// 文档 URI（播放/元数据读取都以它为准）
     pub uri: String,
     /// Kotlin 给出的显示文件名
+    #[serde(default)]
     pub name: String,
     /// 直接父目录显示名（根目录下的文件为树根可读名）
+    #[serde(default)]
     pub folder: String,
     /// 相对树根的目录路径，空串表示根目录
+    #[serde(default)]
     pub folder_path: String,
 }
 
@@ -332,8 +334,8 @@ pub fn list_audio_files(uri: &str) -> Result<Vec<SafEntry>, AppError> {
 
 /// SAF 授权状态快照
 ///
-/// `version` 每次成功授权都会递增：重新授权**同一个**目录时 URI 不变，
-/// 前端只能靠 version 判定"选择器已返回"。
+/// `version` 每次选择器返回都会递增（成功或失败）：重新授权**同一个**目录时 URI 不变，
+/// 前端只能靠 version 判定"选择器已返回"；成功与否再配合 `uri` / `error` 区分。
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SafPickState {
@@ -343,6 +345,8 @@ pub struct SafPickState {
     pub version: i64,
     /// 树的可读显示名（如 Music）
     pub display_name: Option<String>,
+    /// 最近一次目录选择失败的原因（成功或未开始时为 None）
+    pub error: Option<String>,
 }
 
 /// 获取 SAF 授权状态（仅 Android）

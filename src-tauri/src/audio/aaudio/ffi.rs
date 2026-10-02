@@ -95,6 +95,17 @@ unsafe extern "C" {
         builder: AAudioStreamBuilder,
         mode: aaudio_performance_mode_t,
     );
+    /// 单次数据回调交付的帧数。不设置时 AAudio 每 burst 回调一次；调大可降低回调线程
+    /// 唤醒频率，代价是输出延迟变长。生效上限为 BufferCapacity。
+    pub fn AAudioStreamBuilder_setFramesPerDataCallback(
+        builder: AAudioStreamBuilder,
+        numFrames: c_int,
+    );
+    /// 缓冲区容量上限。实际值会被 AAudio 向上取整到 burst 的整数倍，也可能按设备约束调整。
+    pub fn AAudioStreamBuilder_setBufferCapacityInFrames(
+        builder: AAudioStreamBuilder,
+        numFrames: c_int,
+    );
     pub fn AAudioStreamBuilder_setDataCallback(
         builder: AAudioStreamBuilder,
         callback: AAudioStream_dataCallback,

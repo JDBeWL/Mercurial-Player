@@ -129,15 +129,10 @@ export function createPluginStorage(pluginId: string): PluginPersistentStorage {
   }
 
   /**
-   * 生命周期方法: flush / cleanup
-   *
-   * 必须作为不可枚举、不可覆盖的能力暴露,而不是写成 storage 上的数据键。
-   * 早期实现直接 `persistentStorage.flush = ...`,由于 storage 是 Proxy,
-   * 赋值会走 set 陷阱 → 变成 reactive 对象的可枚举自有属性,带来两个后果:
-   *   1. api.storage.getAll() 的 `{ ...storage }` 展开会带上这两个函数,
-   *      宿主 postMessage 时结构化克隆抛 DataCloneError,而 pushMirror 只
-   *      logger.warn 吞掉 → 整份状态镜像 (playerState/theme/tracks) 静默丢失;
-   *   2. 插件可 `api.storage.set('flush', 1)` 覆盖,使停用时的落盘静默失败。
+   * flush/cleanup 必须作为不可枚举、不可覆盖的能力暴露，而非写成 storage 数据键。
+   * 早期直接赋值 `storage.flush` 走了 Proxy set 陷阱，变成可枚举自有属性：
+   * getAll() 展开带上函数 → 宿主 postMessage 克隆抛错且被 warn 吞掉，整份状态镜像静默丢失；
+   * 且插件可 set('flush') 覆盖，使停用时的落盘静默失效。
    */
   const lifecycle = {
     flush: (): Promise<void> => {

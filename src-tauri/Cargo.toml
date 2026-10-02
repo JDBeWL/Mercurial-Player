@@ -58,8 +58,9 @@ base64 = "0.22"
 flate2 = "1"
 md-5 = "0.10"
 
-# Android 专属：cpal 的 AAudio 后端需要 ndk_context（JavaVM+Activity），
-# 但 Tauri 栈（tao/wry）从不初始化它；需在 Activity 创建时自建 JNI 入口初始化
+# Android 专属：cpal 的 AAudio 后端需要 ndk_context（JavaVM+Context），
+# 但 Tauri 栈（tao/wry）从不初始化它；需自建 JNI 入口在进程级初始化一次
+# （传 Application Context，见 src/android/entry.rs 与 MainActivity.kt）
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 ndk-context = "0.1"

@@ -31,9 +31,7 @@ import {
   serializeError,
 } from './sandboxProtocol'
 
-// ---------------------------------------------------------------------------
-// 模块加载
-// ---------------------------------------------------------------------------
+// ---- 模块加载 ----
 
 /** 插件工厂函数 (模块默认导出):接收 api 与沙箱全局,返回插件实例 */
 export type PluginFactory = (api: PluginAPI, globals: unknown) => unknown
@@ -61,9 +59,7 @@ async function importPluginModule(code: string): Promise<PluginFactory> {
   return mod.default as PluginFactory
 }
 
-// ---------------------------------------------------------------------------
-// 序列化
-// ---------------------------------------------------------------------------
+// ---- 序列化 ----
 
 type CallbackRegistrar = (fn: (...args: unknown[]) => unknown) => number
 
@@ -122,22 +118,16 @@ function sanitizeLogArgs(args: unknown[]): unknown[] {
 /** 单个插件同时注册的回调上限(事件监听/返回值携带函数等),防失控插件刷爆内存 */
 const MAX_REGISTERED_CALLBACKS = 10_000
 
-// ---------------------------------------------------------------------------
-// Worker 本地工具实现 (不经过主窗口)
-// ---------------------------------------------------------------------------
+// ---- Worker 本地工具实现 (不经过主窗口) ----
 // (formatTime 已统一收敛到 utils/format.ts,Worker 打包时随 chunk 内联)
 
 /**
- * Worker 全局中需移除的原生 API:
- * - 网络类:插件的全部网络访问必须经 api.network.fetch 的权限代理走后端 HTTP
- * - 逃逸/外传类:postMessage (伪造沙箱协议消息)、close (自杀 Worker)、
- *   indexedDB (本地持久化外传)、importScripts (经典脚本加载)
- * - 新 realm 类:Worker/SharedWorker (嵌套 Worker 的全局是全新的,中和全部失效)、
- *   BroadcastChannel/caches (跨上下文通信与本地持久化)
- * - RTCPeerConnection:WebRTC 的 ICE 出站不受 CSP connect-src 约束
- * - 事件类:addEventListener/removeEventListener/dispatchEvent
- *   (窃听宿主下行消息、以合成 MessageEvent 向运行时注入伪造消息;
- *   运行时自身的 unhandledrejection 监听在中和前捕获原生引用,见 workerBootstrap)
+ * Worker 全局中需移除的原生 API：
+ * - 网络类：插件网络访问一律经 api.network.fetch 权限代理走后端 HTTP
+ * - 逃逸/外传类：postMessage（伪造协议消息）、close（自杀）、indexedDB（持久化外传）、importScripts
+ * - 新 realm 类：Worker/SharedWorker（嵌套后全局全新、中和失效）、BroadcastChannel/caches
+ * - RTCPeerConnection：ICE 出站不受 CSP connect-src 约束
+ * - 事件类：addEventListener/removeEventListener/dispatchEvent（窃听下行、注入伪造 MessageEvent）
  */
 const SANDBOX_BLOCKED_GLOBAL_KEYS = [
   'fetch',
@@ -160,18 +150,14 @@ const SANDBOX_BLOCKED_GLOBAL_KEYS = [
 ] as const
 
 /**
- * 从 Worker 全局作用域移除原生网络与逃逸相关 API。
- *
- * blob Worker 的 CSP 继承 (script-src/connect-src 生效) 之外的纵深防御:
- * 即使 CSP 继承在某个 WebView 版本中失效,插件也无法直接发起网络请求。
- * 注意:真正的权限边界在宿主侧 (workerSandboxHost 的 API_CALL_POLICY),
- * 本函数仅消除明显的绕过入口;运行时自身的消息收发必须在中和前捕获
- * 原生引用 (见 workerBootstrap)。
- * - 自身可配置属性:直接删除
- * - 原型链上的属性:删除最近一处原型定义 (WebIDL 接口原型成员均为
- *   configurable,且每个 Worker 拥有独立 realm,删除仅影响本 Worker),
- *   阻断经 self.__proto__.postMessage 等原型链引用绕过;再以抛错 getter 遮蔽
- * - 自身不可配置属性:保留 (由 CSP 兜底拦截)
+ * 移除 Worker 全局的网络与逃逸 API —— CSP 继承之外的纵深防御，
+ * 即便某个 WebView 版本的 CSP 继承失效，插件也无法直接发起网络请求。
+ * 注意真正的权限边界在宿主侧 (workerSandboxHost 的 API_CALL_POLICY)，
+ * 本函数只消除明显的绕过入口；运行时自身的消息收发须在中和前捕获原生引用 (见 workerBootstrap)。
+ * - 自身可配置：直接删除
+ * - 原型链属性：删最近一处原型定义并补抛错 getter，阻断 self.__proto__.postMessage 之类绕过
+ *   （WebIDL 接口原型成员均 configurable，各 Worker 独立 realm，删除只影响本 Worker）
+ * - 自身不可配置：保留，由 CSP 兜底
  */
 export function removeNetworkGlobals(scope: Record<string, unknown>): void {
   for (const key of SANDBOX_BLOCKED_GLOBAL_KEYS) {
@@ -245,9 +231,7 @@ function cssVarToCamel(name: string): string {
   return name.replace(/^--/, '').replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())
 }
 
-// ---------------------------------------------------------------------------
-// network.fetch 的 Response 序列化包装 (Worker 侧)
-// ---------------------------------------------------------------------------
+// ---- network.fetch 的 Response 序列化包装 (Worker 侧) ----
 
 interface SerializedResponse {
   [SANDBOX_RESPONSE_MARKER]: true
@@ -310,9 +294,7 @@ function reviveHostValue(value: unknown): unknown {
   return value
 }
 
-// ---------------------------------------------------------------------------
-// 沙箱 Worker 运行时
-// ---------------------------------------------------------------------------
+// ---- 沙箱 Worker 运行时 ----
 
 interface PendingCall {
   resolve: (value: unknown) => void
@@ -433,9 +415,7 @@ export class SandboxWorkerRuntime {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // 内部:主流程与代理构建
-  // -------------------------------------------------------------------------
+  // ---- 内部:主流程与代理构建 ----
 
   private async runMain(): Promise<void> {
     if (!this.factory) {

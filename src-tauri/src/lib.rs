@@ -130,6 +130,9 @@ pub struct VisualizationState {
     pub spectrum_data: Arc<Mutex<Vec<f32>>>,
     /// 目标刷新率（用于可视化FFT计算，默认60fps）
     pub target_fps: Arc<AtomicU64>,
+    /// 频谱计算门控：可视化面板在屏、且应用在前台才算 FFT 并发送事件。
+    /// 面板是 `spectrum-update` 唯一的订阅者，两者任一不成立时算出来都没人消费。
+    pub spectrum_gate: Arc<audio::spectrum::SpectrumGate>,
 }
 
 /// 解码线程管理
@@ -405,6 +408,7 @@ pub fn run() {
             audio::commands::toggle_exclusive_mode,
             audio::commands::get_exclusive_mode,
             audio::commands::set_target_fps,
+            audio::commands::set_visualizer_visible,
             audio::commands::set_fade_enabled,
             audio::commands::get_fade_enabled,
             // 上次播放会话恢复命令

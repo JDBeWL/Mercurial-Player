@@ -49,9 +49,7 @@ export function getFadeEnabled(): Promise<boolean> {
   return invoke<boolean>('get_fade_enabled')
 }
 
-// ============================================================================
-// Android：USB DAC 独占（位完美）
-// ============================================================================
+// ---- Android：USB DAC 独占（位完美） ----
 
 /** 单个输出设备的摘要（Android，来自 AudioManager.getDevices） */
 export interface OutputDevice {

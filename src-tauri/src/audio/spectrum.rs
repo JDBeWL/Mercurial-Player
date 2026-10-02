@@ -25,9 +25,12 @@ use crate::equalizer::EqSettings;
 pub(crate) const SPECTRUM_BINS: usize = 128;
 
 /// 频谱更新事件 - 简化结构减少序列化开销
+///
+/// 借用语义而不是持有 `Vec`：调用方已经有 `prev_spectrum`，再 `to_vec()` 只是每秒
+/// 几十次无谓的堆分配。
 #[derive(Debug, serde::Serialize, Clone)]
-pub struct SpectrumUpdateEvent {
-    pub data: Vec<f32>,
+pub struct SpectrumUpdateEvent<'a> {
+    pub data: &'a [f32],
 }
 
 #[inline]
@@ -36,13 +39,50 @@ pub(super) fn emit_spectrum_update(
     data: &[f32],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 直接发送数据数组，减少JSON包装开销
-    app.emit(
-        "spectrum-update",
-        SpectrumUpdateEvent {
-            data: data.to_vec(),
-        },
-    )?;
+    app.emit("spectrum-update", SpectrumUpdateEvent { data })?;
     Ok(())
+}
+
+/// 频谱计算的门控：两个来源都为真才做 FFT 并发送 `spectrum-update`。
+///
+/// - `panel`：可视化面板是否挂载，由前端在挂载/卸载时写入。面板是该事件唯一的订阅者。
+/// - `foreground`：应用是否可见，由 Kotlin 的 Activity 生命周期写入。这一路必须由 native
+///   来做：横屏看着波形退到后台时组件并不会卸载，而 wry 在 `onPause` 里就调了
+///   `mWebView.onPause()` 把 JS 冻住，前端既来不及关、回到前台也不会主动补一句"我又可见了"。
+///
+/// 缺省 `foreground = true`：进程启动即在前台，Kotlin 随后按实际生命周期纠正。
+pub struct SpectrumGate {
+    foreground: AtomicBool,
+    panel: AtomicBool,
+}
+
+impl SpectrumGate {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            foreground: AtomicBool::new(true),
+            panel: AtomicBool::new(false),
+        }
+    }
+
+    pub fn set_foreground(&self, foreground: bool) {
+        self.foreground.store(foreground, Ordering::Relaxed);
+    }
+
+    pub fn set_panel_visible(&self, visible: bool) {
+        self.panel.store(visible, Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn allowed(&self) -> bool {
+        self.foreground.load(Ordering::Relaxed) && self.panel.load(Ordering::Relaxed)
+    }
+}
+
+impl Default for SpectrumGate {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// 根据采样率取约 43ms 分析窗口的 FFT 大小（2 的幂，2048@48kHz）
@@ -277,6 +317,7 @@ fn spawn_spectrum_thread(
     ring: Arc<SampleRing>,
     spectrum_data: Arc<Mutex<Vec<f32>>>,
     target_fps: Arc<AtomicU64>,
+    gate: Arc<SpectrumGate>,
     app: Option<AppHandle>,
     samples_played: Arc<AtomicU64>,
     eof_reached: Arc<AtomicBool>,
@@ -305,14 +346,18 @@ fn spawn_spectrum_thread(
             // 曲目结束事件:音频线程只置位,发送在这里做
             emit_ended_once(app.as_ref(), &eof_reached);
 
-            let drained = ring.drain_into(&mut scratch, SPECTRUM_DRAIN_MAX);
-            if drained > 0 {
-                analyzer.extend_buffer(&scratch);
-                scratch.clear();
-            }
-
             let now = now_ms();
-            analyzer.compute_if_ready(now, &spectrum_data, &target_fps, app.as_ref());
+            // 面板不在屏、或应用已经到后台时，整条 FFT + 事件发送都跳过：数据没有订阅者。
+            // 期间采样堆到 ring 容量上限后由 push 侧丢弃（约几百毫秒的量级），重新显示时
+            // 频谱相位略有滞后，但不影响正确性；反过来若这里继续算，就是纯耗电。
+            if gate.allowed() {
+                let drained = ring.drain_into(&mut scratch, SPECTRUM_DRAIN_MAX);
+                if drained > 0 {
+                    analyzer.extend_buffer(&scratch);
+                    scratch.clear();
+                }
+                analyzer.compute_if_ready(now, &spectrum_data, &target_fps, app.as_ref());
+            }
 
             // 播放位置事件同样不能从音频线程发送
             if now.saturating_sub(last_position_emit) >= POSITION_EMIT_INTERVAL_MS {
@@ -344,6 +389,7 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         spectrum_data: Arc<Mutex<Vec<f32>>>,
         app_handle: Option<AppHandle>,
         target_fps: Arc<AtomicU64>,
+        gate: Arc<SpectrumGate>,
     ) -> Self {
         let (sr, ch) = (input.sample_rate().get(), input.channels().get());
         let samples_played = Arc::new(AtomicU64::new(0));
@@ -358,6 +404,7 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             Arc::clone(&sample_ring),
             spectrum_data,
             target_fps,
+            gate,
             app_handle,
             Arc::clone(&samples_played),
             Arc::clone(&eof_reached),

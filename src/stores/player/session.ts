@@ -67,13 +67,8 @@ export async function saveLastSessionNow(store: PlayerStore): Promise<void> {
 }
 
 /**
- * 启动时调用 - 尝试恢复上次播放会话
- *
- * 行为:
- * - resumed=true: 后端已加载文件并暂停在 position,前端设置 UI 状态
- *   (currentTrack/duration/currentTime/audioInfo/playlist),isPlaying=false 保持暂停
- * - resumed=false 且 status='not_found': 文件不存在,从播放列表移除该路径
- * - 其他 false 状态: 静默忽略,无需 UI 反馈
+ * resumed=true：后端已加载并暂停在 position，前端补 UI 状态且保持暂停。
+ * not_found：文件已不存在，从播放列表移除该路径；其余 false 静默忽略。
  */
 export async function resumeLastSession(store: PlayerStore): Promise<ResumeResult | null> {
   try {

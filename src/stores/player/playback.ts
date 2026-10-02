@@ -1,12 +1,7 @@
 /**
- * 播放控制模块:seek / 音量 / 静音。
- *
- * 从 stores/player.ts 拆出的纯逻辑层,避免 options store 越滚越大。
- * 函数接收最小化的 store 形状(而非 import player 造成循环依赖),
- * 通过 Pinia action 委托调用,行为与原实现完全一致。
- *
- * 注:play/pause/next/previous 与播放列表、结束后自动切歌逻辑强耦合,
- * 未随本模块迁出,留在 player.ts。
+ * 从 player.ts 拆出的纯逻辑层，避免 options store 膨胀。
+ * 接收最小 store 形状而非 import player，以免循环依赖；行为与原实现一致。
+ * play/pause/next/previous 与播放列表强耦合，故留在 player.ts。
  */
 import type { Track } from '@/types'
 import { ErrorSeverity } from '../../utils/errorHandler'

@@ -6,18 +6,10 @@ import CoverUpscaleWorker from '../workers/coverUpscale.worker?worker'
 import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
 
 /**
- * 沉浸式封面高清放大。
- *
- * 浏览器对 <img> 的默认放大是双线性插值，封面被拉伸到整窗高度后会发糊。
- * 这里按显示端相同的裁剪规则（object-fit: cover + object-position: left center）
- * 先裁出靠左的正方形源区域，再用 pica 的 Lanczos3 核放大到「窗口高度 × DPR」
- * 的精确像素尺寸，最后以 objectURL 交给 <img>，实现 1:1 像素映射。
- *
- * - 优先在专用 worker 线程执行（解码 + 裁剪 + Lanczos 放大），主线程零阻塞，
- *   避免切歌瞬间与歌词首帧渲染争抢主线程。
- * - worker 不可用（创建失败 / 运行报错 / OffscreenCanvas 不支持）时回退主线程同步执行，
- *   功能不中断但可能短暂卡顿；再失败或源图已够大（无需放大）则直接用原始 URL。
- * - 处理期间先展示原始 URL，完成后无缝替换，避免封面闪空。
+ * 浏览器默认放大是双线性插值，封面拉满窗高会发糊；这里先按显示端同一规则裁出左侧正方形，
+ * 再用 pica Lanczos3 放大到「窗高 × DPR」精确像素做 1:1 映射。
+ * 优先丢给专用 worker（免与歌词首帧争主线程），失败回退同步执行，再失败用原图。
+ * 处理期间先显示原 URL，完成后无缝替换以免封面闪空。
  */
 
 // 主线程回退路径用的 pica 单例。features 显式不含 'ww'（web worker）：

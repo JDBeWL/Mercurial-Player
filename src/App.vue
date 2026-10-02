@@ -64,12 +64,10 @@
                 >
                   <span class="material-symbols-rounded">cloud_done</span>
                 </div>
-                <!-- 视图切换：只在桌面端出现。波形这一态只有这个按钮能进入，手机上不给入口就等于没有；
-                     手机横屏本来就是"左封面 + 右歌词"双栏不需要切换，竖屏靠点封面/点歌词空白处切换，
-                     而顶栏空间宝贵。判据必须用平台（isAndroid）而不是方向：桌面窗口绝大多数时候也是横屏，
-                     用方向判据会把桌面端一起改掉。 -->
+                <!-- 手机竖屏隐藏：顶栏空间宝贵，竖屏靠点封面/歌词空白处切换。
+                     判据须带上平台而非只看方向——桌面窗口绝大多数时候也是横屏。 -->
                 <button
-                  v-if="!isAndroid"
+                  v-if="!isAndroid || !isPortrait"
                   class="icon-button view-toggle-btn"
                   :title="$t(nextUpperViewTitleKey)"
                   @click="cycleUpperView"

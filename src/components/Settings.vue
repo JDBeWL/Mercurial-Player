@@ -99,12 +99,9 @@ const activeTab = ref<string>(isMobilePortrait.value ? '' : 'folders')
 const mobileView = ref<'list' | 'detail'>('list')
 
 /**
- * 系统返回键做成"应用内后退一级"。
- *
- * MainActivity 打开了 wry 的 handleBackNavigation，返回键会先走 webview.goBack()，
- * 于是每次返回落进这里的 popstate：详情页 → 列表页 → 关闭设置 → 再返回才退出应用。
- * 我们按层级压入等量的 history 条目（heldEntries 记账），页面自己关不掉时
- * （比如从顶栏按钮关）在卸载时把多余的条目消费掉，避免留下"按了没反应"的返回。
+ * 系统返回键做成「应用内后退一级」：MainActivity 开了 handleBackNavigation，
+ * 返回键先走 webview.goBack()，逐次 popstate 到「关闭设置」才退出应用。
+ * heldEntries 记账层级，页面自行关闭时卸载后把多余条目消费掉。
  */
 let heldEntries = 0
 const pushEntry = (): void => {

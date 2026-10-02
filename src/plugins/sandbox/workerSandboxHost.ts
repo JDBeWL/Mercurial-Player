@@ -1,13 +1,9 @@
 /**
- * 插件沙箱宿主 —— 主窗口侧
- *
- * 为单个外置插件管理一个 Dedicated Worker:
- * - 消息 RPC:把 Worker 内代理发起的 api-call 分发到真实 PluginAPI
- * - 状态镜像:向 Worker 推送 player/theme/storage/library 快照,
- *   使沙箱插件的同步读 API 保持原契约
- * - 回调桥:把插件注册的函数 (歌词源 search / 事件监听 / activate 等)
- *   还原为调用 Worker 的 stub 函数
- * - 生命周期:deactivate 时 terminate Worker (定时器/监听随之全部释放)
+ * 插件沙箱宿主 —— 主窗口侧。为单个外置插件管理一个 Dedicated Worker：
+ * - 消息 RPC：把 Worker 内代理发起的 api-call 分发到真实 PluginAPI
+ * - 状态镜像：向 Worker 推送 player/theme/storage/library 快照，使同步读 API 保持原契约
+ * - 回调桥：把插件注册的函数（歌词源 search / 事件监听 / activate）还原为调用 Worker 的 stub
+ * - 生命周期：deactivate 时 terminate Worker（定时器与监听随之释放）
  */
 
 import { watch, type WatchStopHandle } from 'vue'
@@ -32,14 +28,11 @@ import SandboxWorker from './workerBootstrap?worker&inline'
 export type WorkerFactory = () => Worker
 
 /**
- * 沙箱 api-call 路径白名单:精确路径 → 所需权限 (null = 无需权限)。
- *
- * 权限校验的权威位置在宿主 (主窗口可信侧):Worker 内的 requirePermission
- * (workerCore) 与插件代码共享同一全局作用域,可被插件以
- * self.postMessage({type:'api-call',...}) 直接绕过。本表以精确匹配取代
- * 任意属性链遍历,不在表中的路径 (如 log.info.constructor、
- * permissions.__proto__.push) 一律拒绝。
- * 使用 Map 避免对象原型链键 (constructor 等) 干扰白名单查找。
+ * 沙箱 api-call 路径白名单：精确路径 → 所需权限（null = 无需权限）。
+ * 权限校验的权威位置在宿主主窗口侧：Worker 内的 requirePermission 与插件共享全局作用域，
+ * 可被以 self.postMessage({type:'api-call',...}) 直接绕过。
+ * 本表用精确匹配取代属性链遍历，未收录的路径（log.info.constructor 等）一律拒绝；
+ * 用 Map 存储以免对象原型链键干扰查找。
  */
 const API_CALL_POLICY: ReadonlyMap<string, PluginPermissionType | null> = new Map([
   ['player.getLyrics', PluginPermission.PLAYER_READ],
@@ -81,15 +74,12 @@ const API_CALL_POLICY: ReadonlyMap<string, PluginPermissionType | null> = new Ma
 /**
  * 默认 Worker 工厂:blob URL 内联 Worker (vite `?worker&inline`)。
  *
- * 安全原因: Tauri 的 CSP 以 meta 标签注入主文档,资产协议不为 JS 文件注入 CSP 头;
- * 经普通 URL 加载的 Worker,其 CSP 只来自脚本响应自身 → Worker 内完全没有
- * CSP 约束,插件可用原生 fetch / WebSocket / 远程动态 import() 绕过 NETWORK
- * 权限 (远程 import 的 URL 本身即可携带外传数据)。
- * 而 blob: URL 创建的 Worker 会继承创建文档的 CSP (MDN: CSP in workers),
- * 使 script-src / connect-src 在 Worker 内生效;当前 CSP 的 script-src 已含
- * blob:,blob Worker 的创建也被允许。
- * (dev 模式下 vite 以 dev-server URL 创建 Worker,不继承 CSP,但 dev 为
- * 开发者自身的可信环境;生产构建为 blob URL。)
+ * 安全原因:Tauri 的 CSP 由 meta 标签注入主文档,资产协议不为 JS 注入 CSP 头;
+ * 经普通 URL 加载的 Worker 其 CSP 只来自脚本响应自身 → Worker 内全无 CSP 约束,
+ * 插件可用原生 fetch / WebSocket / 远程动态 import() 绕过 NETWORK 权限。
+ * 而 blob: URL 的 Worker 会继承创建文档的 CSP (MDN: CSP in workers),
+ * 使 script-src / connect-src 在 Worker 内生效;当前 CSP script-src 已含 blob:。
+ * (dev 下 vite 用 dev-server URL 建 Worker 不继承 CSP,但那是开发者自身可信环境。)
  */
 const defaultWorkerFactory = (): Worker => new SandboxWorker()
 
@@ -171,9 +161,7 @@ const LOG_LEVELS = new Set(['error', 'warn', 'info', 'debug'])
 
 type LogLevel = 'error' | 'warn' | 'info' | 'debug'
 
-// ---------------------------------------------------------------------------
-// 不可信消息校验
-// ---------------------------------------------------------------------------
+// ---- 不可信消息校验 ----
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -338,9 +326,7 @@ export class PluginWorkerHost {
     this.api = null
   }
 
-  // -------------------------------------------------------------------------
-  // 内部:消息分发
-  // -------------------------------------------------------------------------
+  // ---- 内部:消息分发 ----
 
   private post(msg: HostToWorkerMessage): void {
     this.worker?.postMessage(msg)
@@ -364,10 +350,9 @@ export class PluginWorkerHost {
    * 消息来自不可信侧:插件代码与沙箱运行时共享同一全局作用域,可自行
    * postMessage 伪造任意 payload。因此这里做三层防护:
    *   1. 按消息类型逐一校验字段形状,不合法直接丢弃(不改变任何宿主状态);
-   *   2. revive 阶段受深度/节点数预算约束,越界抛可捕获的普通 Error,
-   *      而不是让无限制递归触发栈溢出 RangeError;
-   *   3. 整体 try/catch —— 任何残留异常都必须拒绝全部挂起 Promise 并终止
-   *      Worker,否则插件会永久卡在半初始化状态且不产生任何报错。
+   *   2. revive 受深度/节点数预算约束,越界抛可捕获的普通 Error,而非让递归触发栈溢出;
+   *   3. 整体 try/catch —— 残留异常必须拒绝全部挂起 Promise 并终止 Worker,
+   *      否则插件会永久卡在半初始化状态且毫无报错。
    */
   private handleWorkerMessage(raw: unknown): void {
     if (!isRecord(raw) || typeof raw.type !== 'string') return
@@ -633,9 +618,7 @@ export class PluginWorkerHost {
     return result
   }
 
-  // -------------------------------------------------------------------------
-  // 内部:回调桥
-  // -------------------------------------------------------------------------
+  // ---- 内部:回调桥 ----
 
   /** 主窗口侧回调 stub:调用时 RPC 到 Worker 内执行插件函数 */
   private makeCallbackStub(cbId: number): (...args: unknown[]) => Promise<unknown> {
@@ -688,9 +671,7 @@ export class PluginWorkerHost {
     return stub
   }
 
-  // -------------------------------------------------------------------------
-  // 内部:状态镜像
-  // -------------------------------------------------------------------------
+  // ---- 内部:状态镜像 ----
 
   private hasPerm(permission: string): boolean {
     return this.permissions.includes(permission)
@@ -820,9 +801,7 @@ export class PluginWorkerHost {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 序列化辅助 (主窗口侧)
-// ---------------------------------------------------------------------------
+// ---- 序列化辅助 (主窗口侧) ----
 
 type StubFactory = (cbId: number) => (...args: unknown[]) => unknown
 

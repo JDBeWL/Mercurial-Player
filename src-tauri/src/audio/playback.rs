@@ -42,10 +42,11 @@ pub fn play_track_shared(
         player_lock.set_volume(vol);
     }
     *lock_or_log!(player.track.current_path.lock()) = Some(path.to_string());
-    let (spectrum, eq_settings, target_fps) = (
+    let (spectrum, eq_settings, target_fps, gate) = (
         Arc::clone(&player.visualization.spectrum_data),
         state.equalizer.get_settings_handle(),
         Arc::clone(&player.visualization.target_fps),
+        Arc::clone(&player.visualization.spectrum_gate),
     );
 
     let source: Box<dyn Source<Item = f32> + Send> = match SymphoniaDecoder::new(path) {
@@ -64,6 +65,7 @@ pub fn play_track_shared(
                     spectrum,
                     Some(app.clone()),
                     target_fps,
+                    gate,
                 )
                 .with_start_position(start_pos)
                 .with_eq_settings(eq_settings)
@@ -79,6 +81,7 @@ pub fn play_track_shared(
                     spectrum,
                     Some(app.clone()),
                     target_fps,
+                    gate,
                 )
                 .with_start_position(position.unwrap_or(0.0))
                 .with_eq_settings(eq_settings)
@@ -217,13 +220,14 @@ pub async fn play_track_exclusive(
 
     let source = LockFreeSymphoniaSource::new(decoder);
     let start_pos = position.unwrap_or(0.0);
-    let (wasapi_clone, generation, thread_id, eq_settings, spectrum_data, target_fps) = (
+    let (wasapi_clone, generation, thread_id, eq_settings, spectrum_data, target_fps, gate) = (
         Arc::clone(&player.output.wasapi_player),
         Arc::clone(&player.decode.generation),
         Arc::clone(&player.decode.id),
         state.equalizer.get_settings_handle(),
         Arc::clone(&player.visualization.spectrum_data),
         Arc::clone(&player.visualization.target_fps),
+        Arc::clone(&player.visualization.spectrum_gate),
     );
     let app_clone = app.clone();
     let thread_started = Arc::new(AtomicBool::new(false));
@@ -247,6 +251,7 @@ pub async fn play_track_exclusive(
             eq_settings,
             spectrum_data,
             target_fps,
+            gate,
             start_pos,
         );
     });
@@ -327,6 +332,7 @@ pub fn seek_track_shared(
             Arc::clone(&player.visualization.spectrum_data),
             Some(app.clone()),
             Arc::clone(&player.visualization.target_fps),
+            Arc::clone(&player.visualization.spectrum_gate),
         )
         .with_start_position(time)
         .with_eq_settings(eq_settings)

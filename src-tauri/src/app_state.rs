@@ -78,6 +78,7 @@ pub fn build_app_state(
                     crate::audio::spectrum::SPECTRUM_BINS
                 ])),
                 target_fps: Arc::new(AtomicU64::new(60)), // 默认60fps
+                spectrum_gate: Arc::new(crate::audio::spectrum::SpectrumGate::new()),
             },
             decode: DecodeThreadState {
                 generation: Arc::new(AtomicU64::new(0)),

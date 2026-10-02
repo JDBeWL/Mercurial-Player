@@ -4,16 +4,10 @@ import type { ImmersiveColorScheme } from '@/types'
 import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
 
 /**
- * 从封面图片提取主色，用于沉浸式封面模式的背景填充。
- *
- * 两种取色风格（mode 参数）：
- * - 'album' 专辑主题色：整张封面均匀取样，K‑Means 选出最具代表性且美观的主题色
- *   （偏中等亮度与高彩度，抑制过暗/过亮和灰色）。
- * - 'fusion' 封面融合：只取封面最右侧 5%（x >= 0.95）的羽化条带求平均，背景色与封面右缘一致，
- *   封面"沉入"背景的过渡最无痕。
- *
- * 取样前先按 object-fit: cover + object-position: left center 裁剪，取到的就是实际显示的区域；
- * 结果在 OKLab 里保持色相、二分查找最大合法彩度，避免 RGB 溢出。纯色/透明过多时返回后备色。
+ * 从封面提取主色，用于沉浸式背景填充。取样前先按 object-fit: cover 裁剪到实际显示区域。
+ * - 'album'：整张均匀取样 + K‑Means 选代表性色（偏中亮度高彩度，抑制过暗/过亮与灰）。
+ * - 'fusion'：只取最右 5% 羽化条带求平均，与封面右缘一致，过渡最无痕。
+ * 结果在 OKLab 保色相并二分查找最大合法彩度以免 RGB 溢出；纯色/透明过多时返回后备色。
  */
 export function useDominantColor(
   coverPath: Ref<string | undefined | null>,

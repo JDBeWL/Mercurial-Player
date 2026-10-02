@@ -25,6 +25,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media.session.MediaButtonReceiver
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * 后台播放前台服务：只保活进程 + 托管 MediaSession/通知，不持有任何音频句柄（解码与输出都在 Rust 侧）。
@@ -90,7 +92,29 @@ class PlaybackService : Service() {
   private lateinit var audioManager: AudioManager
   private var mediaSession: MediaSessionCompat? = null
   private var focusRequest: AudioFocusRequest? = null
+
+  /** 是否**真正持有**音频焦点（requestAudioFocus 返回值）。focusRequest 非空只表示请求对象已构建 */
+  private var focusGranted = false
   private val mainHandler = Handler(Looper.getMainLooper())
+
+  /**
+   * 媒体命令串行后台执行器。dispatchToRust 的 JNI 调用是同步的：切歌/seek 会打开文件、
+   * 建解码器并预填充缓冲，慢存储或慢文档提供者上可能秒级；主线程（MediaSession 回调 /
+   * 广播接收器 / 焦点回调）只负责提交命令，避免控制迟滞与 ANR。串行也保证命令按到达顺序执行。
+   */
+  private val commandExecutor: ExecutorService =
+    Executors.newSingleThreadExecutor { r -> Thread(r, "media-command") }
+
+  /** 通知封面读取/解码执行器（content:// 要经 provider，可能很慢，不能占主线程） */
+  private val coverExecutor: ExecutorService =
+    Executors.newSingleThreadExecutor { r -> Thread(r, "cover-load") }
+
+  /** 当前封面位图及其来源路径：只缓存"当前这一首"，避免位图累积 */
+  private var coverBitmap: Bitmap? = null
+  private var coverBitmapPath: String? = null
+
+  /** 正在后台加载的封面路径，避免同一路径重复提交 */
+  private var coverLoadingPath: String? = null
 
   private var title = ""
   private var artist = ""
@@ -117,6 +141,8 @@ class PlaybackService : Service() {
         AudioManager.AUDIOFOCUS_LOSS,
         AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
         -> {
+          // 焦点已不在我们手里：下次播放必须重新申请，否则会一直以为还持有焦点
+          focusGranted = false
           android.util.Log.i(TAG, "audio focus lost ($change) -> pause")
           dispatchToRust("pause", 0L)
         }
@@ -138,13 +164,20 @@ class PlaybackService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    if (intent == null && !hasTrack) {
+      // 防御分支：空 Intent 且没有可恢复的会话（进程刚重建，Rust 侧播放器与全局 AppHandle
+      // 都未初始化）时，建通知只会得到"未知曲目"通知与无效的媒体按钮，直接停掉
+      android.util.Log.i(TAG, "空 Intent 且无有效会话，停止服务")
+      stopSelf()
+      return START_NOT_STICKY
+    }
     if (intent != null) {
       // ACTION_MEDIA_BUTTON 由 MediaButtonReceiver 统一处理（耳机线控）
       if (intent.action == Intent.ACTION_MEDIA_BUTTON) {
         MediaButtonReceiver.handleIntent(mediaSession, intent)
       }
       when (intent.action) {
-        ACTION_PLAY -> dispatchToRust("play", 0L)
+        ACTION_PLAY -> if (ensureFocusForPlayback()) dispatchToRust("play", 0L)
         ACTION_PAUSE -> dispatchToRust("pause", 0L)
         ACTION_NEXT -> dispatchToRust("next", 0L)
         ACTION_PREVIOUS -> dispatchToRust("previous", 0L)
@@ -190,7 +223,9 @@ class PlaybackService : Service() {
       abandonAudioFocus()
     }
     updateMediaSession()
-    return START_STICKY
+    // 不用 START_STICKY：进程死亡后 Rust 侧的播放器与全局 AppHandle 都随进程消失，
+    // 服务自身没有重建播放器的入口，粘性重启只会留下"未知曲目"通知与无效按键
+    return START_NOT_STICKY
   }
 
   override fun onDestroy() {
@@ -198,6 +233,9 @@ class PlaybackService : Service() {
     runCatching { unregisterReceiver(noisyReceiver) }
     mediaSession?.release()
     mediaSession = null
+    // shutdown（而非 shutdownNow）：已提交但未执行的命令要继续跑完，"停止播放"不能丢
+    commandExecutor.shutdown()
+    coverExecutor.shutdown()
     running = false
     super.onDestroy()
   }
@@ -220,7 +258,9 @@ class PlaybackService : Service() {
       MediaSessionCompat(this, "MercurialPlayer").apply {
         setCallback(
           object : MediaSessionCompat.Callback() {
-            override fun onPlay() = dispatchToRust("play", 0L)
+            override fun onPlay() {
+              if (ensureFocusForPlayback()) dispatchToRust("play", 0L)
+            }
 
             override fun onPause() = dispatchToRust("pause", 0L)
 
@@ -307,8 +347,8 @@ class PlaybackService : Service() {
     }
     addAction(builder, ACTION_NEXT, "下一首", R.drawable.ic_action_next)
 
-    // 通知封面：统一降采样后再设置，约束见 loadCoverBitmap
-    loadCoverBitmap()?.let { builder.setLargeIcon(it) }
+    // 通知封面：命中缓存直接用；未命中提交后台加载，加载完再刷新通知（见 currentCoverBitmap）
+    currentCoverBitmap(coverPath)?.let { builder.setLargeIcon(it) }
     return builder.build()
   }
 
@@ -332,21 +372,51 @@ class PlaybackService : Service() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
 
   /**
+   * 取当前封面位图（主线程调用，只读缓存）。未命中时提交后台加载，完成后回主线程刷新通知；
+   * 同一路径不会重复提交，解码失败也会"缓存"为空结果，避免每条状态同步都重试。
+   */
+  private fun currentCoverBitmap(path: String): Bitmap? {
+    if (path.isBlank()) {
+      coverBitmap = null
+      coverBitmapPath = null
+      return null
+    }
+    if (path == coverBitmapPath) return coverBitmap
+    if (path != coverLoadingPath) {
+      coverLoadingPath = path
+      coverExecutor.execute {
+        val bitmap = loadCoverBitmap(path)
+        mainHandler.post {
+          coverLoadingPath = null
+          if (!running || coverPath != path) return@post
+          coverBitmapPath = path
+          coverBitmap = bitmap
+          if (bitmap != null) {
+            notificationManager.notify(NOTIFICATION_ID, buildNotification())
+          }
+        }
+      }
+    }
+    return null
+  }
+
+  /**
    * 通知大图：封面路径由 Rust 侧 `get_track_cover_path` 给出（本地路径或 content://）。
    * Binder 事务上限 1MB，必须降采样到 ≤256px 再 `setLargeIcon`，否则抛 TransactionTooLargeException。
+   * 只在 [coverExecutor] 线程调用：content:// 读取要走 provider，可能很慢。
    */
-  private fun loadCoverBitmap(): Bitmap? {
-    if (coverPath.isBlank()) return null
+  private fun loadCoverBitmap(path: String): Bitmap? {
+    if (path.isBlank()) return null
     val source =
       runCatching {
         when {
-          coverPath.startsWith("content://") -> {
-            contentResolver.openInputStream(android.net.Uri.parse(coverPath))?.use { input ->
+          path.startsWith("content://") -> {
+            contentResolver.openInputStream(android.net.Uri.parse(path))?.use { input ->
               BitmapFactory.decodeStream(input)
             }
           }
-          coverPath.startsWith("/") -> {
-            val file = java.io.File(coverPath)
+          path.startsWith("/") -> {
+            val file = java.io.File(path)
             if (!file.exists()) return null
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.absolutePath, opts)
@@ -374,31 +444,53 @@ class PlaybackService : Service() {
     )
   }
 
+  /**
+   * 起播前的焦点闸门：确认拿到焦点才下发 play，把"未获焦点仍出声"挡在源头。
+   * 申请失败时 [requestAudioFocus] 内部会下发 pause 兜底，覆盖 Rust 已先起播的路径。
+   */
+  private fun ensureFocusForPlayback(): Boolean {
+    requestAudioFocus()
+    return focusGranted
+  }
+
   private fun requestAudioFocus() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      if (focusRequest != null) return
-      val attrs =
-        AudioAttributes.Builder()
-          .setUsage(AudioAttributes.USAGE_MEDIA)
-          .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-          .build()
-      focusRequest =
-        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-          .setAudioAttributes(attrs)
-          .setOnAudioFocusChangeListener(focusChangeListener, mainHandler)
-          .build()
-      audioManager.requestAudioFocus(focusRequest!!)
-    } else {
-      @Suppress("DEPRECATION")
-      audioManager.requestAudioFocus(
-        focusChangeListener,
-        AudioManager.STREAM_MUSIC,
-        AudioManager.AUDIOFOCUS_GAIN,
-      )
+    // 已持有焦点才直接返回；focusRequest 非空不能当作"已获得"，否则被拒后永远无法重试
+    if (focusGranted) return
+    // focusRequest 只缓存请求对象（可复用重试），与是否持有焦点无关
+    val granted =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val request = focusRequest ?: buildFocusRequest().also { focusRequest = it }
+        audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+      } else {
+        @Suppress("DEPRECATION")
+        audioManager.requestAudioFocus(
+          focusChangeListener,
+          AudioManager.STREAM_MUSIC,
+          AudioManager.AUDIOFOCUS_GAIN,
+        ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+      }
+    focusGranted = granted
+    if (!granted) {
+      // 系统拒绝焦点：未获焦点还继续出声属于抢播，立即暂停输出；focusGranted 为 false，
+      // 用户下次播放会重新申请（不再被"请求对象已存在"挡住）
+      android.util.Log.w(TAG, "requestAudioFocus 被拒绝 -> 暂停输出")
+      dispatchToRust("pause", 0L)
     }
   }
 
+  private fun buildFocusRequest(): AudioFocusRequest =
+    AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+      .setAudioAttributes(
+        AudioAttributes.Builder()
+          .setUsage(AudioAttributes.USAGE_MEDIA)
+          .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+          .build(),
+      )
+      .setOnAudioFocusChangeListener(focusChangeListener, mainHandler)
+      .build()
+
   private fun abandonAudioFocus() {
+    focusGranted = false
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
       focusRequest = null
@@ -417,9 +509,15 @@ class PlaybackService : Service() {
     }
   }
 
-  /** 通过 JNI 下发到 Rust（native 实现见 src-tauri/src/android/entry.rs） */
+  /**
+   * 通过 JNI 下发到 Rust（native 实现见 src-tauri/src/android/entry.rs）。
+   * 调用是同步的且可能很重（打开文件、建解码器、预填充缓冲、SAF fd 桥），
+   * 因此提交到 [commandExecutor] 串行执行，主线程只负责提交，避免 ANR。
+   */
   private fun dispatchToRust(action: String, positionMs: Long) {
-    runCatching { MainActivity.nativeMediaAction(action, positionMs) }
-      .onFailure { e -> android.util.Log.e(TAG, "nativeMediaAction($action) 失败: ${e.message}") }
+    commandExecutor.execute {
+      runCatching { MainActivity.nativeMediaAction(action, positionMs) }
+        .onFailure { e -> android.util.Log.e(TAG, "nativeMediaAction($action) 失败: ${e.message}") }
+    }
   }
 }

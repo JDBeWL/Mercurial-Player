@@ -38,23 +38,31 @@ export class FileUtils {
 
   /** Android：调起 SAF 系统目录选择器，轮询等待授权结果（树 URI 持久化在 Kotlin 侧） */
   private static async selectFolderAndroid(): Promise<string | null> {
-    const before = await invoke<{ uri?: string | null; version: number }>('saf_get_pick_state')
+    type PickState = { uri?: string | null; version: number; error?: string | null }
+    const before = await invoke<PickState>('saf_get_pick_state')
     await invoke('saf_request_pick')
 
-    // 系统选择器为异步 UI：每 500ms 轮询，直到**授权版本号**变化，超时 3 分钟。
-    // 不能比较 URI：重新授权同一个目录时 URI 完全相同，会永远等不到结果。
+    // 轮询异步的选择器直到 version 变化，超时 3 分钟。
+    // 不能比较 URI：重授权同一目录 URI 不变，会永远等不到。
+    // 失败也递增 version 并带 error，据此提前收尾。
     const timeoutMs = 3 * 60 * 1000
     const startedAt = Date.now()
     let treeUri: string | null = before.uri ?? null
     let version = before.version
+    let error: string | null = null
     while (Date.now() - startedAt < timeoutMs) {
       await new Promise((resolve) => setTimeout(resolve, 500))
-      const state = await invoke<{ uri?: string | null; version: number }>('saf_get_pick_state')
+      const state = await invoke<PickState>('saf_get_pick_state')
       treeUri = state.uri ?? null
       version = state.version
-      if (treeUri && version !== before.version) break
+      error = state.error ?? null
+      if (version !== before.version) break
     }
 
+    if (error) {
+      logger.warn(`SAF pick failed: ${error}`)
+      return null
+    }
     if (!treeUri || version === before.version) {
       logger.warn('SAF pick cancelled or timed out')
       return null

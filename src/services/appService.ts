@@ -52,6 +52,11 @@ export function setTargetFps(fps: number): Promise<void> {
   return invoke<void>('set_target_fps', { fps })
 }
 
+/** 面板是 spectrum-update 唯一订阅者，不在屏时后端整条跳过 FFT/序列化/IPC */
+export function setVisualizerVisible(visible: boolean): Promise<void> {
+  return invoke<void>('set_visualizer_visible', { visible })
+}
+
 /** 使用系统默认浏览器打开外部 URL（后端有 HTTPS 白名单校验） */
 export function openExternalUrl(url: string): Promise<void> {
   return invoke<void>('open_external_url', { url })

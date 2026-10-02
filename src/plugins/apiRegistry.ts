@@ -1,13 +1,7 @@
 /**
- * 插件 API 权限元数据(单一事实来源)
- *
- * pluginAPI.ts(主线程,权威校验)与 workerCore.ts(沙箱镜像,预检)两侧共用本表,
- * 避免两份手写的「动作 → 权限」映射漂移 —— 曾经 registerActionButton 两侧都漏权限
- * 就是这类副本导致。新增/调整插件动作时只需改这一处。
- *
- * 取值为 `PluginPermissionType` 的动作需要该权限才能调用;
- * 取值为 `null` 表示该动作不额外设权限(读取/展示类或主侧另有白名单校验,
- * 例如 events.on 由 assertPluginEventSubscriptionAllowed 单独把关)。
+ * 权限元数据单一事实来源：pluginAPI.ts 权威校验与 workerCore.ts 沙箱预检共用本表，
+ * 避免两份手写映射漂移——registerActionButton 曾两侧都漏权限。
+ * 值为权限表示调用需该权限；null 表示不额外设限（读取类，或由主侧白名单另行把关）。
  */
 import { PluginPermission, type PluginPermissionType } from './pluginTypes'
 
