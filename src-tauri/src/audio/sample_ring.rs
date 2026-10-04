@@ -216,7 +216,7 @@ mod tests {
         let ring = SampleRing::new(8);
         let mut out = Vec::new();
         assert_eq!(ring.drain_into(&mut out, 4), 0);
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [f32; 0]);
     }
 
     #[test]
@@ -293,7 +293,7 @@ mod tests {
         assert!(ring.push(1.0));
         let mut out = Vec::new();
         assert_eq!(ring.drain_into(&mut out, 0), 0);
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [f32; 0]);
         // 未被取走的数据仍可完整读出
         assert_eq!(ring.drain_into(&mut out, 4), 1);
         assert_eq!(out, vec![1.0]);

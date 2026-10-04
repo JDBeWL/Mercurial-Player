@@ -15,7 +15,9 @@ use crate::AppState;
 use rodio::Source;
 use std::io::BufReader;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(any(windows, target_os = "android"))]
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tauri::{AppHandle, State};
 

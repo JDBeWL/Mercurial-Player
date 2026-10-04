@@ -799,7 +799,7 @@ mod tests {
     #[test]
     fn test_app_config_default_values() {
         let config = AppConfig::default();
-        assert!(config.music_directories.is_empty());
+        assert_eq!(config.music_directories, [] as [String; 0]);
         assert!(config.directory_scan.enable_subdirectory_scan);
         assert_eq!(config.directory_scan.max_depth, 3);
         assert_eq!(config.general.language, "zh");
@@ -970,7 +970,7 @@ mod tests {
         assert_eq!(config.immersive_color_scheme, "album");
         assert!(config.immersive_auto_theme);
         assert!(!config.enable_auto_update);
-        assert!(!config.external_url_allowed_hosts.is_empty());
+        assert_ne!(config.external_url_allowed_hosts, [] as [String; 0]);
         assert_eq!(config.cover_cache_size_mb, 1024);
         assert!(config.cover_cache_path.is_none());
     }
@@ -1020,7 +1020,7 @@ mod tests {
     #[test]
     fn test_track_snapshot_default_all_none_or_empty() {
         let snapshot = TrackSnapshot::default();
-        assert!(snapshot.path.is_empty());
+        assert_eq!(snapshot.path, "");
         assert!(snapshot.title.is_none());
         assert!(snapshot.artist.is_none());
         assert!(snapshot.album.is_none());

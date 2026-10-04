@@ -93,7 +93,7 @@ fn extract_member_roundtrip() {
         for tag in expected {
             let (offset, bytes) = table_bytes(&out, *tag);
             assert_eq!(offset % 4, 0, "表 {tag:?} 未按 4 字节对齐");
-            assert!(!bytes.is_empty());
+            assert_ne!(bytes, [] as [u8; 0]);
         }
     }
 
@@ -144,8 +144,8 @@ fn internal_font_families_rejects_unparseable() {
     // fixture 表数据是任意的，Face::parse 无法解析 -> 返回空
     let member: &[([u8; 4], &[u8])] = &[(*b"HEA1", b"x")];
     let single = build_sfnt(0, member);
-    assert!(internal_font_families(&single).is_empty());
-    assert!(internal_font_families(b"garbage").is_empty());
+    assert_eq!(internal_font_families(&single), [] as [String; 0]);
+    assert_eq!(internal_font_families(b"garbage"), [] as [String; 0]);
 }
 
 #[test]
