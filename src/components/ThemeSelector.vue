@@ -9,9 +9,8 @@
       <span class="material-symbols-rounded">palette</span>
     </button>
 
-    <!-- 挂到 body：面板在 .nav-bar 内部会受那一层 stacking context 限制（竖屏下 .nav-bar 是
-         position:relative + z-index:100），而音乐库 / 播放列表抽屉是 fixed + z-index:1000，一打开
-         就把颜色面板整个压住。:disabled 让横屏 / 桌面维持原来的"相对按钮下拉"形态，不受影响。 -->
+    <!-- 挂到 body：面板在 .nav-bar 内会受那层 stacking context 限制（竖屏下 .nav-bar 是
+         relative + z-index:100），音乐库 / 播放列表抽屉是 fixed + z-index:1000，一开就压住它 -->
     <Teleport to="body" :disabled="!isPortrait">
       <Transition name="picker-fade">
         <div v-if="showColorPicker" ref="colorPickerRef" class="color-picker" @click.stop>
@@ -22,7 +21,6 @@
             </button>
           </div>
 
-          <!-- 色彩分类标签 -->
           <div class="color-categories">
             <button
               v-for="category in colorCategories"
@@ -35,7 +33,6 @@
             </button>
           </div>
 
-          <!-- 颜色预设网格 -->
           <div class="color-presets">
             <div
               v-for="color in filteredColors"
@@ -54,7 +51,6 @@
             </div>
           </div>
 
-          <!-- 自定义颜色 -->
           <div class="custom-color-section">
             <label for="custom-color">{{ $t('themeSelector.customColor') }}</label>
             <div class="custom-color-input">
@@ -76,7 +72,6 @@
             </div>
           </div>
 
-          <!-- 当前颜色预览 -->
           <div class="color-preview">
             <div class="preview-swatch" :style="{ backgroundColor: themeStore.primaryColor }"></div>
             <div class="preview-info">
@@ -100,7 +95,6 @@ import { useOrientation } from '../composables/useOrientation'
 import logger from '../utils/logger'
 import { colorPresets, type ColorPreset } from '../utils/themePresets'
 
-// 颜色分类类型
 interface ColorCategory {
   id: string
   name: string
@@ -115,18 +109,15 @@ const colorName = (color: ColorPreset): string => {
 }
 const themeStore = useThemeStore()
 const configStore = useConfigStore()
-// 手机（Android）竖屏下：自己的触发按钮被收进顶栏溢出菜单，面板改成底部抽屉。
-// 用 data 属性而不是 CSS 媒体查询直接判断 —— @media (orientation: portrait)
-// 在桌面把窗口拉成窄高时也会命中，不加平台守卫会把桌面端的按钮一起藏掉。
+// 藏触发按钮需要平台守卫：方向媒体查询在桌面窄高窗口也会命中（理由见下方 isPortrait 注释）
 const { isAndroid } = usePlatform()
-// 面板的"贴底抽屉"形态与 Teleport 都只按方向判断，不用平台判断：
-// isAndroid 来自后端 IPC（异步，取不到会被兜底成 unknown → false），
-// 一旦失败就会退回绝对定位的老形态、在窄屏上向右溢出屏幕。
+// 抽屉形态与 Teleport 只看方向：isAndroid 来自异步 IPC，取不到会兜底成 unknown -> false，
+// 用它守卫就退回相对按钮的绝对定位形态，窄屏上向右溢出屏幕。
+// 藏触发按钮反而必须带平台守卫：桌面窗口拉成窄高时它是第二个入口。
 const { isPortrait } = useOrientation()
 const showColorPicker = ref<boolean>(false)
 const activeCategory = ref<string>('all')
 
-// 颜色分类
 const colorCategories = computed<ColorCategory[]>(() => [
   { id: 'all', name: t('themeSelector.category.all') },
   { id: 'blue', name: t('themeSelector.category.blue') },
@@ -141,7 +132,6 @@ const colorCategories = computed<ColorCategory[]>(() => [
 
 // 颜色预设数据见 src/utils/themePresets.ts
 
-// 根据分类筛选颜色
 const filteredColors = computed<ColorPreset[]>(() => {
   if (activeCategory.value === 'all') {
     return colorPresets
@@ -153,19 +143,18 @@ const toggleColorPicker = (): void => {
   showColorPicker.value = !showColorPicker.value
 }
 
-// 供外部打开面板：手机竖屏下这个组件自己的触发按钮被收进顶栏的溢出菜单
-// （AppHeader 的 ⋮ 调用这里暴露出的 open）。桌面端仍走按钮 toggle。
+// 供外部打开面板：手机竖屏下触发按钮收进了 AppHeader 的溢出菜单，桌面仍走按钮 toggle
 const open = (): void => {
   showColorPicker.value = true
 }
 
-// 点击外部关闭（通过模板 ref 定位面板与触发按钮）
+// 点击外部关闭：靠模板 ref 判断 target 是否落在面板 / 触发按钮之外
 const colorPickerRef = ref<HTMLElement | null>(null)
 const toggleButtonRef = ref<HTMLElement | null>(null)
 
-/** 必须监听 pointerdown 而不是 click。竖屏下面板由顶栏溢出菜单里的"主题颜色"调 open() 打开，那次
- *  点击的 target 既不在面板内也不在被隐藏的触发按钮内，监听 click 会在同一次点击的冒泡阶段就把刚
- *  挂上的面板当成"点了外面"关掉。pointerdown 早于 click，那时面板还没打开，关掉是无害的空操作。 */
+/** 必须监听 pointerdown 而不是 click：竖屏下面板由顶栏溢出菜单调 open() 打开，那次点击的 target
+ *  既不在面板内也不在被隐藏的触发按钮内，监听 click 会在同一次点击的冒泡阶段把刚挂上的面板当成
+ *  点了外面而关掉。pointerdown 早于 click，那时面板还没打开，关掉只是空操作。 */
 const handleClickOutside = (event: PointerEvent): void => {
   const picker = colorPickerRef.value
   const button = toggleButtonRef.value
@@ -187,7 +176,7 @@ onUnmounted(() => {
   }
 })
 
-// 应用主题色并按需自动保存配置到 user.json
+// 应用主题色；开了自动保存才落盘到 user.json
 const applyColor = async (color: string): Promise<void> => {
   void themeStore.setPrimaryColor(color)
 
@@ -203,8 +192,8 @@ const applyColor = async (color: string): Promise<void> => {
 
 const selectColor = (color: string): Promise<void> => applyColor(color)
 
-// 拖动实时预览:用 rAF 把连续 input 事件合并为每帧一次,且只做不落盘的主题应用
-// 配置持久化在拖动结束；(@change)时由 commitCustomColor 统一完成
+// 拖动实时预览：rAF 把连续的 input 合并成每帧一次，且只应用主题不落盘；
+// 持久化留到拖动结束的 @change，由 commitCustomColor 统一做
 let previewRafId: number | null = null
 let pendingPreviewColor = ''
 
@@ -227,7 +216,7 @@ const commitCustomColor = (event: Event): void => {
 
 const onHexInput = (event: Event): Promise<void> | undefined => {
   const value = (event.target as HTMLInputElement).value.trim()
-  // 验证 HEX 颜色格式
+  // 只接受 #RRGGBB，非法输入忽略
   if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
     return applyColor(value)
   }
@@ -242,7 +231,6 @@ defineExpose({ open })
   position: relative;
 }
 
-/* 颜色选择器面板 */
 .color-picker {
   position: absolute;
   top: 60px;
@@ -304,7 +292,6 @@ defineExpose({ open })
   }
 }
 
-/* 颜色分类标签 */
 .color-categories {
   display: flex;
   flex-wrap: wrap;
@@ -339,7 +326,6 @@ defineExpose({ open })
   color: var(--md-sys-color-on-primary);
 }
 
-/* 颜色预设网格 */
 .color-presets {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -381,7 +367,6 @@ defineExpose({ open })
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
-/* 自定义颜色区域 */
 .custom-color-section {
   margin-bottom: 16px;
 }
@@ -443,7 +428,6 @@ defineExpose({ open })
   box-shadow: 0 0 0 2px var(--primary-alpha-20, rgba(100, 181, 246, 0.2));
 }
 
-/* 颜色预览 */
 .color-preview {
   display: flex;
   align-items: center;
@@ -477,7 +461,6 @@ defineExpose({ open })
   color: var(--md-sys-color-on-surface);
 }
 
-/* 动画 */
 .picker-fade-enter-active,
 .picker-fade-leave-active {
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -489,7 +472,6 @@ defineExpose({ open })
   transform: translateY(-10px) scale(0.95);
 }
 
-/* 滚动条样式 */
 .color-presets::-webkit-scrollbar {
   width: 6px;
 }
@@ -509,9 +491,8 @@ defineExpose({ open })
   }
 }
 
-/* 手机竖屏：触发按钮收进顶栏溢出菜单，面板改成贴底抽屉（原来相对按钮绝对定位，窄屏上会向右溢出）。
-   守卫刻意分成两段，别合并成一段：藏按钮 / 让盒子消失要带 [data-mobile='true']，否则桌面把窗口拉成
-   窄高时就没有第二个入口；抽屉只按方向判断，isAndroid 来自异步 IPC，取不到时整块样式就失效。 */
+/* 手机竖屏：触发按钮收进顶栏溢出菜单，面板改成贴底抽屉（相对按钮绝对定位在窄屏上会向右溢出）。
+   守卫分两段（藏按钮带 data-mobile、抽屉只看方向）的理由见脚本里 isPortrait 注释。 */
 @media (orientation: portrait) {
   .theme-selector[data-mobile='true'] {
     /* 盒子消失：不再占栅格列（面板已改 fixed，不再需要它当定位祖先） */
@@ -541,8 +522,8 @@ defineExpose({ open })
     padding: 20px 16px calc(16px + env(safe-area-inset-bottom, 0px));
   }
 
-  /* 抽屉从下往上滑，与桌面端"从按钮下方掉下来"的缩放动画区分。位移只给 24px 而不是 100%：过渡被打断
-     时元素可能停在 enter-from 态，100% 会把整个抽屉停在屏幕外，24px 只是偏下一点、仍然完全可用。 */
+  /* 抽屉从下往上滑，与桌面端从按钮下方掉下来的缩放动画区分。位移只给 24px 而不是 100%：过渡被打断时
+     元素会停在 enter-from 态，100% 会把整个抽屉停在屏幕外，24px 只是偏下一点、仍然完全可用。 */
   .picker-fade-enter-from,
   .picker-fade-leave-to {
     opacity: 0;

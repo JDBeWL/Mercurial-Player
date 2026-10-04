@@ -25,7 +25,6 @@ fn cover_extension_from_mime(mime: Option<&str>) -> &'static str {
     }
 }
 
-/// 获取封面数据的哈希值，用于识别相同的封面
 fn get_picture_hash(picture: &Picture) -> u64 {
     let mut hasher = DefaultHasher::new();
     picture.data().hash(&mut hasher);
@@ -33,7 +32,7 @@ fn get_picture_hash(picture: &Picture) -> u64 {
 }
 
 fn get_cover_cache_path(_audio_path: &Path, picture: &Picture) -> Result<PathBuf, AppError> {
-    // 使用封面数据哈希作为缓存键，相同封面的不同歌曲会共享缓存
+    // 缓存键用封面数据哈希，相同封面的不同歌曲共享同一份缓存
     let hash = get_picture_hash(picture);
     let ext = cover_extension_from_mime(picture.mime_type().map(lofty::picture::MimeType::as_str));
     let cache_dir = cover_cache_dir();
@@ -67,13 +66,13 @@ pub fn get_track_cover_path_internal(path: &str) -> Result<Option<String>, AppEr
 
     log::debug!("Getting cover for: {path}");
 
-    // 走带缓存的元数据通路：命中时只比较一次文件 mtime，不再 open_tagged_file。
-    // 对 content URI 而言那次 open 是 binder IPC + 整份标签解析 + 图片解码 + 封面内容哈希，
-    // 而通知栏/MediaSession 每次播放控制都要读封面路径，前端预取封面更是整批地读。
+    // 走带缓存的元数据通路：命中时只比一次 mtime。直接 open_tagged_file 的话，MediaSession 播放
+    // 控制与前端每批预取都要付 binder IPC + 标签解析 + 图片解码
     Ok(get_track_metadata_with_cover(path)?.cover_path)
 }
 
 /// 提取音频文件的封面并保存到指定路径
+///
 /// `output_path` 有两种形态：桌面端是保存对话框给的本地绝对路径（走扩展名白名单 + 敏感目录检查）；
 /// Android 的 SAF 给的是 `content://` URI，只能经 ContentResolver 拿 fd 写入，校验改用其显示名。
 pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<String, AppError> {
@@ -84,8 +83,7 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
     let is_uri = crate::android::saf::is_content_uri(output_path);
 
     if is_uri {
-        // content URI 不是文件路径：`is_sensitive_path` 那类前缀检查对它无从谈起，
-        // 扩展名这一关改为回查它的显示名（保存位置由用户在系统选择器里亲自圈定）。
+        // 保存位置由用户在系统选择器里亲自圈定，所以把显示名拿回来过扩展名这一关
         let display_name = crate::android::saf::content_uri_display_name(output_path)
             .ok_or_else(|| AppError::msg("无法确认保存目标的文件名，请换一个位置再试"))?;
         if !has_allowed_extension(&display_name, &COVER_OUTPUT_EXTENSIONS) {
@@ -96,9 +94,7 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
             .into());
         }
     } else {
-        // 校验输出路径：必须是图片扩展名，且不允许写入敏感目录。
-        // 不能写成「有扩展名才校验白名单」——无扩展名的路径会整体跳过检查，只剩
-        // is_sensitive_path 兜底，仍可向用户目录写任意字节；has_allowed_extension 对其返回 false。
+        // 无扩展名也要校验：跳过的话只剩 is_sensitive_path 兜底，仍可向用户目录写任意字节
         if !has_allowed_extension(output_path, &COVER_OUTPUT_EXTENSIONS) {
             return Err(format!(
                 "封面输出路径必须是图片文件 ({})",
@@ -123,8 +119,7 @@ pub fn extract_cover_internal(audio_path: &str, output_path: &str) -> Result<Str
         .ok_or_else(|| "文件没有封面图片".to_string())?;
 
     if is_uri {
-        // fd 写入：File 随作用域结束关闭。注意 URI 上没有"补扩展名"这一步 ——
-        // 文件名由保存对话框的 defaultPath 决定，前端已经带上封面真实扩展名。
+        // URI 这条路不补扩展名：文件名来自前端 defaultPath，已带封面真实扩展名
         let mut file = crate::android::saf::open_write_file(output_path)?;
         file.write_all(picture.data())
             .map_err(|e| format!("无法写入文件: {e}"))?;

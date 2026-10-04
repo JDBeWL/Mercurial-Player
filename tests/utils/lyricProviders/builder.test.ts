@@ -83,7 +83,7 @@ describe('buildPreviewLyric', () => {
     const text = buildPreviewLyric({ ...bundle, karaoke: ass }, 'auto', true)
     expect(text).not.toContain('Dialogue')
     expect(text).toContain('Original')
-    // auto + 全局开启翻译 → 原文与翻译都在
+    // auto + 全局开启翻译 -> 原文与翻译都在
     expect(text).toContain('翻译')
   })
 

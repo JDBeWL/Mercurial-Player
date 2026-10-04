@@ -1,12 +1,7 @@
-//! HTTP 客户端单例
+//! HTTP 客户端单例：可重用的 `Client`，避免重复建连。
 //!
-//! 提供可重用的 HTTP 客户端，避免重复创建连接
-//!
-//! 安全约束：`capabilities/*.json` 中 `http:default` 的 URL scope **只约束
-//! 前端 JS** 经 tauri-plugin-http 绑定发起的 fetch。Rust 侧通过本模块持有的
-//! `Client` 发出的请求不经过该 scope 校验（scope 是插件命令层的检查，不是
-//! 网络层的拦截）。因此出网目标必须在本模块显式白名单化 —— 业务代码不要
-//! 直接对任意 URL 发请求，请走 [`get`] / [`post`]。
+//! 安全约束：`capabilities/*.json` 的 `http` scope 只约束前端经 tauri-plugin-http 发的 fetch，
+//! Rust 侧请求完全绕开它，故出网目标在本模块白名单化，业务代码一律走 [`get`] / [`post`]。
 
 use crate::error::AppError;
 use std::sync::LazyLock;
@@ -14,29 +9,19 @@ use std::time::Duration;
 use tauri_plugin_http::reqwest::Response;
 use tauri_plugin_http::reqwest::{Client, RequestBuilder, Url};
 
-/// 允许 Rust 侧 HTTP 客户端访问的目标主机
+/// 允许 Rust 侧 HTTP 客户端访问的目标主机（网易云 / Lrclib / QQ / 酷狗，酷狗只收可 HTTPS 的域名）
 ///
-/// 新增出网域名时在此登记；若该请求将来也会从前端发起，还需在
-/// `src-tauri/capabilities/default.json` 的 `http` scope 中同步添加。
-///
-/// 歌词多来源：网易云 / Lrclib / QQ 音乐 / 酷狗（酷狗仅登记可 HTTPS 访问的域名）。
+/// 新增出网域名在此登记；前端也会发起的，须同步 `src-tauri/capabilities/default.json` 的 `http` scope。
 const ALLOWED_HOSTS: &[&str] = &[
-    // 网易云音乐
     "music.163.com",
-    // Lrclib 歌词库
     "lrclib.net",
-    // QQ 音乐
     "c.y.qq.com",
     "y.qq.com",
-    // 酷狗音乐
     "songsearch.kugou.com",
     "lyrics.kugou.com",
 ];
 
-/// 全局 HTTP 客户端实例
-///
-/// 构建失败（如 TLS 后端初始化失败）时保存错误，
-/// 由调用方决定如何处理，避免首次使用时 panic 导致整个应用崩溃
+/// 全局 HTTP 客户端；构建失败（如 TLS 后端初始化失败）时保存错误而不是 panic，由调用方处理
 static HTTP_CLIENT: LazyLock<Result<Client, AppError>> = LazyLock::new(|| {
     Client::builder()
         .timeout(Duration::from_secs(30))
@@ -84,20 +69,17 @@ pub fn post(url: &str) -> Result<RequestBuilder, AppError> {
     Ok(client()?.post(url))
 }
 
-/// 获取全局 HTTP 客户端
-///
-/// 仅供本模块 [`get`] / [`post`] 使用：业务代码不应绕开主机白名单
-/// 直接对任意 URL 发请求。
+/// 获取全局 HTTP 客户端：只供本模块 [`get`] / [`post`] 用，绕开白名单的入口一律不开
 fn client() -> Result<&'static Client, AppError> {
     HTTP_CLIENT
         .as_ref()
         .map_err(|e| AppError::msg(e.to_string()))
 }
 
-/// 最大重试次数（块外部网络请求，如连接超时/DNS 失败）
+/// 请求重试次数上限
 const MAX_RETRIES: u32 = 3;
 
-/// 带指数退避的请求重试：网络错误重试，HTTP 错误状态码不重试
+/// 带指数退避的请求重试：只对连接级失败（超时/DNS）重试，HTTP 错误状态码不重试
 pub(crate) async fn send_with_retry(request_builder: RequestBuilder) -> Result<Response, AppError> {
     let mut last_err = String::new();
     for attempt in 0..MAX_RETRIES {

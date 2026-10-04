@@ -1,6 +1,4 @@
-//! 配置管理相关的 Tauri 命令
-//!
-//! 这个模块包含所有与配置管理相关的功能，包括加载、保存、导入、导出等。
+//! 配置管理相关的 Tauri 命令：加载/保存/导入导出配置与音乐目录列表维护。
 use crate::android::saf;
 use crate::error::AppError;
 
@@ -10,15 +8,15 @@ use crate::security::is_sensitive_path;
 use std::path::Path;
 use tauri::{State, command};
 
-/// 验证路径是否安全（不在敏感目录中）
+/// 验证音乐目录路径是否安全（不在敏感目录中）
 ///
-/// Android SAF 的 content:// URI 无需本地文件系统校验，直接放行。
+/// 词法 + canonicalize 复查的完整规则见 [`crate::media::filesystem::validate_media_path`]；
+/// Android SAF 的 `content://` URI 无需本地校验，直接放行。
 fn is_path_safe(path: &str) -> Result<(), AppError> {
     if saf::is_content_uri(path) {
         return Ok(());
     }
 
-    // 先对原始输入做词法检查
     if is_sensitive_path(path) {
         return Err(AppError::Path(
             "安全限制：不允许添加系统敏感目录".to_string(),
@@ -27,12 +25,10 @@ fn is_path_safe(path: &str) -> Result<(), AppError> {
 
     let path = Path::new(path);
 
-    // 规范化路径
     let canonical = path
         .canonicalize()
         .map_err(|_| AppError::Path("无法解析路径，请确保目录存在".to_string()))?;
 
-    // canonicalize 可能解析出输入中未显现的敏感位置（如 junction/symlink），需复查
     let mut canonical_str = canonical.to_string_lossy().to_string();
     if let Some(stripped) = canonical_str.strip_prefix(r"\\?\") {
         canonical_str = stripped.to_string();
@@ -43,7 +39,6 @@ fn is_path_safe(path: &str) -> Result<(), AppError> {
         ));
     }
 
-    // 确保是目录
     if !canonical.is_dir() {
         return Err(AppError::Path("指定的路径不是一个目录".to_string()));
     }
@@ -51,7 +46,6 @@ fn is_path_safe(path: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 验证配置文件路径安全：必须为 .json 文件且不在敏感目录中
 fn is_config_file_path_safe(path: &str) -> Result<(), AppError> {
     if is_sensitive_path(path) {
         return Err(AppError::Path(
@@ -64,21 +58,18 @@ fn is_config_file_path_safe(path: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 加载配置
 #[command]
 pub fn load_config(state: State<AppState>) -> Result<AppConfig, AppError> {
     state.config_manager.load_config()
 }
 
-/// 保存配置
+/// 保存前端提交的整包配置
 ///
-/// - `last_session` 由后端 save_last_session / clear_last_session 独立管理,
-///   前端负载不含该字段;若直接落盘会把已记录的播放会话抹掉,这里沿用现有值。
-/// - `audio.preferred_device_id` 由后端 set_audio_device 写入,前端负载不含该字段;
-///   同样沿用现有值,避免前端的整包保存把用户设备选择抹掉。
+/// `last_session` 与 `audio.preferred_device_id` 由后端独立写、前端负载不含，
+/// 为空时沿用现值，否则整包落盘会抹掉它们。
 #[command]
 pub fn save_config(state: State<AppState>, mut config: AppConfig) -> Result<(), AppError> {
-    // 读-改-写必须在同一把写锁内完成,否则与 save_last_session 等并发时会互相覆盖
+    // 读-改-写必须在同一把写锁内，见 ConfigManager::write_lock
     state.config_manager.update_config(|current| {
         if config.last_session.is_none() {
             config.last_session.clone_from(&current.last_session);
@@ -93,7 +84,6 @@ pub fn save_config(state: State<AppState>, mut config: AppConfig) -> Result<(), 
     })
 }
 
-/// 导出配置到指定路径
 #[command]
 pub fn export_config(
     state: State<AppState>,
@@ -104,20 +94,17 @@ pub fn export_config(
     state.config_manager.export_config(&config, &file_path)
 }
 
-/// 从指定路径导入配置
 #[command]
 pub fn import_config(state: State<AppState>, file_path: String) -> Result<AppConfig, AppError> {
     is_config_file_path_safe(&file_path)?;
     state.config_manager.import_config(&file_path)
 }
 
-/// 添加音乐目录
 #[command]
 pub fn add_music_directory(state: State<AppState>, path: String) -> Result<Vec<String>, AppError> {
-    // 验证路径安全性
     is_path_safe(&path)?;
 
-    // 读-改-写原子化:并发添加目录时不会互相覆盖
+    // 走 update_config 而不是分步读写，理由见 ConfigManager::write_lock
     state.config_manager.update_config(|config| {
         if !config.music_directories.contains(&path) {
             config.music_directories.push(path);
@@ -126,7 +113,6 @@ pub fn add_music_directory(state: State<AppState>, path: String) -> Result<Vec<S
     })
 }
 
-/// 移除音乐目录
 #[command]
 pub fn remove_music_directory(
     state: State<AppState>,
@@ -138,13 +124,11 @@ pub fn remove_music_directory(
     })
 }
 
-/// 设置音乐目录列表
 #[command]
 pub fn set_music_directories(
     state: State<AppState>,
     paths: Vec<String>,
 ) -> Result<Vec<String>, AppError> {
-    // 验证所有路径的安全性
     for path in &paths {
         is_path_safe(path)?;
     }
@@ -155,7 +139,6 @@ pub fn set_music_directories(
     })
 }
 
-/// 获取当前音乐目录列表
 #[command]
 pub fn get_music_directories(state: State<AppState>) -> Result<Vec<String>, AppError> {
     let config = state.config_manager.load_config()?;

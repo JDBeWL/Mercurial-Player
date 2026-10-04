@@ -178,9 +178,7 @@
         />
       </div>
 
-      <!-- 主歌词面板的字号。与下面「桌面歌词」里的字号是两回事：那个管独立的
-           桌面歌词窗口，这个管播放页那一片歌词（含可视化面板的单行歌词）。
-           改的是 CSS 变量 --lyrics-scale，所以不需要重建歌词 DOM。 -->
+      <!-- 主歌词面板字号, 与下面桌面歌词窗口的字号是两回事; 改 CSS 变量 --lyrics-scale, 不需要重建歌词 DOM -->
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.lyricsFontSize') }}</span>
@@ -321,7 +319,6 @@
       </template>
     </div>
 
-    <!-- 可视化设置 -->
     <div class="settings-section">
       <div class="section-header">
         <h4 class="section-title">{{ $t('config.visualizerSettings') }}</h4>
@@ -387,7 +384,7 @@ import { LYRIC_PROVIDERS, resolveMethod } from '@/services/lyrics'
 import type { LyricProviderDescriptor } from '@/services/lyrics'
 import type { LyricsConfig, LyricsProviderId, DesktopLyricsConfig, VisualizerConfig } from '@/types'
 
-// 歌词默认配置：store 缺省时初始化与字段补全共用（与 config store 中的默认值保持一致）
+// 歌词默认配置: store 缺省时的初始化与字段补全共用, 须与 config store 的默认值保持一致
 const DEFAULT_LYRICS_CONFIG: LyricsConfig = {
   enableOnlineFetch: false,
   autoSaveOnlineLyrics: true,
@@ -405,14 +402,14 @@ const configStore = useConfigStore()
 const { t } = useI18n()
 const systemFonts = ref<string[]>([])
 
-// 可用的刷新率挡位（由系统枚举，查询失败时回落到常见挡位）
+// 刷新率挡位由系统枚举, 查询失败时回落到下面这组常见挡位 (单位 FPS)
 const FALLBACK_FPS_OPTIONS = [30, 60, 120, 144, 165, 240]
 const availableRates = ref<number[]>([])
 
 const fpsOptions = computed(() => {
   const rates =
     availableRates.value.length > 0 ? [...availableRates.value] : [...FALLBACK_FPS_OPTIONS]
-  // 当前配置值必须始终在选项中，否则选择器无法回显
+  // 当前配置值必须始终在选项里, 否则选择器无法回显
   const target = visualizerConfig.value.targetFps
   if (!rates.includes(target)) {
     rates.push(target)
@@ -427,7 +424,7 @@ const alignmentOptions = computed(() => [
 ])
 
 const fontOptions = computed(() => {
-  // 通用字体 / 内置打包字体 / 外部字体（软件同级 fonts/）/ 系统字体（与内置重名的只保留靠前分组）
+  // 分组顺序: 通用 / 内置 / 外部 (软件同级 fonts/) / 系统; 与内置重名的只保留靠前分组
   const bundledValues = new Set(bundledFontOptions.map((f) => f.value))
   const externalOptions = externalFontOptions.value.filter((f) => !bundledValues.has(f.value))
   const externalValues = new Set([...bundledValues, ...externalOptions.map((f) => f.value)])
@@ -450,13 +447,13 @@ const fontOptions = computed(() => {
   ]
 })
 
-// 译文字体选项：在原文选项基础上多一个“跟随原文”（空值 = 继承原文歌词字体）
+// 译文字体比原文多一个跟随原文选项, 空值即继承原文歌词字体
 const translationFontOptions = computed(() => [
   { value: '', label: t('config.translationFontFollow') },
   ...fontOptions.value,
 ])
 
-// 译文字体的 v-model 适配：可选字段归一为空串（跟随原文），MD3Select 只接受 string | number
+// v-model 适配: 可选字段归一为空串, MD3Select 只接受 string | number
 const translationFontModel = computed<string>({
   get: () => lyricsConfig.value.translationFontFamily ?? '',
   set: (value: string) => {
@@ -469,7 +466,7 @@ const styleOptions = computed(() => [
   { value: 'classic', label: t('config.lyricsStyleClassic') },
 ])
 
-// 初始化默认值（在 setup 阶段同步执行，避免 computed 副作用）
+// 默认值在 setup 阶段同步写入, 避免放进 computed 造成副作用
 if (!configStore.visualizer) {
   configStore.visualizer = {
     targetFps: 60,
@@ -485,12 +482,11 @@ const visualizerConfig = computed<VisualizerConfig>({
   },
 })
 
-// 当前刷新率从config读取
 const currentRefreshRate = computed(() => {
   return visualizerConfig.value.detectedRefreshRate || 60
 })
 
-// 查询窗口所在显示器的实时刷新率与支持挡位（跨屏/改刷新率后可重新查询）
+// 查询窗口所在显示器的实时刷新率 (Hz) 与支持挡位; 跨屏或改挡位后需重新查询
 const refreshDisplayRates = async (): Promise<void> => {
   try {
     const { current, available } = await getDisplayRefreshRates()
@@ -501,7 +497,7 @@ const refreshDisplayRates = async (): Promise<void> => {
       visualizerConfig.value.detectedRefreshRate = current
       configStore._markDirty()
       logger.info(`Detected screen refresh rate: ${current} Hz`)
-      // 刷新率变了，限制值需要重新计算
+      // 刷新率变了要重算限制值
       await applyTargetFps()
       await saveConfig()
     }
@@ -510,7 +506,6 @@ const refreshDisplayRates = async (): Promise<void> => {
   }
 }
 
-// 处理 FPS 变化
 const handleFpsChange = async (): Promise<void> => {
   try {
     await applyTargetFps()
@@ -521,7 +516,6 @@ const handleFpsChange = async (): Promise<void> => {
   }
 }
 
-// 切换"限制到屏幕刷新率"
 const toggleFpsLimit = async (): Promise<void> => {
   visualizerConfig.value.enableVerticalSync = !visualizerConfig.value.enableVerticalSync
   try {
@@ -533,13 +527,13 @@ const toggleFpsLimit = async (): Promise<void> => {
   }
 }
 
-// 按配置应用目标帧率（开启限制时 cap 到实时屏幕刷新率）
+// 按配置应用目标帧率, 开启限制时 cap 到实时屏幕刷新率
 const applyTargetFps = async (): Promise<void> => {
   const result = await applyVisualizerFps(visualizerConfig.value)
   if (!result) {
     return
   }
-  // 顺带把实时刷新率写回配置，设置页显示值保持真实
+  // 顺带把实时刷新率写回配置, 设置页显示值保持真实
   if (result.screenRate && result.screenRate !== visualizerConfig.value.detectedRefreshRate) {
     visualizerConfig.value.detectedRefreshRate = result.screenRate
     configStore._markDirty()
@@ -547,11 +541,10 @@ const applyTargetFps = async (): Promise<void> => {
   logger.info(`Target FPS applied: ${result.fps}`)
 }
 
-// 初始化默认值（在 setup 阶段同步执行，避免 computed 副作用）
+// 同 visualizer 默认值: setup 阶段同步写入
 if (!configStore.lyrics) {
   configStore.lyrics = { ...DEFAULT_LYRICS_CONFIG }
 } else {
-  // 确保所有字段都存在
   if (!configStore.lyrics.lyricsAlignment) {
     configStore.lyrics.lyricsAlignment = 'center'
   }
@@ -572,7 +565,7 @@ if (!configStore.lyrics) {
   }
 }
 
-// 确保来源配置字段存在（旧配置兼容）
+// 旧配置缺字段时补齐
 if (!String(configStore.lyrics.onlineSource)) {
   configStore.lyrics.onlineSource = 'netease'
 }
@@ -590,7 +583,6 @@ const lyricsConfig = computed<LyricsConfig>({
   },
 })
 
-// ---------- 歌词来源设置 ----------
 const providerOrder = computed<string[]>(() => {
   const order = configStore.lyrics.lyricProviderOrder ?? []
   const known = LYRIC_PROVIDERS.map((p) => p.id)
@@ -618,7 +610,7 @@ const providerSettings = (id: LyricsProviderId): { method?: string; preferKind?:
 const methodOptions = (provider: LyricProviderDescriptor) =>
   provider.methods.map((m) => ({ value: m.id, label: t(m.nameKey) }))
 
-// 每个平台"获取算法"下拉始终显示有效值：未配置时回落到该平台默认算法
+// 每个平台的获取算法下拉始终显示有效值: 未配置时回落到该平台默认算法
 const methodValue = (id: LyricsProviderId): string =>
   resolveMethod(id, providerSettings(id).method ?? '')
 
@@ -639,7 +631,7 @@ const toggleProvider = async (id: LyricsProviderId, enabled: boolean): Promise<v
   }
   const finalOrder = order.length ? order : ['netease']
   configStore.lyrics.lyricProviderOrder = finalOrder
-  // 默认来源 = 列表第一项
+  // 默认来源固定取列表第一项
   configStore.lyrics.onlineSource = finalOrder[0] as LyricsProviderId
   configStore._markDirty()
   await saveConfig()
@@ -652,7 +644,7 @@ const moveProvider = async (id: LyricsProviderId, dir: -1 | 1): Promise<void> =>
   if (idx < 0 || target < 0 || target >= order.length) return
   ;[order[idx], order[target]] = [order[target]!, order[idx]!]
   configStore.lyrics.lyricProviderOrder = order
-  // 上移/下移后默认来源跟随第一项
+  // 上移/下移后默认来源仍跟随第一项
   configStore.lyrics.onlineSource = order[0] as LyricsProviderId
   configStore._markDirty()
   await saveConfig()
@@ -673,13 +665,11 @@ const setProviderKind = async (id: LyricsProviderId, value: string | number): Pr
 const loadSystemFonts = async (): Promise<void> => {
   try {
     const fonts = await getSystemFonts()
-    // 过滤掉已经在默认列表中的字体
     const defaultFonts = ['Roboto', 'sans-serif', 'serif', 'monospace']
     systemFonts.value = fonts.filter((font) => !defaultFonts.includes(font))
     logger.info(`Loaded ${systemFonts.value.length} system fonts`)
   } catch (error) {
     logger.error('Failed to load system fonts:', error)
-    // 失败时使用空数组，仍然可以使用默认字体
     systemFonts.value = []
   }
 }
@@ -695,7 +685,6 @@ const toggleSetting = async (
     | 'showFetchLyricsButton'
     | 'autoSelectBestLyrics',
 ): Promise<void> => {
-  // 确保 lyrics 配置存在
   if (!configStore.lyrics) {
     configStore.lyrics = { ...DEFAULT_LYRICS_CONFIG }
   }
@@ -724,10 +713,9 @@ const fontSizeSliderStyle = computed(() => {
   }
 })
 
-/* ===== 主歌词面板字号 =====
-   v-model 只改配置；实际生效走 useAppLifecycle 里对 lyrics.fontScale 的 watch
-   （它把倍率写到根元素的自定义属性 --lyrics-scale 上），因此拖动时是实时的、
-   也不需要重建歌词 DOM。上下限即变量可取的区间。 */
+/* 主歌词面板字号: v-model 只改配置, 实际生效走 useAppLifecycle 对 lyrics.fontScale 的 watch
+   (把倍率写到根元素的 --lyrics-scale), 因此拖动即时生效、无需重建歌词 DOM;
+   下面两个常量就是该变量可取的区间 */
 const LYRICS_FONT_SCALE_MIN = 0.6
 const LYRICS_FONT_SCALE_MAX = 1.8
 
@@ -751,7 +739,7 @@ const lyricsFontScaleSliderStyle = computed(() => {
   }
 })
 
-/** 100% = 歌词样式表里的原始字号 */
+/** 显示为百分比, 100% = 歌词样式表里的原始字号 */
 const lyricsFontScaleText = computed(() => `${Math.round(lyricsFontScale.value * 100)}%`)
 
 const toggleDesktopLyrics = async (): Promise<void> => {
@@ -777,13 +765,13 @@ const setColorPreset = async (preset: DesktopLyricsConfig['colorPreset']): Promi
 
 onMounted(() => {
   void loadSystemFonts()
-  // 每次打开设置页重新扫描外部字体目录，运行中放入的字体无需重启即可选择
+  // 每次打开设置页重扫外部字体目录, 运行中放入的字体无需重启即可选
   void loadExternalFonts()
 
-  // 每次打开设置页都查询实时刷新率与支持挡位，不依赖上次会话的旧值
+  // 每次打开都查实时刷新率与挡位, 不依赖上次会话的旧值
   void refreshDisplayRates()
 
-  // 确保后端的FPS设置与配置同步
+  // 让后端 FPS 与配置同步
   applyTargetFps().catch((error) => {
     logger.error('Failed to sync FPS on mount:', error)
   })
@@ -1004,7 +992,6 @@ onMounted(() => {
 }
 
 .auto-preview {
-  /* 半深半浅 */
   background: linear-gradient(135deg, #1a1a1a 50%, #f5f5f5 50%);
 }
 
@@ -1077,10 +1064,9 @@ onMounted(() => {
   min-width: 130px;
 }
 
-/* 字体名普遍偏长（Noto Sans SC、系统字体全名等），
-   单独加宽歌词字体这一行的下拉框。
-   触发器宽度即下拉列表宽度（.md3-select-dropdown 用 left/right: 0 对齐），
-   所以加宽后展开的字体列表也能少截断一些 */
+/* 字体名普遍偏长 (Noto Sans SC、系统字体全名), 单独加宽这一行的下拉框;
+   触发器宽度即下拉列表宽度 (.md3-select-dropdown 用 left/right: 0 对齐),
+   加宽后展开的字体列表也少截断一些 */
 .setting-item.lyrics-font-select :deep(.md3-select-wrapper) {
   min-width: 240px;
 }

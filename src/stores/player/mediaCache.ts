@@ -4,14 +4,10 @@ import logger from '@/utils/logger'
 import type { Track } from '@/types'
 import type { usePlayerStore } from './index'
 
-/**
- * Player store 的元数据缓存与封面批量加载,从 player.ts 抽离以降低单文件复杂度。
- * 函数接收 store 实例参数,在运行时与 player store 共享同一 Pinia 实例。
- */
+/** Player store 的播放列表元数据批量缓存与封面加载。 */
 type PlayerStore = ReturnType<typeof usePlayerStore>
 
-// 待通知的封面更新 (path -> coverPath):非响应式,由 takeCoverUpdates 一次性取走。
-// 放在 store 实例外,避免 Pinia 深度代理整个 Map。
+// 待通知的封面更新 (path -> coverPath):放在 store 实例外,避免 Pinia 深度代理整个 Map
 const pendingCoverUpdates = new Map<string, string>()
 
 /** 记录一条封面更新 (由 player store 的 recordCoverUpdate action 转发) */
@@ -30,7 +26,7 @@ export function takeCoverUpdates(): Map<string, string> {
 export async function cachePlaylistMetadata(store: PlayerStore, playlist: Track[]): Promise<void> {
   if (!playlist || playlist.length === 0) return
 
-  // 创建新的 AbortController，使此次缓存任务可被后续调用取消
+  // 每次调用换一个新 controller,后续调用可通过 _cacheAbortController 取消本次缓存
   const abortController = new AbortController()
 
   store._cacheAbortController = abortController
@@ -40,7 +36,6 @@ export async function cachePlaylistMetadata(store: PlayerStore, playlist: Track[
   let cached = 0
 
   for (let i = 0; i < playlist.length; i++) {
-    // 检查是否已被取消
     if (abortController.signal.aborted) {
       logger.debug(`Metadata caching aborted after ${cached} tracks`)
       return
@@ -72,10 +67,8 @@ export async function cachePlaylistMetadata(store: PlayerStore, playlist: Track[
 }
 
 /**
- * 取/建背景批量任务的取消令牌。
- *
- * 与 `_cachePlaylistMetadata` 共用同一个 controller：`setPlaylist`、恢复会话、cleanup
- * 处的一次 abort 就能同时停掉元数据缓存与封面加载，不必各自再维护一个。
+ * 背景批量任务的取消令牌,与 cachePlaylistMetadata 共用同一个 controller:
+ * setPlaylist / 恢复会话 / cleanup 处一次 abort 同时停掉元数据缓存与封面加载。
  */
 function ensureAbortController(store: PlayerStore): AbortController {
   const existing = store._cacheAbortController
@@ -91,11 +84,7 @@ export async function loadPlaylistCovers(store: PlayerStore, playlist: Track[]):
   const metadataCache = store._getMetadataCache()
   const { signal } = ensureAbortController(store)
 
-  // 封面加载后不再依赖响应式 mutation 传播:逐条修改 track.coverPath 仅用于
-  // currentTrack 同步与元数据缓存,列表 UI 通过 pendingCoverUpdates +
-  // playlistCoverVersion 每批一次增量通知 (PlaylistView 以 O(变更数) 应用)。
-
-  // 批量加载封面路径，每次处理 10 首歌曲
+  // 列表 UI 不靠响应式 mutation 更新,用 pendingCoverUpdates + playlistCoverVersion 每批增量通知
   const BATCH_SIZE = 10
   for (let i = 0; i < playlist.length; i += BATCH_SIZE) {
     if (signal.aborted || store._isDestroyed) {
@@ -105,7 +94,6 @@ export async function loadPlaylistCovers(store: PlayerStore, playlist: Track[]):
     const batch = playlist.slice(i, i + BATCH_SIZE)
     let foundInBatch = 0
 
-    // 并行加载这一批的封面
     await Promise.all(
       batch.map(async (track) => {
         if (signal.aborted || store._isDestroyed) return
@@ -117,11 +105,9 @@ export async function loadPlaylistCovers(store: PlayerStore, playlist: Track[]):
             // 回写前再判一次：这一批进行中途可能已经换列表或 cleanup
             if (signal.aborted || store._isDestroyed) return
             if (coverPath) {
-              // 先同步当前曲目,再写列表条目(顺序不能反):
-              // playlist 已 markRaw,元素不再是响应式代理,就地写 track.coverPath 不会触发渲染;
-              // 若先写它,再从 store 代理写同一字段时目标值已更新 → 同样不触发,
-              // 播放器大封面会一直停在占位图(恢复会话时 currentTrack 与列表条目常是同一对象)。
-              // 因此这里整体重新赋值,让 currentTrack 属性本身发生变化。
+              // 先同步当前曲目、再写列表条目,顺序不能反(恢复会话时两者常是同一对象)。
+              // playlist 已 markRaw(约束见 index.ts 的 _setPlaylist),就地写不触发渲染,
+              // 所以这里整体重新赋值让 currentTrack 属性本身发生变化。
               const current = store.currentTrack
               if (current?.path === track.path && current.coverPath !== coverPath) {
                 store.currentTrack = { ...current, coverPath }
@@ -143,7 +129,6 @@ export async function loadPlaylistCovers(store: PlayerStore, playlist: Track[]):
       }),
     )
 
-    // 本批有新封面时通知一次,列表组件增量应用
     if (foundInBatch > 0) {
       store.playlistCoverVersion++
     }

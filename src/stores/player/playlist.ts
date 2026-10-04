@@ -4,31 +4,27 @@ import type { Track } from '@/types'
 import type { usePlayerStore } from './index'
 import { adjustShuffleAfterRemove } from './shuffle'
 
-/**
- * Player store 的播放列表增删管理,从 player.ts 抽离以降低单文件复杂度。
- * 函数接收 store 实例参数,在运行时与 player store 共享同一 Pinia 实例。
- */
+/** Player store 的播放列表增删管理。 */
 type PlayerStore = ReturnType<typeof usePlayerStore>
 
 export function removeTrackFromPlaylist(store: PlayerStore, path: string): void {
   const index = store.playlist.findIndex((t) => t.path === path)
   if (index === -1) return
 
-  // 重新赋值而非 splice:playlist 已 markRaw,原地变异不会触发更新
+  // 整体重新赋值而非 splice(markRaw 约束见 index.ts 的 _setPlaylist)
   store._setPlaylist(store.playlist.filter((_, i) => i !== index))
 
-  // 如果播放列表为空，重置状态
+  // 列表已空:重置状态但保留播放列表
   if (store.playlist.length === 0) {
     void store.resetPlayerState(false)
     return
   }
 
-  // 如果删除的是当前播放的歌曲
   if (store.currentTrack?.path === path) {
     const nextIndex = index >= store.playlist.length ? 0 : index
     const wasPlaying = store.isPlaying
 
-    // 暂停当前播放，避免音频状态不一致
+    // 先暂停,避免新旧曲目音频状态不一致
     if (wasPlaying) {
       invoke('pause_track').catch((err) => logger.warn('pause before remove:', err))
     }
@@ -42,12 +38,10 @@ export function removeTrackFromPlaylist(store: PlayerStore, path: string): void 
       })
       .catch((err) => logger.warn('play after remove failed:', err))
   } else {
-    // 如果删除的不是当前播放的歌曲，但删除了当前歌曲前面的歌曲，
-    // 我们不需要更新 currentTrack，但需要处理 vue 响应式带来的潜在问题
-    // 虽然在目前的设计中 currentTrackIndex 是一个 getter，所以它会自动更新
+    // currentTrackIndex 是 getter,删掉前面的曲目不需要修正当前曲目
 
-    // 同步更新 shuffle 顺序，避免 _shuffleOrder.length 与 playlist.length 不一致
-    // 导致 _isShuffleOrderValid() 返回 false，进而造成 shuffle 模式下单曲列表无限重播
+    // 同步校正 shuffle 顺序,否则 _shuffleOrder 与 playlist 长度不一致会让
+    // _isShuffleOrderValid() 返回 false,shuffle 模式下单曲列表会无限重播
     if (store._shuffleOrder.length > 0) {
       const adjusted = adjustShuffleAfterRemove(
         store._shuffleOrder,
@@ -67,14 +61,12 @@ export function addTrackNextInPlaylist(store: PlayerStore, track: Track): void {
 
   const currentIndex = store.currentTrackIndex
 
-  // 如果没有当前曲目或播放列表为空，直接添加到开头
   if (currentIndex === -1 || store.playlist.length === 0) {
     store._setPlaylist([track, ...store.playlist])
     logger.info('Added track to beginning of playlist:', track.path)
     return
   }
 
-  // 检查曲目是否已经在播放列表中
   const existingIndex = store.playlist.findIndex((t) => t.path === track.path)
 
   if (existingIndex !== -1) {
@@ -87,7 +79,6 @@ export function addTrackNextInPlaylist(store: PlayerStore, track: Track): void {
     store._setPlaylist([...rest.slice(0, at), track, ...rest.slice(at)])
     logger.info('Moved existing track to next position:', track.path)
   } else {
-    // 如果曲目不存在，直接插入到当前曲目后面
     const at = currentIndex + 1
     store._setPlaylist([...store.playlist.slice(0, at), track, ...store.playlist.slice(at)])
     logger.info('Added new track to next position:', track.path)

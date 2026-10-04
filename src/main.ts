@@ -20,7 +20,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
-// Roboto 字体自托管 ,仅导入使用到的权重
+// Roboto 字体自托管，只导入用到的权重
 import '@fontsource/roboto/300.css'
 import '@fontsource/roboto/400.css'
 import '@fontsource/roboto/500.css'
@@ -36,14 +36,13 @@ import logger from './utils/logger'
 import { setupThemeContrastValidation } from './utils/themeContrastValidator'
 import type { BuiltinPluginDefinition } from './plugins/pluginManager'
 
-// 初始化日志系统
 logger.info('应用程序启动中...')
 
 const app = createApp(App)
 const pinia = createPinia()
 
-// 全局错误兜底:生产构建会 drop console,未捕获异常若不落盘则完全不可诊断
-// Vue 组件渲染 / watcher / 生命周期钩子中的同步异常统一进入此处理器
+// 全局错误兜底：生产构建会 drop console，未捕获异常不落盘就完全无法诊断；
+// 渲染 / watcher / 生命周期钩子里的同步异常都汇到这里
 app.config.errorHandler = (err, _instance, info) => {
   logger.error(`[全局错误] ${info}:`, err)
 }
@@ -57,15 +56,13 @@ app.use(pinia)
 app.use(i18n)
 app.mount('#app')
 
-// 扫描软件同级 fonts/ 目录，注册外部字体（应用运行中放入的字体在打开设置页时还会重新扫描）
+// 扫描软件同级 fonts/ 目录，注册外部字体（运行中新放入的字体在打开设置页时还会重扫）
 void loadExternalFonts()
 
 logger.info('应用程序已启动')
 
-// 设置主题对比度验证
 setupThemeContrastValidation()
 
-// 生产环境禁用右键菜单
 if (import.meta.env.PROD) {
   document.addEventListener('contextmenu', (e) => {
     e.preventDefault()
@@ -74,10 +71,8 @@ if (import.meta.env.PROD) {
   logger.info('生产环境：已禁用右键菜单')
 }
 
-// 按需加载歌词样式 CSS:
-// 根据用户配置 (modern/classic) 只加载对应的一种样式,
-// 避免两种样式都被解析并常驻内存。
-// 注意: 此处需要 pinia 已初始化,故放在 app.mount 之后。
+// 按用户配置 (modern/classic) 只加载一种歌词样式（两套样式互斥的说明见 LyricsDisplay 的 loadLyricsStyleCss）
+// 需要 pinia 已初始化，故必须在 app.mount 之后
 import { useConfigStore } from './stores/config'
 async function loadLyricsStyleCss(): Promise<void> {
   try {
@@ -120,7 +115,6 @@ const loadBuiltinPlugins = async (): Promise<void> => {
   }
   logger.info('内置插件加载完成')
 
-  // 加载外部插件
   try {
     await loadAllPlugins()
     logger.info('外部插件加载完成')
@@ -128,7 +122,6 @@ const loadBuiltinPlugins = async (): Promise<void> => {
     logger.error('加载外部插件失败:', error)
   }
 
-  // 启动快捷键管理器
   shortcutManager.start()
 }
 

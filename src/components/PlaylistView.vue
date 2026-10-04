@@ -31,8 +31,7 @@
       </div>
 
       <div v-else class="playlist-songs">
-        <!-- 使用委托让整份列表只在容器上挂 1 个 click，而不是每行 3 个。
-             行与按钮通过 data-path / data-action 声明意图，由 handleListClick 分派。 -->
+        <!-- 点击委托：整份列表只在容器上挂 1 个 click，行用 data-path、按钮用 data-action -->
         <div class="list" @click="handleListClick">
           <div
             v-for="(track, index) in processedPlaylist"
@@ -110,7 +109,7 @@ import { useI18n } from 'vue-i18n'
 import type { Track } from '../types'
 import { formatTime } from '../utils/format'
 
-// 处理后的 track 类型 (扩展自 Track, 添加缓存字段)
+// Track 加显示用的缓存字段（标题 / 艺术家 / 封面 URL）
 interface ProcessedTrack extends Track {
   cachedTitle: string
   cachedArtist: string
@@ -126,27 +125,26 @@ const configStore = useConfigStore()
 const { t } = useI18n()
 const { playlist, currentTrack, currentTrackIndex } = storeToRefs(playerStore)
 
-// 是否显示播放队列信息
+// 队列信息开关走 config.general.showQueueInfo，缺省视为开
 const showQueueInfo = computed(() => configStore.general.showQueueInfo !== false)
 
-// 第 X 首 / 共 Y 首 · 总时长
+// 第 X 首 / 共 Y 首，后面再拼总时长
 const queueInfoText = computed(() => {
   const base = t('player.queueInfo', {
     current: currentTrackIndex.value + 1,
     total: playlist.value.length,
   })
 
-  // 播放列表总时长（有时长数据才附加）
+  // 总时长（秒），有时长数据才附加
   const total = playlist.value.reduce((sum, track) => sum + (track.duration || 0), 0)
   if (!total) return base
 
   return `${base} · ${formatTime(total)}`
 })
 
-// 滚动容器引用
 const scrollContainer = ref<HTMLElement | null>(null)
 
-// 滚动状态检测（用于禁用滚动时的 hover 效果）
+// 滚动期间用 .is-scrolling 关掉 hover，免得每滚动一帧都重绘；150ms 没 scroll 事件算停下
 const isScrolling = ref(false)
 let scrollTimeout: ReturnType<typeof setTimeout> | null = null
 
@@ -159,18 +157,15 @@ const handleScroll = (): void => {
   }, 150)
 }
 
-// 关闭处理
 const handleClose = (): void => {
   emit('close')
 }
 
-// ===== 核心优化：用简单的 computed 替代 Map 遍历 =====
-// 只追踪当前曲目的 path，O(1) 而非 O(N)
+// 只比对当前曲目的 path，O(1) 而不是整表 O(N)
 const currentPath = computed<string | null>(() => currentTrack.value?.path || null)
 
-// 该行是否为当前正在播放的曲目:决定播放按钮显示播放还是暂停。
-// 播放/暂停曾是两个互斥的 v-if 按钮,未命中的那个会在 DOM 里留下一个注释占位节点,
-// 合并为单按钮后每行少一个注释节点
+// 该行是否为当前正在播放的曲目，决定播放按钮显示播放还是暂停。
+// 播放 / 暂停原是两个互斥的 v-if 按钮，未命中的那个会在 DOM 留一个注释占位节点，合并后每行少一个
 const isTrackPlaying = (track: Track): boolean =>
   track.path === currentPath.value && playerStore.isPlaying
 
@@ -186,8 +181,7 @@ const pauseTrack = (): void => {
   playerStore.pause()
 }
 
-// 标题/艺术家显示:简单的 || 链式调用,无需缓存
-// 组件内不再另建 Map:与 useTrackInfo.processedTracks 的共享 LRU 重叠,且大列表下是额外内存开销
+// 组件内不另建标题缓存 Map：与 useTrackInfo.processedTracks 的共享 LRU 重叠，大列表下是额外内存开销
 const getTrackTitle = (track: Track): string => {
   return FileUtils.getTrackDisplayName(track, configStore.titleExtraction.hideFileExtension)
 }
@@ -196,13 +190,12 @@ const getTrackArtist = (track: Track): string => {
   return track.displayArtist || track.artist || ''
 }
 
-// ===== 核心优化：processedPlaylist 使用路径索引实现增量更新 =====
+// shallowRef：不对整表做深度响应，封面增量靠就地改对象 + triggerRef 通知渲染
 const processedPlaylist = shallowRef<ProcessedTrack[]>([])
 
-// 用于快速查找已处理过的 track（path -> processedTrack 索引）
+// path -> processedTrack 索引，供增量复用与点击反查
 let processedMap = new Map<string, ProcessedTrack>()
 
-// 构建单个 processed track 对象
 const buildProcessedTrack = (track: Track): ProcessedTrack => ({
   ...track,
   cachedTitle: getTrackTitle(track),
@@ -210,7 +203,7 @@ const buildProcessedTrack = (track: Track): ProcessedTrack => ({
   coverUrl: track.coverPath ? convertFileSrc(track.coverPath) : undefined,
 })
 
-// 处理播放列表：增量更新，只重建变化的部分
+// 增量重建播放列表，只重算变化项
 const processPlaylist = (): void => {
   const raw = playlist.value
   if (raw.length === 0) {
@@ -227,7 +220,7 @@ const processPlaylist = (): void => {
     const track = raw[i]!
     const existing = processedMap.get(track.path)
 
-    // 复用已有对象（如果 path 和 coverPath 都没变）
+    // path 与 coverPath 都没变就复用旧对象，保住 v-memo 的引用相等
     if (existing && existing.coverPath === track.coverPath) {
       result[i] = existing
     } else {
@@ -237,7 +230,7 @@ const processPlaylist = (): void => {
     newProcessedMap.set(track.path, result[i]!)
   }
 
-  // 列表长度变化或有新增/修改项时才更新
+  // 只有长度变化或确有新增 / 修改项才换掉数组引用，避免每次 playlist 变动都重渲染
   if (
     changed ||
     result.length !== processedPlaylist.value.length ||
@@ -248,9 +241,8 @@ const processPlaylist = (): void => {
   processedMap = newProcessedMap
 }
 
-// ===== 核心优化：合并 watch，消除冗余 =====
-// 结构 watch：getter 只读取每项的 path，列表增删/移动/替换才触发 O(N) 处理；
-// 封面等字段级 mutation 不再触发 deep watch 的 O(N) 级联（封面走下方版本号通道）
+// 结构 watch：getter 只读每项的 path，列表增删 / 移动 / 替换才触发 O(N) 处理；
+// 封面等字段级 mutation 不再触发 deep watch 的 O(N) 级联（封面走下面的版本号通道）
 const stopWatchPlaylist = watch(
   () => {
     const raw = playlist.value
@@ -262,8 +254,8 @@ const stopWatchPlaylist = watch(
   { immediate: true },
 )
 
-// 封面增量更新：store 的 _loadPlaylistCovers 每处理完一批递增 playlistCoverVersion，这里取走更新并就地
-// 修改 processedTrack（配合 triggerRef 与 v-memo，只重渲染封面真正变化的那几项），
+// 封面增量通道：store 的 _loadPlaylistCovers 每批处理完递增 playlistCoverVersion，
+// 这里取走更新并就地改 processedTrack（配合 triggerRef 与 v-memo，只重渲染变化的那几项），
 // 代价只随变化数增长，不会每批都全量重排整个列表。
 watch(
   () => playerStore.playlistCoverVersion,
@@ -284,7 +276,7 @@ watch(
   { immediate: true },
 )
 
-// 滚动到当前播放的歌曲
+// 滚到当前曲目：nextTick 等 DOM 补丁完成，否则 querySelectorAll 数不到刚渲染的行
 const scrollToCurrentTrack = (): void => {
   if (!currentTrack.value || processedPlaylist.value.length === 0 || !scrollContainer.value) return
 
@@ -303,7 +295,7 @@ const scrollToCurrentTrack = (): void => {
   })
 }
 
-// 组件挂载时滚动到当前歌曲
+// 数据可能晚于挂载到达：等 processedPlaylist 首次非空再滚一次，然后停掉这个 watch
 let hasScrolledOnMount = false
 let stopWatchScrollOnMount: WatchStopHandle | null = null
 
@@ -323,7 +315,7 @@ onMounted(() => {
   )
 })
 
-// 组件卸载时清理所有资源
+// 卸载：解开两个 watch 和滚动防抖，再清掉缓存
 onUnmounted(() => {
   if (scrollTimeout) {
     clearTimeout(scrollTimeout)
@@ -333,20 +325,16 @@ onUnmounted(() => {
   stopWatchPlaylist()
   stopWatchScrollOnMount?.()
 
-  // 清理缓存和状态
   processedMap.clear()
   processedMap = new Map()
   processedPlaylist.value = []
 })
 
-// 通过路径删除音轨
 const removeTrackByPath = (path: string): void => {
   playerStore.removeTrack(path)
 }
 
-/**
- * 播放列表点击委托。
- */
+/** 委托分派：remove / pause 由 data-action 命中，行本体和播放按钮都用 path 反查 track（O(1)） */
 const handleListClick = (event: MouseEvent): void => {
   const target = event.target as HTMLElement | null
   if (!target) return
@@ -365,7 +353,6 @@ const handleListClick = (event: MouseEvent): void => {
     return
   }
 
-  // 命中行本体或播放按钮:都由 path 反查 track(O(1))
   const track = processedMap.get(path)
   if (track) playTrack(track)
 }
@@ -380,15 +367,15 @@ const handleListClick = (event: MouseEvent): void => {
   max-width: 90vw;
   height: 100%;
   background-color: var(--md-sys-color-surface);
-  /* 与 MusicLibrary 保持一致:浮层面板需要 level2 阴影与内容区分 */
+  /* 与 MusicLibrary 保持一致：浮层面板要 level2 阴影才分得清内容区 */
   box-shadow: var(--md-sys-elevation-level2);
   z-index: 1000;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   will-change: transform;
-  /* fixed 相对视口定位，不吃 #app 的安全区 padding，
-     安卓边到边时会顶到状态栏 / 手势条下面，这里单独让出来 */
+  /* fixed 相对视口定位，不吃 #app 的安全区 padding，安卓边到边时会顶进状态栏 / 手势条，
+     这里单独让出来 */
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
   box-sizing: border-box;
@@ -417,7 +404,6 @@ const handleListClick = (event: MouseEvent): void => {
   white-space: nowrap;
 }
 
-/* 标题右侧的播放队列信息 */
 .playlist-queue-info {
   font-size: 14px;
   color: var(--md-sys-color-on-surface-variant);
@@ -586,8 +572,8 @@ const handleListClick = (event: MouseEvent): void => {
   }
 }
 
-/* 竖屏（手机）：400px 定宽抽屉会露出左侧背景，看起来像没铺满的浮层，改成整屏。
-   与上面的 480px 规则分开写：那是按宽度收窄，这里是按方向 */
+/* 竖屏（手机）：400px 定宽抽屉会露出左侧背景，看着像没铺满的浮层，改成整屏。
+   与上面的 480px 规则分开写：那条按宽度收窄，这条按方向 */
 @media (orientation: portrait) {
   .playlist-view[data-mobile='true'] {
     width: 100vw;

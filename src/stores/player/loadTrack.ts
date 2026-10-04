@@ -9,15 +9,14 @@ import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
 import { classifyAudioInvokeError } from '@/utils/audioErrorClassifier'
 
 /**
- * 曲目装载：把播放列表里的一条 Track 解析成可播放状态并起播，从 index.ts 的 playTrack 抽离。
- * 四个阶段各自可测：解析路径 → 组装元数据 → 写入 store → 与后端交互起播。
- * playTrack 只保留编排与过期请求（_playRequestId）的守卫。
+ * 曲目装载:把播放列表里的一条 Track 解析成可播放状态并起播,拆成解析路径 -> 组装元数据 ->
+ * 写入 store -> 起播四个可测阶段。过期请求守卫(_playRequestId)留在 index.ts 的 playTrack。
  */
 type PlayerStore = ReturnType<typeof usePlayerStore>
 
-/// play_track IPC 的超时(毫秒),超时视为后端无响应并报错
+/** play_track IPC 的超时(毫秒),超时视为后端无响应并报错 */
 const PLAY_TRACK_TIMEOUT_MS = 5000
-/// 播放失败后自动跳到下一首的延迟(毫秒),给 UI 留出状态刷新窗口
+/** 播放失败后自动跳到下一首的延迟(毫秒),给 UI 留出状态刷新窗口 */
 const AUTO_NEXT_TRACK_DELAY_MS = 100
 
 export interface ResolvedTrackPath {
@@ -88,7 +87,7 @@ export function prepareTrack(
     artist: metadata.artist,
     album: metadata.album,
     duration: metadata.duration,
-    coverPath: track.coverPath, // 保留原始的 coverPath
+    coverPath: track.coverPath,
   }
 
   return { resolvedPath, resolvedTrack, metadata, isSameTrackReplay }
@@ -101,21 +100,19 @@ export function applyPreparedTrack(store: PlayerStore, prepared: PreparedTrack):
 
   store.currentTrack = resolvedTrack
 
-  // shuffle 模式下,用户手动切曲时同步 _shufflePosition 到新曲目在 _shuffleOrder 中的位置
-  // 如果新曲目不在 _shuffleOrder 中 (顺序失效/外部触发),则作废顺序,下次 nextTrack 时重新生成
+  // shuffle 模式下手动切曲时,同步 _shufflePosition 到新曲目在 _shuffleOrder 中的位置;
+  // 不在顺序中(顺序失效/外部触发)则作废顺序,下次 nextTrack 时重新生成
   if (store.isShuffle && store._shuffleOrder.length > 0) {
     const newIdx = store.currentTrackIndex
     const pos = store._shuffleOrder.indexOf(newIdx)
     if (pos >= 0) {
       store._shufflePosition = pos
     } else {
-      // 顺序已失效,作废等待下次懒生成
       store._shuffleOrder = []
       store._shufflePosition = -1
     }
   }
 
-  // 按需加载封面路径（如果还没有）
   if (!resolvedTrack.coverPath) {
     logger.debug('Loading cover for track:', resolvedPath)
     invoke<string | null>('get_track_cover_path', { path: resolvedPath })
@@ -154,9 +151,8 @@ export function applyPreparedTrack(store: PlayerStore, prepared: PreparedTrack):
 }
 
 /**
- * 起播：串行等 pause 完成后再 play_track（带超时），避免 pause 晚于 play 返回把新曲目立即暂停。
+ * 起播：必须串行等 pause 完成后再 play_track（带超时），否则 pause 晚于 play 返回会把新曲目立即暂停。
  * 失败时上报错误并按需顺延下一首；过期请求（已被新的 playTrack 取代）直接放弃。
- * `_isLoading` 由调用方 playTrack 统一复位，这里不负责收尾。
  */
 export async function startPlayback(
   store: PlayerStore,
@@ -199,7 +195,7 @@ export async function startPlayback(
     store._updateTaskbarState()
 
     // 歌词加载不再在此显式触发:useLyrics 的共享 watcher 监听 currentTrack.path
-    // 变化后会统一加载 (缓存 → 本地文件 → 在线获取),单一入口避免双路径竞态
+    // 变化后会统一加载 (缓存 -> 本地文件 -> 在线获取),单一入口避免双路径竞态
   } catch (err) {
     if (store._activePlayRequestId !== requestId || store._isDestroyed) {
       return
@@ -225,7 +221,6 @@ export async function startPlayback(
           void store.nextTrack()
         }
       }, AUTO_NEXT_TRACK_DELAY_MS)
-      // 保存定时器ID以便在cleanup时清理
       store._nextTrackTimeoutId = nextTrackTimeoutId
     }
   }

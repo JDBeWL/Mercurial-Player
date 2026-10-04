@@ -1,9 +1,5 @@
-//! 整帧渲染。
-//!
-//! [`render_lyrics_d2d_frame`] 在 D2D_STATE 渲染线程上完成一帧的全部
-//! Direct2D 绘制：悬浮卡片与关闭/锁定按钮、单行或双行歌词（含译文
-//! 行的独立字体与垂直居中排版），并汇总是否需要继续滚动动画。
-//! 颜色/几何换算辅助函数也放在此处供本模块内复用。
+//! 整帧渲染：[`render_lyrics_d2d_frame`] 画悬浮卡片与按钮、单行或双行歌词
+//! （含译文行），并返回是否需要继续滚动动画。
 
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D1_COLOR_F};
@@ -74,9 +70,7 @@ pub(super) fn render_lyrics_d2d_frame(
             *state_ref = Some(state);
         }
         let state = state_ref.as_mut()?;
-        // SAFETY: 所有 COM 调用均在已初始化 COM 的 desktop-lyrics 线程上执行；
-        // &raw const 的局部变量仅在对应 COM 调用期间被读取，无别名冲突；
-        // BeginDraw/EndDraw 配对调用符合 Direct2D 渲染契约
+        // SAFETY: 同上；BeginDraw/EndDraw 在本块内配对，符合 DC 渲染目标契约
         unsafe {
             state.dc_render_target.BindDC(hdc_mem, client_rect).ok()?;
             state.dc_render_target.BeginDraw();
@@ -88,8 +82,6 @@ pub(super) fn render_lyrics_d2d_frame(
             let strip_radius = (10 * scale / 96) as f32;
 
             if is_hovered {
-                // 简单黑色遮罩卡片
-                // 外层 unsafe 块保证 COM 已初始化
                 draw_hover_card(state, client_rect, corner_radius);
 
                 let btn_text_format = state
@@ -274,8 +266,7 @@ pub(super) fn render_lyrics_d2d_frame(
 /// 悬浮卡片底板：简单的半透明黑色遮罩圆角卡片 + 细高光描边
 ///
 /// # Safety
-/// 必须在已初始化 COM 的渲染线程（D2D_STATE 上下文）调用，且此时
-/// 渲染目标已 BindDC
+/// COM 已初始化的渲染线程（见 `d2d_resources` 模块注释），且渲染目标已 BindDC
 unsafe fn draw_hover_card(state: &mut Direct2DState, client_rect: &RECT, corner_radius: f32) {
     let w = client_rect.right - client_rect.left;
     let h = client_rect.bottom - client_rect.top;

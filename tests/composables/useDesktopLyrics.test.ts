@@ -123,7 +123,7 @@ const flushFrames = async () => {
   await settle()
 }
 
-/** 推进一次轮询:触发 interval → 调度 rAF → 执行更新 */
+/** 推进一次轮询:触发 interval -> 调度 rAF -> 执行更新 */
 const tick = async () => {
   await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
   await flushFrames()
@@ -284,7 +284,7 @@ describe('useDesktopLyrics > lyric payload', () => {
 
     await tick()
 
-    // 共 5 个字符:第 1 个词 3 字符走过 0.4/1 → 1.2 / 5 = 0.24
+    // 共 5 个字符:第 1 个词 3 字符走过 0.4/1 -> 1.2 / 5 = 0.24
     expect(lastUpdatePayload()?.progress).toBeCloseTo(0.24)
   })
 

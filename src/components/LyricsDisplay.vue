@@ -13,12 +13,11 @@
     >
       <div v-if="loading" class="loading">{{ $t('lyrics.loading') }}</div>
 
-      <!-- 没有播放音乐时显示空闲状态 -->
       <div v-else-if="!hasCurrentTrack" class="no-lyrics idle-state">
         <span>{{ $t('lyrics.noTrackPlaying') }}</span>
       </div>
 
-      <!-- 有音乐但没有歌词（提示文字与获取按钮均可在设置中隐藏，两者都隐藏时整个区域留空） -->
+      <!-- 无歌词兜底区：显隐开关见 showNoLyricsHint / showFetchLyricsButton -->
       <div
         v-else-if="!lyrics.length && (showNoLyricsHint || showFetchLyricsButton)"
         class="no-lyrics"
@@ -82,9 +81,7 @@
       </div>
     </div>
 
-    <!-- 底部控制栏 -->
     <div v-if="lyrics.length || actionButtons.length" class="lyrics-bottom-bar">
-      <!-- 插件操作按钮 -->
       <div v-if="actionButtons.length" class="plugin-action-buttons">
         <button
           v-for="btn in actionButtons"
@@ -97,7 +94,6 @@
         </button>
       </div>
 
-      <!-- 歌词偏移控制 -->
       <div v-if="lyrics.length" class="lyrics-offset-control">
         <button class="offset-btn" :title="$t('lyrics.offsetDelay')" @click="adjustOffset(-0.5)">
           <span class="material-symbols-rounded">remove</span>
@@ -151,17 +147,14 @@ import { detectLyricLanguage, type LyricLanguage } from '@/utils/languageDetect'
 export default {
   name: 'LyricsDisplay',
   components: { KaraokeLine, LyricsCandidatePicker },
-  // 竖屏下"点歌词区域的空白处返回封面"：只有组件内部知道哪些元素是可点的，
-  // 所以判定在这里，动作交给父组件（App.vue）响应
+  // 竖屏下"点歌词空白处返回封面"：只有组件内部知道哪些元素可点，判定在这里，动作交给父组件（App.vue）
   emits: ['blankClick'],
   setup(_props, { emit }) {
     const playerStore = usePlayerStore()
     const configStore = useConfigStore()
     const containerRef = ref<HTMLElement | null>(null)
 
-    // 按需加载歌词样式 CSS：监听 lyricsStyle 变化，首次切换到某样式时动态 import 对应 CSS。
-    // 已加载的 CSS 会常驻 DOM，但由于 .lyrics-style-modern / .lyrics-style-classic
-    // 选择器互斥，不会产生样式冲突。
+    // 已加载的样式 CSS 会常驻 DOM，但 .lyrics-style-modern / .lyrics-style-classic 选择器互斥，不会冲突
     const loadedLyricsStyles = new Set<string>()
     const loadLyricsStyleCss = async (style: string | undefined): Promise<void> => {
       const normalized = style || 'modern'
@@ -178,9 +171,7 @@ export default {
         loadedLyricsStyles.delete(normalized) // 失败时允许重试
       }
     }
-    // 首次加载当前样式
     void loadLyricsStyleCss(configStore.lyrics?.lyricsStyle || 'modern')
-    // 监听样式切换
     watch(
       () => configStore.lyrics?.lyricsStyle,
       (newStyle) => {
@@ -188,14 +179,12 @@ export default {
       },
     )
 
-    // 使用 composable
     const lyricsComposable = useLyrics()
     const { lyrics, loading, lyricsSource } = lyricsComposable
 
-    // 本地高频 activeIndex，基于 visualTime 计算，避免滚动延迟
+    // 本地高频 activeIndex 由 visualTime 驱动，避免依赖 store 的秒级更新造成滚动延迟
     const activeIndex = ref(-1)
 
-    // 是否有当前播放的曲目
     const hasCurrentTrack = computed(() => !!playerStore.currentTrack)
 
     // 无歌词时的提示文字与获取按钮显隐（默认显示，旧配置缺字段时同样视为显示）
@@ -204,12 +193,10 @@ export default {
       () => configStore.lyrics?.showFetchLyricsButton !== false,
     )
 
-    // 获取插件注册的操作按钮
     const actionButtons = computed(() => {
       return pluginManager.getExtensions('actionButtons').filter((btn) => btn.location === 'lyrics')
     })
 
-    // 处理插件按钮点击
     const handleActionButton = async (btn: ActionButton & { pluginId: string }): Promise<void> => {
       try {
         await btn.action()
@@ -218,19 +205,16 @@ export default {
       }
     }
 
-    // 手动获取歌词状态
     const fetchingLyrics = ref(false)
 
-    // 手动挑选弹窗状态
     const showPicker = ref(false)
     const pickerCandidates = ref<LyricCandidate[]>([])
     const pickerLoading = ref(false)
 
-    // 是否自动选择最优歌词（跳过手动挑选弹窗）
+    // 关掉时走手动挑选弹窗而不是自动取最优
     const autoSelectBestLyrics = computed(() => configStore.lyrics?.autoSelectBestLyrics !== false)
 
     const handleFetchLyrics = async (): Promise<void> => {
-      // 设置开启"自动选择最优歌词"时无感自动获取，否则弹出多来源候选挑选窗口
       if (autoSelectBestLyrics.value) {
         fetchingLyrics.value = true
         try {
@@ -278,18 +262,14 @@ export default {
       }
     }
 
-    // --- 视觉时间系统 ---
-    // 将 visualTime ref 本身提供给 KaraokeLine（provide 不解包 ref），
-    // 使逐字进度渲染依赖只存在于子组件中
+    // provide 的是 visualTime ref 本身（provide 不解包 ref），逐字进度的渲染依赖因此只留在子组件里
     const { visualTime, advanceVisualTime, resetFrameClock, syncToCurrentTime } = useVisualTime()
     provide('lyricsVisualTime', visualTime)
     let rafId: number | null = null
 
-    // 启动高频时间循环（仅在播放时运行）
     const startAnimationLoop = (): void => {
       if (rafId) return // 防止重复启动
       resetFrameClock()
-      // 启动时先同步到真实时间
       syncToCurrentTime()
 
       const animate = (timestamp: number): void => {
@@ -299,7 +279,6 @@ export default {
       rafId = requestAnimationFrame(animate)
     }
 
-    // 停止动画循环
     const stopAnimationLoop = (): void => {
       if (rafId) {
         cancelAnimationFrame(rafId)
@@ -307,7 +286,6 @@ export default {
       }
     }
 
-    // 监听播放状态，控制动画循环的启停
     watch(
       () => playerStore.isPlaying,
       (isPlaying) => {
@@ -315,26 +293,24 @@ export default {
           startAnimationLoop()
         } else {
           stopAnimationLoop()
-          // 暂停时同步到真实时间
+          // 暂停时把 visualTime 对齐真实时间，避免它跑在播放位置前面
           syncToCurrentTime()
         }
       },
       { immediate: true },
     )
 
-    // 监听歌曲切换，立即重置 visualTime
+    // 切歌时把 visualTime 归到当前时间（通常是 0），不能沿用上歌的时间轴
     watch(
       () => playerStore.currentTrack?.path,
       () => {
-        // 切歌时立即同步到当前时间（通常是 0）
         syncToCurrentTime()
         activeIndex.value = -1
       },
     )
 
-    // 根据时间计算当前歌词索引（二分查找），并同步到 store
+    // 二分查找当前行索引，并写回 store
     const updateActiveIndex = (time: number): void => {
-      // 应用歌词偏移
       const offset = playerStore.lyricsOffset || 0
       const currentTime = time - offset
 
@@ -346,8 +322,6 @@ export default {
       }
     }
 
-    // 基于高频 visualTime 计算 activeIndex，实现即时滚动
-    // 使用节流来减少计算频率
     let lastCalcTime = 0
     const CALC_INTERVAL = 50 // 每 50ms 计算一次，足够流畅且减少开销
 
@@ -357,7 +331,6 @@ export default {
         return
       }
 
-      // 节流：避免每帧都计算
       const now = performance.now()
       if (now - lastCalcTime < CALC_INTERVAL) return
       lastCalcTime = now
@@ -365,8 +338,7 @@ export default {
       updateActiveIndex(time)
     })
 
-    // 歌词行样式：将对齐方式与共享的歌词字体合并为 computed,
-    // 避免在模板内联 style 中使用 CSS 自定义属性导致 vue-tsc 类型报错
+    // 对齐方式与共享歌词字体合并成 computed：模板内联 style 里写 CSS 自定义属性会让 vue-tsc 报错
     const { lyricFontStyle, translationStyle } = useLyricsTypography()
 
     const lyricLineStyle = computed<CSSProperties>(() => {
@@ -384,8 +356,7 @@ export default {
       }
     })
 
-    // 每行歌词的语言标注（原文/译文分别检测），供 lang 属性使用；
-    // 仅依赖歌词数据本身，歌词不变时不会因滚动/激活状态变化而重算
+    // 每行的 lang 标注（原文/译文分别检测）；只依赖歌词数据，滚动/激活变化不会触发重算
     const lineLanguages = computed<[LyricLanguage, LyricLanguage][]>(() =>
       lyrics.value.map((line) => [
         detectLyricLanguage(line.texts[0]),
@@ -393,10 +364,9 @@ export default {
       ]),
     )
 
-    // --- 样式计算逻辑 ---
     const isActive = (index: number): boolean => index === activeIndex.value
 
-    // --- 滚动控制(状态机实现见 composables/useLyricsScroll) ---
+    // 滚动状态机实现在 composables/useLyricsScroll
     const {
       isUserScroll,
       isHovering,
@@ -410,32 +380,28 @@ export default {
     // 挂载初始化期间由 onMounted 显式定位，抑制 activeIndex 变化触发的自动跟随滚动
     let suppressAutoScrollOnMount = false
 
-    // handleLyricClick 中 forceSync 连锁 rAF 的 id 集合,卸载时取消
+    // forceSync 连锁 rAF 的 id 集合，卸载时取消
     const syncFrameIds = new Set<number>()
 
-    // 监听 activeIndex 变化以滚动
     watch(activeIndex, () => {
       if (suppressAutoScrollOnMount) return
-      // 只有在非用户滚动状态下才自动跟随
       if (!isUserScroll.value) {
         scrollToActiveLyric()
       }
     })
 
-    // 歌词加载完成后滚动到当前位置
     watch(loading, (newVal) => {
       if (!newVal) {
-        // 歌词加载完成后，强制同步 visualTime
+        // 加载完成时 visualTime 可能已落后于播放位置，先强制同步再滚动
         visualTime.value = playerStore.currentTime
         void nextTick(() => scrollToActiveLyric(true))
       }
     })
 
-    // 用户点击歌词跳转
     const handleLyricClick = async (time: number, index: number): Promise<void> => {
       if (time < 0) return
 
-      // 点击跳转应打破用户滚动锁定，并强制执行
+      // 点击跳转必须打破用户滚动锁定，否则滚轮留下的锁会让点击歌词不跟过去
       breakUserScrollLock()
 
       await playerStore.seek(time)
@@ -444,7 +410,7 @@ export default {
       const forceSync = (): void => {
         visualTime.value = playerStore.currentTime
       }
-      // 记录 rAF id 以便卸载时取消连锁调用
+      // 先取消上一轮还没跑的 forceSync，避免两串 rAF 互相覆盖
       syncFrameIds.forEach((id) => cancelAnimationFrame(id))
       syncFrameIds.clear()
       const trackFrame = (fn: () => void): void => {
@@ -457,14 +423,13 @@ export default {
       trackFrame(forceSync)
       trackFrame(() => trackFrame(forceSync))
 
-      // 明确传入目标 index，確保即使 DOM class 更新滞后也能正确找到元素
+      // 明确传入目标 index，确保 DOM class 更新滞后时也能找到元素
       void nextTick(() => scrollToActiveLyric(true, true, index))
     }
 
-    // 保存 resize 处理函数引用，以便正确清理
+    // 具名函数才能成对地 removeEventListener
     const handleResize = (): void => scrollToActiveLyric(true)
 
-    // 歌词偏移控制
     const adjustOffset = (delta: number): void => {
       playerStore.adjustLyricsOffset(delta)
     }
@@ -480,7 +445,7 @@ export default {
     }
 
     onMounted(() => {
-      // 组件重新挂载时需立即恢复高亮与定位，挂载时主动根据当前播放位置计算。
+      // 组件重新挂载时需立即恢复高亮与定位，挂载时主动按当前播放位置计算
       if (lyrics.value.length && !loading.value) {
         visualTime.value = playerStore.currentTime
         suppressAutoScrollOnMount = true
@@ -497,18 +462,16 @@ export default {
 
     onUnmounted(() => {
       stopAnimationLoop()
-      // 清理滚动冷却定时器与状态
+      // dispose 负责清滚动冷却定时器与交互状态
       dispose()
-      // 取消点击跳转后 pending 的 forceSync 连锁 rAF
+      // 取消 pending 的 forceSync rAF
       syncFrameIds.forEach((id) => cancelAnimationFrame(id))
       syncFrameIds.clear()
-      // 清理 resize 事件监听器
       window.removeEventListener('resize', handleResize)
     })
 
-    // 判断点是否真的落在歌词文字上。歌词行是整宽的块级元素（.lyrics 是 flex column、宽度撑满容器），
-    // 只靠 closest('.lyrics') 会把行内左右的大片留白也算成"点歌词"，用户想返回封面时莫名其妙跳到那句，
-    // 所以用 Range 量出文字实际占据的矩形来精确判断。getClientRects() 返回空时保守返回 true。
+    // 歌词行是整宽块级元素，closest('.lyrics') 会把行内大片留白也算成点歌词，
+    // 所以用 Range 量出文字实际矩形（CSS px）；getClientRects() 为空时保守返回 true
     const isPointOnLyricText = (event: MouseEvent, line: HTMLElement): boolean => {
       const range = document.createRange()
       range.selectNodeContents(line)
@@ -523,9 +486,8 @@ export default {
       )
     }
 
-    // 点击歌词面板的空白处时通知父组件（竖屏下用于返回封面）。原则是只有确实落在空白上才发事件，所以
-    // 排除 button（获取歌词、插件动作、偏移加减）、.offset-value（点它是重置偏移）、.lyrics-bottom-bar
-    // （控制区）和歌词文字（语义是"跳到这一句"，见 isPointOnLyricText），否则用户会莫名其妙退回封面。
+    // 只有确实落在空白上才发事件：排除 button（获取歌词/插件动作/偏移加减）、.offset-value（重置偏移）、
+    // .lyrics-bottom-bar（控制区）和歌词文字（语义是跳到这一句，见 isPointOnLyricText）
     const handleBlankClick = (event: MouseEvent): void => {
       const el = event.target as HTMLElement | null
       if (el?.closest('button, .offset-value, .lyrics-bottom-bar')) return
@@ -579,9 +541,8 @@ export default {
 
 .lyrics-display {
   height: 100%;
-  /* 左右对称。原来是 `0 32px 0 8px`，右边 32px 是早年为可见滚动条留的，滚动条隐藏后（见下面的
-     scrollbar-width / ::-webkit-scrollbar）它就成了纯右侧空白、唱词整体偏左。取 20px 是因为它正好是
-     (8+32)/2，唱词的光学中心一点没动，只是两边终于一样宽。竖屏在文件末尾再收窄。 */
+  /* 20px = 原左右 (8+32)/2，唱词光学中心不变；32px 那侧本是给可见滚动条留的，
+     滚动条已隐藏（见下面的 scrollbar-width / ::-webkit-scrollbar），改成两侧等宽。竖屏在文件末尾再收窄 */
   padding: 0 20px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -760,8 +721,8 @@ export default {
   height: 45vh;
 }
 
-/* 手机竖屏：这一屏的宽度本来就紧，唱词要吃掉更多横向空间。左右仍然对称（12px / 12px），只是整体比横屏的
-   20px 更贴边。只按方向判断、不挂平台守卫：这是"窄屏必须能看"的兜底规则，桌面窗口拉成窄高也该跟着放宽。 */
+/* 竖屏：左右仍然对称（12px / 12px），只是比横屏的 20px 更贴边，给唱词让出横向空间。
+   只按方向判断、不挂平台守卫："窄屏必须能看"是兜底规则，桌面窗口拉成窄高时同样该放宽 */
 @media (orientation: portrait) {
   .lyrics-display {
     padding: 0 12px;

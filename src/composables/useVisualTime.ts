@@ -1,8 +1,7 @@
 /**
  * 视觉时间系统 composable
  *
- * 供歌词显示与可视化器共用的卡拉OK时间源:在 rAF 循环中按帧间隔累加本地时间,
- * 并通过 P 控制器动态调整速度消除与真实播放时间的漂移。
+ * 歌词显示与可视化器共用的卡拉OK时间源:rAF 内按帧间隔累加,再用 P 控制器调速消除与真实播放时间的漂移
  */
 import { ref, watch, type Ref } from 'vue'
 import { usePlayerStore } from '@/stores/player'
@@ -38,8 +37,7 @@ export function useVisualTime(): {
 } {
   const playerStore = usePlayerStore()
   const visualTime = ref(0)
-  // 用 null 表示"尚未播种"而非 0:时间戳 0 是合法值(测试/首帧均可能出现),
-  // 若用 0 做哨兵会导致此后每一帧都被当作首帧、delta 恒为 0
+  // 用 null 表示"尚未播种":时间戳 0 是合法值,拿 0 当哨兵会让此后每帧都被视为首帧、delta 恒为 0
   let lastFrameTime: number | null = null
 
   const advanceVisualTime = (timestamp: number): void => {
@@ -51,15 +49,12 @@ export function useVisualTime(): {
     const diff = visualTime.value - realTime // 正值表示视觉领先,负值表示落后
 
     if (Math.abs(diff) > HARD_SYNC_THRESHOLD) {
-      // 误差超过 0.5s,直接硬同步
       visualTime.value = realTime
     } else if (Math.abs(diff) > SMOOTH_THRESHOLD) {
-      // 误差在 0.05s ~ 0.5s 之间,使用 P 控制器平滑追赶
       const speed = 1.0 - diff * P_GAIN
       const clampedSpeed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, speed))
       visualTime.value += deltaTime * clampedSpeed
     } else {
-      // 误差很小,正常累加
       visualTime.value += deltaTime
     }
   }
@@ -72,7 +67,7 @@ export function useVisualTime(): {
     visualTime.value = playerStore.currentTime
   }
 
-  // 监听真实时间跳变(如拖拽进度条),立即同步
+  // seek(如拖拽进度条)立即同步:调用方的 rAF 循环只在播放时跑,暂停时没有 advanceVisualTime 来追平
   watch(
     () => playerStore.currentTime,
     (newTime, oldTime) => {

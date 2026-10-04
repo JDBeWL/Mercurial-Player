@@ -13,11 +13,11 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::core::{Interface, PCWSTR, w};
 
-/// fonts/ 目录外部字体的名字索引：前端族名（小写）→ 候选文件路径。
-/// 只记录路径不驻留字体数据，被歌词实际选中的字体才按需加载，
-/// 避免像 Super OTC 这类动辄数百 MB 的字体集合整包进入内存
+/// fonts/ 目录外部字体的名字索引：只记录路径，不驻留字体数据。
+///
+/// 按需加载被歌词实际选中的字体，避免 Super OTC 这类数百 MB 的字体集合整包进内存。
 pub(super) struct ExternalFontIndex {
-    /// 前端族名（小写）→ 候选文件（常规字重/VF 优先，按优先级升序）
+    /// 前端族名（小写）-> 候选文件（常规字重/VF 优先，按优先级升序）
     pub(super) candidates: HashMap<String, Vec<String>>,
     /// 构建时的字体设置代数，用于判断是否需要重建
     pub(super) generation: u32,
@@ -26,13 +26,11 @@ pub(super) struct ExternalFontIndex {
 /// 单个外部字体文件加载出的 DirectWrite 自定义字体集合
 pub(super) struct ExternalFontCollection {
     pub(super) collection: IDWriteFontCollection,
-    /// CreateTextFormat 应使用的内部族名（字体 name 表的族名，
-    /// 可能与前端按文件名解析出的族名不同）
+    /// CreateTextFormat 要用的内部族名（name 表族名，可能与前端按文件名解析出的不同）
     pub(super) internal_family: String,
 }
 
-/// 桌面歌词按常规字重请求文本格式：VF 可变字体优先，其次常规字重
-/// （无后缀 / -400 / -regular 等），最后其余字重
+/// 常规字重优先的排序键：VF 可变字体 > 常规字重（无后缀 / -400 / -regular 等）> 其余字重
 fn font_weight_priority(stem: &str) -> u8 {
     let lower = stem.to_lowercase();
     if lower.ends_with("-vf") {
@@ -43,13 +41,13 @@ fn font_weight_priority(stem: &str) -> u8 {
     };
     match last {
         "400" | "regular" | "normal" | "book" => 1,
-        // 其余字重后缀（-700、-bold 等）偏离常规字重
         _ => 2,
     }
 }
 
 /// 构建外部字体名字索引：只扫描文件名，不读取字体内容。
-/// woff/woff2 为 Web 压缩容器，DirectWrite 无法读取，跳过
+///
+/// woff/woff2 是 Web 压缩容器，DirectWrite 读不了，直接跳过。
 pub(super) fn build_external_font_index(generation: u32) -> Option<ExternalFontIndex> {
     let entries = crate::system::fonts::list_external_fonts().ok()?;
     let mut candidates: HashMap<String, Vec<(u8, String)>> = HashMap::new();
@@ -94,10 +92,10 @@ pub(super) fn build_external_font_index(generation: u32) -> Option<ExternalFontI
 }
 
 /// 创建并注册 DirectWrite 内存字体加载器。
-/// 头文件要求客户端自行调用 RegisterFontFileLoader 注册，未注册的
-/// 加载器创建字体文件引用会返回 E_INVALIDARG。
-/// 不注销：字体文件引用仅在 loader 保持注册期间有效，注册关系
-/// 随工厂存活到进程结束，渲染线程重建时新 loader 单独注册即可
+///
+/// 加载器必须注册到 factory 才能创建字体文件引用，否则返回 E_INVALIDARG。刻意不注销：
+/// 引用只在 loader 保持注册期间有效，而注册关系随 factory 存活到进程结束，渲染线程
+/// 重建时新 loader 各自注册即可。
 ///
 /// # Safety
 /// 必须在已初始化 COM（`CoInitializeEx`）的渲染线程上调用
@@ -123,8 +121,8 @@ pub(super) unsafe fn build_memory_loader(
 }
 
 /// 把一个外部字体文件加载为 DirectWrite 自定义字体集合。
-/// ownerObject 传 NULL 时 DirectWrite 会复制字体数据，
-/// 调用方的临时缓冲在调用后即可释放
+///
+/// ownerObject 传 NULL 时 DirectWrite 会复制字体数据，调用方的临时缓冲调用后即可释放。
 ///
 /// # Safety
 /// 必须在已初始化 COM（`CoInitializeEx`）的渲染线程上调用
@@ -172,7 +170,6 @@ pub(super) unsafe fn try_load_external_font(
     // SAFETY: builder 已成功加入字体文件
     let font_set = unsafe { builder.CreateFontSet().ok()? };
     let collection = unsafe { factory5.CreateFontCollectionFromFontSet(&font_set).ok()? };
-    // 优先使用与前端族名一致的内部族名，否则取第一个
     let internal_family = internal_families
         .iter()
         .find(|f| f.eq_ignore_ascii_case(family))

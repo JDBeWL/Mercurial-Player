@@ -62,7 +62,7 @@ pub(crate) fn precompute_hann_window(size: usize) -> Vec<f32> {
 ///
 /// 共享模式(decoder::convert_audio_buffer)与独占模式(decode_push::convert_channels_into)
 /// 共用此实现,避免两套系数漂移。非 6/8 声道的其它多声道布局退化为
-/// FL/FR × 0.8 输出。
+/// FL/FR * 0.8 输出。
 pub(crate) fn downmix_surround_to_stereo(
     samples: &[f32],
     src_ch: usize,

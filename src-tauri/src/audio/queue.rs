@@ -72,25 +72,23 @@ impl RepeatMode {
 /// tracks/repeat/auto_advance 由前端经 `set_play_queue` 整条同步，index 两端都会更新。
 #[derive(Debug, Default)]
 pub struct PlaybackQueue {
-    /// 已按最终播放顺序排列的曲目（随机序由前端算好）
+    /// 已按最终播放顺序排列的曲目（算序分工见模块头）
     tracks: Vec<TrackSnapshot>,
-    /// 当前曲目下标
     index: Option<usize>,
-    /// 循环模式
     repeat: RepeatMode,
     /// 是否由 Rust 接管曲目结束后的推进（仅 Android 开启）
     auto_advance: bool,
 }
 
 impl PlaybackQueue {
-    /// 创建空队列
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// 整条替换队列。`index` 为当前曲目在 `tracks` 中的下标；越界或不传时按「未知」处理
-    /// （`auto_advance` 依赖它，未知则本次不推进）。
+    ///
+    /// `auto_advance` 依赖它，未知则本次不推进。
     pub fn set_queue(
         &mut self,
         tracks: Vec<TrackSnapshot>,
@@ -117,7 +115,6 @@ impl PlaybackQueue {
         }
     }
 
-    /// 更新循环模式
     pub fn set_repeat(&mut self, repeat: RepeatMode) {
         self.repeat = repeat;
     }
@@ -140,7 +137,8 @@ impl PlaybackQueue {
         self.auto_advance
     }
 
-    /// 曲目自然结束后推进：返回下一首的 `(下标, 快照)`，`None` 表示队列到底应停止；
+    /// 曲目自然结束后推进：返回下一首的 `(下标, 快照)`，`None` 表示队列到底应停止。
+    ///
     /// 单曲循环时返回当前曲目本身。
     pub fn advance_on_end(&mut self) -> Option<(usize, TrackSnapshot)> {
         let len = self.tracks.len();
@@ -233,7 +231,8 @@ fn stop_at_queue_end(app: &AppHandle, state: &AppState) {
     sync_media_session(app, state);
 }
 
-/// 曲目自然结束的统一入口，由 `emit::emit_track_ended` 在发出 `track-ended` 之后调用：
+/// 曲目自然结束的统一入口，由 `emit::emit_track_ended` 在发出 `track-ended` 之后调用。
+///
 /// 未开 `auto_advance`（桌面端）立即返回，开则推进队列并播下一首。
 /// 调用方是分析线程而非音频回调，直接推进不会与回调形成锁序环。
 pub fn handle_track_ended(app: &AppHandle, state: &AppState) {
@@ -268,7 +267,7 @@ fn play_queue_track(
     track: &TrackSnapshot,
     reason: &str,
 ) -> Result<(), AppError> {
-    // 移动端：按用户偏好对齐本首的输出模式（"下一首生效"在这里落地）
+    // 本首的输出模式对齐到用户偏好，理由见 super::commands::sync_exclusive_mode_from_config
     #[cfg(target_os = "android")]
     super::commands::sync_exclusive_mode_from_config(state);
 
@@ -315,9 +314,9 @@ fn play_queue_track(
     Ok(())
 }
 
-/// 播放开始后同步队列下标与（Android）通知栏：前端任何切歌都走这里，
-/// 保证队列下标与通知栏始终跟随实际播放的曲目。
+/// 播放开始后同步队列下标与（Android）通知栏。
 ///
+/// 前端任何切歌都走这里，保证队列下标与通知栏始终跟随实际播放的曲目。
 /// `start_position` 是本首的起点（秒，None 表示从头播），用来重设 MediaSession 的进度基准。
 pub fn note_playback_started(
     app: &AppHandle,
@@ -334,8 +333,9 @@ pub fn note_playback_started(
     sync_media_session(app, state);
 }
 
-/// 媒体控制动作（通知栏 / MediaSession / 耳机线控共用入口），与前端操作走同一套播放函数：
-/// 按 `exclusive_mode` 分流到独占或共享输出，两种模式下按键都有效。
+/// 媒体控制动作（通知栏 / MediaSession / 耳机线控共用入口）。
+///
+/// 与前端操作走同一套播放函数：按 `exclusive_mode` 分流到独占或共享输出，两种模式下按键都有效。
 pub fn media_control(
     app: &AppHandle,
     state: &AppState,
@@ -414,8 +414,7 @@ pub fn media_control(
                         log::error!("独占模式媒体控制 seek 失败: {e}");
                         return;
                     }
-                    // 独占的 seek 是重建输出流，与共享分支一样要把进度基准挪到跳转目标，
-                    // 否则通知栏继续按跳转前的位置推算
+                    // 独占的 seek 也是重建输出流，进度基准同样要挪到跳转目标
                     note_position(position);
                     sync_media_session(&app_clone, &state);
                 });
@@ -448,8 +447,7 @@ pub fn media_control(
             play_queue_track(app, state, index, &track, action)
         }
         "sync" => {
-            // App 回到前台：后台期间 WebView 的 JS 被冻结，事件可能积压或丢失，
-            // 这里把真实播放状态重新推给前端，避免 UI 停留在后台前的旧曲目/进度。
+            // App 回到前台：后台期间 JS 被冻结，事件可能积压或丢失，这里重推真实播放状态
             let (index, track) = {
                 let queue = state.player.queue.lock().lock_or_err("playback queue")?;
                 (queue.index(), queue.current().cloned())
@@ -472,6 +470,7 @@ pub fn media_control(
 }
 
 /// 把当前播放状态同步给 Android 通知栏 / MediaSession，桌面端为空实现。
+///
 /// 仅在切歌、播放状态变化、seek 时调用（低频）；进度由系统的 `updateTime + speed` 推算。
 pub fn sync_media_session(app: &AppHandle, state: &AppState) {
     #[cfg(target_os = "android")]

@@ -73,7 +73,7 @@ pub async fn search_candidates(
     }
 }
 
-/// 搜索 → 对前 N 个取歌词
+/// 搜索 -> 对前 N 个取歌词
 async fn netease_candidates(
     query: &LyricQuery,
     limit: u32,

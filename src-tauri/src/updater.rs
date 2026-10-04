@@ -1,8 +1,7 @@
-//! 应用更新模块
+//! 应用更新：检查/安装复用 tauri-plugin-updater（配置、签名、安装器行为一致）。
 //!
-//! 检查/安装流程复用 tauri-plugin-updater（配置、签名、安装器行为一致），
-//! 下载阶段替换为多线程分片下载（HTTP Range 并发请求），
-//! 下载完成后按插件相同逻辑做 minisign 签名校验，再走插件原生安装。
+//! 只把下载阶段换成多线程分片下载（HTTP Range 并发请求），下载完按插件相同逻辑做 minisign
+//! 签名校验，再交回插件原生安装。
 use crate::error::AppError;
 
 use std::path::{Path, PathBuf};
@@ -33,13 +32,13 @@ const PROGRESS_EVENT: &str = "updater://download-progress";
 pub struct PendingUpdate {
     /// updater_check 检查到的更新对象
     update: Mutex<Option<Update>>,
-    /// updater_download 下载并校验通过的安装包临时文件路径。
+    /// updater_download 下载并校验通过的安装包临时文件路径
+    ///
     /// 只存路径不存数据：安装包可达上百 MB，全程驻留内存会带来数百 MB 常驻开销
     path: Mutex<Option<PathBuf>>,
 }
 
 impl PendingUpdate {
-    /// 创建空状态
     pub fn new() -> Self {
         Self {
             update: Mutex::new(None),
@@ -75,12 +74,10 @@ fn remove_temp_file(path: &Path) {
     }
 }
 
-/// 以 `create_new` 语义创建空临时文件。
+/// 以 `create_new` 语义创建空临时文件，而不是可截断已存在文件的 `File::create`。
 ///
-/// 不用 `File::create`(可截断已存在文件):临时文件路径仅含 pid+时间戳,
-/// 攻击者可先在同名路径预创建普通文件或符号链接,使后续写入落盘到攻击者
-/// 指定的位置。`create_new` 在文件已存在时报 `AlreadyExists`,保证我们
-/// 写入的一定是本进程新建的文件。
+/// 临时路径只含 pid+时间戳，攻击者可预先在同名路径放普通文件或符号链接，让后续写入落到他
+/// 指定的位置；`create_new` 遇已存在即报 `AlreadyExists`，保证写的一定是本进程新建的文件。
 fn create_temp_file_exclusive(path: &Path) -> std::io::Result<()> {
     std::fs::OpenOptions::new()
         .write(true)
@@ -99,13 +96,10 @@ fn clear_pending_path(guard: &mut Option<PathBuf>) {
 /// updater_check 返回给前端的更新信息
 #[derive(Debug, Serialize)]
 pub struct UpdateInfo {
-    /// 新版本号
     pub version: String,
     /// 更新说明（Release Notes）
     pub notes: Option<String>,
-    /// 发布日期
     pub date: Option<String>,
-    /// 当前版本号
     pub current_version: String,
 }
 
@@ -118,10 +112,7 @@ struct DownloadProgress {
     total: u64,
 }
 
-/// 检查更新
-///
-/// 通过 tauri.conf.json 中 plugins.updater 的 endpoints/pubkey 配置检查，
-/// 结果保存在 [`PendingUpdate`] 中供后续下载使用
+/// 检查更新，结果存进 [`PendingUpdate`] 供后续下载与安装使用
 #[tauri::command]
 pub async fn updater_check(
     app: AppHandle,
@@ -160,11 +151,9 @@ pub async fn updater_check(
     }
 }
 
-/// 下载更新
+/// 下载更新：多线程分片，服务器不支持 Range 时回退单线程
 ///
-/// 多线程分片下载（服务器不支持 Range 时自动回退单线程），流式写入临时文件，
-/// 完成后校验 minisign 签名，通过后暂存文件路径供 [`updater_install`] 使用。
-/// 进度通过 `updater://download-progress` 事件推送。
+/// 流式写入临时文件，完成后校验 minisign 签名，通过才把路径暂存给 [`updater_install`]。
 #[tauri::command]
 pub async fn updater_download(
     app: AppHandle,
@@ -199,8 +188,7 @@ pub async fn updater_download(
     let range_supported = probe.status() == reqwest::StatusCode::PARTIAL_CONTENT && total > 0;
     drop(probe);
 
-    // 下载全程流式写入临时文件，峰值内存只有单个 chunk，
-    // 避免安装包（可达上百 MB）在下载期间整体驻留内存两份
+    // 流式写盘，峰值内存只有一个 chunk；不落内存两份的原因见 PendingUpdate::path
     let temp_path = unique_temp_path();
     let download_result = if range_supported && total >= MIN_PARALLEL_SIZE {
         log::info!("更新包支持分片下载，总大小 {total} 字节，{PARALLEL_PARTS} 线程并发");
@@ -218,8 +206,7 @@ pub async fn updater_download(
         }
     };
 
-    // 与 tauri-plugin-updater 相同的 minisign 签名校验：
-    // 读临时文件到内存校验后立即释放，随后只保留文件路径
+    // 校验签名（口径见 verify_signature）：整包读进内存，验不过就删文件，验完即释放
     let Some(pubkey) = updater_pubkey(&app) else {
         remove_temp_file(&temp_path);
         return Err(AppError::Network("无法读取更新公钥配置".to_string()));
@@ -247,10 +234,9 @@ pub async fn updater_download(
     Ok(())
 }
 
-/// 安装已下载的更新
+/// 安装已下载的更新：委托给 tauri-plugin-updater 原生安装流程
 ///
-/// 委托给 tauri-plugin-updater 原生安装流程
-/// （Windows 下拉起安装器并退出进程，由安装器完成替换和重启）
+/// Windows 下拉起安装器并退出进程，替换与重启由安装器完成。
 #[tauri::command]
 pub async fn updater_install(pending: State<'_, PendingUpdate>) -> Result<(), AppError> {
     let update = lock_or_log!(pending.update.lock())
@@ -260,10 +246,10 @@ pub async fn updater_install(pending: State<'_, PendingUpdate>) -> Result<(), Ap
         .take()
         .ok_or("更新尚未下载完成")?;
 
-    // 读文件和安装都涉及大文件 IO 与拉起安装器，放到阻塞线程池执行
+    // 大文件 IO 与拉起安装器，都放阻塞线程池，别占着 async 运行时
     let install_path = temp_path.clone();
     let install_result = tauri::async_runtime::spawn_blocking(move || -> Result<(), AppError> {
-        // tauri-plugin-updater 的 install 接口以字节为输入，此处读取是瞬时峰值
+        // 插件的 install 接口收字节，这次读取是瞬时峰值
         let data = std::fs::read(&install_path).map_err(|e| format!("读取更新包文件失败: {e}"))?;
         update
             .install(&data)
@@ -297,7 +283,7 @@ fn updater_pubkey(app: &AppHandle) -> Option<String> {
         .map(String::from)
 }
 
-/// 启动进度上报任务：每 250ms 向前端推送一次已下载字节数，下载结束后自行退出
+/// 启动进度上报任务：按 `PROGRESS_INTERVAL_MS` 推送已下载字节数，下载结束后自行退出
 fn spawn_progress_reporter(
     app: AppHandle,
     fetched: Arc<AtomicU64>,
@@ -318,9 +304,8 @@ fn spawn_progress_reporter(
     })
 }
 
-/// 多线程分片下载：将文件按 [`PARALLEL_PARTS`] 分片并发请求，
-/// 各分片流式写入同一临时文件的对应偏移（峰值内存仅为单个 chunk），
-/// 完成后校验落盘大小
+/// 多线程分片下载：文件按 [`PARALLEL_PARTS`] 切片并发请求，各分片 seek 到同一临时文件的
+/// 对应偏移流式写入，完成后校验落盘大小
 async fn download_parallel(
     client: &reqwest::Client,
     url: &reqwest::Url,
@@ -328,8 +313,7 @@ async fn download_parallel(
     path: &Path,
     app: &AppHandle,
 ) -> Result<u64, AppError> {
-    // 先以 create_new 创建并独占目标文件;各分片任务各自持有写句柄,
-    // seek 到自己的偏移写入 (create_new 保证不覆盖任何已存在的预创建文件)
+    // create_new 的理由见 create_temp_file_exclusive；之后各分片任务各自持写句柄
     create_temp_file_exclusive(path).map_err(|e| format!("创建临时文件失败: {e}"))?;
 
     let fetched = Arc::new(AtomicU64::new(0));
@@ -478,7 +462,7 @@ async fn download_single(
         spawn_progress_reporter(app.clone(), Arc::clone(&fetched), Arc::clone(&done), total);
 
     let download_result: Result<u64, AppError> = async {
-        // create_new:防止攻击者预创建同名文件/符号链接后被覆盖写入
+        // create_new 的理由见 create_temp_file_exclusive
         let mut file = tokio::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -514,8 +498,9 @@ async fn download_single(
     download_result
 }
 
-/// minisign 签名校验（与 tauri-plugin-updater 内部实现一致：
-/// 公钥与签名均为 base64 编码的 minisign 格式）
+/// minisign 签名校验，口径与 tauri-plugin-updater 内部实现一致
+///
+/// 配置里的公钥与更新源给的签名都是 base64 编码的 minisign 格式。
 fn verify_signature(data: &[u8], release_signature: &str, pub_key: &str) -> Result<(), AppError> {
     let pub_key_decoded =
         base64_decode_to_string(pub_key).map_err(|e| format!("更新公钥解码失败: {e}"))?;
@@ -533,7 +518,6 @@ fn verify_signature(data: &[u8], release_signature: &str, pub_key: &str) -> Resu
     Ok(())
 }
 
-/// base64 解码为 UTF-8 字符串
 fn base64_decode_to_string(input: &str) -> Result<String, AppError> {
     let decoded = BASE64_STANDARD.decode(input).map_err(|e| e.to_string())?;
     String::from_utf8(decoded).map_err(|e| AppError::msg(e.to_string()))

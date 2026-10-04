@@ -55,9 +55,10 @@ pub fn usb_dac_available() -> Result<bool, AppError> {
     Ok(device::find_usb_output_device()?.is_some())
 }
 
-/// USB DAC 热插拔：由 Kotlin 的 `AudioDeviceCallback` 经 JNI 调用。
-/// 拔掉 → 作废独占流、关独占标志并暂停；插上 → 建流后置标志。
-/// 核心约束：AAudio 的流死绑创建时的 device id，设备不在了就必须丢掉这条流
+/// USB DAC 热插拔：由 Kotlin 的 `AudioDeviceCallback` 经 JNI 调用。拔掉时作废独占流、关标志并
+/// 暂停；插上时建流后置标志。
+///
+/// AAudio 的流死绑创建时的 device id，设备不在了就必须丢掉这条流
 /// （[`AaudioExclusivePlayer::release_stream`]），否则拿旧 id 开流时独占与共享回退都会失败。
 pub fn on_audio_route_changed(app: &tauri::AppHandle) {
     use tauri::Emitter;
@@ -82,9 +83,9 @@ pub fn on_audio_route_changed(app: &tauri::AppHandle) {
         .unwrap_or(false)
         && usb;
 
-    // 锁序遵循 audio/mod.rs 顶部的约定：exclusive_mode → wasapi_player。
-    // 注意：下面的 wasapi_player 临界区会跨 `initialize()`（内含 JNI 设备查询与 openStream），
-    // 持锁时间不短；这条路径只在设备插拔时走，不与音频回调争锁。
+    // 锁序遵循 audio/mod.rs 顶部的约定：exclusive_mode 先于 wasapi_player。下面的临界区会跨
+    // `initialize()`（内含 JNI 设备查询与 openStream），但这条路径只在设备插拔时走，不与音频
+    // 回调争锁。
     let Ok(mut exclusive) = state.player.output.exclusive_mode.lock() else {
         log::warn!("on_audio_route_changed: exclusive_mode 锁中毒");
         return;
@@ -132,7 +133,15 @@ pub fn on_audio_route_changed(app: &tauri::AppHandle) {
             *player_guard = Some(player);
         }
 
-        *exclusive = player_guard.is_some();
+        // 必须按"有没有真的开出一条流"判定，而不是 `player_guard.is_some()`：initialize 失败时
+        // 这里存的是一条没有流的 default 播放器，按 is_some 会让设置页显示"独占已生效"、播放却
+        // 走独占路径拿不到流（无声），共享输出也已被让位。
+        *exclusive = player_guard
+            .as_ref()
+            .is_some_and(|p| p.current_device().is_some());
+        if !*exclusive {
+            log::warn!("独占未生效（无可用流），本次继续走共享输出");
+        }
         drop(player_guard);
         drop(exclusive);
         let _ = app.emit(
@@ -146,7 +155,7 @@ pub fn on_audio_route_changed(app: &tauri::AppHandle) {
     if let Some(player) = player_guard.as_ref() {
         let _ = player.stop();
         let _ = player.clear_buffer();
-        // 设备没了 → 流本身也已失效，必须一起丢掉（见函数文档）
+        // 设备没了，流本身也已失效，必须一起丢掉（见函数文档）
         player.release_stream();
     }
     drop(player_guard);

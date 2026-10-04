@@ -1,6 +1,4 @@
-//! 系统相关的 Tauri 命令
-//!
-//! 包含系统信息获取和窗口管理功能。
+//! 系统相关的 Tauri 命令：应用与系统信息、mini 模式、字体列表与缓存、刷新率、外链白名单。
 use crate::error::AppError;
 
 use crate::AppState;
@@ -76,10 +74,8 @@ pub fn get_system_info() -> Result<HashMap<String, String>, AppError> {
 /// 获取系统可用的字体列表
 #[command]
 pub fn get_system_fonts() -> Result<Vec<String>, AppError> {
-    // 尝试获取真实的系统字体
     match super::fonts::get_system_fonts() {
         Ok(mut fonts) => {
-            // 添加一些通用的 Web 字体作为后备
             let fallback_fonts = vec![
                 "system-ui".to_string(),
                 "sans-serif".to_string(),
@@ -87,7 +83,6 @@ pub fn get_system_fonts() -> Result<Vec<String>, AppError> {
                 "monospace".to_string(),
             ];
 
-            // 合并并去重
             fonts.extend(fallback_fonts);
             fonts.sort();
             fonts.dedup();
@@ -95,7 +90,6 @@ pub fn get_system_fonts() -> Result<Vec<String>, AppError> {
             Ok(fonts)
         }
         Err(e) => {
-            // 如果获取系统字体失败，返回一些常见字体作为后备
             log::warn!("Failed to get system fonts: {e}");
             Ok(vec![
                 "system-ui".to_string(),
@@ -132,9 +126,9 @@ pub fn get_font_cache_stats() -> super::fonts::FontCacheStats {
     }
 }
 
-/// 清理字体缓存：磁盘上的 TTC/OTC 提取缓存 + 桌面歌词的外部字体
-/// 内存缓存（名字索引/已加载字体集/文本格式），返回清理后的统计。
-/// 提取缓存会在下次扫描 fonts/ 目录时按需重建
+/// 清理字体缓存：磁盘上的 TTC/OTC 提取缓存 + 桌面歌词的外部字体内存缓存。
+///
+/// 返回清理后的统计；提取缓存会在下次扫描 fonts/ 目录时按需重建。
 #[command]
 pub fn clear_font_caches() -> Result<super::fonts::FontCacheStats, AppError> {
     super::fonts::clear_font_extract_cache()?;
@@ -220,7 +214,7 @@ pub const fn get_platform() -> &'static str {
 
 /// 设置应用内「界面字号」倍率（`1.0` = 设计稿原始大小）
 ///
-/// Android 上把 WebView 的 `textZoom` 直接写成 `100 × 倍率`，从而覆盖系统字号
+/// Android 上把 WebView 的 `textZoom` 直接写成 `100 * 倍率`，从而覆盖系统字号
 /// （原理见 [`crate::android::font_scale`] 的模块注释）；桌面端为 no-op。
 #[command]
 pub fn set_app_font_scale(scale: f32) -> Result<(), AppError> {
@@ -342,9 +336,10 @@ pub fn get_screen_refresh_rate(window: tauri::WebviewWindow) -> Result<u32, AppE
     }
 }
 
-/// 获取窗口所在显示器支持的刷新率挡位（用于目标帧率选项，免去硬编码猜测）
+/// 获取窗口所在显示器支持的刷新率挡位（用于目标帧率选项，免去硬编码猜测）。
+///
 /// available 只保留不超过 MAX_TARGET_FPS 的挡位，与 set_target_fps 的钳制一致；
-/// current 始终为屏幕真实刷新率（仅用于展示，不受上限过滤）
+/// current 始终为屏幕真实刷新率（仅用于展示，不受上限过滤）。
 #[cfg(desktop)]
 #[command]
 pub fn get_display_refresh_rates(

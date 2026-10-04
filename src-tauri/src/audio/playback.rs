@@ -27,17 +27,15 @@ pub fn play_track_shared(
     position: Option<f32>,
 ) -> Result<(), AppError> {
     let player = &state.player;
-    // 取消任何正在进行的淡入淡出,防止其 on_complete(pause) 在新歌播放后执行
+    // 作废进行中的 fade，理由见 commands 的 spawn_shared_fade
     player.fade.generation.fetch_add(1, Ordering::SeqCst);
-    // 上一首可能还挂在独占输出上（移动端"下一首生效"留下的旧流）：走共享前回收，
-    // 否则它会一直占着 USB DAC
+    // 上一首可能还挂在独占输出上，走共享前必须回收，理由见 release_exclusive_player
     super::commands::release_exclusive_player(state);
     // 先读取 target_volume 再锁 sink,避免嵌套锁死锁风险
     let vol = *lock_or_log!(player.output.target_volume.lock());
     {
         let player_lock = lock_or_log!(player.output.sink.lock());
-        // 直接停止，不做淡出（淡出会阻塞主线程）
-        // 新音源会有fade_in效果来平滑过渡
+        // 直接停止不做淡出（淡出会阻塞这里），新音源的 fade_in 负责平滑过渡
         player_lock.stop();
         player_lock.set_volume(vol);
     }
@@ -159,8 +157,7 @@ pub async fn play_track_exclusive(
             }
         }
     }
-    // fade 启用时等待淡出完成(50ms) + 旧解码线程退出(20ms buffer)
-    // fade 禁用时只等旧解码线程退出
+    // fade 启用时要等淡出 50ms + 旧解码线程退出 20ms，禁用时只等后者
     let wait_ms = if player.fade.enabled.load(Ordering::SeqCst) {
         70
     } else {
@@ -196,9 +193,8 @@ pub async fn play_track_exclusive(
     let _ = decoder.prefill_buffer();
     let (src_sr, src_ch) = (decoder.sample_rate(), decoder.channels());
 
-    // Android：AAudio 独占流不接受任意采样率，必须按曲目原生速率重建一次。
-    // 设备支持原生速率时 = 位完美直出；不支持时退到最接近的一档（解码线程重采样）。
-    // Windows 不需要：WASAPI 独占的格式在 initialize 时已与设备协商好。
+    // Android：AAudio 独占流不接受任意采样率，按曲目原生速率重建一次；支持原生速率即位完美直出，
+    // 否则退到最接近的一档由解码线程重采样。Windows 在 initialize 时已与设备协商好，不需要。
     #[cfg(target_os = "android")]
     let (target_sr, target_ch) = {
         let (rate, channels) = {
@@ -256,18 +252,15 @@ pub async fn play_track_exclusive(
         );
     });
 
-    // 等待解码线程启动
     let mut wait = 0;
     while !thread_started.load(Ordering::SeqCst) && wait < 20 {
         tokio::time::sleep(Duration::from_millis(5)).await;
         wait += 1;
     }
 
-    // 等待缓冲区有足够数据再开始播放，避免音频开头欠载
-    // 注意:不能在持有 wasapi_player 锁守卫的情况下 await(守卫非 Send),
-    // 因此每次检查后立即释放锁再 sleep。
+    // 等缓冲有足够数据再起播，避免开头欠载；
+    // 不能在持有 wasapi_player 锁守卫时 await(守卫非 Send)，所以每次检查后立即释放锁再 sleep
     {
-        // 等待至少200ms的音频数据（约 1/5 秒）
         let min_buffer_samples = target_sr as usize * target_ch as usize / 5;
         let mut buffer_wait = 0;
         loop {
@@ -281,10 +274,8 @@ pub async fn play_track_exclusive(
             tokio::time::sleep(Duration::from_millis(10)).await;
             buffer_wait += 1;
         }
-        // 额外等待一小段时间确保数据稳定
         tokio::time::sleep(Duration::from_millis(20)).await;
-        // 仅在需要时启动播放(重新获取锁,不跨 await)
-        // 保持暂停时(start_playback=false)不启动,解码线程持续预缓冲,resume 随时可用
+        // 保持暂停时(start_playback=false)不启动，解码线程持续预缓冲，resume 随时可用
         if start_playback {
             let g = lock_or_log!(player.output.wasapi_player.lock());
             if let Some(ref wasapi) = *g {
@@ -311,7 +302,7 @@ pub async fn play_track_exclusive(
     ))
 }
 
-/// Seek共享模式
+/// 共享模式 seek：重建音源到目标位置并接回播放
 pub fn seek_track_shared(
     app: &AppHandle,
     state: &AppState,
@@ -319,7 +310,7 @@ pub fn seek_track_shared(
     time: f32,
 ) -> Result<(), AppError> {
     let player = &state.player;
-    // 取消任何正在进行的淡入淡出,防止其 on_complete(pause) 在 seek 后执行
+    // 作废进行中的 fade，理由见 commands 的 spawn_shared_fade
     player.fade.generation.fetch_add(1, Ordering::SeqCst);
     let eq_settings = state.equalizer.get_settings_handle();
     let mut decoder =

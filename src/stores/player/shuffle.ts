@@ -1,9 +1,6 @@
 /**
- * Shuffle 逻辑辅助模块
- *
- * 从 player.ts 抽离的纯函数,负责 Knuth 洗牌序列的生成、校验和导航计算。
- * 状态 (_shuffleOrder / _shufflePosition / _shuffleHistory) 仍保留在 player store 中,
- * 本模块仅提供无副作用的状态计算逻辑,由 store 调用后赋值。
+ * Shuffle 辅助模块:Knuth 洗牌序列的生成、校验与导航计算,全部为无副作用的纯函数。
+ * 状态(_shuffleOrder / _shufflePosition / _shuffleHistory)仍由 player store 持有,这里只算不存。
  */
 
 /**
@@ -19,10 +16,8 @@ export function generateShuffleOrder(
     return { order: [], position: -1 }
   }
 
-  // 1. 生成 [0, 1, ..., n-1]
   const order = Array.from({ length: n }, (_, i) => i)
 
-  // 2. Knuth shuffle: for i = n-1 downto 1, swap(order[i], order[rand(0..i)])
   for (let i = n - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
     const tmp = order[i]!
@@ -30,7 +25,6 @@ export function generateShuffleOrder(
     order[j] = tmp
   }
 
-  // 3. 以当前曲目为起点:把 currentIndex 移到第 0 位
   if (currentIndex >= 0 && currentIndex < n) {
     const curPos = order.indexOf(currentIndex)
     if (curPos > 0) {
@@ -43,10 +37,7 @@ export function generateShuffleOrder(
   return { order, position: 0 }
 }
 
-/**
- * 校验洗牌顺序是否仍然有效
- * 失效条件: 序列长度与当前 playlist 不一致 (playlist 变化/重置)
- */
+/** 洗牌序列是否仍有效：长度与当前 playlist 一致(列表变化/重置即失效)且位置已定位 */
 export function isShuffleOrderValid(
   order: number[],
   position: number,
@@ -62,7 +53,7 @@ export function isShuffleOrderValid(
  * @param position 当前在序列中的位置
  * @param playlistLength 播放列表长度
  * @param currentIndex 当前曲目索引 (用于在序列失效时重新生成)
- * @returns `{ index, position, order }` — order 可能在重新洗牌后变化
+ * @returns `{ index, position, order }` - order 可能在重新洗牌后变化
  */
 export function getNextShuffleIndex(
   order: number[],
@@ -109,7 +100,6 @@ export function getPreviousShuffleIndex(
 
   const currentHistory = [...history]
 
-  // 优先从历史栈弹出,真正回到上一首
   if (currentHistory.length > 0) {
     const prevIndex = currentHistory.pop()!
     let newPosition = position
@@ -165,21 +155,18 @@ export function adjustShuffleAfterRemove(
     return { order: [], position, history: [...history] }
   }
 
-  // 被删 index 在 _shuffleOrder 中的位置
   const removedPos = order.indexOf(removedIndex)
 
-  // 从序列中移除该 index,并将大于该 index 的所有值减 1
   const newOrder = order
     .filter((idx) => idx !== removedIndex)
     .map((idx) => (idx > removedIndex ? idx - 1 : idx))
 
-  // 校正 position:若被删条目位于当前播放位置之前,当前条目前移一位
+  // 被删条目在当前播放位置之前时,当前条目前移一位
   let newPosition = position
   if (removedPos !== -1 && removedPos < position) {
     newPosition--
   }
 
-  // 校正历史栈:移除被删 index,并将大于该 index 的值减 1
   const newHistory = history
     .filter((idx) => idx !== removedIndex)
     .map((idx) => (idx > removedIndex ? idx - 1 : idx))

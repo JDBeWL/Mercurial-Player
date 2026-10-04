@@ -1,4 +1,5 @@
 //! Android SAF（Storage Access Framework）适配层。
+//!
 //! 桌面端媒体路径为绝对路径，Android 分区存储下为 `content://` URI；本模块经 JNI 调 Kotlin
 //! `SafBridge` 把 URI 转成 native fd 再包成 `File`，解码/元数据/封面因此复用桌面代码。
 
@@ -26,14 +27,13 @@ mod android_impl {
     use std::fs::File;
     use std::os::fd::FromRawFd;
 
-    /// 获取当前保存的(content URI)音乐目录树
+    /// 当前保存的树 URI（Kotlin 返回空串时按 None 处理）
     pub fn get_saved_tree() -> Result<Option<String>, AppError> {
-        let _ = is_content_uri; // 占位避免未用警告，实际逻辑在 JNI 侧
         let s = jni_call_string("getSavedTreeUri", &[])?;
         Ok(if s.is_empty() { None } else { Some(s) })
     }
 
-    /// 授权状态快照（URI + 版本号 + 显示名）
+    /// 读取 [`SafPickState`] 快照
     pub fn get_pick_state() -> Result<SafPickState, AppError> {
         let json = jni_call_string("getPickState", &[])?;
         let v: serde_json::Value = serde_json::from_str(&json)
@@ -64,9 +64,9 @@ mod android_impl {
         })
     }
 
-    /// 清除已保存的树 URI
-    pub fn clear_saved_tree() -> Result<(), AppError> {
-        jni_call_static_noop("com/jdbewl/mercurial_player/SafBridge", "clearSavedTree")
+    /// 释放树 URI 的持久授权并清 Kotlin 侧记录；为什么必须释放见 [`super::clear_saved_tree`]
+    pub fn clear_saved_tree(tree_uri: &str) -> Result<(), AppError> {
+        jni_call_void("clearSavedTree", &[tree_uri])
     }
 
     /// 获取应用数据目录（files 父级 data 目录，写配置/缓存用）
@@ -76,7 +76,7 @@ mod android_impl {
 
     /// 调起系统目录选择器（异步；结果写入 Kotlin 侧持久化存储）
     pub fn request_pick() -> Result<(), AppError> {
-        // 通过 MainActivity 静态方法转发，确保在主线程触发 Activity Result API
+        // 经 MainActivity 静态方法转发，确保在主线程触发 Activity Result API
         jni_call_static_noop("com/jdbewl/mercurial_player/MainActivity", "safRequestPick")
     }
 
@@ -86,8 +86,7 @@ mod android_impl {
         parse_audio_scan(&json)
     }
 
-    /// Kotlin `SafBridge.listAudioFiles` 的返回载荷（字段名一一对应，改一边要同步另一边）：
-    /// `files` 为扫描到的条目，`failedDirs` 为读取失败的目录，非空即扫描不完整。
+    /// Kotlin `SafBridge.listAudioFiles` 的载荷：`failedDirs` 非空即扫描不完整
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct SafScanPayload {
@@ -98,14 +97,12 @@ mod android_impl {
     }
 
     fn parse_audio_scan(json: &str) -> Result<Vec<SafEntry>, AppError> {
-        // 直接反序列化进 SafEntry。先前是先解成无类型 `Value` 再把字段逐个搬进新 String，
-        // 每个条目要多养一棵 `Map` 加八份临时串；万曲规模的扫库就是十几万次分配，
-        // 而且这些全部发生在从 JNI 取回那串大 JSON 之后紧邻的路径上。
+        // 直接反序列化进 SafEntry：万曲规模扫库时逐字段搬运会让每个条目多养一棵 Map 加临时串
         let payload: SafScanPayload = serde_json::from_str(json)
             .map_err(|e| AppError::msg(format!("SAF 音频列表 JSON 无效: {e}")))?;
         if !payload.failed_dirs.is_empty() {
-            // 部分目录读取失败时明确报错，而不是把残缺列表当完整扫描交上去：
-            // 调用方据此跳过这棵树并记录失败目录，避免"部分歌曲静默消失"被当成用户删了歌
+            // 不把残缺列表当完整扫描交上去：调用方据此跳过这棵树，免得"部分歌曲静默消失"
+            // 被当成用户删了歌
             return Err(AppError::msg(format!(
                 "SAF 扫描不完整，{} 个目录读取失败: {}",
                 payload.failed_dirs.len(),
@@ -126,28 +123,29 @@ mod android_impl {
         Ok(unsafe { File::from_raw_fd(fd) })
     }
 
-    /// 打开 content URI 用于写入，返回包装好的 `File`（fd 所有权在 Rust 侧）
-    ///
-    /// Kotlin 侧用 `"wt"` 打开（写 + 截断），见 `SafBridge.openOutputFd`。
+    /// 打开 content URI 用于写入；Kotlin 侧用 `"wt"`（写 + 截断，见 `SafBridge.openOutputFd`）
     pub fn open_output_file(path: &str) -> Result<File, AppError> {
         debug_assert!(is_content_uri(path));
         let fd = jni_call_int("openOutputFd", &[path])?;
         if fd < 0 {
             return Err(AppError::msg(format!("无法写入 SAF 文件: {path}")));
         }
-        // SAFETY: detachFd 已经把 fd 所有权移交给本进程；此处包装进 File 负责关闭
+        // SAFETY: 同 open_media_file，detachFd 已把 fd 所有权移交本进程
         Ok(unsafe { File::from_raw_fd(fd) })
     }
 
     // JNI 封装
 
-    // 共享 JNI 封装：with_jni / app_class 见 crate::android::java_bridge
     use crate::android::java_bridge::{app_class, with_jni};
 
-    /// 调用 SafBridge 返回 String 的静态方法
-    pub fn jni_call_string(method: &str, args: &[&str]) -> Result<String, AppError> {
-        use jni::objects::{JObject, JString, JValue};
-        with_jni(|env| {
+    /// 组装 `(String...)` 实参并调用 SafBridge 静态方法，返回原始返回值。
+    ///
+    /// 用宏而非泛型函数：`JValue` 借用同一函数内的局部引用，无法跨函数边界返回。
+    macro_rules! call_saf {
+        ($env:expr, $method:expr, $ret_sig:expr, $args:expr $(,)?) => {{
+            use jni::objects::{JObject, JValue};
+            let env: &mut jni::JNIEnv = $env;
+            let args: &[&str] = $args;
             let class = app_class(env, "com/jdbewl/mercurial_player/SafBridge")?;
             // JObject 需在调用期间存活：先收集到 Vec，再借用
             let mut objs: Vec<JObject> = Vec::with_capacity(args.len());
@@ -158,47 +156,35 @@ mod android_impl {
                 objs.push(js.into());
             }
             let jargs: Vec<JValue> = objs.iter().map(JValue::Object).collect();
-            let sig = format!(
-                "({})Ljava/lang/String;",
-                "Ljava/lang/String;".repeat(args.len())
-            );
-            let ret = env
-                .call_static_method(&class, method, &sig, &jargs)
-                .map_err(|e| AppError::msg(format!("调用 {method} 失败: {e}")))?;
-            let obj: JObject = ret
+            let sig = format!("({}){}", "Ljava/lang/String;".repeat(args.len()), $ret_sig);
+            env.call_static_method(&class, $method, &sig, &jargs)
+                .map_err(|e| AppError::msg(format!("调用 {} 失败: {e}", $method)))?
+        }};
+    }
+
+    /// 调用 SafBridge 返回 String 的静态方法
+    pub fn jni_call_string(method: &str, args: &[&str]) -> Result<String, AppError> {
+        with_jni(|env| {
+            let ret = call_saf!(env, method, "Ljava/lang/String;", args);
+            let obj: jni::objects::JObject = ret
                 .l()
                 .map_err(|e| AppError::msg(format!("{method} 返回类型不符: {e}")))?;
             // Kotlin 可能返回 null（如无已保存的树 URI），此时按空字符串处理
             if obj.is_null() {
                 return Ok(String::new());
             }
-            let s: JString = obj.into();
-            let s = env
-                .get_string(&s)
-                .map_err(|e| AppError::msg(format!("{method} 读取字符串失败: {e}")))?;
-            Ok(s.to_string_lossy().to_string())
+            let s: jni::objects::JString = obj.into();
+            env.get_string(&s)
+                .map(|v| v.to_string_lossy().to_string())
+                .map_err(|e| AppError::msg(format!("{method} 读取字符串失败: {e}")))
         })
     }
 
     /// 调用 SafBridge 返回 Int 的静态方法
     fn jni_call_int(method: &str, args: &[&str]) -> Result<i32, AppError> {
-        use jni::objects::{JObject, JValue};
         with_jni(|env| {
-            let class = app_class(env, "com/jdbewl/mercurial_player/SafBridge")?;
-            // JObject 需在调用期间存活：先收集到 Vec，再借用
-            let mut objs: Vec<JObject> = Vec::with_capacity(args.len());
-            for a in args {
-                let js = env
-                    .new_string(a)
-                    .map_err(|e| AppError::msg(format!("new_string 失败: {e}")))?;
-                objs.push(js.into());
-            }
-            let jargs: Vec<JValue> = objs.iter().map(JValue::Object).collect();
-            let sig = format!("({})I", "Ljava/lang/String;".repeat(args.len()));
-            let ret = env
-                .call_static_method(&class, method, &sig, &jargs)
-                .map_err(|e| AppError::msg(format!("调用 {method} 失败: {e}")))?;
-            ret.i()
+            call_saf!(env, method, "I", args)
+                .i()
                 .map_err(|e| AppError::msg(format!("{method} 返回类型不符: {e}")))
         })
     }
@@ -209,6 +195,14 @@ mod android_impl {
             let class = app_class(env, class_name)?;
             env.call_static_method(&class, method, "()V", &[])
                 .map_err(|e| AppError::msg(format!("调用 {method} 失败: {e}")))?;
+            Ok(())
+        })
+    }
+
+    /// 调用 SafBridge 的 `(String...) -> void` 静态方法
+    fn jni_call_void(method: &str, args: &[&str]) -> Result<(), AppError> {
+        with_jni(|env| {
+            call_saf!(env, method, "V", args);
             Ok(())
         })
     }
@@ -230,7 +224,8 @@ pub fn open_media_file(path: &str) -> Result<std::fs::File, AppError> {
     std::fs::File::open(path).map_err(|e| e.to_string().into())
 }
 
-/// Android 下的统一**写文件**入口：content URI 走 JNI fd 桥，其余走本地路径。
+/// Android 下的统一写文件入口：content URI 走 JNI fd 桥，其余走本地路径。
+///
 /// 存在的理由：安卓端「提取封面」拿到的是 `content://`，按路径 `fs::write` 必然失败且用户无感知。
 #[cfg(target_os = "android")]
 pub fn open_write_file(path: &str) -> Result<std::fs::File, AppError> {
@@ -248,6 +243,7 @@ pub fn open_write_file(path: &str) -> Result<std::fs::File, AppError> {
 }
 
 /// content URI 的显示名（非 Android 或无名字时返回 `None`）。
+///
 /// URI 本身看不出文件名（document id 可能是 `msf:1000000021` 这种），只能回查 provider。
 #[cfg(target_os = "android")]
 pub fn content_uri_display_name(uri: &str) -> Option<String> {
@@ -334,7 +330,7 @@ pub fn list_audio_files(uri: &str) -> Result<Vec<SafEntry>, AppError> {
 
 /// SAF 授权状态快照
 ///
-/// `version` 每次选择器返回都会递增（成功或失败）：重新授权**同一个**目录时 URI 不变，
+/// `version` 每次选择器返回都会递增（成功或失败）：重新授权同一个目录时 URI 不变，
 /// 前端只能靠 version 判定"选择器已返回"；成功与否再配合 `uri` / `error` 区分。
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -361,14 +357,17 @@ pub fn get_pick_state() -> Result<SafPickState, AppError> {
     }
 }
 
-/// 清除已保存的树 URI（移除音乐目录时同步清理，避免残留状态）
-pub fn clear_saved_tree() -> Result<(), AppError> {
+/// 移除某个 SAF 目录时调用：释放该树 URI 的持久授权并清掉残留记录。
+///
+/// 只删本地记录会让 grant 永久留在系统里（额度有限），累积到上限后新授权会被拒绝。
+pub fn clear_saved_tree(tree_uri: &str) -> Result<(), AppError> {
     #[cfg(target_os = "android")]
     {
-        android_impl::clear_saved_tree()
+        android_impl::clear_saved_tree(tree_uri)
     }
     #[cfg(not(target_os = "android"))]
     {
+        let _ = tree_uri;
         Ok(())
     }
 }
@@ -387,6 +386,7 @@ pub fn get_saved_tree_display_name() -> Result<Option<String>, AppError> {
 }
 
 /// 把 URL 编码的百分号序列解成原始字符。
+///
 /// `document id` 常把分隔符编码（`primary%3AMusic%2FSong.mp3`），不解码就会显示成一串编码。
 #[must_use]
 pub fn percent_decode(input: &str) -> String {
@@ -418,7 +418,7 @@ fn hex_val(byte: u8) -> Option<u8> {
 
 /// 由 content URI 推出可读文件名（含扩展名）
 ///
-/// `content://.../document/primary%3AMusic%2FAlbum%2FSong.mp3` → `Song.mp3`
+/// `content://.../document/primary%3AMusic%2FAlbum%2FSong.mp3` -> `Song.mp3`
 #[must_use]
 pub fn display_name_from_document_uri(uri: &str) -> String {
     let last = uri.rsplit('/').next().unwrap_or("");
@@ -427,15 +427,15 @@ pub fn display_name_from_document_uri(uri: &str) -> String {
     file_name.to_string()
 }
 
-/// 从树 URI 直接推导可读名（`.../tree/primary%3AMusic` → `Music`）
+/// 从树 URI 直接推导可读名（`.../tree/primary%3AMusic` -> `Music`）
 ///
 /// 不经过 JNI，任何树 URI 都能用；仅在 Kotlin 侧取不到显示名时兜底。
 #[must_use]
 pub fn display_name_from_tree_uri(uri: &str) -> String {
     let tail = uri.rsplit("/tree/").next().unwrap_or("");
-    // document id 可能含编码后的分隔符（primary%3ADownload%2FMusic），先解码；
-    // 再依次取"最后一个 / 之后"和"最后一个 : 之后"，两者都要考虑
-    // （SD 卡树形如 "1A1B-2C3D:Music"，外置目录形如 "primary:Download/Music"）
+    // document id 可能含编码后的分隔符（primary%3ADownload%2FMusic），先解码再取末段；
+    // "最后一个 / 之后"和"最后一个 : 之后"都要考虑（SD 卡树 "1A1B-2C3D:Music"，
+    // 外置目录 "primary:Download/Music"）
     let decoded = percent_decode(tail);
     let after_slash = decoded.rsplit(['/', '\\']).next().unwrap_or(&decoded);
     let name = after_slash.rsplit(':').next().unwrap_or(after_slash);

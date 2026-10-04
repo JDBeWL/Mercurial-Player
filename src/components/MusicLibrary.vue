@@ -18,7 +18,6 @@
     </div>
 
     <div class="library-content">
-      <!-- 搜索栏 -->
       <div v-if="musicFolders.length > 0" class="search-bar">
         <div class="search-input-wrapper">
           <span class="material-symbols-rounded">search</span>
@@ -34,7 +33,6 @@
         </div>
       </div>
 
-      <!-- 搜索结果 -->
       <div v-if="searchResults.length > 0" class="search-results">
         <h3 class="section-title">
           {{ $t('library.searchResults') }} ({{ searchResults.length }})
@@ -92,9 +90,7 @@
         </div>
       </div>
 
-      <!-- 播放列表和目录结构 -->
       <div v-if="!searchTerm && musicFolders.length > 0" class="library-structure">
-        <!-- 播放列表 -->
         <div v-if="playlists.length > 0" class="library-playlists">
           <div class="playlists-header">
             <h3 class="section-title">
@@ -148,7 +144,6 @@
         </div>
       </div>
 
-      <!-- 空状态 -->
       <div v-if="musicFolders.length === 0" class="library-empty">
         <div class="empty-state">
           <span class="material-symbols-rounded">folder_open</span>
@@ -209,7 +204,6 @@ const configStore = useConfigStore()
 
 const { showSuccess } = useErrorNotification()
 
-// 根据 hideFileExtension 设置获取音轨显示名称
 const getDisplayName = (file: {
   displayTitle?: string
   title?: string
@@ -217,7 +211,6 @@ const getDisplayName = (file: {
   path: string
 }): string => FileUtils.getTrackDisplayName(file, configStore.titleExtraction.hideFileExtension)
 
-// 关闭处理
 const handleClose = (): void => {
   emit('close')
 }
@@ -244,16 +237,14 @@ const cachedEnhancedPlaylists = shallowRef<EnhancedPlaylist[]>([])
 const lastPlaylistsHash = ref<string>('')
 const lastSortOrder = ref<string>('')
 
-// 计算播放列表的哈希值用于检测变化
-// 计算结果内嵌了 i18n 文案 (playlist.allSongs / library.tracksUnit),
-// 因此哈希也要包含这些文案,保证切换语言后能触发重算
+// 哈希用于检测播放列表变化；结果内嵌 i18n 文案 (playlist.allSongs / library.tracksUnit)，
+// 所以哈希也要含这些文案，切换语言后才能触发重算
 const getPlaylistsHash = (): string => {
   if (!playlists.value.length) return ''
   const i18nKeys = `${t('playlist.allSongs')}|${t('library.tracksUnit')}`
   return i18nKeys + '|' + playlists.value.map((p) => `${p.name}:${p.files?.length || 0}`).join('|')
 }
 
-// 实际的计算逻辑
 const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
   if (!playlists.value.length) return []
 
@@ -261,10 +252,8 @@ const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
   let allSongsFiles: Track[] = []
   const uniqueFiles = new Set<string>()
 
-  // 检查是否有全部歌曲播放列表
   const hasAllSongsPlaylist = playlists.value.some((p) => isAllSongs(p))
 
-  // 处理全部歌曲播放列表
   for (const playlist of playlists.value) {
     if (playlist.files && !isAllSongs(playlist)) {
       for (const file of playlist.files) {
@@ -276,7 +265,6 @@ const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
     }
   }
 
-  // 如果有全部歌曲，则添加到播放列表中
   if (allSongsFiles.length > 0 && !hasAllSongsPlaylist) {
     allPlaylists.push({
       name: `${t('playlist.allSongs')} (${allSongsFiles.length} ${t('library.tracksUnit')})`,
@@ -288,10 +276,8 @@ const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
     })
   }
 
-  // 处理其他播放列表
   for (const playlist of playlists.value) {
     if (playlist.files && playlist.files.length > 0) {
-      // 处理播放列表名称，如果为"全部歌曲"，则加上文件数量
       const playlistName = isAllSongs(playlist)
         ? `${t('playlist.allSongs')} (${playlist.files.length} ${t('library.tracksUnit')})`
         : `${playlist.name} (${playlist.files.length} ${t('library.tracksUnit')})`
@@ -306,26 +292,21 @@ const computeEnhancedPlaylists = (): EnhancedPlaylist[] => {
     }
   }
 
-  // 根据配置排序
   const isAscOrder = configStore.playlist.sortOrder === 'asc'
   return allPlaylists.sort((a, b) => {
-    // 如果两个都是"全部歌曲"，则保持原始顺序
+    // 排序规则："全部歌曲"恒排在最前，两个都命中时保持原顺序
     if (a.isAllSongsPlaylist && b.isAllSongsPlaylist) return 0
 
-    // 如果一个是"全部歌曲"，则排在前面
     if (a.isAllSongsPlaylist) return -1
     if (b.isAllSongsPlaylist) return 1
 
-    // 如果两个都不是"全部歌曲"，则按名称排序
     const nameA = a.name.toLowerCase()
     const nameB = b.name.toLowerCase()
 
     if (isAscOrder) {
-      // A-Z order
       if (nameA < nameB) return -1
       if (nameA > nameB) return 1
     } else {
-      // Z-A order
       if (nameA > nameB) return -1
       if (nameA < nameB) return 1
     }
@@ -341,7 +322,6 @@ watch(
     const currentHash = getPlaylistsHash()
     const currentSortOrder = configStore.playlist.sortOrder
 
-    // 只有当播放列表或排序顺序真正变化时才重新计算
     if (currentHash !== lastPlaylistsHash.value || currentSortOrder !== lastSortOrder.value) {
       lastPlaylistsHash.value = currentHash
       lastSortOrder.value = currentSortOrder
@@ -351,10 +331,8 @@ watch(
   { immediate: true },
 )
 
-// 使用缓存的结果
 const enhancedPlaylists = computed<EnhancedPlaylist[]>(() => cachedEnhancedPlaylists.value)
 
-// 生命周期
 onMounted(async () => {
   // 只在音乐库为空时加载，避免频繁刷新
   if (musicLibraryStore.musicFolders.length === 0) {
@@ -363,11 +341,10 @@ onMounted(async () => {
 
   // 播放列表为空时：先尝试缓存，再后台刷新
   if (musicLibraryStore.playlists.length === 0) {
-    // 1. 优先从缓存加载（瞬间恢复）
     const loadedFromCache = await musicLibraryStore.loadPlaylistsFromCache()
 
     if (loadedFromCache) {
-      // 有缓存 -> 先计算统计 -> 再用与手动刷新一致的加载 UI 进行更新
+      // 有缓存：先算统计，再用与手动刷新一致的加载 UI 更新
       await calculateDirectoryStats()
 
       isLoading.value = true
@@ -380,7 +357,7 @@ onMounted(async () => {
         isLoading.value = false
       }
     } else {
-      // 无缓存 -> 正常扫描（首次使用）
+      // 无缓存：正常扫描（首次使用）
       isLoading.value = true
       try {
         await musicLibraryStore.refreshMusicFolders()
@@ -394,7 +371,6 @@ onMounted(async () => {
   }
 })
 
-// 目录树管理
 const refreshDirectoryTrees = async (): Promise<void> => {
   // 避免并发刷新让 playlists 分批 push 交错
   if (isLoading.value) return
@@ -422,16 +398,15 @@ const calculateDirectoryStats = async (): Promise<void> => {
 
   let totalDirs: number
   let totalFiles: number
-  let allAudioFiles = new Set<string>() // 使用Set来去重
-  let allDirectories = new Set<string>() // 使用Set来去重目录
+  let allAudioFiles = new Set<string>()
+  let allDirectories = new Set<string>()
 
-  // 统计所有播放列表的实际文件和目录
   for (const playlist of playlists.value) {
     if (playlist.files) {
       playlist.files.forEach((file) => allAudioFiles.add(file.path))
     }
     if (!isAllSongs(playlist) && playlist.files && playlist.files.length > 0) {
-      // 如果不是"全部歌曲"，则添加到目录中
+      // 排除"全部歌曲"：它的 name 不是目录
       allDirectories.add(playlist.name)
     }
   }
@@ -447,7 +422,6 @@ const calculateDirectoryStats = async (): Promise<void> => {
   })
 }
 
-// 播放控制
 const openFolderDialog = async (): Promise<void> => {
   try {
     const selected = await FileUtils.selectFolder({
@@ -459,14 +433,12 @@ const openFolderDialog = async (): Promise<void> => {
       await calculateDirectoryStats()
       logger.info(result.message)
 
-      // 检查是否是初次添加音乐库
       if (musicLibraryStore.musicFolders.length === 1) {
         logger.info('初次添加音乐库，正在刷新配置和播放列表...')
 
-        // 初次添加音乐库时，主动加载配置（不重置当前 UI 视图，避免正在设置时被跳回）
+        // loadConfig(false)：不重置当前 UI 视图，避免用户正在设置时被跳回
         await configStore.loadConfig(false)
 
-        // 刷新音乐文件夹以生成播放列表
         await musicLibraryStore.refreshMusicFolders()
         await calculateDirectoryStats()
 
@@ -480,14 +452,12 @@ const openFolderDialog = async (): Promise<void> => {
 
 // 播放全部（当前显示的全部歌曲播放列表）
 const playAll = async (): Promise<void> => {
-  // 找到全部歌曲播放列表
   const allSongsPlaylist = enhancedPlaylists.value.find((p) => p.isAllSongsPlaylist)
   if (allSongsPlaylist && allSongsPlaylist.files.length > 0) {
     await playerStore.loadPlaylist(allSongsPlaylist.files)
     playerStore.play()
     handleClose()
   } else if (enhancedPlaylists.value.length > 0) {
-    // 如果没有全部歌曲播放列表，则播放第一个播放列表
     const firstPlaylist = enhancedPlaylists.value[0]!
     await playerStore.loadPlaylist(firstPlaylist.files)
     playerStore.play()
@@ -498,7 +468,6 @@ const playAll = async (): Promise<void> => {
 // 点击列表项时加载播放列表并解码但不播放
 const loadPlaylist = async (playlist: EnhancedPlaylist): Promise<void> => {
   await playerStore.loadPlaylist(playlist.files)
-  // 解码第一首音频但不播放
   if (playlist.files && playlist.files.length > 0) {
     await playerStore.playTrack(playlist.files[0]!)
     playerStore.pause()
@@ -531,13 +500,10 @@ const addFileNext = (file: SearchResult): void => {
   playerStore.addTrackNext(file)
   logger.info('Added track to play next:', getDisplayName(file))
 
-  // 显示成功通知
   showSuccess(getDisplayName(file), t('library.addedToPlayNext'))
 }
 
-/**
- * 搜索结果点击委托。
- */
+// 搜索结果列表的点击委托：按 data-action 分派，省掉每行单独绑监听器
 const handleSearchResultsClick = (event: MouseEvent): void => {
   const target = event.target as HTMLElement | null
   if (!target) return
@@ -622,7 +588,6 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   color: var(--md-sys-color-on-surface);
 }
 
-/* 搜索栏 */
 .search-bar {
   margin-bottom: 16px;
 }
@@ -635,7 +600,7 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   border-radius: var(--md-sys-shape-corner-medium);
   padding: 8px 12px;
   height: 48px; /* 固定高度，与搜索后的高度一致 */
-  box-sizing: border-box; /* 确保padding包含在高度内 */
+  box-sizing: border-box;
   border: 1px solid var(--md-sys-color-outline);
 }
 
@@ -746,13 +711,12 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   min-width: 0;
   overflow: hidden;
   position: relative;
-  /* 确保可以正确计算高度 */
+  /* min-height 44px 让内容高度可预期，两行文本的省略基准才稳定 */
   min-height: 44px;
 }
 
-/* 这两条不要再加 `max-height: 1.4em`：Android 的系统字号设置会被 WebView 放大到网页文字上，行高跟着变
-   大，而 1.4em 是按未放大的字号算的，盒子会比文字矮一截，正好切掉 g / y / p 的下伸部。两行都是
-   white-space: nowrap，盒子高度天然就是一行，这个 max-height 本来就是多余的。 */
+/* 这两条不要再加 max-height: 1.4em：Android 的系统字号设置会被 WebView 放大到网页文字上、行高跟着变大，
+   而 1.4em 按未放大的字号算，盒子会比文字矮一截并切掉 g / y / p 的下伸部；两行都是 nowrap，本来就多余 */
 .list-item-headline {
   font-size: 16px;
   font-weight: 400;
@@ -760,7 +724,6 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* 添加平滑过渡 */
   transition: all 0.2s ease;
   line-height: 1.4;
 }
@@ -771,7 +734,6 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* 添加平滑过渡 */
   transition: all 0.2s ease;
   line-height: 1.4;
 }
@@ -783,7 +745,6 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   margin-left: 8px;
 }
 
-/* 空状态 */
 .library-empty {
   height: 100%;
   display: flex;
@@ -818,7 +779,6 @@ const handleSearchResultsClick = (event: MouseEvent): void => {
   color: var(--md-sys-color-on-surface-variant);
 }
 
-/* 轻量刷新提示：顶部细进度条 */
 .top-loading-bar {
   position: sticky;
   top: 0;

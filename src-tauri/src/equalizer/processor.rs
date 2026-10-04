@@ -1,6 +1,4 @@
-//! EQ 均衡器模块
-//!
-//! 实现 10 段参数均衡器，支持实时调节。
+//! 10 段参数均衡器的双二阶系数、滤波状态与 eq.json 持久化。
 
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
@@ -144,8 +142,10 @@ impl BiquadCoefficients {
         }
     }
 
-    /// RBJ peaking EQ。系数用 f64 计算后转 f32 存储以保留精度
-    /// (31Hz@44.1kHz 的归一化频率极低,f32 直接计算会有可观的系数量化误差)。
+    /// RBJ peaking EQ。
+    ///
+    /// 系数用 f64 计算后转 f32 存储:31Hz@44.1kHz 的归一化频率极低,
+    /// f32 直接算会有可观的系数量化误差。
     #[must_use]
     pub fn peaking_eq(sample_rate: f32, frequency: f32, gain_db: f32, q: f32) -> Self {
         if gain_db.abs() < 0.001 {
@@ -170,7 +170,7 @@ impl BiquadCoefficients {
         }
     }
 
-    /// RBJ low shelf(Q = 1/√2,等价于 shelf slope S = 1 的 Butterworth 特性)。
+    /// RBJ low shelf(Q = 1/sqrt(2),等价于 shelf slope S = 1 的 Butterworth 特性)。
     #[must_use]
     pub fn low_shelf(sample_rate: f32, frequency: f32, gain_db: f32) -> Self {
         if gain_db.abs() < 0.001 {
@@ -194,7 +194,7 @@ impl BiquadCoefficients {
         let a = 10.0_f64.powf(f64::from(gain_db) / 40.0);
         let omega = std::f64::consts::TAU * f0 / sr;
         let (sin_omega, cos_omega) = omega.sin_cos();
-        // Q = 1/√2 → alpha = sin/2·√2,即 S = 1
+        // Q = 1/sqrt(2),即 shelf slope S = 1:alpha = sin_omega / sqrt(2)
         let alpha = sin_omega / std::f64::consts::SQRT_2;
         let term = 2.0 * a.sqrt() * alpha;
         let (a_plus, a_minus) = (a + 1.0, a - 1.0);
@@ -283,13 +283,9 @@ impl EqSettings {
     }
 }
 
-// EQ 设置持久化(data/eq.json)
-//
-// 均衡器与 config.json 分开落盘:调节是高频低延迟操作且独立于配置导出/导入,
-// 拖拽滑块时 set_eq_* 命令会连续触发。为了避免每次都同步写盘阻塞命令线程,
-// GlobalEqualizer 维护一个后台持久化线程:每次变更只投递一个"脏标记",
-// 线程收信后合并积压并一次性把最新快照原子写入 eq.json(写 tmp → rename)。
-
+// EQ 设置单独落盘到 data/eq.json,不进 config.json:调节是高频低延迟操作,拖拽滑块时
+// set_eq_* 命令会连续触发,且它独立于配置的导出/导入。为避免每次变更都同步写盘阻塞
+// 命令线程,这里维护一个后台线程:变更只投递脏标记,线程合并积压后写一次最新快照。
 enum PersistMsg {
     Ping,
     Stop,
@@ -413,7 +409,8 @@ impl GlobalEqualizer {
         }
     }
 
-    /// 创建均衡器并绑定 `<data>/eq.json` 持久化:
+    /// 创建均衡器并绑定 `<data>/eq.json` 持久化。
+    ///
     /// 启动时若文件有效则恢复上次设置,之后每次变更经后台线程合并落盘。
     #[must_use]
     pub fn with_persistence(config_dir: &str) -> Self {
@@ -708,7 +705,7 @@ mod tests {
             eq.set_enabled(true);
             eq.set_gains(gains);
             eq.set_preamp(1.5);
-            // 离开作用域时 EqPersister Drop → Stop + join,队列中最后一次 Ping 已写盘
+            // 离开作用域时 EqPersister Drop -> Stop + join,队列中最后一次 Ping 已写盘
         }
 
         let eq = GlobalEqualizer::with_persistence(dir_str);

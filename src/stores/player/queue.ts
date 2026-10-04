@@ -73,8 +73,7 @@ async function syncPlayQueue(store: PlayerStore): Promise<void> {
   }
 }
 
-/** Rust 的 `TrackSnapshot` 用 null 表示"未知"，前端的 `Track` 用 undefined。
- *  就地做一次归一，别再用 `as never` 把结构校验整个关掉。 */
+/** Rust 的 TrackSnapshot 用 null 表示"未知",前端 Track 用 undefined,这里做一次归一 */
 function snapshotToTrack(snapshot: TrackSnapshot): Track {
   return {
     path: snapshot.path,
@@ -126,8 +125,7 @@ export async function setupQueueListener(store: PlayerStore): Promise<UnlistenFn
 
 let stateSyncUnlisten: UnlistenFn | null = null
 
-/** 回到前台时重新同步播放状态。Android 上 WebView 的 JS 在后台会被完全冻结、期间发出的
- *  事件丢失，不重新同步 UI 就会停在后台前的旧曲目与进度。 */
+/** 回到前台时重新同步播放状态,否则 UI 会停在后台前的旧曲目与进度(Android 冻结见文件头) */
 export async function setupStateSyncListener(store: PlayerStore): Promise<UnlistenFn | null> {
   // `_setupListeners` 可重入，先注销上一个再建新的，否则旧句柄被覆盖后再也拿不到
   stateSyncUnlisten?.()
@@ -166,8 +164,7 @@ let queueWatchStop: WatchStopHandle | null = null
 /** 监听播放列表/循环/随机变化，自动同步队列到 Rust */
 export function watchPlayQueue(store: PlayerStore): void {
   if (queueWatchStop) return
-  // 取路径拼接而不是数组本身：原地 push/splice 不改变 store.playlist 的引用，
-  // 直接 watch 数组不会触发
+  // watch 路径拼接而不是数组本身:playlist 原地变异不改引用,直接 watch 数组不会触发
   queueWatchStop = watch(
     () =>
       [
@@ -193,8 +190,8 @@ export function stopPlayQueueWatch(): void {
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let heartbeatSeq = 0
 
-/** 后台心跳探针（调试用）：固定间隔调用 Rust 命令打日志，`adb logcat` 里看它是否停止
- *  即可判断 App 进后台后 JS 还在不被调度。移动端专用，桌面端不会启动。 */
+/** 后台心跳探针(仅 Android,桌面端不启动):固定间隔调 Rust 命令打日志，
+ *  在 logcat 看它是否停止即可判断 App 进后台后 JS 还在不被调度。 */
 export async function startBackgroundHeartbeat(intervalMs = 1000): Promise<void> {
   if (heartbeatTimer) return
   if (!(await isAndroid())) return

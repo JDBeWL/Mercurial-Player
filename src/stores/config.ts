@@ -43,15 +43,11 @@ interface ConfigState {
   _savePromise: Promise<unknown> | null
 }
 
-/**
- * 配置系统存储（包含UI设置）
- */
+/** 配置系统存储（包含 UI 设置） */
 export const useConfigStore = defineStore('config', {
   state: (): ConfigState => ({
-    // 音乐文件夹列表
     musicDirectories: [],
 
-    // 子目录扫描配置
     directoryScan: {
       enableSubdirectoryScan: true,
       maxDepth: 3,
@@ -59,7 +55,6 @@ export const useConfigStore = defineStore('config', {
       folderBlacklist: ['.git', 'node_modules', 'temp', 'tmp'],
     },
 
-    // 标题提取配置
     titleExtraction: {
       preferMetadata: true,
       separator: '-',
@@ -68,7 +63,6 @@ export const useConfigStore = defineStore('config', {
       parseArtistTitle: true,
     },
 
-    // 播放列表配置
     playlist: {
       generateAllSongsPlaylist: true,
       folderBasedPlaylists: true,
@@ -76,7 +70,6 @@ export const useConfigStore = defineStore('config', {
       sortOrder: 'asc',
     },
 
-    // 通用设置
     general: {
       language: 'zh',
       theme: 'auto',
@@ -94,7 +87,6 @@ export const useConfigStore = defineStore('config', {
     // 歌词设置(默认值统一由 utils/configDefaults 维护)
     lyrics: createDefaultLyricsConfig(),
 
-    // UI设置
     ui: {
       showSettings: false,
       showConfigPanel: false,
@@ -103,7 +95,6 @@ export const useConfigStore = defineStore('config', {
       fontScale: 1,
     },
 
-    // 音频设置
     audio: {
       exclusiveMode: false,
       volume: 0.5,
@@ -111,7 +102,6 @@ export const useConfigStore = defineStore('config', {
       usbDacExclusive: false,
     },
 
-    // 可视化设置
     visualizer: {
       targetFps: 60,
       enableVerticalSync: false,
@@ -137,13 +127,11 @@ export const useConfigStore = defineStore('config', {
   },
 
   actions: {
-    // 获取可保存的配置（排除内部状态）
-    // 返回完整 AppConfig(而非 Partial):$state 本就包含全部配置分区,
-    // 标成 Partial 会让调用方的字段访问失去类型保护
+    // 返回完整 AppConfig 而非 Partial:Partial 会让调用方的字段访问失去类型保护
     _getSaveableConfig(): AppConfig {
       const { _isInitializing, _isDirty, _lastSavedConfig, _savePromise, ...config } = this.$state
 
-      // 创建一个副本以避免修改当前状态，因为 UI 临时状态不应持久化
+      // 浅拷贝后置空面板开关:UI 临时状态不应持久化
       const saveableConfig = { ...config }
       if (saveableConfig.ui) {
         saveableConfig.ui = {
@@ -156,14 +144,11 @@ export const useConfigStore = defineStore('config', {
       return saveableConfig
     },
 
-    // 标记配置已更改
-    // 初始化期间置位同样有效:此时只跳过自动保存(见 _patchSection),
-    // 落盘由 markInitializationComplete 补一次
+    // 初始化期间置位同样有效:此时只跳过自动保存(见 _patchSection),落盘由 markInitializationComplete 补一次
     _markDirty(): void {
       this._isDirty = true
     },
 
-    // 检查配置是否真的有变化
     _hasRealChanges(): boolean {
       if (!this._lastSavedConfig) return true
       const currentConfig = this._getSaveableConfig()
@@ -173,8 +158,7 @@ export const useConfigStore = defineStore('config', {
     async loadConfig(resetUI = true): Promise<void> {
       this._isInitializing = true
 
-      // 配置统一由后端 ConfigManager 读写 data/config.json(裸 AppConfig 格式),
-      // 旧版布局(config/user.json、plugin-store 包装格式)由后端做一次性迁移
+      // 配置由后端 ConfigManager 读写 data/config.json(裸 AppConfig 格式),旧版布局由后端做一次性迁移
       const configResult = await handlePromise(invoke<Partial<AppConfig>>('load_config'), {
         type: ErrorType.CONFIG_LOAD_ERROR,
         severity: ErrorSeverity.MEDIUM,
@@ -193,7 +177,6 @@ export const useConfigStore = defineStore('config', {
       }
 
       if (configData) {
-        // 迁移旧的歌词设置从 general 到 lyrics
         if (migrateLyricsFieldsFromGeneral(configData)) {
           logger.info('Migrated lyrics settings from general to lyrics config')
           this._markDirty()
@@ -251,7 +234,6 @@ export const useConfigStore = defineStore('config', {
     },
 
     async saveConfigNow(): Promise<void> {
-      // 检查是否真的有变化
       if (!this._hasRealChanges()) {
         // 无实际变化(如仅迁移了配置字段):顺手清掉脏标记,保持与状态一致
         this._isDirty = false
@@ -259,7 +241,6 @@ export const useConfigStore = defineStore('config', {
         return
       }
 
-      // 如果已经有保存操作在进行，等待它完成
       if (this._savePromise) {
         await this._savePromise
       }
@@ -268,7 +249,7 @@ export const useConfigStore = defineStore('config', {
       const themeStore = useThemeStore()
       configToSave.general.theme = themeStore.themePreference
 
-      // 确保 lyrics 配置包含所有必需字段(旧版本配置文件兼容)
+      // 兼容旧版配置:补齐 lyrics 缺失字段
       if (!configToSave.lyrics) {
         configToSave.lyrics = createDefaultLyricsConfig()
       } else {
@@ -299,18 +280,17 @@ export const useConfigStore = defineStore('config', {
       }
     },
 
-    // 防抖保存（2秒延迟）
+    // 防抖 2s 合并落盘:每次保存都要对整个 config 深比较 + 深拷贝 + 写盘,
+    // 音量/主色这类高频改动逐次写入会卡住主线程;关闭前由 flushPendingSave 兜底
     saveConfig: debounce(function (this: { saveConfigNow: () => Promise<void> }) {
       return this.saveConfigNow()
     }, 2000) as DebouncedFunction<() => void>,
 
-    // 强制立即保存（取消防抖，用于应用关闭前）
+    // 取消防抖并立即落盘(应用关闭前调用)
     async flushPendingSave(): Promise<void> {
-      // 取消待执行的防抖保存
       if ((this.saveConfig as DebouncedFunction<() => void>).cancel) {
         ;(this.saveConfig as DebouncedFunction<() => void>).cancel()
       }
-      // 立即保存
       await this.saveConfigNow()
     },
 
@@ -344,10 +324,7 @@ export const useConfigStore = defineStore('config', {
       this._markDirty()
     },
 
-    /**
-     * 通用的"合并分区 → 标脏 → 自动保存"逻辑。
-     * 各 setXxxConfig 只负责指明目标分区与补丁,不再各自重复收尾代码。
-     */
+    /** 统一的"合并分区 -> 标脏 -> 自动保存"入口,各 setXxxConfig 只指明分区与补丁 */
     _patchSection<K extends keyof AppConfig>(section: K, patch: Partial<AppConfig[K]>): void {
       const state = this.$state as unknown as AppConfig
       state[section] = { ...state[section], ...patch }
@@ -407,7 +384,7 @@ export const useConfigStore = defineStore('config', {
 
     markInitializationComplete(): void {
       this._isInitializing = false
-      // 初始化窗口内的改动被跳过了自动保存,这里补一次(无实际变化时内部会提前返回)
+      // 补存初始化窗口内被跳过的自动保存(原因见 _markDirty 注释)
       if (this._isDirty && this.general.autoSaveConfig) {
         this.saveConfig()
       }

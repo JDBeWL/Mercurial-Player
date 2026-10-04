@@ -13,7 +13,7 @@ pub struct Word {
     pub text: String,
 }
 
-/// 秒 → `00:00:03.24`（时:分:秒.厘秒）
+/// 秒 -> `00:00:03.24`（时:分:秒.厘秒）
 fn format_ass_time(secs: f64) -> String {
     let total_cs = (secs * 100.0).round() as i64;
     let h = total_cs / 360_000;
@@ -87,7 +87,7 @@ pub fn dialogue(
         Some(words) if words.len() > 1 => {
             let mut out = String::new();
             for word in words {
-                let kf = (word.end_ms - word.start_ms).unsigned_abs() / 10; // 毫秒 → 厘秒
+                let kf = (word.end_ms - word.start_ms).unsigned_abs() / 10; // 毫秒 -> 厘秒
                 let _ = write!(out, "{{\\kf{kf}}}{}", word.text);
             }
             out
@@ -133,7 +133,7 @@ mod tests {
         assert!(line.starts_with("Dialogue: 0,00:00:03.24,00:00:06.69,orig,,0,0,0,,"));
         assert!(line.contains("{\\kf14}徐"));
         assert!(line.contains("{\\kf16}々"));
-        // 末字时长 = 6690-3540=3150ms → 315 厘秒
+        // 末字时长 = 6690-3540=3150ms -> 315 厘秒
         assert!(line.contains("{\\kf315}に"));
 
         let plain = dialogue(3240, 6690, "ts", None, "那缓缓变化的姿态");

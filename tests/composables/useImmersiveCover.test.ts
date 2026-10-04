@@ -364,7 +364,7 @@ describe('useImmersiveCover > main thread fallback', () => {
   })
 
   it('skips the resize when the source is already large enough', async () => {
-    // 768 * 0.98 ≈ 753,800px 的源图无需放大
+    // 768 * 0.98 约 753,800px 的源图无需放大
     bitmapSize = { width: 800, height: 800 }
     const cover = await mountWithoutWorker()
 
@@ -388,7 +388,7 @@ describe('useImmersiveCover > main thread fallback', () => {
     bitmapSize = { width: 200, height: 400 }
     await mountWithoutWorker()
 
-    // side = min(200, 400) = 200,源区域垂直居中 → sy = (400 - 200) / 2 = 100
+    // side = min(200, 400) = 200,源区域垂直居中 -> sy = (400 - 200) / 2 = 100
     expect(fakeCtx.drawImage).toHaveBeenCalledWith(
       expect.anything(),
       0,
@@ -406,7 +406,7 @@ describe('useImmersiveCover > main thread fallback', () => {
     bitmapSize = { width: 400, height: 200 }
     await mountWithoutWorker()
 
-    // side = 200,宽图取左上角方形 → sy = 0
+    // side = 200,宽图取左上角方形 -> sy = 0
     expect(fakeCtx.drawImage).toHaveBeenCalledWith(
       expect.anything(),
       0,
@@ -489,7 +489,7 @@ describe('useImmersiveCover > lifecycle', () => {
     window.dispatchEvent(new Event('resize'))
     await vi.advanceTimersByTimeAsync(300)
 
-    // 目标边长从 768 变到 1600,差值远大于 32 → 重新放大
+    // 目标边长从 768 变到 1600,差值远大于 32 -> 重新放大
     expect(workerCtor.instances[0]!.posted.length).toBeGreaterThan(postsBefore)
 
     Object.defineProperty(window, 'innerHeight', { value: 768, configurable: true })

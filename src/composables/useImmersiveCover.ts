@@ -6,19 +6,17 @@ import CoverUpscaleWorker from '../workers/coverUpscale.worker?worker'
 import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
 
 /**
- * 浏览器默认放大是双线性插值，封面拉满窗高会发糊；这里先按显示端同一规则裁出左侧正方形，
- * 再用 pica Lanczos3 放大到「窗高 × DPR」精确像素做 1:1 映射。
- * 优先丢给专用 worker（免与歌词首帧争主线程），失败回退同步执行，再失败用原图。
- * 处理期间先显示原 URL，完成后无缝替换以免封面闪空。
+ * 沉浸层封面高清化:浏览器默认双线性插值,封面拉满窗高会发糊,故用 pica Lanczos3 放大到"窗高 * DPR"做 1:1 映射
+ *
+ * 优先交给专用 worker(免与歌词首帧争主线程),失败逐级回退主线程同步执行、再回退原图
  */
 
-// 主线程回退路径用的 pica 单例。features 显式不含 'ww'（web worker）：
-// CSP 的 script-src 不允许 blob: worker，pica 的 worker 通道加载失败时不 reject
-// 而是永久挂起，必须从源头禁用。wasm 在 'wasm-unsafe-eval' 下编译可用，
-// pica 检测失败后自动回退纯 JS 数学内核（仍为 Lanczos 高质量路径）。
+// 主线程回退路径的 pica 单例。features 显式不含 'ww'(web worker):CSP 的 script-src 不允许 blob: worker,
+// 而 pica 的 worker 通道加载失败时不 reject 而是永久挂起,必须从源头禁用。
+// wasm 在 'wasm-unsafe-eval' 下编译可用,pica 检测失败后自动回退纯 JS 数学内核 (仍为 Lanczos 高质量路径)。
 const pica = createPica({ features: ['js', 'wasm'] })
 
-// 防御性上限：超高 DPI / 超大窗口时避免生成离谱尺寸的画布
+// 防御性上限:超高 DPI / 超大窗口时避免生成离谱尺寸的画布
 const MAX_OUTPUT_SIDE = 4096
 
 const mimeFromPath = (path: string): string => {
@@ -77,13 +75,14 @@ const decodeImage = async (path: string): Promise<DecodedImage> => {
   }
 }
 
-/** 目标边长：沉浸层高度（= 窗口高度）× DPR，向上取整并封顶 */
+/** 目标边长:沉浸层高度 (= 窗口高度) * DPR,向上取整并封顶 */
 const displaySide = (): number =>
   Math.min(MAX_OUTPUT_SIDE, Math.round(window.innerHeight * (window.devicePixelRatio || 1)))
 
 /**
- * 裁剪 + Lanczos3 放大（主线程回退路径）。
- * 返回 objectURL；源图足够大无需放大时返回 null（调用方沿用原始 URL）。
+ * 裁剪 + Lanczos3 放大 (主线程回退路径)
+ *
+ * 返回 objectURL;源图足够大无需放大时返回 null,调用方沿用原始 URL
  */
 const upscaleCoverOnMainThread = async (
   path: string,
@@ -91,8 +90,8 @@ const upscaleCoverOnMainThread = async (
 ): Promise<string | null> => {
   const { source, width, height, cleanup } = await decodeImage(path)
   try {
-    // 与 CSS（object-fit: cover + object-position: left center）保持一致：
-    // 取靠左的正方形区域（高图垂直居中裁切，宽图右侧裁掉）
+    // 与 CSS (object-fit: cover + object-position: left center) 一致:取靠左的正方形区域,
+    // 高图垂直居中裁切、宽图右侧裁掉
     const side = Math.min(width, height)
     if (side <= 0 || side >= targetSide * 0.98) return null
 
@@ -101,7 +100,6 @@ const upscaleCoverOnMainThread = async (
     srcCanvas.height = side
     const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true })
     if (!srcCtx) return null
-    // 宽图: sy = (height - side) / 2 = 0，即取左上角方形；高图: 垂直居中
     srcCtx.drawImage(source, 0, (height - side) / 2, side, side, 0, 0, side, side)
 
     const dstCanvas = document.createElement('canvas')
@@ -116,10 +114,8 @@ const upscaleCoverOnMainThread = async (
   }
 }
 
-// --- worker 通道：解码 + 裁剪 + Lanczos 全部在 worker 线程执行，主线程零阻塞 ---
-// 文件式 worker 从 'self' 加载，不违反 CSP（blob: worker 才被禁止）。
-// worker 内任何结构性失败（创建失败 / 加载失败 / OffscreenCanvas 或 pica 报错）
-// 都会永久停用该通道，后续请求走主线程回退路径。
+// worker 通道:解码 + 裁剪 + Lanczos 全在 worker 线程跑,主线程零阻塞。文件式 worker 从 'self'
+// 加载,不违反 CSP (blob: worker 才被禁止);任何结构性失败都会永久停用该通道,后续走主线程回退。
 
 interface UpscaleWorkerResponse {
   id: number
@@ -158,12 +154,12 @@ const ensureWorker = (): Worker | null => {
       pendingJobs.delete(ev.data.id)
       clearTimeout(job.timer)
       if (ev.data.error) {
-        // worker 内结构性失败：停用通道，本次请求走回退路径
+        // worker 内结构性失败:停用通道,本次请求走回退路径
         workerBroken = true
         try {
           w.terminate()
         } catch (e) {
-          // 终止失败仅是资源清理问题，不影响回退路径
+          // 终止失败只是资源清理问题,不影响回退路径
           errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
         }
         upscaleWorker = null
@@ -177,28 +173,28 @@ const ensureWorker = (): Worker | null => {
       }
     }
     w.onerror = () => {
-      // worker 加载失败（脚本/模块错误）：停用通道并触发回退
+      // worker 加载失败 (脚本/模块错误):停用通道并触发回退
       workerBroken = true
       upscaleWorker = null
       failPendingJobs('upscale worker failed to load')
       try {
         w.terminate()
       } catch (e) {
-        // 终止失败仅是资源清理问题，不影响回退路径
+        // 同上:终止失败只是资源清理问题
         errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
       }
     }
     upscaleWorker = w
     return w
   } catch (e) {
-    // worker 创建失败：停用通道，后续请求走主线程回退路径
+    // worker 创建失败:停用通道,后续请求走主线程回退路径
     errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
     workerBroken = true
     return null
   }
 }
 
-// worker 通道超时：正常放大在数百毫秒内完成，超时视为通道异常，走回退路径
+// 正常放大在数百毫秒内完成,超时即视为通道异常并回退
 const WORKER_TIMEOUT_MS = 10_000
 
 const upscaleViaWorker = (path: string, targetSide: number): Promise<string | null> => {
@@ -257,7 +253,7 @@ export function useImmersiveCover(
       return
     }
 
-    // 先立即展示原始 URL，处理完成后再替换为高清版本
+    // 先立即显示原始 URL,处理完成后无缝替换成高清版,避免封面闪空
     coverDisplayUrl.value = convertFileSrc(path)
 
     if (!enabled.value) {
@@ -270,21 +266,21 @@ export function useImmersiveCover(
     lastProcessedSide = targetSide
     upscaleCover(path, targetSide)
       .then((url) => {
-        // 已切换曲目 / 关闭沉浸模式 / 尺寸已变：丢弃过期结果
+        // 代次守卫:已切歌 / 关闭沉浸 / 目标尺寸已变时丢弃过期结果
         if (gen !== generation || !url) return
         revokeProcessed()
         objectUrl = url
         coverDisplayUrl.value = url
       })
       .catch((e) => {
-        // 处理失败：保留原始 URL
+        // 处理失败:继续用原始 URL
         errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
       })
   }
 
   watch([coverPath, enabled], run, { immediate: true })
 
-  // 窗口尺寸 / DPI 变化后重新放大（防抖，且仅在目标边长明显变化时重算）
+  // 窗口尺寸 / DPI 变化后重新放大:防抖 300ms,且目标边长变化超过 32px 才重算,避免拖窗口时反复放大
   const onResize = () => {
     if (resizeTimer) clearTimeout(resizeTimer)
     resizeTimer = window.setTimeout(() => {

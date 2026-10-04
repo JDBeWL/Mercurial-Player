@@ -1,9 +1,7 @@
 /**
- * 插件沙箱宿主 —— 主窗口侧。为单个外置插件管理一个 Dedicated Worker：
- * - 消息 RPC：把 Worker 内代理发起的 api-call 分发到真实 PluginAPI
- * - 状态镜像：向 Worker 推送 player/theme/storage/library 快照，使同步读 API 保持原契约
- * - 回调桥：把插件注册的函数（歌词源 search / 事件监听 / activate）还原为调用 Worker 的 stub
- * - 生命周期：deactivate 时 terminate Worker（定时器与监听随之释放）
+ * 插件沙箱宿主,主窗口侧:为单个外置插件管理一个 Dedicated Worker。
+ * 职责:把 Worker 内代理发起的 api-call 分发到真实 PluginAPI,按 MirrorData 推送状态镜像,
+ * 把插件注册的函数还原为调用 Worker 的 stub,deactivate 时 terminate Worker (定时器与监听随之释放)。
  */
 
 import { watch, type WatchStopHandle } from 'vue'
@@ -28,11 +26,10 @@ import SandboxWorker from './workerBootstrap?worker&inline'
 export type WorkerFactory = () => Worker
 
 /**
- * 沙箱 api-call 路径白名单：精确路径 → 所需权限（null = 无需权限）。
- * 权限校验的权威位置在宿主主窗口侧：Worker 内的 requirePermission 与插件共享全局作用域，
- * 可被以 self.postMessage({type:'api-call',...}) 直接绕过。
- * 本表用精确匹配取代属性链遍历，未收录的路径（log.info.constructor 等）一律拒绝；
- * 用 Map 存储以免对象原型链键干扰查找。
+ * 沙箱 api-call 路径白名单:精确路径 -> 所需权限 (null = 无需权限)。
+ * 权限校验的权威位置在宿主主窗口侧:Worker 内的 requirePermission 与插件共享全局作用域,
+ * 可被插件直接 postMessage 伪造 api-call 绕过。
+ * 精确匹配取代属性链遍历,未收录的路径 (log.info.constructor 等) 一律拒绝;用 Map 存储以免原型链键干扰查找。
  */
 const API_CALL_POLICY: ReadonlyMap<string, PluginPermissionType | null> = new Map([
   ['player.getLyrics', PluginPermission.PLAYER_READ],
@@ -73,13 +70,10 @@ const API_CALL_POLICY: ReadonlyMap<string, PluginPermissionType | null> = new Ma
 
 /**
  * 默认 Worker 工厂:blob URL 内联 Worker (vite `?worker&inline`)。
- *
- * 安全原因:Tauri 的 CSP 由 meta 标签注入主文档,资产协议不为 JS 注入 CSP 头;
- * 经普通 URL 加载的 Worker 其 CSP 只来自脚本响应自身 → Worker 内全无 CSP 约束,
- * 插件可用原生 fetch / WebSocket / 远程动态 import() 绕过 NETWORK 权限。
- * 而 blob: URL 的 Worker 会继承创建文档的 CSP (MDN: CSP in workers),
- * 使 script-src / connect-src 在 Worker 内生效;当前 CSP script-src 已含 blob:。
- * (dev 下 vite 用 dev-server URL 建 Worker 不继承 CSP,但那是开发者自身可信环境。)
+ * Tauri 的 CSP 由 meta 标签注入主文档,资产协议不为 JS 注入 CSP 头,经普通 URL 加载的 Worker 内全无 CSP 约束,
+ * 插件即可用原生 fetch / WebSocket / 远程动态 import() 绕过 NETWORK 权限;
+ * blob: URL 的 Worker 继承创建文档的 CSP (MDN: CSP in workers),使 script-src / connect-src 在 Worker 内生效,
+ * 当前 CSP script-src 已含 blob:。dev 下 vite 用 dev-server URL 建 Worker 不继承 CSP,但那是开发者自身可信环境。
  */
 const defaultWorkerFactory = (): Worker => new SandboxWorker()
 
@@ -90,19 +84,18 @@ const PLAYER_STATE_THROTTLE_MS = 300
 const INIT_TIMEOUT_MS = 5_000
 /** runMain(插件工厂执行)超时 */
 const MAIN_TIMEOUT_MS = 30_000
-/** 宿主→Worker 回调 RPC(activate/deactivate/事件回调等)超时 */
+/** 宿主->Worker 回调 RPC(activate/deactivate/事件回调等)超时 */
 const CALLBACK_TIMEOUT_MS = 30_000
 
 /**
- * 沙箱上行消息令牌桶参数:log 与 api-call 是插件唯一可持续向宿主
- * 发送消息的通道,失控/恶意插件可借此刷爆主窗口事件循环与日志文件。
- * 超过令牌补充速率视为洪泛,直接终止 Worker(失败关闭)。
+ * 上行消息令牌桶参数:log 与 api-call 是插件唯一能持续刷向宿主的通道,可刷爆主窗口事件循环与日志文件;
+ * 超过补充速率视为洪泛,直接终止 Worker (失败关闭)。
  */
 const LOG_BUCKET_CAPACITY = 200
 const LOG_BUCKET_REFILL_PER_SEC = 100
 const API_CALL_BUCKET_CAPACITY = 400
 const API_CALL_BUCKET_REFILL_PER_SEC = 200
-/** 宿主侧同时存活的回调 stub 上限(事件监听/返回值携带函数等),防内存刷爆 */
+/** 宿主侧同时存活的回调 stub 上限(事件监听/返回值携带函数等),防内存刷爆;Worker 侧对应 workerCore 的 MAX_REGISTERED_CALLBACKS */
 const MAX_CALLBACK_STUBS = 10_000
 /** 单个插件可注册的扩展点上限(菜单/按钮/命令/快捷键/歌词源等) */
 const EXTENSION_LIMIT = 200
@@ -120,7 +113,7 @@ const EXTENSION_UNREGISTER_PATHS: ReadonlySet<string> = new Set([
   'shortcuts.unregister',
 ])
 
-/** 简单的令牌桶:按固定速率补充令牌,桶满为止;取令牌失败即超限 */
+/** 令牌桶:按固定速率补充令牌至容量上限,取令牌失败即超限 */
 class TokenBucket {
   private tokens: number
   private lastRefill = Date.now()
@@ -146,12 +139,9 @@ class TokenBucket {
 }
 
 /**
- * 反序列化 (reviveValue) 的资源预算。
- *
- * Worker 与插件代码共享同一全局作用域,插件可自行 postMessage 任意 payload;
- * 恶意/失控的深度嵌套对象会让无限制的递归直接 RangeError (栈溢出),
- * 该异常从 onmessage 逃逸后等待中的 Promise 永不 settle。
- * 这里改为预算耗尽即抛普通 Error,可被调用方捕获并拒绝等待者。
+ * 反序列化 (reviveValue) 的资源预算:插件可自行 postMessage 任意 payload,
+ * 深度嵌套对象会让无限制递归直接抛 RangeError,该异常从 onmessage 逃逸后等待中的 Promise 永不 settle;
+ * 故预算耗尽时改抛可捕获的普通 Error,由调用方拒绝等待者。
  */
 const REVIVE_MAX_DEPTH = 32
 const REVIVE_MAX_NODES = 20_000
@@ -176,7 +166,7 @@ function isSerializedError(value: unknown): value is SerializedError {
   return isRecord(value) && typeof value.name === 'string' && typeof value.message === 'string'
 }
 
-/** 给 promise 附加超时:超时后 reject(调用方负责 terminate 清理) */
+/** 超时即 reject,调用方负责 terminate 清理 */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -255,7 +245,7 @@ export class PluginWorkerHost {
       logger.error(`[Plugin:${this.pluginId}] 沙箱 Worker 异常:`, event.message || event)
       this.rejectAllPending(new Error('插件沙箱 Worker 发生未捕获异常'))
     }
-    // 宿主→Worker 消息在 Worker 侧反序列化失败时落盘 (默认仅静默丢弃)
+    // 宿主->Worker 消息在 Worker 侧反序列化失败时落盘 (默认仅静默丢弃)
     worker.onmessageerror = (event: MessageEvent) => {
       logger.warn(`[Plugin:${this.pluginId}] 沙箱消息反序列化失败:`, event.data)
     }
@@ -345,21 +335,15 @@ export class PluginWorkerHost {
   }
 
   /**
-   * 处理来自 Worker 的消息
-   *
-   * 消息来自不可信侧:插件代码与沙箱运行时共享同一全局作用域,可自行
-   * postMessage 伪造任意 payload。因此这里做三层防护:
-   *   1. 按消息类型逐一校验字段形状,不合法直接丢弃(不改变任何宿主状态);
-   *   2. revive 受深度/节点数预算约束,越界抛可捕获的普通 Error,而非让递归触发栈溢出;
-   *   3. 整体 try/catch —— 残留异常必须拒绝全部挂起 Promise 并终止 Worker,
-   *      否则插件会永久卡在半初始化状态且毫无报错。
+   * 处理来自 Worker 的消息:先按类型逐一校验字段形状,不合法直接丢弃 (见 dropMalformed);
+   * revive 预算见 REVIVE_MAX_DEPTH / REVIVE_MAX_NODES;整体 try/catch,残留异常必须拒绝全部
+   * 挂起 Promise 并 terminate,否则插件会永久卡在半初始化状态且毫无报错。
    */
   private handleWorkerMessage(raw: unknown): void {
     if (!isRecord(raw) || typeof raw.type !== 'string') return
     const type = raw.type
 
-    // 令牌桶限速:log / api-call 是插件可无限发送的上行通道,
-    // 超过补充速率即视为洪泛,拒绝挂起调用并终止 Worker (失败关闭)
+    // 令牌桶限速,参数与失败关闭策略见 LOG_BUCKET_* / API_CALL_BUCKET_*
     if (type === 'log' || type === 'api-call') {
       const bucket = type === 'log' ? this.logBucket : this.apiCallBucket
       if (!bucket.tryTake()) {
@@ -410,9 +394,8 @@ export class PluginWorkerHost {
         }
 
         case 'api-call': {
-          // callId 无法定位调用时只能丢弃 (回执无从投递);
-          // path / args 的形状交给 handleApiCall 校验并回一条 ok:false,
-          // 否则 Worker 侧挂起的 Promise 会一直等下去。
+          // callId 不合法时无处投递回执,只能丢弃;path/args 由 handleApiCall 校验形状并回 ok:false,
+          // 否则 Worker 侧挂起的 Promise 会一直等下去
           if (!isCallId(raw.callId)) return this.dropMalformed(type, 'callId')
           void this.handleApiCall(raw.callId, raw.path as string, raw.args as unknown[])
           break
@@ -467,13 +450,12 @@ export class PluginWorkerHost {
     logger.warn(`[Plugin:${this.pluginId}] 沙箱消息 "${type}" 的字段 ${field} 不合法,已丢弃`)
   }
 
-  /** Worker 代理发起的 API 调用 → 真实 PluginAPI (宿主侧白名单 + 权限强制校验) */
+  /** Worker 代理发起的 API 调用 -> 真实 PluginAPI (宿主侧白名单 + 权限强制校验) */
   private async handleApiCall(callId: number, path: string, rawArgs: unknown[]): Promise<void> {
-    // 注册类扩展调用进入后预扣配额,失败时在 catch 中退还 (需在 try 外声明以便 catch 访问)
+    // extReserved:本调用是否已预扣扩展配额,需在 try 外声明以便 catch 退还
     let extReserved = false
     try {
-      // 可信侧强制校验:Worker 内的消息可能来自插件伪造 (共享全局作用域),
-      // 先校验消息形状,再查路径白名单与权限,最后进入真实 API (其内部还有逐方法校验)
+      // 校验顺序:消息形状 -> API_CALL_POLICY 白名单与权限 -> 真实 API (其内部还有逐方法校验)
       if (typeof path !== 'string' || !Array.isArray(rawArgs)) {
         throw new Error('非法的沙箱 API 调用消息 (path/args 形状不合法)')
       }
@@ -486,9 +468,9 @@ export class PluginWorkerHost {
           `插件 ${this.pluginId} 没有 ${requiredPermission} 权限，无法调用 ${String(path)}`,
         )
       }
-      // 扩展点配额:注册消耗配额、注销归还,防插件无限堆 UI/命令/歌词源。
-      // 并发下(连续多条 api-call 尚未结算)检查必须先扣减预留,否则竞态可
-      // 让实际调用数越过上限;若后续执行失败(如 PluginAPI 校验拒绝)再退还。
+      // 扩展点配额:注册消耗配额,注销归还配额,防插件无限堆 UI/命令/歌词源。
+      // 并发下 (连续多条 api-call 尚未结算) 必须先扣减预留再检查,否则竞态可让实际调用数越过上限;
+      // 后续执行失败 (如 PluginAPI 校验拒绝) 时在 catch 退还。
       const isExtRegister = EXTENSION_REGISTER_PATHS.has(path)
       const isExtUnregister = EXTENSION_UNREGISTER_PATHS.has(path)
       if (isExtRegister) {
@@ -499,24 +481,23 @@ export class PluginWorkerHost {
         }
         this.extensionSlots -= 1
         extReserved = true
-      } // events.on/off 按 cbId 引用计数:注册 +1、注销成功后 -1,
-      // 归零时同步释放宿主侧 callbackStub,防止反复订阅/退订泄漏 stub
+      } // events.on/off 的 cbId 引用计数见 callbackStubRefs:此处 +1,注销成功后才 -1
       const subCbId =
         path === 'events.on' || path === 'events.off' ? this.extractCallbackId(rawArgs) : null
       if (path === 'events.on' && subCbId !== null) {
         this.callbackStubRefs.set(subCbId, (this.callbackStubRefs.get(subCbId) ?? 0) + 1)
       }
       let args = rawArgs.map((arg) => reviveValue(arg, (cbId) => this.makeCallbackStub(cbId)))
-      // Worker 侧绘制的 OffscreenCanvas 转为 Blob (真实 API 只认 Blob/HTMLCanvasElement)
+      // OffscreenCanvas 转 Blob 的取舍见 flattenCanvasArgs
       if (path === 'file.saveImage' || path === 'clipboard.writeImage') {
         args = await PluginWorkerHost.flattenCanvasArgs(args)
       }
       let value = await this.invokeApi(path, args)
-      // 注销归还配额(注册配额已在进入时预留,成功无需再扣)
+      // 注销归还配额,注册配额已在进入时预留
       if (isExtUnregister) {
         this.extensionSlots = Math.min(EXTENSION_LIMIT, this.extensionSlots + 1)
       }
-      // events.off 注销成功后才归还引用;失败(如权限拒绝)保持 stub 存活
+      // events.off 只在注销成功后归还引用,失败 (如权限拒绝) 时保持 stub 存活
       if (path === 'events.off' && subCbId !== null) {
         const remain = (this.callbackStubRefs.get(subCbId) ?? 1) - 1
         if (remain <= 0) {
@@ -529,7 +510,7 @@ export class PluginWorkerHost {
       value = await this.adaptReturnValue(path, value)
       this.post({ type: 'api-result', callId, ok: true, value })
     } catch (error) {
-      // 注册类调用失败时退还预扣的配额(注销类无需处理,失败不影响配额)
+      // 退还本调用预扣的注册配额
       if (extReserved) this.extensionSlots += 1
       logger.debug(`[Plugin:${this.pluginId}] 沙箱 API 调用失败: ${path}`, error)
       this.post({
@@ -567,7 +548,7 @@ export class PluginWorkerHost {
 
   /** 返回值适配:不可结构化克隆的主窗口对象转换为可传输表示 */
   private async adaptReturnValue(path: string, value: unknown): Promise<unknown> {
-    // Response → 序列化表示 (Worker 侧还原为类 Response 对象)
+    // Response -> 序列化表示 (Worker 侧还原为类 Response 对象)
     if (path === 'network.fetch' && typeof Response !== 'undefined' && value instanceof Response) {
       const headers: Record<string, string> = {}
       value.headers.forEach((v, k) => {
@@ -583,7 +564,7 @@ export class PluginWorkerHost {
         body: await value.arrayBuffer(),
       }
     }
-    // HTMLImageElement → ImageBitmap (可克隆,drawImage 兼容)
+    // HTMLImageElement -> ImageBitmap (可克隆,drawImage 兼容)
     if (
       path === 'utils.loadImage' &&
       typeof HTMLImageElement !== 'undefined' &&
@@ -603,7 +584,7 @@ export class PluginWorkerHost {
     return null
   }
 
-  /** 参数中的 OffscreenCanvas (Worker 侧绘制结果) 转为 Blob 后交给真实 API */
+  /** 递归把参数中的 OffscreenCanvas 转为 Blob:真实 API 只认 Blob/HTMLCanvasElement,Worker 侧画布无法直接投递 */
   private static async flattenCanvasArgs(args: unknown[]): Promise<unknown[]> {
     const result: unknown[] = []
     for (const arg of args) {
@@ -624,7 +605,7 @@ export class PluginWorkerHost {
   private makeCallbackStub(cbId: number): (...args: unknown[]) => Promise<unknown> {
     const existing = this.callbackStubs.get(cbId)
     if (existing) return existing
-    // 上限保护:失控插件反复订阅事件/在返回值中携带函数会让 stub 无限增长
+    // stub 数量上限见 MAX_CALLBACK_STUBS
     if (this.callbackStubs.size >= MAX_CALLBACK_STUBS) {
       throw new Error(`插件 ${this.pluginId} 回调数量超过上限 (${MAX_CALLBACK_STUBS})`)
     }
@@ -635,11 +616,10 @@ export class PluginWorkerHost {
           reject(new Error('插件沙箱已终止'))
           return
         }
-        // callId 与 cbId 是两个独立的 id 空间:
-        // callId 关联本次挂起调用 (callback-result 按 callId 回执),cbId 定位 Worker 内回调
+        // callId 与 cbId 是两个独立 id 空间,分工见 sandboxProtocol 的 callback-call 变体
         const callId = this.nextCbCallId++
-        // 超时保护:插件回调(activate/deactivate/事件处理)死循环时拒绝本次调用,
-        // 避免宿主侧调用方永久挂起;不 terminate 整个 Worker(单次回调失败可恢复)
+        // 超时保护:插件回调 (activate/deactivate/事件处理) 死循环时只拒绝本次调用,避免宿主调用方永久挂起;
+        // 不 terminate 整个 Worker,单次回调失败仍可恢复
         const timer = setTimeout(() => {
           if (this.cbCallPending.delete(callId)) {
             reject(new Error(`插件 ${this.pluginId} 回调执行超时 (${CALLBACK_TIMEOUT_MS}ms)`))
@@ -698,12 +678,8 @@ export class PluginWorkerHost {
   }
 
   /**
-   * 推送状态镜像
-   *
-   * postMessage 走结构化克隆,只要有一个字段不可克隆 (函数、异常代理值等),
-   * 整条消息就会失败。早期实现只 logger.warn 吞掉异常,结果是某个字段坏掉时
-   * playerState / theme / tracks 全部静默丢失,插件侧只能读到零值。
-   * 这里做降级重试:先丢弃最不可控的 storage 字段,保证核心状态仍能送达。
+   * 推送状态镜像:postMessage 走结构化克隆,任一字段不可克隆 (函数/异常代理值等) 整条消息就会失败,
+   * 故失败时先丢弃最不可控的 storage 字段降级重试,保证核心状态仍能送达。
    */
   private pushMirror(data: Partial<MirrorData>): void {
     try {
@@ -769,7 +745,7 @@ export class PluginWorkerHost {
       watch(() => playerStore.currentLyricIndex, pushPlayerState),
     )
 
-    // 主题变化 → 重推 theme + colors (applyTheme 同步更新 CSS 变量)
+    // 主题变化 -> 重推 theme + colors (applyTheme 同步更新 CSS 变量)
     this.watchStops.push(
       watch(
         () => [themeStore.themePreference, themeStore.isDarkMode, themeStore.primaryColor],
@@ -810,7 +786,7 @@ interface ReviveBudget {
   nodes: number
 }
 
-/** 序列化预算耗尽:抛普通 Error 而非依赖栈溢出的 RangeError,便于调用方捕获 */
+/** 预算耗尽时抛出的错误类型,约束见 REVIVE_MAX_DEPTH / REVIVE_MAX_NODES */
 class ReviveLimitError extends Error {
   constructor(message: string) {
     super(message)
@@ -819,11 +795,8 @@ class ReviveLimitError extends Error {
 }
 
 /**
- * 还原 Worker 传来的值:函数句柄标记 → 调用 Worker 的 stub 函数
- *
- * 递归受 REVIVE_MAX_DEPTH / REVIVE_MAX_NODES 约束。超限时抛出
- * ReviveLimitError,由 handleWorkerMessage 捕获后拒绝等待者并终止 Worker,
- * 避免插件用深嵌套 payload 让宿主卡在半初始化状态。
+ * 还原 Worker 传来的值:函数句柄标记 -> 调用 Worker 的 stub 函数。
+ * 递归受 REVIVE_MAX_DEPTH / REVIVE_MAX_NODES 预算约束。
  */
 function reviveValue(value: unknown, makeStub: StubFactory): unknown {
   return reviveInner(value, makeStub, { depth: 0, nodes: 0 })

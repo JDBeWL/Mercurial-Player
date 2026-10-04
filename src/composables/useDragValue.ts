@@ -3,7 +3,7 @@ import { onUnmounted, ref, type Ref } from 'vue'
 export interface UseDragValueOptions {
   /** 由指针事件计算 0..1 的拖拽百分比 (方向与几何由调用方决定) */
   getPercent: (event: MouseEvent) => number
-  /** pointerdown 时调用;返回 false 取消本次拖拽 (不进入拖拽态、不挂监听器) */
+  /** pointerdown 时调用; 返回 false 取消本次拖拽 (不进入拖拽态、不挂监听器) */
   onStart?: (percent: number, event: MouseEvent) => boolean | void
   /** 拖拽移动时调用 */
   onMove?: (percent: number) => void
@@ -23,9 +23,9 @@ export interface UseDragValueResult {
   stopDrag: () => void
 }
 
-/** 拖拽取值的骨架：pointerdown 后把 pointermove/pointerup 挂到 document 上，指针移出滑块也不会中断，
- *  组件卸载时自动清理。用 Pointer Events 而不用 mouse events，因为 Android WebView 上手指拖动不产生
- *  mousemove。调用方必须给滑块写 touch-action: none，否则被判成滚动手势、中途抛 pointercancel 打断。 */
+/** 拖拽取值骨架: pointerdown 后把 pointermove/pointerup/pointercancel 挂到 document, 指针移出元素也不中断, 卸载自动清理。
+ *  用 Pointer Events 而非 mouse events: Android WebView 上手指拖动不产生 mousemove。
+ *  调用方必须给元素写 touch-action: none, 否则手势被判成滚动并中途抛 pointercancel。 */
 export function useDragValue(options: UseDragValueOptions): UseDragValueResult {
   const isDragging = ref(false)
   const percent = ref(0)
@@ -50,8 +50,7 @@ export function useDragValue(options: UseDragValueOptions): UseDragValueResult {
     removeListeners()
   }
 
-  // 指针取消（来电、手势区滑动、系统接管滚动等）：不应用最终取值，
-  // 但要干净地退出拖拽态，否则下一次点击会被当成"正在拖拽"
+  // 指针取消 (来电、系统手势接管滚动等): 不应用最终值, 但必须退出拖拽态, 否则下次点击会被当作仍在拖拽
   const onDragCancel = (): void => {
     if (!isDragging.value) return
     isDragging.value = false
@@ -59,8 +58,7 @@ export function useDragValue(options: UseDragValueOptions): UseDragValueResult {
   }
 
   const startDrag = (event: MouseEvent): void => {
-    // 多指同时按住同一个滑块时只认第一根手指，避免两指互相拉扯把取值拽来拽去。
-    // （只针对 touch：程序合成的 pointerdown 不带 pointerType，不能被误伤）
+    // 同一滑块多指同按时只认主指针; 只判 touch, 程序合成的 pointerdown 不带 pointerType, 不能被误伤
     const pointer = event as PointerEvent
     if (pointer.pointerType === 'touch' && pointer.isPrimary === false) return
 

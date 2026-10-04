@@ -158,7 +158,7 @@ describe('LRUCache', () => {
 
       cache.set('a', '1')
       vi.advanceTimersByTime(1000)
-      // Date.now() - timestamp > ttl → 1000 > 1000 为 false，未过期
+      // Date.now() - timestamp > ttl -> 1000 > 1000 为 false，未过期
       expect(cache.get('a')).toBe('1')
 
       vi.advanceTimersByTime(1)

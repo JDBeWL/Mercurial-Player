@@ -1,3 +1,8 @@
+/**
+ * Player store。按关注点拆到同目录下的 slice 模块(cache/listeners/loadTrack/mediaCache/
+ * playlist/queue/session/shuffle):slice 是接收 store 实例参数的函数,运行时共享同一 Pinia
+ * 实例,不 import 本文件以免循环依赖。playback.ts 更进一步只接收最小结构化类型。
+ */
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 import i18n from '@/i18n'
@@ -77,16 +82,17 @@ interface PlayerState {
   _deviceSwitchRequiredUnlisten: UnlistenFn | null
   _noDeviceAvailableUnlisten: UnlistenFn | null
   _deviceDefaultChangedUnlisten: UnlistenFn | null
+  /** 装载代际:playTrack 递增 _playRequestId 认领 _activePlayRequestId,await 后两者不等即为过期结果,必须丢弃 */
   _playRequestId: number
   _activePlayRequestId: number
   _lyricsRequestId: number
-  /** 最近一次 loadLyrics 请求的 id,用于过期结果守卫 */
+  /** 最近一次 loadLyrics 请求的 id,过期结果守卫(见 beginLyricsRequest) */
   _activeLyricsRequestId: number
   _isSwitchingDevice: boolean
   _lastDeviceSwitchTarget: string | null
-  /** 用于取消正在进行的 _cachePlaylistMetadata 任务 */
+  /** 背景批量任务的取消令牌,元数据缓存与封面加载共用(见 mediaCache.ts 的 ensureAbortController) */
   _cacheAbortController: AbortController | null
-  /** 用于清理 nextTrack 定时器 */
+  /** 播放失败后顺延下一首的延迟定时器,由 cleanup 清除 */
   _nextTrackTimeoutId: ReturnType<typeof setTimeout> | null
   /** shuffle 模式下,Knuth 洗牌后的播放索引序列 (空数组表示未生成) */
   _shuffleOrder: number[]
@@ -95,15 +101,14 @@ interface PlayerState {
   /** 历史栈:记录已播放过的索引,用于 previousTrack 真正回到上一首 */
   _shuffleHistory: number[]
   /** 封面加载完成版本号:_loadPlaylistCovers 每处理完一批递增一次,
-   *  供 PlaylistView 以 O(变更数) 而非 O(N²) 感知封面更新 */
+   *  供 PlaylistView 以 O(变更数) 而非 O(N^2) 感知封面更新 */
   playlistCoverVersion: number
 }
 
-// 待通知的封面更新队列与批量加载实现见 MediaCache.ts
+// 待通知的封面更新队列与批量加载实现见 mediaCache.ts
 
 export const usePlayerStore = defineStore('player', {
   state: (): PlayerState => ({
-    // 当前播放状态
     currentTrack: null,
     playlist: [],
     isPlaying: false,
@@ -113,16 +118,13 @@ export const usePlayerStore = defineStore('player', {
     isMuted: false,
     previousVolume: 1,
 
-    // 重复模式设置
     repeatMode: 'none',
     isShuffle: false,
 
-    // 歌词
     lyrics: null,
     currentLyricIndex: -1,
     lyricsOffset: 0,
 
-    // 音频信息
     audioInfo: {
       bitrate: null,
       sampleRate: null,
@@ -131,18 +133,14 @@ export const usePlayerStore = defineStore('player', {
       format: null,
     },
 
-    // 加载状态
     _isLoading: false,
 
-    // 缓存管理器
     _cacheManager: null,
 
-    // 销毁标志
     _isDestroyed: false,
     _isInitializing: false,
     _initPromise: null,
 
-    // 事件监听器
     _trackEndedUnlisten: null,
     _positionUnlisten: null,
     _taskbarPreviousUnlisten: null,
@@ -163,12 +161,10 @@ export const usePlayerStore = defineStore('player', {
     _lastDeviceSwitchTarget: null,
     _cacheAbortController: null,
     _nextTrackTimeoutId: null,
-    // shuffle 状态: 空数组表示未生成洗牌顺序
     _shuffleOrder: [],
     _shufflePosition: -1,
     _shuffleHistory: [],
 
-    // 封面加载版本号
     playlistCoverVersion: 0,
   }),
 
@@ -184,7 +180,7 @@ export const usePlayerStore = defineStore('player', {
       return true
     },
     hasPreviousTrack: (state): boolean => {
-      // 手动切换应总是允许,与循环模式无关
+      // 同 hasNextTrack:手动切换不受循环模式约束
       if (!state.currentTrack || state.playlist.length <= 1) return false
       return true
     },
@@ -228,6 +224,7 @@ export const usePlayerStore = defineStore('player', {
 
     // --- 初始化 ---
     async initAudio(): Promise<void> {
+      // 并发的 initAudio 复用同一次初始化,避免监听器被重复注册
       if (this._isInitializing && this._initPromise) {
         await this._initPromise
         return
@@ -278,15 +275,14 @@ export const usePlayerStore = defineStore('player', {
       await this._initPromise
     },
 
-    /** 统一设置所有事件监听器 (track-ended / playback-position / taskbar / device / global shortcuts)，
-     *  监听器实现抽离到 Listeners.ts */
+    /** 统一注册所有 Tauri 事件监听与全局媒体键,实现见 listeners.ts */
     async _setupListeners(): Promise<void> {
       this._trackEndedUnlisten = await setupTrackEndedListener(this)
       this._positionUnlisten = await setupPositionListener(this)
       this._queueUnlisten = await setupQueueListener(this)
       await setupStateSyncListener(this)
 
-      // 把播放队列同步给 Rust（Android 开启自动推进）
+      // 把播放队列同步给 Rust,Android 自动推进的来由见 queue.ts 文件头
       watchPlayQueue(this)
       void startBackgroundHeartbeat()
 
@@ -304,12 +300,12 @@ export const usePlayerStore = defineStore('player', {
       await setupGlobalShortcuts(this)
     },
 
-    /** 立即保存 last_session (无节流,用于 pause/切曲/关闭等关键节点)，实现在 Session.ts */
+    /** 立即保存 last_session,无节流(触发时机见 session.ts 的 saveLastSessionNow) */
     async _saveLastSessionNow(): Promise<void> {
       await saveLastSessionNow(this)
     },
 
-    /** 启动时调用，尝试恢复上次播放会话。实现在 Session.ts */
+    /** 启动时尝试恢复上次播放会话,实现见 session.ts */
     async resumeLastSession(): Promise<ResumeResult | null> {
       return resumeLastSession(this)
     },
@@ -377,9 +373,8 @@ export const usePlayerStore = defineStore('player', {
     },
 
     _updateTaskbarState(): void {
-      // 更新 Windows 任务栏按钮状态
       invoke('update_taskbar_state', { isPlaying: this.isPlaying }).catch(() => {
-        // 忽略非 Windows 平台的错误
+        // 任务栏 API 仅 Windows 可用,其他平台的错误直接忽略
       })
     },
 
@@ -396,8 +391,7 @@ export const usePlayerStore = defineStore('player', {
     async playTrack(track: Track): Promise<void> {
       if (this._isDestroyed || !track || this._isLoading) return
 
-      // 切曲前保存上一曲的最后位置 (无节流,确保切换瞬间记录最新)
-      // 只在确实在切曲 (currentTrack 存在且不是同一首) 时才保存
+      // 确实在切曲时才无节流保存上一曲的最后位置(触发时机见 session.ts)
       if (this.currentTrack && this.currentTrack.path !== track.path) {
         void this._saveLastSessionNow()
       }
@@ -421,9 +415,8 @@ export const usePlayerStore = defineStore('player', {
           missingIndex >= 0 &&
           missingIndex < this.playlist.length - 1
         ) {
-          // 按缺失曲目自身在播放列表中的位置顺延。
-          // 不能用 nextTrack():它基于 currentTrack 定位"下一首",
-          // 当缺失曲目紧跟当前曲目时会不断回到同一首,造成无限递归
+          // 按缺失曲目自身在播放列表中的位置顺延,不能用 nextTrack():它基于 currentTrack 定位下一首,
+          // 缺失曲目紧跟当前曲目时会不断回到同一首造成无限递归
           return this.playTrack(this.playlist[missingIndex + 1]!)
         }
 
@@ -452,7 +445,7 @@ export const usePlayerStore = defineStore('player', {
         .then(() => {
           this.isPlaying = false
           this._updateTaskbarState()
-          // 暂停时立即保存 last_session (无节流)
+          // 暂停是关键节点,无节流保存(见 _saveLastSessionNow)
           void this._saveLastSessionNow()
         })
         .catch((err) => logger.error('Failed to pause:', err))
@@ -481,16 +474,13 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
-    // --- 进度控制 ---
-
     // --- 播放结束 ---
 
     async _onEnded(): Promise<void> {
       if (this._isDestroyed || !this.currentTrack) return
 
-      // Android：后台时 WebView 的 JS 会被节流/冻结，`track-ended` 可能延迟甚至
-      // 无人处理，自动切歌已下沉到 Rust 播放队列。这里直接让位，
-      // 由 `queue-track-changed` 事件同步 UI，避免前后端各切一次导致跳曲。
+      // Android 的自动切歌已由 Rust 播放队列接管(来由见 queue.ts 文件头),这里让位给 queue-track-changed,
+      // 否则前后端各切一次会跳曲
       if (await isAndroid()) {
         logger.debug('Android: 自动切歌由 Rust 队列接管，跳过前端 _onEnded')
         return
@@ -593,7 +583,7 @@ export const usePlayerStore = defineStore('player', {
 
     async nextTrack(): Promise<void> {
       if (!this.currentTrack || this._isLoading) return
-      // 空播放列表守卫:避免 (currentTrackIndex + 1) % 0 得到 NaN
+      // 空列表守卫,同 _onEnded 的 % 0 风险
       if (this.playlist.length === 0) return
 
       // 单曲循环由 _onEnded 处理,手动 next 走下一首
@@ -692,7 +682,7 @@ export const usePlayerStore = defineStore('player', {
       } else if (this.repeatMode === 'list') {
         this.repeatMode = 'track'
       } else {
-        // 单曲循环 → 随机（toggleShuffle 打开时会顺手把 repeatMode 置 none）
+        // 单曲循环 -> 随机（toggleShuffle 打开时会顺手把 repeatMode 置 none）
         this.toggleShuffle()
       }
     },

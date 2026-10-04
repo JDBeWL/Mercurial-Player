@@ -1,9 +1,10 @@
-//! AAudio 独占（位完美）输出播放器：绕过 AudioFlinger 的混音与重采样，按设备原生采样率
-//! 直写 USB DAC。数据通路：解码线程 `push_samples` → 无锁 SPSC 环形缓冲 → AAudio 数据
-//! 回调（回调内只做音量与淡入淡出，全走原子量，不阻塞、不分配）。
+//! AAudio 独占（位完美）输出播放器：绕过 AudioFlinger 的混音与重采样，按原生采样率直写 USB DAC。
+//!
+//! 数据通路是解码线程 `push_samples` 写无锁 SPSC 环形缓冲，AAudio 数据回调取走并施加音量与
+//! 淡入淡出；回调内全走原子量，不阻塞、不分配。
 
-// 本模块就是 AAudio 的 FFI 边界（裸指针解引用、C 回调 ABI、跨线程 UnsafeCell），逐项标注
-// 只会重复同一句话，故在模块级统一 allow；每个 unsafe 块内仍保留独立的 SAFETY 说明。
+// 本模块就是 AAudio 的 FFI 边界（裸指针解引用、C 回调 ABI、跨线程 UnsafeCell），逐项标注只会
+// 重复同一句话，故在模块级统一 allow；每个 unsafe 块内仍保留独立的 SAFETY 说明。
 #![allow(unsafe_code)]
 
 use std::cell::UnsafeCell;
@@ -12,39 +13,41 @@ use std::ptr;
 use std::sync::atomic::{
     AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use super::device::{
     OutputDeviceInfo, find_usb_output_device, pick_channel_count, pick_sample_rate,
 };
 use super::ffi;
-use crate::audio::{PlaybackState, SampleRing, spectrum::now_ms};
+use crate::audio::{PlaybackState, PushOutcome, SampleRing, spectrum::now_ms};
 use crate::error::AppError;
 
-/// 环形缓冲的目标时长（秒）。独占模式的 buffer 通常很小（低延迟），
-/// 缓冲给足可以避免解码线程偶发抖动导致的断流，同时 seek/切歌清空也不拖沓。
+/// 环形缓冲的目标时长（秒）：独占 buffer 很小，缓冲给足才能吸收解码抖动而不断流。
+/// 硬约束是必须大于水位门控，见 [`crate::audio::sample_ring::exclusive_ring_capacity`]。
 const RING_SECONDS: f32 = 1.5;
 /// 默认淡入淡出时长（毫秒）
 const DEFAULT_FADE_MS: u32 = 30;
 /// 看门狗轮询间隔（毫秒）
 const WATCHDOG_INTERVAL_MS: u64 = 20;
-/// 看门狗替回调收尾的宽限（毫秒）：回调正常时会在 duration_ms 内走完斜坡，
-/// 超过 duration + 本宽限仍未推进，说明回调已经停摆（流暂停/断开）
+/// 解码线程 park gate 的兜底超时（毫秒）：正常由控制侧与消费进度唤醒，超时只兜漏通知。
+const PARK_TICK_MS: u64 = 250;
+/// 看门狗替回调收尾的宽限（毫秒）：超过 duration + 本宽限斜坡仍未推进，说明回调已停摆。
 const FADE_FALLBACK_GRACE_MS: u64 = 100;
-/// 数据回调 scratch 的预留下限（交错采样数）。实际预留量在开流后按生效容量与
-/// 声道数算出来，这里只兜住容量查询失败或设备给出很小容量的情况。
+/// 数据回调 scratch 的预留下限（交错采样数）。实际预留量开流后按生效容量重算，
+/// 这里只兜住容量查询失败或设备给出很小容量的情况。
 const AAUDIO_SCRATCH_CAPACITY: usize = 32_768;
-/// 单次数据回调的目标时长（毫秒）。不指定时 AAudio 每 burst 回调一次，而输出延迟对本
-/// 应用没有意义（环形缓冲已有 `RING_SECONDS` 的余量），放大回调块就按同比例减少唤醒。
+/// 单次数据回调的目标时长（毫秒）：不指定时 AAudio 每 burst 回调一次，放大回调块能按同比例
+/// 减少唤醒，而输出延迟对本应用没有意义（环形缓冲已有 `RING_SECONDS` 余量）。
 ///
-/// 收益取决于设备 burst：实测手上这台 USB DAC 在 96k/192k 下 burst 恒为 20ms
-/// （1920 / 3840 帧），所以这里只是把约 50 次/秒降到 40 次/秒；burst 只有几毫秒的
-/// 设备上才是数量级的差别。开流日志会打出 burst 与生效容量，换设备时先看那两行。
-///
-/// 上限受 `DEFAULT_FADE_MS` 约束：块长一旦超过淡变时长，整条淡出会在单块内走完，
-/// 斜坡就退化成一次阶跃。
+/// 上限受 `DEFAULT_FADE_MS` 约束：块长一旦超过淡变时长，整条淡出会在单块内走完，退化成阶跃。
 const CALLBACK_MILLIS: u32 = 25;
+/// 欠载补零前的收敛斜坡长度（帧），约 1.5 ms @44.1k：够消掉阶跃造成的 click，
+/// 又短到听感上只是"这句尾巴轻了一点"。
+const UNDERRUN_RAMP_FRAMES: usize = 64;
+/// 欠载上报的最小间隔（秒）：回调是实时线程不能打日志，观测由看门狗按此间隔汇报增量。
+const UNDERRUN_LOG_INTERVAL_SECS: u64 = 5;
 
 /// `PlaybackState` 的原子编码（状态要能在音频回调里更新，不能用 Mutex）
 const ST_UNINITIALIZED: u8 = 0;
@@ -65,7 +68,7 @@ const fn state_from_code(c: u8) -> PlaybackState {
     }
 }
 
-/// 状态码的日志文本：仅在状态迁移日志里用
+/// 状态码的日志文本
 const fn state_text(code: u8) -> &'static str {
     match code {
         ST_UNINITIALIZED => "Uninitialized",
@@ -78,9 +81,8 @@ const fn state_text(code: u8) -> &'static str {
     }
 }
 
-/// 状态迁移的唯一入口：这个原子量必须与 AAudio 流的真实状态一致，媒体按键与
-/// `set_usb_dac_exclusive` 都按它判断"当前是否在播"。看门狗落地 pause/stop 之后
-/// 也必须走这里，否则状态会永远停在 Pausing/Stopping。
+/// 状态迁移的唯一入口：媒体按键与 `set_usb_dac_exclusive` 都按这个原子量判断"当前是否在播"，
+/// 看门狗落地 pause/stop 之后也必须走这里，否则状态会永远停在 Pausing/Stopping。
 fn transition_state(state: &AtomicU8, new: u8) {
     let old = state.swap(new, Ordering::SeqCst);
     if old != new {
@@ -106,9 +108,8 @@ const PENDING_STOP: u8 = 2;
 
 /// `pending` / `fade_action` 的打包格式：高 56 位为命令代际，低 8 位为动作码。
 ///
-/// 代际让"恢复播放"能把更早排队、尚未执行的暂停/停止判为过期（否则快速"暂停→恢复"
-/// 会被看门狗在恢复之后又执行一次暂停，旧的停止动作还会清掉缓冲）。打包进同一个原子量
-/// 是为了让读侧永远拿到一致的 (代际, 动作) 组合，不会看到"新代际配旧动作"。
+/// 代际让"恢复播放"能把更早排队、尚未执行的暂停/停止判为过期（否则快速暂停再恢复，看门狗会
+/// 在恢复之后又执行一次暂停）；打包进同一个原子量则保证读侧永远拿到一致的 (代际, 动作) 组合。
 const fn pack_pending(seq: u64, action: u8) -> u64 {
     (seq << 8) | action as u64
 }
@@ -130,7 +131,7 @@ const FADE_IN: u8 = 2;
 /// 音频回调与命令线程共享的状态（全部是无锁字段）
 struct Shared {
     ring: SampleRing,
-    /// 已交付给 AAudio 的采样数（交织后，即 帧数 × 声道数）
+    /// 已交付给 AAudio 的采样数（交织后，即 帧数 * 声道数）
     written: AtomicU64,
     /// 音量，f32 位模式
     volume: AtomicU32,
@@ -138,7 +139,7 @@ struct Shared {
     format: AtomicI32,
     fade_dir: AtomicU8,
     fade_left: AtomicUsize,
-    /// 斜坡的挂钟兜底截止时刻（毫秒）。回调不跑时（流已暂停/断开）斜坡会停在半途，
+    /// 斜坡的挂钟兜底截止时刻（毫秒）。回调停摆（流已暂停/断开）时斜坡会卡在半途，
     /// 看门狗过了这个时刻就替回调收尾。
     fade_deadline_ms: AtomicU64,
     fade_total: AtomicUsize,
@@ -147,16 +148,22 @@ struct Shared {
     fade_action: AtomicU64,
     /// 淡出完成后待看门狗执行的动作，同样打包了代际
     pending: AtomicU64,
-    /// 命令代际：每次"开始/恢复播放"递增。排队中的暂停/停止若带着更早的代际，
-    /// 执行前会被判为过期而作废（见 [`Shared::bump_cmd_seq`] 与看门狗）
+    /// 命令代际：每次"开始/恢复播放"递增。带更早代际的待办动作执行前会被判过期作废
+    /// （见 [`Shared::bump_cmd_seq`] 与 [`pack_pending`]）
     cmd_seq: AtomicU64,
     underruns: AtomicU64,
     disconnected: AtomicBool,
     /// 流是否处于可写状态（关闭/重建期间置 false）
     running: AtomicBool,
-    /// 与播放器共享的对外状态量：看门狗落地 pause/stop 后要把它从 Pausing/Stopping
-    /// 推进到 Paused/Stopped，否则命令层永远看不到淡出真正完成
+    /// 与播放器共享的对外状态量：看门狗落地 pause/stop 后要把 Pausing/Stopping 推进到
+    /// Paused/Stopped，否则命令层永远看不到淡出真正完成
     state: Arc<AtomicU8>,
+    /// park gate：解码线程环满时停在这里，等控制侧或消费进度变化唤醒。用条件变量而非轮询，
+    /// 暂停时零唤醒（只靠 [`PARK_TICK_MS`] 兜底），恢复立即唤醒。
+    /// 实时回调绝不触碰这两个字段（`Mutex` 在实时线程上可能陷入内核造成 xrun），
+    /// 因此不参与 `audio/mod.rs` 的锁序，也不会与命令锁嵌套。
+    park_mutex: Mutex<()>,
+    park_cvar: Condvar,
 }
 
 impl Shared {
@@ -165,17 +172,30 @@ impl Shared {
         self.cmd_seq.fetch_add(1, Ordering::SeqCst) + 1
     }
 
+    /// 唤醒停在 park gate 上的解码线程。控制侧改变了它等待的条件（暂停/恢复/停止/切歌）、
+    /// 或消费侧腾出了空间时调用；只允许非实时线程调用。
+    fn notify_park(&self) {
+        self.park_cvar.notify_all();
+    }
+
+    /// 停在 park gate 上等一会儿（返回后调用方必须重新检查取消判据与水位）。
+    fn park(&self, timeout: Duration) {
+        let guard = lock_or_log!(self.park_mutex.lock());
+        drop(self.park_cvar.wait_timeout(guard, timeout));
+    }
+
     /// 以"当前代际"把动作写入待办槽。暂停/停止用它排队，恢复播放时递增代际即可作废
     fn queue_pending(&self, action: u8) {
         let seq = self.cmd_seq.load(Ordering::SeqCst);
         self.pending
             .store(pack_pending(seq, action), Ordering::SeqCst);
+        self.notify_park();
     }
 
     /// 把淡出完成转交的动作写进待办槽，仅当槽位为空（槽里已有的是更新的命令，不能被旧动作盖掉）。
     ///
-    /// 本函数会从数据回调（实时线程）调用，因此只做一次 CAS，不打印任何日志。
-    /// CAS 失败不是错误：抢占槽位的新命令本身就是对这次淡出动作的否定。
+    /// 会从数据回调（实时线程）调用，因此只做一次 CAS、不打日志。CAS 失败不是错误：
+    /// 抢占槽位的新命令本身就是对这次淡出动作的否定。
     fn handoff_fade_action(&self, packed: u64) {
         if packed == PENDING_NONE {
             return;
@@ -183,6 +203,25 @@ impl Shared {
         let _ =
             self.pending
                 .compare_exchange(PENDING_NONE, packed, Ordering::SeqCst, Ordering::SeqCst);
+    }
+
+    /// 无条件取消斜坡（任何方向）并清掉排队中的收尾动作。停止 / 无淡变暂停时调用。
+    fn cancel_fade(&self) {
+        self.fade_dir.store(FADE_IDLE, Ordering::SeqCst);
+        self.fade_left.store(0, Ordering::SeqCst);
+        self.fade_action.store(PENDING_NONE, Ordering::SeqCst);
+    }
+
+    /// 只取消进行中的淡出（保留淡入）。恢复 / 重新起播必须调用，否则淡出中的回调会把增益推到 0
+    /// 再跳回 1.0，即音量抽动。刻意不动 `FADE_IN`：`resume_with_fade_in` 先置好淡入参数再调
+    /// `request_start`，无条件清掉会把刚设好的淡入一起抹掉。
+    fn cancel_fade_out(&self) {
+        if self.fade_dir.load(Ordering::SeqCst) != FADE_OUT {
+            return;
+        }
+        self.fade_dir.store(FADE_IDLE, Ordering::SeqCst);
+        self.fade_left.store(0, Ordering::SeqCst);
+        self.fade_action.store(PENDING_NONE, Ordering::SeqCst);
     }
 }
 
@@ -201,8 +240,8 @@ unsafe impl Sync for Ctx {}
 
 /// 一条 AAudio 流的全部资源
 struct Inner {
-    /// 原生流句柄。**取用与关闭都必须持这把控制锁**：AAudio 的 close 不是线程安全操作，
-    /// 命令线程关流（拔 DAC / 换采样率）时，看门狗可能正拿着同一句柄请求 pause/stop。
+    /// 原生流句柄。取用与关闭都必须持这把控制锁：AAudio 的 close 不是线程安全操作，命令线程
+    /// 关流（拔 DAC / 换采样率）时，看门狗可能正拿着同一句柄请求 pause/stop。
     /// 指针的读取也必须在锁内——在锁外先读出的旧指针不受保护。
     stream: Mutex<*mut ffi::AAudioStreamStruct>,
     ctx: Arc<Ctx>,
@@ -212,17 +251,16 @@ struct Inner {
 impl Inner {
     /// 在控制锁内使用流句柄。返回 `None` 表示流已关闭（或正在关闭）。
     ///
-    /// 相比"锁外读指针、锁内使用"，这里把读取也放进锁里：`close_stream` 取走句柄后
-    /// 置 null，之后进来的调用只会看到 null，不可能再碰到已释放的流。
+    /// 读取也放进锁里：`close_stream` 取走句柄后置 null，之后进来的调用只会看到 null，
+    /// 不可能再碰到已释放的流。
     fn with_stream<R>(&self, f: impl FnOnce(*mut ffi::AAudioStreamStruct) -> R) -> Option<R> {
         self.with_control(|stream| stream.map(f))
     }
 
     /// 控制锁内的通用临界区：闭包拿到的句柄可能为 `None`（流已关闭）。
     ///
-    /// 除了保护句柄，这把锁还是"待办动作是否过期"的判定点：看门狗的过期复查与
-    /// `request_start` 的代际自增都在锁内，保证二者要么先后有序、要么整体互斥，
-    /// 不会出现"复查通过后、真正 pause 之前被恢复命令插队"的窗口。
+    /// 这把锁同时是"待办动作是否过期"的判定点：看门狗的过期复查与 `request_start` 的代际自增
+    /// 都在锁内，不会出现"复查通过后、真正 pause 之前被恢复命令插队"的窗口。
     fn with_control<R>(&self, f: impl FnOnce(Option<*mut ffi::AAudioStreamStruct>) -> R) -> R {
         let stream = lock_or_log!(self.stream.lock());
         f(if stream.is_null() {
@@ -267,40 +305,70 @@ fn resolve_shared(inner: &Mutex<Option<Arc<Inner>>>) -> Option<Arc<Shared>> {
 
 /// 解码线程用的无锁写入端，由 `AaudioExclusivePlayer::producer` 取得。
 ///
-/// 只在每次调用开头短暂锁 `inner` 取当前 `Shared`（流可能被重建），随后的背压等待
-/// 不持任何锁 —— 否则解码线程会抱着上层 `wasapi_player` 互斥量睡觉，把切设备、
-/// 停止这些命令一起堵死。
+/// 只在每次调用开头短暂锁 `inner` 取当前 `Shared`（流可能被重建），随后的背压等待不持任何锁
+/// ——否则解码线程会抱着上层 `wasapi_player` 互斥量睡觉，把切设备、停止这些命令一起堵死。
 pub struct AaudioProducer {
     inner: Arc<Mutex<Option<Arc<Inner>>>>,
 }
 
 impl AaudioProducer {
-    pub fn push_samples(&self, samples: &[f32]) -> Result<(), AppError> {
+    /// 本生产者要使用的写入世代。整个解码线程只取一次（见 `decode_push`）：每次推送重取会拿到
+    /// "永远新鲜"的世代，等于没有校验。设备切换会重建环，但新环继承同一世代，不会被误判过期。
+    #[must_use]
+    pub fn write_epoch(&self) -> Option<u64> {
+        resolve_shared(&self.inner).map(|s| s.ring.write_epoch())
+    }
+
+    /// 把采样推进环形缓冲；缓冲满时停在 park gate 等待，`cancelled` 是取消判据
+    /// （generation / thread_id，见 `decode_push`）。
+    /// 流断开 / 被取消 / 世代过期时返回 [`PushOutcome::Partial`]，流未起播只需等它可写。
+    pub fn push_samples(
+        &self,
+        samples: &[f32],
+        epoch: u64,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<PushOutcome, AppError> {
         let Some(shared) = resolve_shared(&self.inner) else {
             return Err(AppError::msg("AAudio 播放器未初始化"));
         };
         let mut offset = 0;
-        // 背压：缓冲满时等一会儿再推。解码线程不是实时线程，等在这里不会造成爆音，
-        // 而直接丢弃样本会。但流已停/已断开时没人消费，必须退出，否则解码线程永久卡死。
         while offset < samples.len() {
-            if !shared.running.load(Ordering::Acquire) || shared.disconnected.load(Ordering::SeqCst)
-            {
-                return Ok(());
+            // 断开与取消都是终止条件：没人再消费，继续等只会卡住
+            if shared.disconnected.load(Ordering::SeqCst) || cancelled() {
+                return Ok(PushOutcome::Partial);
             }
-            let written = shared.ring.push_slice(&samples[offset..]);
-            if written == 0 {
-                std::thread::sleep(std::time::Duration::from_millis(2));
+            if !shared.running.load(Ordering::Acquire) {
+                // 流还没起来（或正在重建）：等它变成可写，别退出也别忙等。
+                // 真正终止的情形已由上面的判据与世代校验覆盖。
+                shared.park(Duration::from_millis(PARK_TICK_MS));
                 continue;
             }
-            offset += written;
+            match shared.ring.push_slice_checked(&samples[offset..], epoch) {
+                // 世代过期：本线程已被切歌/停止作废，剩余样本必须丢弃
+                None => return Ok(PushOutcome::Partial),
+                Some(0) => {
+                    // 环满：停在条件变量上，由控制侧或消费进度变化唤醒（见 notify_park）
+                    shared.park(Duration::from_millis(PARK_TICK_MS));
+                }
+                Some(written) => offset += written,
+            }
         }
-        Ok(())
+        Ok(PushOutcome::Complete)
     }
 
     /// 缓冲里尚未被硬件取走的采样数
     #[must_use]
     pub fn buffer_size(&self) -> usize {
         resolve_shared(&self.inner).map_or(0, |s| s.ring.len())
+    }
+
+    /// 水位门控未通过时的等待，与 [`Self::push_samples`] 共用同一套唤醒源；可能因
+    /// [`PARK_TICK_MS`] 超时返回，调用方须重新检查取消判据与水位。
+    pub fn wait_for_space(&self, timeout: Duration) {
+        match resolve_shared(&self.inner) {
+            Some(shared) => shared.park(timeout),
+            None => std::thread::sleep(timeout),
+        }
     }
 }
 
@@ -350,15 +418,15 @@ impl AaudioExclusivePlayer {
     }
 
     /// 作废当前流（USB DAC 热插拔后由 [`super::on_audio_route_changed`] 调用）。
-    /// 必须连同缓存的设备快照一起丢掉：AAudio 的流死绑创建时的 device id，设备重插后系统
-    /// 给的是**新 id**，拿旧快照开流会让独占与共享回退两条路都失败。
+    /// 必须连同缓存的设备快照一起丢掉：AAudio 的流死绑创建时的 device id，设备重插后系统给的
+    /// 是新 id，拿旧快照开流会让独占与共享回退两条路都失败。
     pub fn release_stream(&self) {
         self.close_stream();
     }
 
     /// 按曲目的原生采样率/声道对齐输出，必要时关掉旧流重开；返回实际生效的 (采样率, 声道)，
     /// 与源一致即为直出（无重采样）。
-    /// 没有流时在这里**重新解析**当前 USB 设备而不是报错：拔插一次后旧设备 id 已失效。
+    /// 没有流时在这里重新解析当前 USB 设备而不是报错：拔插一次后旧设备 id 已失效。
     pub fn ensure_format(&self, sample_rate: u32, channels: u16) -> Result<(u32, u16), AppError> {
         let current = (
             self.sample_rate.load(Ordering::SeqCst),
@@ -426,6 +494,8 @@ impl AaudioExclusivePlayer {
             disconnected: AtomicBool::new(false),
             running: AtomicBool::new(false),
             state: Arc::clone(&self.state),
+            park_mutex: Mutex::new(()),
+            park_cvar: Condvar::new(),
         });
         let ctx = Arc::new(Ctx {
             shared: Arc::clone(&shared),
@@ -434,10 +504,9 @@ impl AaudioExclusivePlayer {
             scratch: UnsafeCell::new(Vec::with_capacity(AAUDIO_SCRATCH_CAPACITY)),
         });
 
-        // 回调块按目标时长折算成帧数。容量必须给到它的四倍：AAudio 头文件明确要求
-        // 请求的回调块小于容量的一半以留出双缓冲，否则会额外插一层内部缓冲。
-        // 容量只会"至少这么大"（final capacity may differ but probably at least this big），
-        // 不像采样率那样会让 open 失败，所以不需要为独占模式准备一条不开容量的退路。
+        // 回调块按目标时长折算成帧数，容量给到它的四倍：AAudio 头文件要求请求的回调块小于容量
+        // 的一半以留出双缓冲，否则会额外插一层内部缓冲。容量只会"至少这么大"，不像采样率那样
+        // 会让 open 失败，所以不需要为独占模式准备一条不开容量的退路。
         let callback_frames = (wanted_rate * CALLBACK_MILLIS / 1000).max(1) as i32;
         let capacity_frames = callback_frames.saturating_mul(4);
 
@@ -472,7 +541,8 @@ impl AaudioExclusivePlayer {
         // SAFETY: builder 有效，stream 为输出参数
         let mut result = unsafe { ffi::AAudioStreamBuilder_openStream(builder, &raw mut stream) };
         if result != ffi::AAUDIO_OK {
-            // 独占开不出（速率/格式不被接受、被其它应用占用）→ 退共享模式重试一次
+            // 独占开不出（速率/格式不被接受、被占用）就退共享模式重试。回退时须把速率交回
+            // "未指定"并换格式：原样重试只会再失败；共享模式由 AudioFlinger 重采样。
             log::warn!(
                 "AAudio 独占开流失败({})，回退共享模式: {}",
                 // SAFETY: 结果码转文本，见 ffi::result_to_text
@@ -482,9 +552,24 @@ impl AaudioExclusivePlayer {
             // SAFETY: 同上，改共享模式后重新 open
             unsafe {
                 ffi::AAudioStreamBuilder_setSharingMode(builder, ffi::AAUDIO_SHARING_MODE_SHARED);
-                ffi::AAudioStreamBuilder_setSampleRate(builder, wanted_rate as i32);
+                ffi::AAudioStreamBuilder_setSampleRate(builder, ffi::AAUDIO_UNSPECIFIED);
+                ffi::AAudioStreamBuilder_setFormat(builder, shared_fallback_format(wanted_format));
             }
             result = unsafe { ffi::AAudioStreamBuilder_openStream(builder, &raw mut stream) };
+            if result != ffi::AAUDIO_OK {
+                // 再兜一层：少数老设备连"未指定速率 + 该格式"也不接受，退到最保守的 48k / I16
+                log::warn!(
+                    "AAudio 共享模式仍未开出({})，改用 48000Hz / I16 重试",
+                    // SAFETY: 结果码转文本
+                    unsafe { ffi::result_to_text(result) }
+                );
+                // SAFETY: 同上，换最保守的速率与格式后重新 open
+                unsafe {
+                    ffi::AAudioStreamBuilder_setSampleRate(builder, 48_000);
+                    ffi::AAudioStreamBuilder_setFormat(builder, ffi::AAUDIO_FORMAT_PCM_I16);
+                }
+                result = unsafe { ffi::AAudioStreamBuilder_openStream(builder, &raw mut stream) };
+            }
         }
         // SAFETY: builder 不再使用（stream 已持有资源）
         unsafe { ffi::AAudioStreamBuilder_delete(builder) };
@@ -506,14 +591,13 @@ impl AaudioExclusivePlayer {
                 ffi::AAudioStream_getBufferCapacityInFrames(stream),
             )
         };
-        // 刻意不调 AAudioStream_setBufferSizeInFrames 把缓冲顶到容量上限：那会让多达
-        // capacity 的音频滞留在流内部，而 seek/stop 走的是 `ring.clear()`，没有
-        // AAudioStream_requestFlush，这段在途音频会变成可听的旧内容尾巴。
-        // 保留出厂的自适应值，省电收益来自回调块变大，不来自缓冲变大。
+        // 刻意不调 AAudioStream_setBufferSizeInFrames 把缓冲顶到容量上限：那会让多达 capacity
+        // 的音频滞留在流内部，而 seek/stop 走的是 `ring.clear()`、没有 requestFlush，这段在途
+        // 音频会变成可听的旧内容尾巴。省电收益来自回调块变大，不来自缓冲变大。
 
-        // 容量和回调块都可能被 AAudio 按设备约束调整（独占模式尤甚），据实际值预留
-        // scratch：多声道高速率下 25ms 会超过 AAUDIO_SCRATCH_CAPACITY，不预留的话
-        // 首个回调要在实时线程上 realloc
+        // 容量和回调块都可能被 AAudio 按设备约束调整（独占模式尤甚），据实际值预留 scratch：
+        // 多声道高速率下 25ms 会超过 AAUDIO_SCRATCH_CAPACITY，不预留的话首个回调要在实时
+        // 线程上 realloc
         let scratch_cap =
             (capacity.max(0) as usize * actual_channels as usize).max(AAUDIO_SCRATCH_CAPACITY);
         // SAFETY: ctx 尚未放进 Inner，回调要等 start 之后才运行，此刻只有本线程能碰到
@@ -541,13 +625,15 @@ impl AaudioExclusivePlayer {
             ctx,
             device: device.clone(),
         }));
+        // 唤醒停在 park gate 上的解码线程：重建流时它会一直等 `running`，靠 250ms 兜底太迟钝。
+        // 放在 Inner 安装之后，反过来的话线程会先醒来、却仍然只看到旧流。
+        shared.notify_park();
 
         log::info!(
             "AAudio stream opened: {} @ {actual_rate}Hz, {actual_channels}ch, format={actual_format}, sharing={sharing}",
             device.name
         );
-        // 实际生效的回调块只反映 builder 请求值；把 burst 与容量一起打出来，
-        // 真机上据此判断 AAudio 有没有按请求放大（被钳小就意味着省电没吃到）
+        // burst 与容量一起打出来：真机上据此判断 AAudio 有没有按请求放大回调块
         log::info!(
             "AAudio buffer: burst={burst}, capacity={capacity}, callback_frames={callback_frames}"
         );
@@ -562,9 +648,7 @@ impl AaudioExclusivePlayer {
         let Some(inner) = taken else { return };
 
         inner.ctx.shared.running.store(false, Ordering::Release);
-        // 取走句柄与看门狗/命令线程的 requestXxx 共用一把控制锁：持锁期间不可能有人正在
-        // 使用句柄，取走后它们再进来只会看到 null。仅把指针置 null 是不够的——在锁外
-        // 读指针的调用者可能已经拿到旧句柄，这正是这里要排除的情况
+        // 取走句柄而不只是置 null：锁外读指针的调用者可能已经拿到旧句柄（见 `Inner::with_control`）
         let stream = {
             let mut handle = lock_or_log!(inner.stream.lock());
             std::mem::replace(&mut *handle, ptr::null_mut())
@@ -580,12 +664,27 @@ impl AaudioExclusivePlayer {
         drop(inner); // ctx 也随之释放（close 已保证回调不再运行）
         self.set_state(ST_UNINITIALIZED);
         self.exclusive_confirmed.store(false, Ordering::SeqCst);
+        // 必须停掉并 join：否则重建流时 start_watchdog 会因旧线程未退出而直接返回，新流再无
+        // 看门狗，pause/stop 落地（PENDING_*、断连收尾）与淡出兜底会一起失效。
+        self.stop_watchdog();
+    }
+
+    /// 停掉看门狗线程并等它退出（可重复调用；Drop 与 close_stream 都会走这里）
+    fn stop_watchdog(&self) {
+        self.watchdog_stop.store(true, Ordering::SeqCst);
+        // 先 take 再 join：写成 if let 的 scrutinee 会让 MutexGuard 活到整个 if let 结束
+        let handle = lock_or_log!(self.watchdog.lock()).take();
+        if let Some(handle) = handle {
+            let _ = handle.join();
+        }
     }
 
     /// 启动看门狗：执行淡出后的 pause/stop、处理设备断开
     fn start_watchdog(&self) {
         let mut guard = lock_or_log!(self.watchdog.lock());
-        if guard.is_some() {
+        // 线程 panic 退出后 handle 仍是 Some，只看 is_some 会让它永不重启——而 pause/stop
+        // 的落地（PENDING_* 执行、淡出兜底、断连收尾）完全依赖这只狗
+        if guard.as_ref().is_some_and(|handle| !handle.is_finished()) {
             return;
         }
         self.watchdog_stop.store(false, Ordering::SeqCst);
@@ -594,6 +693,11 @@ impl AaudioExclusivePlayer {
             inner: Arc::clone(&self.inner),
         };
         let handle = std::thread::spawn(move || {
+            // 上一次看到的环水位，用于识别"消费侧腾出了空间"
+            let mut last_ring_len = 0usize;
+            // 欠载计数与下次允许上报的时刻（实时回调里不能打日志，观测只能借看门狗的节拍）
+            let mut last_underruns = 0u64;
+            let mut next_underrun_log = std::time::Instant::now();
             while !stop.load(Ordering::SeqCst) {
                 if let Some(inner) = inner_getter.current() {
                     let shared = &inner.ctx.shared;
@@ -612,9 +716,8 @@ impl AaudioExclusivePlayer {
                         let packed = shared.fade_action.swap(PENDING_NONE, Ordering::SeqCst);
                         shared.handoff_fade_action(packed);
                     }
-                    // 取待办；过期判定与实际下发都在控制锁内完成，与 request_start 的代际
-                    // 自增串行：要么本动作先落地（随后的恢复会重新起播），要么被判定过期作废。
-                    // 关流（拔 DAC / 换采样率）时看到 null，动作同样作废，不会操作已释放句柄
+                    // 取待办；过期判定与实际下发都在控制锁内完成，与 request_start 的代际自增
+                    // 串行。关流（拔 DAC / 换采样率）时看到 null，动作同样作废。
                     let packed = shared.pending.swap(PENDING_NONE, Ordering::SeqCst);
                     if packed != PENDING_NONE {
                         let action = pending_action(packed);
@@ -642,7 +745,8 @@ impl AaudioExclusivePlayer {
                                     unsafe {
                                         let _ = ffi::AAudioStream_requestStop(stream);
                                     }
-                                    shared.ring.clear();
+                                    shared.ring.invalidate();
+                                    shared.notify_park();
                                     shared.written.store(0, Ordering::Relaxed);
                                     transition_state(&shared.state, ST_STOPPED);
                                 }
@@ -650,12 +754,46 @@ impl AaudioExclusivePlayer {
                             }
                         });
                     }
-                    if shared.disconnected.load(Ordering::SeqCst) {
-                        log::warn!("AAudio 流已断开（USB DAC 可能已拔出）");
-                        shared.disconnected.store(false, Ordering::SeqCst);
+                    if shared.disconnected.swap(false, Ordering::SeqCst) {
+                        // 断开后不会再有二次通知，须在此收尾：否则回调只写静音、状态仍是
+                        // Playing，进度照走却无声。不清 written，让位置停在断开处。
+                        log::error!(
+                            "AAudio 流已断开（USB DAC 被拔出或设备被抢占），停止输出等待重建"
+                        );
+                        shared.running.store(false, Ordering::Release);
+                        inner.with_stream(|stream| {
+                            // SAFETY: 句柄未关闭；控制锁保证 close 不会与本次调用并发
+                            unsafe {
+                                let _ = ffi::AAudioStream_requestStop(stream);
+                            }
+                        });
+                        shared.ring.invalidate();
+                        shared.notify_park();
+                        transition_state(&shared.state, ST_STOPPED);
+                    }
+                    // 水位下降说明消费侧腾出了空间，唤醒 park gate 上的解码线程补货。实时回调
+                    // 不能唤醒非实时线程，故借看门狗 20ms 节拍代劳；暂停时水位不动，不唤醒。
+                    let ring_len = shared.ring.len();
+                    if ring_len < last_ring_len {
+                        shared.notify_park();
+                    }
+                    last_ring_len = ring_len;
+                    // 欠载观测：回调里打日志会破坏实时性，改由看门狗按固定间隔汇报增量。没有它，
+                    // 偶发 click 在现场无法归因是解码供给不足还是存储抖动（对照 WASAPI 侧的
+                    // UnderrunLogger）。
+                    let underruns = shared.underruns.load(Ordering::Relaxed);
+                    if underruns != last_underruns && std::time::Instant::now() >= next_underrun_log
+                    {
+                        log::warn!(
+                            "AAudio 欠载 {} 次（累计 {underruns}），解码供给或存储可能跟不上",
+                            underruns - last_underruns
+                        );
+                        last_underruns = underruns;
+                        next_underrun_log = std::time::Instant::now()
+                            + Duration::from_secs(UNDERRUN_LOG_INTERVAL_SECS);
                     }
                 }
-                std::thread::sleep(std::time::Duration::from_millis(WATCHDOG_INTERVAL_MS));
+                std::thread::sleep(Duration::from_millis(WATCHDOG_INTERVAL_MS));
             }
         });
         *guard = Some(handle);
@@ -672,10 +810,13 @@ impl AaudioExclusivePlayer {
             return Ok(());
         };
         // 取消进行中的淡出，否则回调结束后会把 pending 覆盖成暂停
-        shared.fade_dir.store(FADE_IDLE, Ordering::SeqCst);
-        shared.fade_action.store(PENDING_NONE, Ordering::SeqCst);
+        shared.cancel_fade();
         shared.queue_pending(PENDING_STOP);
-        shared.ring.clear();
+        // invalidate 而非 clear：同时作废仍持有旧世代的解码线程。只清空是不够的——被作废前正
+        // 卡在 park gate 上的线程会在腾出空间后把上一首的样本写进来。
+        // 唤醒放在 invalidate 之后：顺序反了线程可能先醒来、发现世代仍有效后重新睡下。
+        shared.ring.invalidate();
+        shared.notify_park();
         self.set_state(ST_STOPPED);
         Ok(())
     }
@@ -693,8 +834,7 @@ impl AaudioExclusivePlayer {
         let Some(shared) = self.shared() else {
             return Ok(());
         };
-        shared.fade_dir.store(FADE_IDLE, Ordering::SeqCst);
-        shared.fade_left.store(0, Ordering::SeqCst);
+        shared.cancel_fade();
         shared.queue_pending(PENDING_PAUSE);
         self.set_state(ST_PAUSED);
         Ok(())
@@ -750,7 +890,9 @@ impl AaudioExclusivePlayer {
 
     pub fn clear_buffer(&self) -> Result<(), AppError> {
         if let Some(shared) = self.shared() {
-            shared.ring.clear();
+            // invalidate 而非 clear：切歌/seek 时同时作废旧世代的解码线程（见 `stop`）
+            shared.ring.invalidate();
+            shared.notify_park();
             shared.written.store(0, Ordering::SeqCst);
         }
         Ok(())
@@ -820,14 +962,14 @@ impl AaudioExclusivePlayer {
         let Some(inner) = handle else {
             return Err(AppError::msg("AAudio 播放器未初始化"));
         };
-        // 代际自增、清待办、句柄使用全在同一临界区：关流已发生会看到 null；关流紧接着发生
-        // 则排在本次调用之后（close 会等 requestStart 返回），不存在操作已释放句柄的窗口。
-        // 递增代际使"暂停后快速恢复"时排队的旧暂停/旧停止立即过期——否则看门狗会在恢复
-        // 之后补上一刀暂停，旧停止动作还会清掉刚填的缓冲
+        // 代际自增、清待办、句柄使用全在同一临界区，与关流互斥（close 会等 requestStart 返回）。
+        // 递增代际使"暂停后快速恢复"时排队的旧暂停/旧停止立即过期，见 `pack_pending`。
         let r = inner.with_control(|stream| {
             let shared = &inner.ctx.shared;
             shared.bump_cmd_seq();
             shared.pending.store(PENDING_NONE, Ordering::SeqCst);
+            // 取消可能正在进行中的淡出，理由见 `cancel_fade_out`
+            shared.cancel_fade_out();
             let Some(stream) = stream else {
                 return Err(AppError::msg("AAudio 流未打开"));
             };
@@ -843,6 +985,8 @@ impl AaudioExclusivePlayer {
         }
         // 起播成功后才发布 running：失败时流根本没在跑，置了会让回调与解码线程都以为可写
         inner.ctx.shared.running.store(true, Ordering::Release);
+        // 唤醒停在 park gate 上的解码线程：恢复播放会让它等的条件（缓冲能装下的量）重新成立
+        inner.ctx.shared.notify_park();
         self.set_state(ST_PLAYING);
         Ok(())
     }
@@ -864,8 +1008,7 @@ impl AaudioExclusivePlayer {
             // 先写斜坡参数，最后置方向，避免回调读到半更新状态
             shared.fade_total.store(frames, Ordering::SeqCst);
             shared.fade_left.store(frames, Ordering::SeqCst);
-            // 带上发起淡出时的代际：淡出途中若用户恢复播放（代际 +1），
-            // 兜底转交出来的这个动作会被看门狗判为过期
+            // 带上发起淡出时的代际：途中若用户恢复播放，这个动作会被看门狗判为过期
             let packed = pack_pending(shared.cmd_seq.load(Ordering::SeqCst), action_code);
             shared.fade_action.store(packed, Ordering::SeqCst);
             shared.fade_deadline_ms.store(
@@ -884,20 +1027,17 @@ impl AaudioExclusivePlayer {
 
 impl Drop for AaudioExclusivePlayer {
     fn drop(&mut self) {
-        self.watchdog_stop.store(true, Ordering::SeqCst);
-        // 先取出来再判断：写成 if let 的 scrutinee 会让 MutexGuard 活到整个 if let 结束
-        let watchdog = lock_or_log!(self.watchdog.lock()).take();
-        if let Some(handle) = watchdog {
-            let _ = handle.join();
-        }
+        self.stop_watchdog();
         self.close_stream();
     }
 }
 
 // 回调与工具
 
+/// 环形缓冲容量：由 [`crate::audio::sample_ring::exclusive_ring_capacity`] 统一推导，
+/// 保证严格大于解码线程的水位门控（否则门控形同虚设，背压等待会变成主节奏点）。
 fn ring_capacity(sample_rate: u32, channels: u16) -> usize {
-    ((sample_rate as usize * channels as usize) as f32 * RING_SECONDS) as usize
+    crate::audio::sample_ring::exclusive_ring_capacity(sample_rate, channels, RING_SECONDS)
 }
 
 fn fade_frames(duration_ms: u32, sample_rate: u32) -> usize {
@@ -943,22 +1083,55 @@ fn check(result: ffi::aaudio_result_t, what: &str) -> Result<(), AppError> {
     )))
 }
 
+/// 回退共享模式时用的采样格式：共享模式只保证支持 FLOAT 与 I16，
+/// 24-bit packed（API 31+）与 I32 在部分设备上会直接让 openStream 失败。
+const fn shared_fallback_format(wanted: ffi::aaudio_format_t) -> ffi::aaudio_format_t {
+    if wanted == ffi::AAUDIO_FORMAT_PCM_FLOAT {
+        ffi::AAUDIO_FORMAT_PCM_FLOAT
+    } else {
+        ffi::AAUDIO_FORMAT_PCM_I16
+    }
+}
+
+/// 数据回调入口：只做一层 panic 收口，真正的工作在 [`fill_block`]。
+///
+/// 回调里的 panic 会跨 FFI 边界——`panic = "abort"` 构建直接杀进程，否则 unwind 穿进 AAudio 的
+/// C 栈（UB）。此处能接住就补静音继续放；abort 下 catch_unwind 接不住，故 [`fill_block`]
+/// 只允许有界索引与原子量操作，不留 panic 路径。
 unsafe extern "C" fn data_callback(
     _stream: *mut ffi::AAudioStreamStruct,
     user: *mut c_void,
     audio: *mut c_void,
     frames: i32,
 ) -> ffi::aaudio_data_callback_result_t {
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: 见 fill_block 的前置条件
+        unsafe { fill_block(user, audio, frames) }
+    }));
+    if caught.is_err() && !audio.is_null() && frames > 0 {
+        // 实时线程上不做格式化、不分配，静默补零即可
+        // SAFETY: 同 fill_block —— user 仍指向存活的 Ctx，audio 由 AAudio 提供
+        let ctx = unsafe { &*(user as *const Ctx) };
+        write_silence(&ctx.shared, audio, frames as usize);
+    }
+    ffi::AAUDIO_CALLBACK_RESULT_CONTINUE
+}
+
+/// 数据回调主体。
+/// # Safety
+/// `user` 必须是 `open_stream` 传入且仍存活的 `Arc<Ctx>` 裸指针（`AAudioStream_close`
+/// 会等本次回调返回后才释放）；`audio` 为 AAudio 输出区，容量 `frames * channels`。
+unsafe fn fill_block(user: *mut c_void, audio: *mut c_void, frames: i32) {
     // SAFETY: userData 是 open_stream 时传入的 Arc<Ctx> 裸指针，
     // 释放发生在 AAudioStream_close 之后（close 会等本次回调返回）
     let ctx = unsafe { &*(user as *const Ctx) };
     let shared = &ctx.shared;
     if frames <= 0 || audio.is_null() {
-        return ffi::AAUDIO_CALLBACK_RESULT_CONTINUE;
+        return;
     }
     if !shared.running.load(Ordering::Acquire) {
         write_silence(shared, audio, frames as usize);
-        return ffi::AAUDIO_CALLBACK_RESULT_CONTINUE;
+        return;
     }
 
     let channels = shared.channels.load(Ordering::Relaxed).max(1) as usize;
@@ -971,11 +1144,22 @@ unsafe extern "C" fn data_callback(
     if got < need {
         scratch.resize(need, 0.0);
         shared.underruns.fetch_add(1, Ordering::Relaxed);
+        // 补零本身是硬切：最后一个真样本与紧随其后的 0 之间的阶跃就是一次可听 click。
+        // 把缺口之前的最后一小段线性收敛到 0，阶跃就变成斜率有界的斜坡。
+        let ramp_frames = UNDERRUN_RAMP_FRAMES.min(got / channels);
+        let start = got - ramp_frames * channels;
+        for f in 0..ramp_frames {
+            // 末帧增益恰为 0，与缺口里的静音无缝衔接
+            let gain = 1.0 - (f + 1) as f32 / ramp_frames as f32;
+            for c in 0..channels {
+                scratch[start + f * channels + c] *= gain;
+            }
+        }
     }
 
     let volume = f32::from_bits(shared.volume.load(Ordering::Relaxed));
-    // 斜坡按帧而不是按采样推进：一个帧含 channels 个采样，按采样推进会在半个
-    // 回调块内就走完斜坡并继续过冲（淡出时增益转负 → 反相失真），左右声道还不一致
+    // 斜坡按帧而不是按采样推进：一帧含 channels 个采样，按采样推进会在半个回调块内就走完斜坡
+    // 并继续过冲（淡出时增益转负，即反相失真），左右声道还不一致
     let (fade_start, fade_end) = {
         let dir = shared.fade_dir.load(Ordering::Relaxed);
         let total = shared.fade_total.load(Ordering::Relaxed);
@@ -995,7 +1179,7 @@ unsafe extern "C" fn data_callback(
             if left == 0 {
                 shared.fade_dir.store(FADE_IDLE, Ordering::Relaxed);
                 if dir == FADE_OUT {
-                    // 转交打包了代际的动作；淡出途中用户若已恢复播放，看门狗会判其过期
+                    // 转交打包了代际的动作，过期判定见 `pack_pending`
                     let packed = shared.fade_action.swap(PENDING_NONE, Ordering::SeqCst);
                     shared.handoff_fade_action(packed);
                 }
@@ -1010,7 +1194,7 @@ unsafe extern "C" fn data_callback(
         0.0
     };
 
-    // SAFETY: audio 由 AAudio 提供，容量 = frames × channels × 采样字节数
+    // SAFETY: audio 由 AAudio 提供，容量 = frames * channels * 采样字节数
     unsafe {
         match shared.format.load(Ordering::Relaxed) {
             ffi::AAUDIO_FORMAT_PCM_FLOAT => {
@@ -1050,9 +1234,9 @@ unsafe extern "C" fn data_callback(
         }
     }
 
-    shared.written.fetch_add(need as u64, Ordering::Relaxed);
-
-    ffi::AAUDIO_CALLBACK_RESULT_CONTINUE
+    // 只计真正取走的采样：欠载补的零不是音乐。按 need 计会让播放位置比实际听到的跑得快
+    // （卡顿或拔线几秒后位置已经跳过去一段，进度条与声音对不上）。
+    shared.written.fetch_add(got as u64, Ordering::Relaxed);
 }
 
 unsafe extern "C" fn error_callback(
@@ -1070,7 +1254,9 @@ unsafe extern "C" fn error_callback(
 
 /// 流未运行时把输出区填零（避免回放上一轮的残留数据）
 fn write_silence(shared: &Shared, audio: *mut c_void, frames: usize) {
-    let channels = shared.channels.load(Ordering::Relaxed) as usize;
+    // 与 fill_block 同口径地 .max(1)：channels 尚未写入（流刚开）时它会短暂为 0，那时 n 也变成
+    // 0，等于什么都没写、把上一轮的残留数据留在了输出区
+    let channels = (shared.channels.load(Ordering::Relaxed) as usize).max(1);
     let n = frames * channels;
     // SAFETY: audio 由 AAudio 提供，容量与格式匹配
     unsafe {

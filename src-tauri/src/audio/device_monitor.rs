@@ -1,12 +1,9 @@
-//! 音频设备监听模块
+//! 音频设备监听：设备插拔、断开后自动切到其他可用设备，以及系统默认输出变化
+//! （无插拔、用户在系统设置里主动切换）时跟随切换。
 //!
-//! 监听设备插拔、断开后自动切换到其他可用设备，以及系统默认输出变化
-//! （无插拔、用户在系统设置里主动切换）时跟随切换。Android 上 AAudio 的设备枚举语义与桌面
-//! 不同，插拔/切换事件不适用，监听整体降级为 no-op。
-//!
-//! 桌面各平台默认用 cpal 轮询实现。Windows 的 IMMNotificationClient 事件驱动实现保留在
-//! `windows_impl`，由 `imm-notification` feature 启用（`DeviceMonitor::start` 里按 cfg 分发）；
-//! 因 COM 回调触发与 previous_default 状态同步存在运行时可靠性问题，默认关闭。
+//! Android 上 AAudio 的设备枚举语义与桌面不同，插拔/切换事件不适用，监听整体降级为 no-op。
+//! 桌面各平台默认用 cpal 轮询；Windows 的 IMMNotificationClient 事件驱动实现在 `windows_impl`，
+//! 由 `imm-notification` feature 启用（COM 回调触发与 previous_default 同步有可靠性问题，故默认关闭）。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -126,10 +123,10 @@ impl Drop for DeviceMonitor {
 
 // 基于 cpal 的轮询实现（桌面各平台）
 
-/// 监听设备变更的主循环
+/// 监听设备变更的主循环。
 ///
-/// 仅在使用轮询模式时编译:启用 imm-notification 后由 `windows_impl` 接管,
-/// 此时本函数(及其专用的 `get_device_names`)不会被引用。
+/// 仅在使用轮询模式时编译：启用 imm-notification 后由 `windows_impl` 接管，此时本函数
+/// （及其专用的 `get_device_names`）不会被引用。
 #[cfg(not(all(target_os = "windows", feature = "imm-notification")))]
 #[cfg(not(target_os = "android"))]
 fn monitor_device_changes(
@@ -161,7 +158,6 @@ fn monitor_device_changes(
         {
             log::info!("Device removed: {current_device_name}");
 
-            // 发送设备移除事件
             let _ = app.emit(
                 "device-removed",
                 DeviceChangeEvent {
@@ -170,11 +166,9 @@ fn monitor_device_changes(
                 },
             );
 
-            // 尝试切换到其他可用设备
             if let Some(fallback_device) = find_fallback_device(&host, &current_device_name) {
                 log::warn!("Switching to fallback device: {fallback_device}");
 
-                // 发送设备切换请求
                 let _ = app.emit(
                     "device-switch-required",
                     DeviceChangeEvent {
@@ -185,7 +179,6 @@ fn monitor_device_changes(
             } else {
                 log::error!("No fallback device available");
 
-                // 发送无可用设备事件
                 let _ = app.emit(
                     "no-device-available",
                     DeviceChangeEvent {
@@ -211,15 +204,13 @@ fn monitor_device_changes(
             }
         }
 
-        // 检查系统默认设备变化（无插拔时用户在系统设置中主动切换、
-        // 或新设备插入导致默认设备自动变更，都会走到这里）
+        // 系统默认设备变化：无插拔时用户在系统设置中主动切换、或新设备插入导致默认设备自动变更
         let current_default = get_default_device_name(&host);
         if current_default != previous_default {
             let old_default = previous_default.take();
             previous_default.clone_from(&current_default);
 
-            // 仅当应用当前使用的设备是旧默认设备（即正在跟随系统默认输出）时，
-            // 才跟随系统切换到新默认设备，避免打断用户手动指定的设备
+            // 只在应用正跟随系统默认输出时才跟随切换，避免打断用户手动指定的设备
             if let Some(new_default) = current_default {
                 let is_following_default =
                     old_default.as_deref() == Some(current_device_name.as_str());
@@ -264,10 +255,9 @@ fn get_default_device_name(host: &cpal::Host) -> Option<String> {
         .and_then(|device| get_device_friendly_name(&device))
 }
 
-/// 查找备用设备
+/// 查找备用设备：优先系统默认设备，否则取第一个非排除设备
 #[cfg(not(target_os = "android"))]
 fn find_fallback_device(host: &cpal::Host, excluded_device: &str) -> Option<String> {
-    // 首先尝试默认设备
     if let Some(default_device) = host.default_output_device() {
         if let Some(name) = get_device_friendly_name(&default_device) {
             if name != excluded_device {
@@ -276,15 +266,13 @@ fn find_fallback_device(host: &cpal::Host, excluded_device: &str) -> Option<Stri
         }
     }
 
-    // 如果默认设备不可用，选择第一个可用设备
     host.output_devices()
         .ok()?
         .filter_map(|device| get_device_friendly_name(&device))
         .find(|name| name != excluded_device)
 }
 
-// Windows 平台：基于 IMMNotificationClient 的事件驱动实现（默认禁用）
-// COM 回调触发与 previous_default 状态同步存在运行时可靠性问题，故默认走轮询模式。
+// Windows 平台：基于 IMMNotificationClient 的事件驱动实现，默认禁用（原因见模块注释）。
 // 启用方式：构建时加 `imm-notification` feature，DeviceMonitor::start 会分派到 run_windows_monitor。
 
 #[cfg(all(target_os = "windows", feature = "imm-notification"))]
@@ -315,9 +303,8 @@ mod windows_impl {
 
     /// PKEY_Device_FriendlyName = {a45c254e-df08-4e93-bf1a-d1c97c2b3e08}, 14
     ///
-    /// 该常量与 cpal 0.17 WASAPI 后端读取的 FriendlyName 属性完全相同，
-    /// 因此通过 IPropertyStore 获取的设备名称会与 `device.rs` 中
-    /// `get_device_friendly_name` 返回的名称一致。
+    /// 与 cpal 0.17 WASAPI 后端读取的属性相同，故这里取到的设备名与 `device.rs` 的
+    /// `get_device_friendly_name` 一致。
     const PKEY_DEVICE_FRIENDLY_NAME: PROPERTYKEY = PROPERTYKEY {
         fmtid: windows::core::GUID::from_u128(0xa45c254e_df08_4e93_bf1a_d1c97c2b3e08),
         pid: 14,
@@ -325,8 +312,7 @@ mod windows_impl {
 
     /// COM 回调对象：实现 IMMNotificationClient 接口接收系统音频设备变更通知。
     ///
-    /// 字段必须全部 `Send + Sync`，因为 IMMNotificationClient 回调可能从
-    /// 任意 RPC 线程触发（MTA 模式下）。
+    /// 字段必须全部 `Send + Sync`：MTA 模式下回调可能从任意 RPC 线程触发。
     #[windows::core::implement(IMMNotificationClient)]
     struct DeviceNotificationClient {
         app: AppHandle,
@@ -338,7 +324,6 @@ mod windows_impl {
     }
 
     impl DeviceNotificationClient {
-        /// 创建回调对象。`enumerator` 必须传入已创建的 IMMDeviceEnumerator 实例。
         fn new(
             app: AppHandle,
             current_device: Arc<Mutex<String>>,
@@ -353,10 +338,7 @@ mod windows_impl {
             }
         }
 
-        /// 根据设备 ID 获取设备的 FriendlyName。
-        ///
-        /// 返回值与 `device.rs` 中 `get_device_friendly_name` 的输出一致，
-        /// 因为两者都读取 `PKEY_Device_FriendlyName` 属性。
+        /// 根据设备 ID 获取 FriendlyName，与 `device.rs` 的 `get_device_friendly_name` 输出一致。
         ///
         /// # Safety
         /// 调用者必须保证当前线程已通过 `CoInitializeEx` 初始化 COM。
@@ -370,7 +352,6 @@ mod windows_impl {
             // SAFETY: key 是常量指针，PROPVARIANT 由 GetValue 写入
             let prop_variant = unsafe { prop_store.GetValue(&PKEY_DEVICE_FRIENDLY_NAME).ok()? };
 
-            // 将 PROPVARIANT 转换为字符串
             // SAFETY: prop_variant 已通过 GetValue 写入，PropVariantToStringAlloc 读取它
             let name_ptr: PWSTR =
                 unsafe { PropVariantToStringAlloc(&raw const prop_variant).ok()? };
@@ -420,15 +401,12 @@ mod windows_impl {
         }
     }
 
-    /// 实现 IMMNotificationClient 接口。注意：trait 必须实现到 `*_Impl` 类型上
-    /// （由 `#[implement]` 宏生成），而不是原始类型，因为 `IUnknownImpl` 由宏
-    /// 在 `*_Impl` 上实现，trait 的 supertrait 要求才能被满足。
+    /// 实现 IMMNotificationClient 接口。注意：trait 必须实现到 `*_Impl` 类型上（由 `#[implement]`
+    /// 宏生成），因为 `IUnknownImpl` 由宏在 `*_Impl` 上实现，trait 的 supertrait 要求才能被满足。
     impl IMMNotificationClient_Impl for DeviceNotificationClient_Impl {
-        /// 设备状态变化（启用/禁用/插拔）。
-        ///
-        /// 仅当当前设备变为不可用状态时触发移除逻辑；
-        /// 设备从 Disabled 变为 Active 时不触发 device-added 事件，
-        /// 因为 IMMDeviceEnumerator 在枚举设备列表时仍会包含 Disabled 设备。
+        /// 设备状态变化（启用/禁用/插拔）。仅当当前设备变为不可用时触发移除逻辑；
+        /// Disabled 变 Active 时不发 device-added，因为 IMMDeviceEnumerator 枚举设备列表时
+        /// 仍会包含 Disabled 设备。
         fn OnDeviceStateChanged(
             &self,
             pwstrdeviceid: &PCWSTR,
@@ -438,7 +416,6 @@ mod windows_impl {
             let device_name = unsafe { self.get_device_name_by_id(*pwstrdeviceid) };
 
             match dwnewstate {
-                // 设备变为不可用：检查是否为当前设备
                 DEVICE_STATE_UNPLUGGED | DEVICE_STATE_NOTPRESENT | DEVICE_STATE_DISABLED => {
                     if let Some(ref name) = device_name {
                         let current = self
@@ -497,17 +474,13 @@ mod windows_impl {
             Ok(())
         }
 
-        /// 系统默认设备变化。
-        ///
-        /// 仅当应用当前使用的设备是旧默认设备（即正在跟随系统默认输出）时，
-        /// 才跟随系统切换到新默认设备，避免打断用户手动指定的设备。
+        /// 系统默认设备变化。只在应用正跟随系统默认输出时才跟随切换，避免打断用户手动指定的设备。
         fn OnDefaultDeviceChanged(
             &self,
             flow: EDataFlow,
             _role: ERole,
             pwstrdefaultdeviceid: &PCWSTR,
         ) -> windows::core::Result<()> {
-            // 只关心输出设备（render）的默认变化
             if flow != eRender {
                 return Ok(());
             }
@@ -536,7 +509,6 @@ mod windows_impl {
                 .map(|guard| guard.clone())
                 .unwrap_or_default();
 
-            // 仅当应用当前正在使用旧默认设备（即跟随系统默认）时才跟随切换
             let is_following_default = old_default.as_deref() == Some(current_device_name.as_str());
             if is_following_default && new_default != current_device_name {
                 log::info!("System default device changed to: {new_default}, following");
@@ -562,29 +534,23 @@ mod windows_impl {
         }
     }
 
-    /// Windows 平台监听主入口。
-    ///
-    /// 在独立线程上初始化 COM（MTA），创建 `IMMDeviceEnumerator` 并注册
-    /// `IMMNotificationClient` 回调，然后进入等待循环直到 `is_running` 变为 false。
+    /// Windows 平台监听主入口：在独立线程上初始化 COM（MTA）、注册 `IMMNotificationClient`
+    /// 回调，然后等待 `is_running` 变为 false。
     pub fn run_windows_monitor(
         app: AppHandle,
         is_running: Arc<AtomicBool>,
         current_device: Arc<Mutex<String>>,
     ) {
         // SAFETY: 本函数在专属的 device-monitor 线程上运行，所有 COM 调用都在该线程：
-        // - CoInitializeEx(MTA) 在线程入口调用，CoUninitialize 在退出时配对
-        // - IMMDeviceEnumerator 实例和回调注册都在同一线程完成
+        // CoInitializeEx(MTA) 与 CoUninitialize 在线程入口/退出配对，enumerator 与回调注册
+        // 也都在同一线程完成。
         unsafe {
-            // 初始化 COM 库（多线程公寓 MTA）
-            // MTA 模式下，IMMNotificationClient 回调可能从任意 RPC 线程触发，
-            // DeviceNotificationClient 的字段（AppHandle / Arc<Mutex>）均 Send + Sync，线程安全。
             let com_initialized = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
             if !com_initialized {
                 log::error!("Device monitor: CoInitializeEx failed");
                 return;
             }
 
-            // 创建 IMMDeviceEnumerator 实例
             let enumerator: IMMDeviceEnumerator =
                 match CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) {
                     Ok(enumerator) => enumerator,
@@ -595,11 +561,10 @@ mod windows_impl {
                     }
                 };
 
-            // 初始化 previous_default 缓存（与轮询实现保持一致）
+            // previous_default 缓存与轮询实现保持一致
             let host = cpal::default_host();
             let previous_default = Arc::new(Mutex::new(get_default_device_name(&host)));
 
-            // 创建回调对象
             let callback: IMMNotificationClient = DeviceNotificationClient::new(
                 app,
                 Arc::clone(&current_device),
@@ -608,7 +573,6 @@ mod windows_impl {
             )
             .into();
 
-            // 注册回调
             // SAFETY: enumerator 是有效的 IMMDeviceEnumerator，callback 是有效的 IMMNotificationClient
             if let Err(e) = enumerator.RegisterEndpointNotificationCallback(&callback) {
                 log::error!("Device monitor: RegisterEndpointNotificationCallback failed: {e}");
@@ -618,19 +582,16 @@ mod windows_impl {
 
             log::info!("Device monitor: registered IMMNotificationClient callback");
 
-            // 等待停止信号
             // MTA 模式下不需要消息泵，回调由 RPC 线程直接派发
             while is_running.load(Ordering::SeqCst) {
                 thread::sleep(Duration::from_millis(100));
             }
 
-            // 注销回调
             // SAFETY: enumerator 和 callback 都有效，且 callback 之前已成功注册
             if let Err(e) = enumerator.UnregisterEndpointNotificationCallback(&callback) {
                 log::warn!("Device monitor: UnregisterEndpointNotificationCallback failed: {e}");
             }
 
-            // 释放 COM
             // SAFETY: 与 CoInitializeEx 配对，所有 COM 对象已释放
             CoUninitialize();
 

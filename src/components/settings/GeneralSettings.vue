@@ -4,7 +4,6 @@
       <h3>{{ $t('config.generalSettings') }}</h3>
     </div>
 
-    <!-- 配置设置 -->
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.configSettings') }}</h4>
 
@@ -29,7 +28,6 @@
       </div>
     </div>
 
-    <!-- 目录扫描设置 -->
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.directoryScan') }}</h4>
 
@@ -80,8 +78,7 @@
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.display') }}</h4>
 
-      <!-- 界面字号：只有 Android 真正生效（原生侧接管 WebView textZoom，原理见 useAppFontScale）。
-           桌面端仍显示该项，但后端是 no-op。 -->
+      <!-- 界面字号只有 Android 真正生效 (原生侧接管 WebView textZoom, 原理见 useAppFontScale); 桌面端仍显示该项但后端是 no-op -->
       <div class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.interfaceFontSize') }}</span>
@@ -168,7 +165,6 @@
       </div>
     </div>
 
-    <!-- 缓存设置 -->
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.cacheSettings') }}</h4>
 
@@ -194,8 +190,7 @@
         </div>
       </div>
 
-      <!-- setting-item-wide：这一行的右侧控件（缓存路径 + 两个按钮）在窄屏上是撑不满的，
-           见文件末尾 orientation 媒体查询，竖屏下改成上下排。 -->
+      <!-- setting-item-wide: 右侧控件 (缓存路径 + 两个按钮) 窄屏撑不满, 见文件末尾 orientation 媒体查询 -->
       <div class="setting-item setting-item-wide">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.coverCachePath') }}</span>
@@ -332,9 +327,8 @@ const cacheSliderStyle = computed(() => {
   }
 })
 
-/* ===== 界面字号 =====
-   上下限必须与原生侧 FontScaleBridge.MIN_SCALE / MAX_SCALE 一致，
-   那边还会再 clamp 一次（超范围的值不会让界面崩掉，只会被收进这个区间）。 */
+/* 界面字号上下限须与原生侧 FontScaleBridge.MIN_SCALE / MAX_SCALE 一致 (那边还会再 clamp 一次),
+   两份值由 fontScaleBoundsMirror.test.ts 守住 */
 const UI_FONT_SCALE_MIN = 0.8
 const UI_FONT_SCALE_MAX = 1.6
 
@@ -357,7 +351,7 @@ const uiFontScaleSliderStyle = computed(() => {
 /** 100% = 设计稿原始大小 */
 const uiFontScaleText = computed(() => `${Math.round(uiFontScale.value * 100)}%`)
 
-/** 把当前倍率下发给原生侧 */
+/** 倍率改动立即下发原生侧, 不等保存配置 */
 const handleUIFontScaleChange = (): void => {
   void applyAppFontScale(uiFontScale.value)
 }
@@ -373,7 +367,6 @@ const coverCachePathDisplay = computed(() => {
   if (!coverCachePath.value) {
     return tempDirPath.value
   }
-  // 缩短路径显示
   const path = coverCachePath.value
   if (path.length > 30) {
     return '...' + path.slice(-30)
@@ -520,7 +513,7 @@ const selectCachePath = async () => {
     })
     if (selected && typeof selected === 'string') {
       coverCachePath.value = selected
-      // 通知后端更新缓存路径
+      // 缓存路径要立即下发后端, 不能只等保存配置
       await setCoverCachePath(selected)
       await saveConfig()
     }
@@ -531,7 +524,7 @@ const selectCachePath = async () => {
 
 const resetCachePath = async () => {
   coverCachePath.value = undefined
-  // 通知后端恢复默认路径
+  // 同理立即下发; null 表示回到系统临时目录
   await setCoverCachePath(null)
   await saveConfig()
 }
@@ -612,14 +605,12 @@ onMounted(() => {
   color: var(--md-sys-color-on-surface);
 }
 
-/* 设置描述文字 */
 .setting-desc {
   font-size: 12px;
   color: var(--md-sys-color-on-surface-variant);
   margin-top: 2px;
 }
 
-/* 数字输入控件 */
 .number-input {
   display: flex;
   align-items: center;
@@ -666,7 +657,6 @@ onMounted(() => {
   color: var(--md-sys-color-on-surface);
 }
 
-/* 缓存大小控制 */
 .cache-size-control {
   display: flex;
   align-items: center;
@@ -716,12 +706,11 @@ onMounted(() => {
   color: var(--md-sys-color-on-surface);
 }
 
-/* 百分比文案（"100%"）在拖动时会从 3 位变 4 位，留个下限宽度免得整行左右抖 */
+/* 百分比文案拖动时会从 3 位变 4 位, 留个下限宽度免得整行左右抖 */
 .ui-font-size-value {
   min-width: 44px;
 }
 
-/* 缓存路径控制 */
 .cache-path-control {
   display: flex;
   align-items: center;
@@ -760,7 +749,6 @@ onMounted(() => {
   font-size: 20px;
 }
 
-/* 清理缓存按钮 */
 .clear-cache-btn {
   padding: 8px 16px;
   background-color: var(--md-sys-color-primary);
@@ -785,9 +773,9 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-/* 窄屏（手机竖屏）：这一行右侧是"一长串路径 + 两个图标按钮"，横排时它的 max-content 宽度只
-   能靠挤压左侧文字腾地方，.setting-info 会被压到 0px 而控件顶出屏幕。改成上下排：文字占满整
-   行，路径单独一行并允许换行，按钮落到下一行右对齐。 */
+/* 竖屏: 右侧是一长串路径 + 两个图标按钮, 横排时只能靠挤压左侧文字腾地方,
+   .setting-info 会被压到 0px 而控件顶出屏幕, 故改上下排: 文字占满整行,
+   路径单独一行允许换行, 按钮落到下一行右对齐 */
 @media (orientation: portrait) {
   .setting-item-wide {
     flex-direction: column;
@@ -797,7 +785,7 @@ onMounted(() => {
 
   .setting-item-wide .cache-path-control {
     flex-wrap: wrap;
-    /* 路径独占一行（flex-basis 100%），按钮因此被挤到第二行，靠右收尾 */
+    /* 路径 flex-basis 100% 独占一行, 按钮被挤到第二行靠右收尾 */
     justify-content: flex-end;
     gap: 6px;
   }
@@ -805,8 +793,8 @@ onMounted(() => {
   .setting-item-wide .cache-path-value {
     flex: 1 1 100%;
     white-space: normal;
-    /* 路径没有可断行的空格，只有 break-all 才能换行；
-       用 anywhere 会在过窄时把单行压成极限窄，break-all 更稳 */
+    /* 路径没有可断行的空格, 只有 break-all 能换行;
+       anywhere 在过窄时会把单行压成极限窄, break-all 更稳 */
     word-break: break-all;
     line-height: 1.35;
     text-overflow: clip;

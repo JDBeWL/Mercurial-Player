@@ -14,9 +14,8 @@ import { defineComponent, inject, type PropType, type CSSProperties, type Ref } 
 import type { KaraokeWord } from '@/types'
 import { usePlayerStore } from '@/stores/player'
 
-// 卡拉OK逐字进度子组件：把对 visualTime（每帧更新）的渲染依赖隔离在这里，
-// 父组件 LyricsDisplay 的渲染不再每帧重跑，只有当前激活行的单词会重渲染。
-// visualTime 由 LyricsDisplay 通过 provide 注入（传 ref 本身，而非解包后的数值）。
+// 卡拉 OK 逐字进度子组件：把对 visualTime（每帧更新）的渲染依赖隔离在这里，
+// 父组件 LyricsDisplay 不再每帧重渲染；visualTime 由 LyricsDisplay 以 'lyricsVisualTime' provide ref 本身
 export default defineComponent({
   name: 'KaraokeLine',
   props: {
@@ -34,17 +33,15 @@ export default defineComponent({
 
     const isWordActive = (word: KaraokeWord): boolean => {
       const t = currentTime()
-      // 只有在时间范围内才算激活，并且考虑下一个单词的开始时间
       return t >= word.start && t < word.end
     }
 
-    // 计算卡拉OK单词的填充进度 (0% - 100%)
     const getKaraokeStyle = (word: KaraokeWord): CSSProperties => {
       const t = currentTime()
       if (t >= word.end) return { '--progress': '100%' }
       if (t < word.start) return { '--progress': '0%' }
 
-      // 确保进度计算精确，避免浮点数误差
+      // 夹在 0-100，时间戳重叠时 --progress 不会越界
       const duration = word.end - word.start
       const elapsed = t - word.start
       const progress = Math.min(100, Math.max(0, (elapsed / duration) * 100))

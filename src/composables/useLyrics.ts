@@ -10,8 +10,7 @@ import { invoke } from '@tauri-apps/api/core'
 import logger from '@/utils/logger'
 import type { LyricLine, LyricsConfig, Track } from '@/types'
 
-// 模块级别的在线歌词缓存，限制最多50首，避免内存泄漏。
-// 复用通用 LRU 实现;TTL 传 Infinity 表示本会话内不过期(歌词内容不可变)。
+// 在线歌词缓存:上限 50 首;TTL 传 Infinity 表示会话内不过期 (歌词内容不可变)
 const onlineLyricsCache = new LRUCache<{
   content: string
   format: 'lrc' | 'ass'
@@ -19,32 +18,30 @@ const onlineLyricsCache = new LRUCache<{
   source: string
 }>(50, Infinity)
 
-// 模块级别的共享状态：
-// 所有 useLyrics 实例共享同一份 lyrics / loading / activeIndex / lyricsSource / onlineLyricsError,
-// 以及同一套 watcher,避免多个调用方各自创建 watcher 导致重复 IPC 调用和内存泄漏。
+// 模块级共享状态:所有 useLyrics 实例共用同一份,原因见 initializeSharedWatchers
 const sharedLyrics = ref<LyricLine[]>([])
 const sharedLoading = ref(false)
 const sharedActiveIndex = ref(-1)
 const sharedLyricsSource: Ref<'local' | 'online'> = ref('local')
 const sharedOnlineLyricsError = ref<string | null>(null)
 
-// 在线歌词请求经由 Tauri invoke 后端代理,前端的 AbortSignal 无法取消后端 HTTP 请求;
-// 过期结果的丢弃由 store 的统一歌词请求守卫负责:
-// player.beginLyricsRequest / isLyricsRequestCurrent (store.loadLyrics 与本模块共享同一计数器)。
+// 在线歌词经由 Tauri invoke 后端代理,前端 AbortSignal 取消不了后端 HTTP 请求;
+// 过期结果的丢弃统一交给 store 的序号守卫 (player.beginLyricsRequest / isLyricsRequestCurrent,
+// store.loadLyrics 与本模块共享同一计数器)
 
-// 模块级别的初始化标记
+// 模块级初始化标记:共享 watcher 只建立一次
 let isInitialized = false
 
-// 共享 watcher 的停止函数,在 cleanup 时用于停止所有 watcher (HMR 场景)
+// 共享 watcher 的停止函数,cleanup 时用于全部停止 (HMR 重建 store 后旧 watcher 会引用旧实例)
 const sharedWatchStopFns: Array<() => void> = []
 
-// 模块级别的 store 引用（在 initializeSharedWatchers 中赋值）
+// 模块级 store 引用,在 initializeSharedWatchers 中赋值
+// cleanup 时刻意不置空:置空会让 loadLyrics / fetchOnlineLyrics 因守卫检查静默失效,
+// 下次 initializeSharedWatchers() 会重新指向最新的 store 实例
 let _playerStore: ReturnType<typeof usePlayerStore> | null = null
 let _configStore: ReturnType<typeof useConfigStore> | null = null
 
-/**
- * 兜底歌词配置（store 歌词配置为空时使用），保证多来源流程不因缺字段而崩溃
- */
+/** 兜底歌词配置:store 配置缺字段时使用,避免多来源流程崩溃 */
 function safeLyricsConfig(): LyricsConfig {
   return (
     _configStore?.lyrics ?? {
@@ -61,7 +58,7 @@ function safeLyricsConfig(): LyricsConfig {
   )
 }
 
-/** 从当前曲目构造歌词查询参数 */
+/** 从当前曲目构造歌词查询参数;duration_ms 是毫秒,而 store 的 duration 以秒计 */
 function buildQuery(track: Track | null): { title: string; artist: string; duration_ms: number } {
   const title =
     track?.title || track?.name || FileUtils.getFileNameWithoutExtension(track?.path || '')
@@ -90,9 +87,7 @@ async function fetchOnlineLyrics(
   }
 }
 
-/**
- * 保存歌词到本地（按格式选扩展名：ASS 逐字 / LRC）
- */
+/** 保存歌词到本地,按格式选扩展名 (ASS 逐字歌词 / LRC 逐行歌词) */
 async function saveLyricsToLocal(
   trackPath: string,
   content: string,
@@ -114,14 +109,13 @@ async function saveLyricsToLocal(
 }
 
 /**
- * 加载歌词（本地优先,失败时尝试在线获取）
+ * 加载歌词:本地文件优先,缺失时按配置在线获取
  *
- * 写入统一走 _playerStore.lyrics (唯一事实源),
- * sharedLyrics 由 initializeSharedWatchers 中的同步 watcher 跟随更新。
+ * 写入统一走 _playerStore.lyrics,时机见 initializeSharedWatchers 中的 store.lyrics watcher
  */
 async function loadLyrics(trackPath: string | undefined): Promise<void> {
   if (!_playerStore || !_configStore) return
-  // 序号守卫: 快速切歌时并发请求,只有最新一次的结果允许写入共享状态
+  // 序号守卫:快速切歌时请求并发,只有最新一次的结果允许写入共享状态
   const seq = _playerStore.beginLyricsRequest()
   if (!trackPath) {
     _playerStore.lyrics = null
@@ -130,7 +124,6 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
     return
   }
 
-  // 先检查缓存中是否有这首歌的在线歌词
   const cached = onlineLyricsCache.get(trackPath)
   if (cached) {
     logger.debug('Using cached online lyrics for:', trackPath)
@@ -150,8 +143,7 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
     if (lyricsPath) {
       const content = await FileUtils.readFile(lyricsPath)
       const ext = FileUtils.getFileExtension(lyricsPath) as 'lrc' | 'ass' | 'srt'
-      // 使用统一的异步解析器
-      // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
+      // markRaw: 歌词行只整体替换、不改内部字段,无需深度响应式代理
       const parsed = markRaw(await LyricsParser.parseAsync(content, ext))
       if (!_playerStore.isLyricsRequestCurrent(seq)) return
       _playerStore.lyrics = parsed
@@ -162,7 +154,7 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
       const onlineLyrics = await fetchOnlineLyrics(track)
       if (!_playerStore.isLyricsRequestCurrent(seq)) return
       if (onlineLyrics) {
-        // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
+        // markRaw: 同上
         const parsed = markRaw(
           await LyricsParser.parseAsync(onlineLyrics.content, onlineLyrics.format),
         )
@@ -170,7 +162,6 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
         _playerStore.lyrics = parsed
         sharedLyricsSource.value = 'online'
 
-        // 缓存在线歌词
         onlineLyricsCache.set(trackPath, {
           content: onlineLyrics.content,
           format: onlineLyrics.format,
@@ -186,7 +177,7 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
           )
           if (saved && _playerStore.isLyricsRequestCurrent(seq)) {
             sharedLyricsSource.value = 'local'
-            // 保存成功后从缓存中移除，下次会从本地加载
+            // 缓存里存的是"仅在线可得"的歌词,落盘后本地文件才是来源,故清掉
             onlineLyricsCache.delete(trackPath)
           }
         }
@@ -198,7 +189,7 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
       sharedOnlineLyricsError.value = (e as Error).message
     }
   } finally {
-    // 只有最新一次请求有权结束 loading 状态,避免旧请求过早关闭新请求的 loading
+    // 过期请求不得改动 loading 状态,否则会过早关掉新请求的 loading (序号守卫)
     if (_playerStore.isLyricsRequestCurrent(seq)) {
       sharedLoading.value = false
     }
@@ -206,11 +197,10 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
 }
 
 /**
- * 初始化共享 watcher（只执行一次）
+ * 初始化共享 watcher (只执行一次)
  *
- * 所有 useLyrics 调用方共享同一套 watcher 和状态,
- * 避免 LyricsDisplay / VisualizerPanel / App.vue 各自创建 watcher
- * 导致切歌时触发 3 次 loadLyrics 和每帧 3 次二分查找。
+ * LyricsDisplay / VisualizerPanel / App.vue 共用同一套 watcher 与状态,
+ * 否则切歌会触发 3 次 loadLyrics、每帧 3 次二分查找
  */
 function initializeSharedWatchers(): void {
   if (isInitialized) return
@@ -225,8 +215,7 @@ function initializeSharedWatchers(): void {
   sharedWatchStopFns.push(stopWatchTrackPath)
 
   // store.lyrics 是唯一事实源:任何写入路径 (本模块 / store.loadLyrics / 插件 API)
-  // 都经由该同步 watcher 反映到 sharedLyrics,保证两个状态视图一致。
-  // flush: 'sync' 保持与直接赋值相同的时机语义。
+  // 都经此 watcher 同步到 sharedLyrics,保证两个状态视图一致;flush: 'sync' 与直接赋值时机相同
   const stopWatchStoreLyrics = watch(
     () => _playerStore!.lyrics,
     (lyrics) => {
@@ -236,9 +225,9 @@ function initializeSharedWatchers(): void {
   )
   sharedWatchStopFns.push(stopWatchStoreLyrics)
 
-  // activeIndex 更新逻辑 - 使用节流避免高频更新
+  // activeIndex 节流:currentTime 变化很频繁,高亮行只需 100ms 精度
   let lastActiveIndexUpdate = 0
-  const ACTIVE_INDEX_THROTTLE = 100 // 每 100ms 更新一次
+  const ACTIVE_INDEX_THROTTLE = 100
 
   const stopWatchCurrentTime = watch(
     () => _playerStore!.currentTime,
@@ -251,16 +240,14 @@ function initializeSharedWatchers(): void {
         return
       }
 
-      // 节流：避免每次 currentTime 变化都计算
       const now = Date.now()
       if (now - lastActiveIndexUpdate < ACTIVE_INDEX_THROTTLE) return
       lastActiveIndexUpdate = now
 
-      // 应用歌词偏移
+      // 单位是秒:store 的 currentTime / lyricsOffset 与 LyricLine.time 一致
       const offset = _playerStore!.lyricsOffset || 0
       const adjustedTime = currentTime - offset
 
-      // 二分查找当前歌词索引
       const idx = findLyricIndex(sharedLyrics.value, adjustedTime)
 
       if (idx !== sharedActiveIndex.value) {
@@ -274,7 +261,6 @@ function initializeSharedWatchers(): void {
 }
 
 export function useLyrics() {
-  // 首次调用时初始化共享 watcher
   initializeSharedWatchers()
 
   const playerStore = usePlayerStore()
@@ -283,7 +269,7 @@ export function useLyrics() {
   const fetchAndSaveLyrics = async (): Promise<boolean> => {
     const track = playerStore.currentTrack
     if (!track) return false
-    // 序号守卫:手动刷新也纳入统一计数,快速切歌时旧请求的结果不写入状态
+    // 序号守卫:手动刷新也纳入统一计数 (见 loadLyrics)
     const seq = playerStore.beginLyricsRequest()
     sharedLoading.value = true
     sharedOnlineLyricsError.value = null
@@ -291,7 +277,7 @@ export function useLyrics() {
       const onlineLyrics = await fetchOnlineLyrics(track)
       if (!playerStore.isLyricsRequestCurrent(seq)) return false
       if (onlineLyrics) {
-        // markRaw: 歌词只整体替换、不修改内部字段,无需深度响应式代理
+        // markRaw: 见 loadLyrics
         const parsed = markRaw(
           await LyricsParser.parseAsync(onlineLyrics.content, onlineLyrics.format),
         )
@@ -299,7 +285,6 @@ export function useLyrics() {
         playerStore.lyrics = parsed
         sharedLyricsSource.value = 'online'
 
-        // 缓存在线歌词
         onlineLyricsCache.set(track.path, {
           content: onlineLyrics.content,
           format: onlineLyrics.format,
@@ -307,7 +292,6 @@ export function useLyrics() {
           source: 'online',
         })
 
-        // 只有在启用自动保存时才保存到本地
         if (configStore.lyrics?.autoSaveOnlineLyrics) {
           const saved = await saveLyricsToLocal(
             track.path,
@@ -316,7 +300,7 @@ export function useLyrics() {
           )
           if (saved && playerStore.isLyricsRequestCurrent(seq)) {
             sharedLyricsSource.value = 'local'
-            // 保存成功后从缓存中移除
+            // 落盘后清掉在线缓存,理由见 loadLyrics
             onlineLyricsCache.delete(track.path)
           }
         }
@@ -395,23 +379,14 @@ export function useLyrics() {
     }
   }
 
-  // cleanup 用于显式全量清理 (如 HMR 重建 store 时手动调用):
-  // 停止共享 watcher、重置初始化标记与 store 引用、清空共享状态,
-  // 以便下次 useLyrics() 调用时重新初始化并引用新的 store。
-  // 注意:不要在单个组件 onUnmounted 中调用 cleanup,
-  // 否则会停掉其他调用方共享的 watcher 导致丢失更新。
+  // cleanup 供显式全量清理 (如 HMR 重建 store 时手动调用):停 watcher、复位标记、清空共享状态
+  // 不要在单个组件 onUnmounted 里调用,那会停掉其他调用方共享的 watcher
   const cleanup = (): void => {
-    // 作废所有进行中的歌词请求 (过期结果由统一序号守卫丢弃)
+    // 作废所有进行中的歌词请求 (过期结果由序号守卫丢弃)
     _playerStore?.beginLyricsRequest()
-    // 停止所有共享 watcher,避免 HMR 重建 store 后旧 watcher 仍引用旧 store
     sharedWatchStopFns.forEach((fn) => fn())
     sharedWatchStopFns.length = 0
-    // 重置初始化标记,允许下次 useLyrics() 调用重新初始化 watchers(引用新的 store)
     isInitialized = false
-    // 注意:不置空 _playerStore / _configStore,避免 cleanup 后 loadLyrics /
-    // fetchOnlineLyrics 因守卫检查而静默失效。下次 initializeSharedWatchers()
-    // 会重新赋值为最新的 store 实例。
-    // 清空共享状态
     sharedLyrics.value = []
     sharedLoading.value = false
     sharedActiveIndex.value = -1

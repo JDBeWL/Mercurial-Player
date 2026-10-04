@@ -1,13 +1,8 @@
 /**
- * Worker 沙箱核心 —— 运行在 Dedicated Worker 中
- *
- * 外置插件代码在本 Worker 内以 ES 模块 (blob URL 动态 import) 求值,
- * 与主窗口的完整权限 (DOM / localStorage / Tauri IPC) 物理隔离:
- * Worker 中不存在 __TAURI_INTERNALS__ 与 window 对象,插件只能通过
- * postMessage RPC 访问主窗口受权限控制的 PluginAPI。
- *
- * 本模块保持纯逻辑 (不直接引用 self),便于在测试中以 FakeWorker
- * 通道驱动真实的协议实现。
+ * Worker 沙箱核心:外置插件代码在本 Worker 内以 ES 模块 (blob URL 动态 import) 求值,
+ * 与主窗口的完整权限 (DOM / localStorage / Tauri IPC) 物理隔离:Worker 中不存在
+ * __TAURI_INTERNALS__ 与 window 对象,插件只能通过 postMessage RPC 访问受权限控制的 PluginAPI。
+ * 本模块保持纯逻辑 (不直接引用 self),便于测试中以 FakeWorker 通道驱动真实协议实现。
  */
 
 import { formatTime } from '../../utils/format'
@@ -63,10 +58,7 @@ async function importPluginModule(code: string): Promise<PluginFactory> {
 
 type CallbackRegistrar = (fn: (...args: unknown[]) => unknown) => number
 
-/**
- * 序列化发送给主窗口的值:
- * 函数替换为回调句柄标记,可直接结构化克隆的类型原样保留。
- */
+/** 序列化发给主窗口的值:函数替换为回调句柄标记 (SANDBOX_FN_MARKER),可直接结构化克隆的类型原样保留 */
 function serializeForHost(value: unknown, registerCallback: CallbackRegistrar): unknown {
   if (typeof value === 'function') {
     return { [SANDBOX_FN_MARKER]: registerCallback(value as (...args: unknown[]) => unknown) }
@@ -75,9 +67,8 @@ function serializeForHost(value: unknown, registerCallback: CallbackRegistrar): 
     return value.map((item) => serializeForHost(item, registerCallback))
   }
   if (value && typeof value === 'object') {
-    // 仅展开普通对象:带原型的宿主对象 (Date/Map/Blob/Node 的 Timeout 等,
-    // 内部常含循环引用) 原样交给结构化克隆处理,展开会导致无限递归。
-    // OffscreenCanvas/ImageBitmap 在纯 Node 测试环境不存在,需 typeof 守卫
+    // 仅展开普通对象:带原型的宿主对象 (Date/Map/Blob/Node 的 Timeout 等,内部常含循环引用)
+    // 原样交给结构化克隆,展开会导致无限递归;OffscreenCanvas/ImageBitmap 在纯 Node 测试环境不存在,需 typeof 守卫
     const proto = Object.getPrototypeOf(value)
     if (proto !== Object.prototype && proto !== null) {
       return value
@@ -115,19 +106,16 @@ function sanitizeLogArgs(args: unknown[]): unknown[] {
   })
 }
 
-/** 单个插件同时注册的回调上限(事件监听/返回值携带函数等),防失控插件刷爆内存 */
+/** Worker 侧回调注册上限(事件监听/返回值携带函数等);宿主侧权威配额见 workerSandboxHost 的 MAX_CALLBACK_STUBS */
 const MAX_REGISTERED_CALLBACKS = 10_000
 
 // ---- Worker 本地工具实现 (不经过主窗口) ----
-// (formatTime 已统一收敛到 utils/format.ts,Worker 打包时随 chunk 内联)
 
 /**
- * Worker 全局中需移除的原生 API：
- * - 网络类：插件网络访问一律经 api.network.fetch 权限代理走后端 HTTP
- * - 逃逸/外传类：postMessage（伪造协议消息）、close（自杀）、indexedDB（持久化外传）、importScripts
- * - 新 realm 类：Worker/SharedWorker（嵌套后全局全新、中和失效）、BroadcastChannel/caches
- * - RTCPeerConnection：ICE 出站不受 CSP connect-src 约束
- * - 事件类：addEventListener/removeEventListener/dispatchEvent（窃听下行、注入伪造 MessageEvent）
+ * 需从 Worker 全局移除的原生 API,按逃逸途径分类:网络类只能改走 api.network.fetch 权限代理;
+ * postMessage 可伪造协议消息,close 自杀,indexedDB/caches 持久化外传,importScripts 加载远程代码;
+ * Worker/SharedWorker/BroadcastChannel 另开 realm 使中和失效,RTCPeerConnection 的 ICE 出站不受 CSP connect-src 约束,
+ * addEventListener 家族可窃听宿主下行消息或注入伪造 MessageEvent。
  */
 const SANDBOX_BLOCKED_GLOBAL_KEYS = [
   'fetch',
@@ -150,20 +138,14 @@ const SANDBOX_BLOCKED_GLOBAL_KEYS = [
 ] as const
 
 /**
- * 移除 Worker 全局的网络与逃逸 API —— CSP 继承之外的纵深防御，
- * 即便某个 WebView 版本的 CSP 继承失效，插件也无法直接发起网络请求。
- * 注意真正的权限边界在宿主侧 (workerSandboxHost 的 API_CALL_POLICY)，
- * 本函数只消除明显的绕过入口；运行时自身的消息收发须在中和前捕获原生引用 (见 workerBootstrap)。
- * - 自身可配置：直接删除
- * - 原型链属性：删最近一处原型定义并补抛错 getter，阻断 self.__proto__.postMessage 之类绕过
- *   （WebIDL 接口原型成员均 configurable，各 Worker 独立 realm，删除只影响本 Worker）
- * - 自身不可配置：保留，由 CSP 兜底
+ * 中和上述 API 与 navigator.sendBeacon:CSP 继承之外的纵深防御,真正的权限边界在宿主侧 API_CALL_POLICY。
+ * 各 Worker 独立 realm,删除只影响本 Worker;运行时自身的收发须在中和前捕获原生引用 (见 workerBootstrap)。
  */
 export function removeNetworkGlobals(scope: Record<string, unknown>): void {
   for (const key of SANDBOX_BLOCKED_GLOBAL_KEYS) {
     neutralizeGlobal(scope, key)
   }
-  // navigator.sendBeacon 是另一个数据外传通道 (定义在原型链上)
+  // sendBeacon 是另一个数据外传通道,且定义在原型链上
   const navigator = scope['navigator']
   if (navigator && typeof navigator === 'object') {
     neutralizeGlobal(navigator as Record<string, unknown>, 'sendBeacon')
@@ -175,12 +157,11 @@ function neutralizeGlobal(target: Record<string, unknown>, key: string): void {
     if (!(key in target)) return
     const own = Object.getOwnPropertyDescriptor(target, key)
     if (own) {
-      // 自身可配置属性:直接删除 (自身不占位,`key in target` 为 false)
       if (own.configurable) delete target[key]
-      // 自身不可配置属性:保留 (由 CSP 兜底拦截)
+      // 自身不可配置时保留,交给 CSP 兜底
       return
     }
-    // 属性在原型链上:删除最近一处原型定义
+    // 原型链属性:删最近一处原型定义 (WebIDL 接口原型成员均 configurable)
     let proto = Object.getPrototypeOf(target) as Record<string, unknown> | null
     while (proto && proto !== Object.prototype) {
       const desc = Object.getOwnPropertyDescriptor(proto, key)
@@ -190,7 +171,7 @@ function neutralizeGlobal(target: Record<string, unknown>, key: string): void {
       }
       proto = Object.getPrototypeOf(proto) as Record<string, unknown> | null
     }
-    // 自身以抛错 getter 遮蔽 (原型定义不可配置、删除失败时仍阻断访问)
+    // 抛错 getter 遮蔽:原型定义不可配置或删除失败时,仍阻断 self.__proto__.postMessage 之类绕过
     Object.defineProperty(target, key, {
       configurable: true,
       get() {
@@ -198,7 +179,7 @@ function neutralizeGlobal(target: Record<string, unknown>, key: string): void {
       },
     })
   } catch {
-    // 部分环境不允许修改该属性:忽略 (CSP 继承兜底)
+    // 部分环境不允许改动该属性:忽略,由 CSP 兜底
   }
 }
 
@@ -226,7 +207,7 @@ async function arrayBufferToBase64(buffer: ArrayBuffer): Promise<string> {
   return btoa(binary)
 }
 
-/** CSS 变量名 → 驼峰键 (与 pluginAPI.getAllColors 的键生成规则一致) */
+/** CSS 变量名 -> 驼峰键 (与 pluginAPI.getAllColors 的键生成规则一致) */
 function cssVarToCamel(name: string): string {
   return name.replace(/^--/, '').replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())
 }
@@ -270,13 +251,13 @@ function reviveResponse(serialized: SerializedResponse): ResponseLike {
   }
 }
 
-/** api-result 值的反序列化 (主窗口 → Worker 方向) */
+/** api-result 值的反序列化 (主窗口 -> Worker 方向) */
 function reviveHostValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(reviveHostValue)
   }
   if (value && typeof value === 'object') {
-    // 仅展开普通对象;Date/Map/ImageBitmap 等保留克隆原样 (展开会丢失类型)
+    // 展开规则同 serializeForHost:仅普通对象展开,Date/Map/ImageBitmap 等保留克隆原样
     const proto = Object.getPrototypeOf(value)
     if (proto !== Object.prototype && proto !== null) {
       return value
@@ -448,12 +429,7 @@ export class SandboxWorkerRuntime {
     return id
   }
 
-  /**
-   * 权限预检:与 pluginAPI 的同步 throw 语义一致。
-   * 注意:本方法运行在与插件共享的 Worker 全局作用域内,仅作快速失败,
-   * 不能作为安全边界 —— 权威校验在宿主侧 (workerSandboxHost API_CALL_POLICY
-   * + pluginAPI 各方法的 requirePermission)。
-   */
+  /** 权限预检,与 pluginAPI 的同步 throw 语义一致;仅快速失败,权威校验见 workerSandboxHost 的 API_CALL_POLICY */
   private requirePermission(permission: string, action: string): void {
     if (!this.permissions.includes(permission)) {
       throw new Error(`插件 ${this.pluginId} 没有 ${permission} 权限，无法执行 ${action}`)
@@ -498,7 +474,7 @@ export class SandboxWorkerRuntime {
     })
   }
 
-  /** 同步命令 (原 API 返回 void):权限预检后异步派发,错误由主窗口记录日志 */
+  /** 原 API 返回 void 的同步命令:异步派发,不等回执,错误由主窗口记录日志 */
   private fire(path: string, args: unknown[] = []): void {
     const callId = this.nextCallId++
     try {

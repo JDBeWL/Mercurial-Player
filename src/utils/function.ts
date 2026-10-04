@@ -1,10 +1,9 @@
-/**
- * 通用函数工具:防抖等
- */
+/** 通用函数工具（防抖等） */
 
 /**
- * 防抖函数(带取消功能)。
- * 连续调用时只执行最后一次;返回的函数带 `cancel()` 用于清理(如组件卸载时)。
+ * 防抖函数：连续调用只执行最后一次。
+ *
+ * 返回值带 cancel()，供组件卸载等场景清理待执行调用。
  */
 export interface DebouncedFunction<T extends (...args: unknown[]) => unknown> {
   (...args: Parameters<T>): void

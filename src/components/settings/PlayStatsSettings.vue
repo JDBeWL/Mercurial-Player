@@ -1,6 +1,5 @@
 <template>
   <div class="tab-content">
-    <!-- 头部：标题 + 统计范围 + 操作(结构与插件页保持一致) -->
     <div class="content-header">
       <h3>{{ $t('config.playStats') }}</h3>
       <div class="header-actions">
@@ -16,7 +15,6 @@
             {{ option.label }}
           </button>
         </div>
-        <!-- 与插件页一致:带文字的填充按钮,而不是只有图标 -->
         <button class="filled-tonal-button" @click="refresh">
           <span class="material-symbols-rounded">refresh</span>
           {{ $t('config.refresh') }}
@@ -28,7 +26,7 @@
       </div>
     </div>
 
-    <!-- 清除数据的二次确认：替换掉原先「点一下即清空」的不可逆操作 -->
+    <!-- 清除不可逆, 需二次确认 -->
     <div v-if="clearConfirmed" class="confirm-bar" role="alertdialog">
       <span class="material-symbols-rounded confirm-icon">warning</span>
       <div class="confirm-text">
@@ -45,7 +43,6 @@
       </div>
     </div>
 
-    <!-- 空状态 -->
     <div v-if="!hasData" class="empty-state">
       <span class="material-symbols-rounded">bar_chart</span>
       <p>{{ $t('config.noPlayStats') }}</p>
@@ -53,7 +50,6 @@
     </div>
 
     <template v-else>
-      <!-- 统计概览 -->
       <section class="stats-overview" role="list">
         <article
           v-for="card in overviewCards"
@@ -71,7 +67,6 @@
         </article>
       </section>
 
-      <!-- 趋势 -->
       <section class="section">
         <div class="section-header">
           <h4>
@@ -129,7 +124,6 @@
         </div>
       </section>
 
-      <!-- 最常播放 -->
       <section class="section">
         <div class="section-header">
           <h4>
@@ -202,7 +196,7 @@
                 decoding="async"
               />
             </div>
-            <!-- 无封面时与播放器大封面/MiniPlayer/播放列表行保持一致:album 占位图标 -->
+            <!-- 无封面用 album 占位图标, 与播放器大封面/MiniPlayer/播放列表行一致 -->
             <div v-else class="track-cover">
               <span class="material-symbols-rounded">album</span>
             </div>
@@ -236,8 +230,7 @@
                 <div class="completion-fill" :style="{ width: `${item.completionRate * 100}%` }" />
               </div>
             </div>
-            <!-- 恒为 play_arrow：播放中的状态已由标题旁的 now-playing 跳动条表达，
-                 这里再切成 graphic_eq 是重复表达 -->
+            <!-- 恒为 play_arrow: 播放中状态由标题旁的 now-playing 跳动条表达 -->
             <span class="row-icon material-symbols-rounded">play_arrow</span>
             <div class="track-metrics">
               <span class="play-count">{{
@@ -261,7 +254,6 @@
         </button>
       </section>
 
-      <!-- 最近播放 -->
       <section class="section">
         <div class="section-header">
           <h4>
@@ -314,7 +306,7 @@
                 decoding="async"
               />
             </div>
-            <!-- 无封面时与播放器大封面/MiniPlayer/播放列表行保持一致:album 占位图标 -->
+            <!-- 同最常播放列表: album 占位图标 -->
             <div v-else class="track-cover">
               <span class="material-symbols-rounded">album</span>
             </div>
@@ -425,8 +417,7 @@ const getPluginInstance = (): PlayCountPluginInstance | null => {
   return entry?.instance ?? null
 }
 
-/** 数据源自插件存储（reactive 代理），computed 直接订阅即可；显式读激活状态以保证
- *  激活后重新求值。播放结算会自动重算，不再需要原先 5 秒一次的全量轮询。 */
+/** 插件存储是 reactive 代理, computed 直接订阅; 显式读激活状态以便激活后重算, 无需轮询 */
 const instance = computed<PlayCountPluginInstance | null>(() =>
   pluginManager.plugins.get(PLAY_COUNT_PLUGIN_ID)?.state === 'active' ? getPluginInstance() : null,
 )
@@ -473,15 +464,13 @@ const EMPTY_STATS: PlayCountStats = {
 
 // ============ 数据 ============
 
-/** 数据源 = 插件实例 + 变更信号（手动刷新计数）。插件存储本身是 reactive 代理，
- *  结算后自动重算，无需轮询。 */
+/** 数据源 = 插件实例 + 手动刷新计数; 响应式订阅见 instance */
 const dataSource = computed(() => ({
   plugin: instance.value,
   revision: refreshTick.value,
 }))
 
-/** 汇总统计额外挂播放心跳：进行中这一首的时长要每秒推进。榜单/历史/趋势不挂，
- *  否则每秒都要把全部曲目重排一遍、把 200 行历史重算一遍 */
+/** 仅汇总统计挂播放心跳以推进进行中的时长; 榜单/历史/趋势不挂, 否则每秒全量重排 */
 const statsSource = computed(() => ({
   plugin: instance.value,
   revision: refreshTick.value + playbackTick.value,
@@ -536,10 +525,7 @@ const dailySeries = computed<DailyPoint[]>(() => {
 // 趋势取完整范围的天数,不再在此裁剪;超出可容纳柱数时由 trendPoints 聚合成桶
 const trendDays = computed(() => range.value ?? TREND_DEFAULT_DAYS)
 
-/**
- * 当前播放列表索引（path -> Track），可播判断与标题兜底都从这里取。
- * 只在列表增删时重建：封面是就地分批写进 markRaw 元素的，不影响这份映射。
- */
+/** 播放列表索引 (path -> Track); 封面就地分批写入 markRaw 元素, 故只在列表增删时重建 */
 const playlistTracks = computed(() => {
   const tracks = new Map<string, Track>()
   for (const track of playerStore.playlist) {
@@ -552,16 +538,11 @@ const currentPath = computed(() => playerStore.currentTrack?.path ?? '')
 
 // ============ 曲目封面 ============
 
-/** 播放列表之外的历史曲目按需补一次封面（与音乐库搜索一致：整批替换 Map，只触发一次
- *  渲染）。取不到封面保留占位图，不重试。 */
+/** 播放列表外的历史曲目按需补封面: 整批替换 Map 只触发一次渲染, 取不到留占位不重试 */
 const lazyCovers = shallowRef<Map<string, string>>(new Map())
 const coverRequested = new Set<string>()
 
-/**
- * 列表内曲目按需转换封面 URL，只算当前真正渲染到的那几行。
- * 早先随 `playlistCoverVersion` 整表重建 covers，每写完 10 张就重扫全列表，
- * 一万首曲目约等于 10^7 次 Map.set；这里靠版本号做渲染触发、不再建索引。
- */
+/** 只转换当前渲染到的行: 用 playlistCoverVersion 触发重渲染, 不整表重建封面索引 */
 const coverUrlFor = (path: string): string | undefined => {
   // 建立响应式依赖：每批封面写完，模板里用到的行要重新求值
   void playerStore.playlistCoverVersion
@@ -711,8 +692,7 @@ const matchedHistory = computed(() => {
   })
 })
 
-/** 最近播放去重：同一曲目只留一条（最近一次）。入参已是"最近优先"，顺序扫描时首次
- *  遇到某曲目即其最近一次播放，保留它即可让曲目按最近播放时间排在最前。 */
+/** 同一曲目只留最近一条; 入参按最近优先, 首次遇到即最近一次播放 */
 const dedupeByPath = (entries: PlayHistoryEntry[]): PlayHistoryEntry[] => {
   const seen = new Set<string>()
   const result: PlayHistoryEntry[] = []
@@ -835,7 +815,6 @@ const startOfDay = (timestamp: number): number => {
   return date.getTime()
 }
 
-/** 从文件路径提取曲名，作为元信息缺失时的兜底 */
 const extractFileName = (path: string): string => {
   if (!path) return t('config.unknown')
   const parts = path.replace(/\\/g, '/').split('/')
@@ -843,7 +822,6 @@ const extractFileName = (path: string): string => {
   return filename.replace(/\.[^/.]+$/, '') || t('config.unknown')
 }
 
-/** 元信息优先取插件留存的曲目信息，其次查当前播放列表，最后退回文件名 */
 const displayTitle = (item: { path: string; title?: string }): string =>
   item.title ||
   playlistTracks.value.get(item.path)?.title ||
@@ -920,8 +898,7 @@ const confirmClear = (): void => {
 }
 
 onMounted(() => {
-  // 数据本身由响应式存储驱动，这里只为"进行中这一次播放"提供秒级心跳，
-  // 且仅在真正播放时推进，暂停/隐藏窗口时不做任何计算
+  // 只为进行中的这一次播放提供秒级心跳, 暂停或窗口隐藏时不推进
   tickTimer = setInterval(() => {
     if (!document.hidden && playerStore.isPlaying) {
       playbackTick.value += 1
@@ -938,7 +915,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* ---------- 头部 ---------- */
 .content-header {
   display: flex;
   flex-wrap: wrap;
@@ -962,11 +938,7 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-/* ---------- 分段控件 ----------
-   高度与圆角对齐其它设置页的按钮:控件整体 40px 高、20px 圆角(即胶囊形),
-   内部选项取 16px(--md-sys-shape-corner-large)保持嵌套观感,文字 14px。
-   注意:应用没有全局 box-sizing: border-box,若不显式声明,
-   40px 会被撑成 40 + 3×2(padding) + 1×2(border) = 48px */
+/* 项目无全局 box-sizing: border-box, 不声明则 40px 高会被 padding+border 撑成 48px */
 .segmented {
   box-sizing: border-box;
   display: inline-flex;
@@ -1006,7 +978,6 @@ onUnmounted(() => {
   color: var(--md-sys-color-on-secondary-container);
 }
 
-/* 填充按钮:与插件页的刷新/打开目录按钮一致(20px 圆角、secondary-container 底) */
 .filled-tonal-button {
   display: flex;
   align-items: center;
@@ -1041,7 +1012,6 @@ onUnmounted(() => {
   }
 }
 
-/* ---------- 清除确认条 ---------- */
 .confirm-bar {
   display: flex;
   flex-wrap: wrap;
@@ -1081,7 +1051,6 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-/* ---------- 概览卡片 ---------- */
 .stats-overview {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -1138,7 +1107,6 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* ---------- 区块 ---------- */
 .section {
   margin-bottom: 28px;
 }
@@ -1183,9 +1151,7 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-/* 搜索框:对齐音乐库的样式(实心底 + 1px outline 描边 + 图标前缀) */
-/* 搜索框:音乐库的描边样式 + 与本页其它控件一致的 40px 高 / 20px 圆角。
-   同样需要 border-box,否则 1px 上下描边会把它撑到 42px */
+/* border-box 同 .segmented: 否则 1px 描边会把 40px 撑到 42px */
 .search-box {
   box-sizing: border-box;
   display: flex;
@@ -1274,7 +1240,6 @@ onUnmounted(() => {
   text-align: center;
 }
 
-/* ---------- 趋势图 ---------- */
 .trend-panel {
   padding: 16px;
   border-radius: 16px;
@@ -1286,7 +1251,7 @@ onUnmounted(() => {
   align-items: flex-end;
   gap: 2px;
   height: 140px;
-  /* 柱子过密(期窄面板)时横向滚动,避免日期标签被裁剪 */
+  /* 柱子过密时横向滚动, 避免日期标签被裁剪 */
   overflow-x: auto;
   scrollbar-width: thin;
 }
@@ -1348,7 +1313,6 @@ onUnmounted(() => {
   color: var(--md-sys-color-on-surface-variant);
 }
 
-/* ---------- 曲目列表 ---------- */
 .track-list {
   display: flex;
   flex-direction: column;
@@ -1373,8 +1337,7 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-/* 悬浮/聚焦的底色只给非当前播放的行：正在播放的行已经是 primary-container 高亮态，
-   再叠一层 hover 底色会把"正在播放"这个状态盖掉、看着像在变色 */
+/* hover 底色排除当前行: 该行已是 primary-container 高亮态, 再叠色会盖掉状态 */
 .track-item.playable:hover:not(.is-current),
 .track-item.playable:focus-visible:not(.is-current) {
   background-color: var(--md-sys-color-surface-container-high);
@@ -1405,8 +1368,7 @@ onUnmounted(() => {
   color: var(--md-sys-color-on-primary);
 }
 
-/* 封面:尺寸与圆角沿用播放列表/音乐库的列表封面规范(48px 那套的同比例小号),
-   无封面时用播放器一致的 album 占位图标,底色用 surface-variant */
+/* 封面尺寸/圆角沿用播放列表封面规范的同比例小号 */
 .track-cover {
   width: 40px;
   height: 40px;
@@ -1529,14 +1491,11 @@ onUnmounted(() => {
   opacity: 1;
 }
 
-/* 正在播放的那一行整颗按钮都不出现：播放中状态已由标题旁的 now-playing 跳动条表达，
-   再来一颗 play_arrow 属于重复表达，所以连悬浮也不显示。
-   用 visibility 而不是 display：保留占位，各行右侧的统计列才能对齐 */
+/* 用 visibility 保留占位以对齐右侧统计列; play_arrow 隐藏原因见模板注释 */
 .track-item.is-current .row-icon {
   visibility: hidden;
 }
 
-/* "正在播放"的跳动条 */
 .now-playing {
   display: inline-flex;
   align-items: flex-end;
@@ -1582,9 +1541,6 @@ onUnmounted(() => {
   margin-top: 10px;
 }
 
-/* ---------- 按钮 ----------
-   与其它设置页的 .filled-tonal-button / .text-button 同尺度:
-   40px 高、20px 圆角、14px 字号、500 字重 */
 .text-button {
   display: flex;
   align-items: center;
@@ -1629,7 +1585,6 @@ onUnmounted(() => {
   color: var(--md-sys-color-on-error-container);
 }
 
-/* ---------- 空状态 ---------- */
 .empty-state {
   display: flex;
   flex-direction: column;

@@ -1,5 +1,6 @@
 //! libaaudio 的原始 FFI 声明：只声明本项目用到的那部分 AAudio C API。
-//! cpal 的 AAudio 后端不暴露共享模式与设备选择，要"USB DAC 直连"必须自己调 AAudio。
+//!
+//! cpal 的 AAudio 后端不暴露共享模式与设备选择，要 USB DAC 直连必须自己调 AAudio。
 //! 符号来自 NDK 的 `libaaudio.so`（API 26 起），由文件末尾的 `#[link]` 引入，无需运行时 dlopen。
 
 #![allow(
@@ -43,15 +44,12 @@ pub type AAudioStream_errorCallback = Option<
     unsafe extern "C" fn(stream: *mut AAudioStreamStruct, userData: *mut c_void, error: i32),
 >;
 
-// 方向
 pub const AAUDIO_DIRECTION_OUTPUT: aaudio_direction_t = 0;
 
-// 共享模式
 pub const AAUDIO_SHARING_MODE_SHARED: aaudio_sharing_mode_t = 0;
 /// 独占：直连设备、绕开 AudioFlinger 的混音与重采样（位完美的前提）
 pub const AAUDIO_SHARING_MODE_EXCLUSIVE: aaudio_sharing_mode_t = 1;
 
-// 采样格式
 pub const AAUDIO_FORMAT_INVALID: aaudio_format_t = -1;
 pub const AAUDIO_FORMAT_UNSPECIFIED: aaudio_format_t = 0;
 pub const AAUDIO_FORMAT_PCM_I16: aaudio_format_t = 1;
@@ -60,15 +58,15 @@ pub const AAUDIO_FORMAT_PCM_FLOAT: aaudio_format_t = 2;
 pub const AAUDIO_FORMAT_PCM_I24_PACKED: aaudio_format_t = 3;
 pub const AAUDIO_FORMAT_PCM_I32: aaudio_format_t = 4;
 
-// 性能模式
+/// AAudio 的"未指定"值，用于采样率 / 声道数等字段，交给系统按设备默认值决定
+pub const AAUDIO_UNSPECIFIED: i32 = 0;
+
 pub const AAUDIO_PERFORMANCE_MODE_NONE: aaudio_performance_mode_t = 10;
 pub const AAUDIO_PERFORMANCE_MODE_LOW_LATENCY: aaudio_performance_mode_t = 12;
 
-// 数据回调返回值
 pub const AAUDIO_CALLBACK_RESULT_CONTINUE: aaudio_data_callback_result_t = 0;
 pub const AAUDIO_CALLBACK_RESULT_STOP: aaudio_data_callback_result_t = 1;
 
-// 流状态
 pub const AAUDIO_STREAM_STATE_UNINITIALIZED: aaudio_stream_state_t = 0;
 pub const AAUDIO_STREAM_STATE_UNKNOWN: aaudio_stream_state_t = 1;
 pub const AAUDIO_STREAM_STATE_OPEN: aaudio_stream_state_t = 2;
@@ -77,7 +75,7 @@ pub const AAUDIO_STREAM_STATE_PAUSED: aaudio_stream_state_t = 6;
 pub const AAUDIO_STREAM_STATE_STOPPED: aaudio_stream_state_t = 10;
 pub const AAUDIO_STREAM_STATE_DISCONNECTED: aaudio_stream_state_t = 13;
 
-// 错误码（仅用于与文本互转，具体值以 NDK 头文件为准）
+// 错误码不逐个声明，读回时只当数值用，文本化统一交给 AAudio_convertResultToText
 pub const AAUDIO_OK: aaudio_result_t = 0;
 
 #[link(name = "aaudio")]
@@ -95,8 +93,7 @@ unsafe extern "C" {
         builder: AAudioStreamBuilder,
         mode: aaudio_performance_mode_t,
     );
-    /// 单次数据回调交付的帧数。不设置时 AAudio 每 burst 回调一次；调大可降低回调线程
-    /// 唤醒频率，代价是输出延迟变长。生效上限为 BufferCapacity。
+    /// 单次数据回调交付的帧数。不设置时每 burst 回调一次；调大减少唤醒但延迟变长，上限为 BufferCapacity。
     pub fn AAudioStreamBuilder_setFramesPerDataCallback(
         builder: AAudioStreamBuilder,
         numFrames: c_int,
@@ -148,8 +145,7 @@ unsafe extern "C" {
 /// # Safety
 /// 只在成功返回且指针非空时读取 C 字符串；AAudio 返回的是静态字符串。
 pub unsafe fn result_to_text(code: aaudio_result_t) -> String {
-    // SAFETY: 该 C API 只把 returnCode 映射到静态字符串表, 任意 i32 输入都合法
-    // (未知码返回兜底文本), 不触碰其它状态。
+    // SAFETY: 该 C API 只把 returnCode 映射到静态字符串表, 任意 i32 输入都合法, 不触碰其它状态。
     let ptr = unsafe { AAudio_convertResultToText(code) };
     if ptr.is_null() {
         return format!("AAudio error {code}");

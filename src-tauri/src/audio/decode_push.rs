@@ -15,14 +15,19 @@ use super::dsp::convert_channels_into;
 use super::emit::{emit_playback_position, emit_track_ended};
 use super::eq_processor::EqProcessor;
 use super::spectrum::SpectrumAnalyzer;
+use super::{EXCLUSIVE_BUFFER_WATERMARK_SECS, PushOutcome};
+
+/// 背压等待的单次兜底超时（毫秒）
+const GATE_WAIT_TICK_MS: u64 = 250;
 
 /// 根据采样率计算解码chunk 大小
-/// 目标是保持约~21ms的处理块（1024@48kHz）
+///
+/// 目标是保持约 21ms 的处理块（1024@48kHz）
 #[must_use]
 #[cfg(any(windows, target_os = "android"))]
 const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
     match sample_rate {
-        0..=32000 => 512,        // ≤32kHz
+        0..=32000 => 512,        // <=32kHz
         32001..=64000 => 1024,   // 44.1k/48k
         64001..=128_000 => 2048, // 88.2k/96k
         _ => 4096,               // 176.4k/192k/384k
@@ -70,7 +75,6 @@ pub(super) fn decode_and_push_to_wasapi(
     let resample_ratio = target_sr as f64 / src_sr as f64;
     let mut eq_update_counter: u32 = 0;
     let mut resampler: Option<Async<f32>> = if need_resample {
-        // SincInterpolationParameters 走 builder 模式构造
         let params = SincInterpolationParameters::new(128, WindowFunction::BlackmanHarris2)
             .f_cutoff(0.925)
             .interpolation(SincInterpolationType::Linear)
@@ -89,7 +93,6 @@ pub(super) fn decode_and_push_to_wasapi(
     };
 
     let mut input_frames: Vec<Vec<f32>> = vec![Vec::with_capacity(chunk_size); src_ch as usize];
-    // 精确计算最大输出缓冲区大小
     let max_output_frames = ((chunk_size as f64 * resample_ratio).ceil() as usize).max(chunk_size);
     let mut output_buffer: Vec<f32> = Vec::with_capacity(max_output_frames * target_ch as usize);
     // 预分配输出帧 buffer 复用,避免每次循环堆分配;
@@ -103,14 +106,11 @@ pub(super) fn decode_and_push_to_wasapi(
     // 通道转换用复用缓冲区
     let mut converted_buffer: Vec<f32> = Vec::with_capacity(max_output_frames * target_ch as usize);
 
-    // 播放位置追踪
     let mut last_position_emit_time: u64 = 0;
 
-    // 频谱分析器:用最终输出采样(重采样/EQ/声道转换之后)驱动,
-    // 与共享模式 VisualizationSource 发送相同的 spectrum-update 事件
+    // 频谱分析器用最终输出采样(重采样/EQ/声道转换之后)驱动，与共享模式发同一个 spectrum-update
     let mut spectrum_analyzer = SpectrumAnalyzer::new(target_sr);
 
-    // 发送播放位置的闭包
     let emit_position = |last_time: &mut u64| {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -127,9 +127,8 @@ pub(super) fn decode_and_push_to_wasapi(
         }
     };
 
-    // EOF 收尾:等缓冲排空后停止播放并发出 track-ended。
-    // 整数倍 chunk 长度的曲目最后一轮读满块,下一轮首样本即 EOF,只能在此收尾;
-    // 遗漏会让这类曲目放完不发 track-ended(独占模式表现为不自动切下一首)。
+    // EOF 收尾:等缓冲排空后停止播放并发出 track-ended。整数倍 chunk 长度的曲目最后一轮读满块、
+    // 下一轮首样本即 EOF，只能在此收尾，遗漏会让这类曲目放完不自动切下一首。
     let finish_eof = |my_gen: u64, my_tid: u64| {
         use crate::audio::PlaybackState;
 
@@ -194,6 +193,13 @@ pub(super) fn decode_and_push_to_wasapi(
         }
     };
 
+    // 写入世代：整个解码线程只取一次（每轮重取会拿到"永远新鲜"的世代，等于放弃校验）；
+    // 设备切换重建的环继承同一世代，无需更新；取不到环时留 None，循环中补上。
+    let mut write_epoch: Option<u64> = {
+        let guard = lock_or_log!(wasapi.lock());
+        guard.as_ref().and_then(|p| p.producer().write_epoch())
+    };
+
     loop {
         if generation.load(Ordering::SeqCst) != my_generation
             || thread_id_ref.load(Ordering::SeqCst) != my_id
@@ -205,7 +211,6 @@ pub(super) fn decode_and_push_to_wasapi(
             ch.clear();
         }
 
-        // 复用 interleaved 缓冲区
         interleaved.clear();
         let mut eof = false;
         for _ in 0..samples_needed {
@@ -226,7 +231,6 @@ pub(super) fn decode_and_push_to_wasapi(
             break;
         }
 
-        // 发送播放位置
         emit_position(&mut last_position_emit_time);
 
         for (i, s) in interleaved.iter().enumerate() {
@@ -254,7 +258,6 @@ pub(super) fn decode_and_push_to_wasapi(
         let output_frames: Cow<'_, [Vec<f32>]> = if let Some(ref mut r) = resampler {
             let actual = input_frames[0].len();
             if actual < chunk_size && !eof {
-                // 非EOF情况下填充到chunk_size
                 for ch in &mut input_frames {
                     let last_sample = ch.last().copied().unwrap_or(0.0);
                     let samples_to_add = chunk_size - ch.len();
@@ -263,10 +266,8 @@ pub(super) fn decode_and_push_to_wasapi(
                         last_sample * fade
                     }));
                 }
-                // 用 SequentialSliceOfVecs adapter 包装输入输出
                 match SequentialSliceOfVecs::new(&input_frames, src_ch as usize, chunk_size) {
                     Ok(input_adapter) => {
-                        // 清空并复用输出 buffer
                         for ch in &mut output_frames_resampled {
                             ch.clear();
                             ch.resize(output_frames_capacity, 0.0);
@@ -287,8 +288,7 @@ pub(super) fn decode_and_push_to_wasapi(
                                         for ch in &mut output_frames_resampled {
                                             ch.truncate(out_written);
                                         }
-                                        // 成功路径借用即可：output_frames_resampled
-                                        // 在本迭代内只读，下一轮循环才会被 clear/resize
+                                        // 借用即可：output_frames_resampled 本迭代内只读，下一轮才 clear/resize
                                         Cow::Borrowed(&output_frames_resampled)
                                     }
                                     Err(_) => Cow::Borrowed(&input_frames),
@@ -300,7 +300,7 @@ pub(super) fn decode_and_push_to_wasapi(
                     Err(_) => Cow::Borrowed(&input_frames),
                 }
             } else if eof && actual < chunk_size {
-                // EOF情况下 - 直接借用 input_frames,避免 clone
+                // EOF 时直接借用 input_frames，避免 clone
                 Cow::Borrowed(&input_frames)
             } else {
                 let frames_in = input_frames[0].len();
@@ -326,8 +326,7 @@ pub(super) fn decode_and_push_to_wasapi(
                                         for ch in &mut output_frames_resampled {
                                             ch.truncate(out_written);
                                         }
-                                        // 成功路径借用即可：output_frames_resampled
-                                        // 在本迭代内只读，下一轮循环才会被 clear/resize
+                                        // 同上：成功路径借用即可
                                         Cow::Borrowed(&output_frames_resampled)
                                     }
                                     Err(_) => Cow::Borrowed(&input_frames),
@@ -343,7 +342,6 @@ pub(super) fn decode_and_push_to_wasapi(
             Cow::Borrowed(&input_frames)
         };
 
-        // 交错输出帧
         output_buffer.clear();
         let out_len = output_frames.first().map_or(0, Vec::len);
         for i in 0..out_len {
@@ -352,8 +350,7 @@ pub(super) fn decode_and_push_to_wasapi(
             }
         }
 
-        // 通道转换:使用复用缓冲区,避免 clone
-        // current_ch 是重采样后实际声道数
+        // current_ch 是重采样后的实际声道数，转换结果写入复用缓冲区
         let current_ch = output_frames.len() as u16;
         let final_out: &[f32] = if current_ch == target_ch {
             &output_buffer
@@ -363,9 +360,7 @@ pub(super) fn decode_and_push_to_wasapi(
         };
 
         if !final_out.is_empty() {
-            // 可视化:推送采样同时计算频谱并发送 spectrum-update。
-            // 面板不在屏或应用已到后台时整段跳过 —— FFT、序列化与跨线程投递都省掉，
-            // 重新显示时分析器从零开始积累窗口（约 43ms），不影响正确性。
+            // 可视化门控见 SpectrumGate：未放行时 FFT、序列化与投递整段跳过
             if gate.allowed() {
                 spectrum_analyzer.push_and_maybe_emit(final_out, &spectrum_data, &target_fps, &app);
             }
@@ -378,28 +373,46 @@ pub(super) fn decode_and_push_to_wasapi(
             };
 
             if let Some(producer) = producer {
-                let max_buffer = target_sr as usize * target_ch as usize * 2;
-                loop {
-                    if generation.load(Ordering::SeqCst) != my_generation
+                let max_buffer =
+                    target_sr as usize * target_ch as usize * EXCLUSIVE_BUFFER_WATERMARK_SECS;
+                // 取消判据：切歌（generation 变）或停止（thread_id 变）。
+                let cancelled = || {
+                    generation.load(Ordering::SeqCst) != my_generation
                         || thread_id_ref.load(Ordering::SeqCst) != my_id
-                    {
+                };
+                if write_epoch.is_none() {
+                    write_epoch = producer.write_epoch();
+                    if write_epoch.is_none() {
+                        // 环还没建立（流尚未打开）：本轮不推，下一轮再试
+                        log::debug!("独占输出环尚未建立，本轮跳过推送");
+                    }
+                }
+                if let Some(epoch) = write_epoch {
+                    loop {
+                        if cancelled() {
+                            break;
+                        }
+                        if producer.buffer_size() < max_buffer {
+                            break;
+                        }
+                        // 停在 park gate 上等：控制侧与消费进度变化都会唤醒，超时只是兜底
+                        producer.wait_for_space(Duration::from_millis(GATE_WAIT_TICK_MS));
+                        // 背压等待期间也要继续上报播放位置
+                        emit_position(&mut last_position_emit_time);
+                    }
+                    if cancelled() {
                         break;
                     }
-                    if producer.buffer_size() < max_buffer {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
-                    // 等待时继续发送播放位置
-                    emit_position(&mut last_position_emit_time);
-                }
-                if generation.load(Ordering::SeqCst) != my_generation
-                    || thread_id_ref.load(Ordering::SeqCst) != my_id
-                {
-                    break;
-                }
 
-                if producer.push_samples(final_out).is_err() {
-                    break;
+                    match producer.push_samples(final_out, epoch, cancelled) {
+                        Ok(PushOutcome::Complete) => {}
+                        // 未写完必须结束本线程：继续解码会被误判成"已排空"而发出 track-ended
+                        Ok(PushOutcome::Partial) => break,
+                        Err(e) => {
+                            log::warn!("独占输出写入失败，停止解码推送: {e}");
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -408,8 +421,7 @@ pub(super) fn decode_and_push_to_wasapi(
             finish_eof(my_generation, my_id);
             break;
         }
-        // 让出 CPU 给其他线程 (主要给消费线程),避免 100% 占用
-        // 但用更短的时间,因为已经被 condvar 同步过
+        // 让出 CPU 给消费线程；进度已由 condvar 同步过，不需要更长的 sleep
         std::thread::yield_now();
     }
 }

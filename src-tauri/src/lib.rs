@@ -2,10 +2,9 @@
 
 /// 取锁；中毒时记录 error 后继续使用其中的数据。
 ///
-/// 适用于 `Mutex::lock()`、`RwLock::read()`、`RwLock::write()`，三者均返回
-/// `Result<T, PoisonError<T>>`。release 构建是 `panic = "abort"`，进程不会带着中毒锁
-/// 继续跑，所以这条分支只可能在 dev 构建命中——命中即说明另有线程 panic 过，数据一致性
-/// 已无从保证，因此按 error 记录而不是声称"已自动恢复"。
+/// 适用于 `Mutex::lock()`、`RwLock::read()`、`RwLock::write()`。release 构建是
+/// `panic = "abort"`，进程不会带着中毒锁继续跑，所以这条分支只在 dev 命中：命中即说明
+/// 另有线程 panic 过、数据一致性已无从保证，因此按 error 记录而不是声称已自动恢复。
 /// 命令边界别用它，改用 [`LockOrErr`] 把失败如实返回给前端。
 macro_rules! lock_or_log {
     ($lock:expr) => {
@@ -62,7 +61,6 @@ pub struct Placeholder;
 
 #[cfg(not(any(windows, target_os = "android")))]
 impl Placeholder {
-    /// 占位方法：没有独占能力的平台上调用独占接口时返回错误
     pub fn stop(&self) -> Result<(), String> {
         Err("WASAPI not available on non-Windows".to_string())
     }
@@ -101,18 +99,13 @@ impl Placeholder {
 }
 
 /// 音频输出相关状态
-///
-/// 包含音频 sink、输出流、音量、设备、独占模式等与音频输出直接相关的字段
 pub struct AudioOutputState {
-    /// 音频输出 sink
     pub sink: Arc<Mutex<rodio::Player>>,
     /// 音频输出流（必须长期持有，否则会静音）
     pub output_stream: Arc<Mutex<Option<rodio::MixerDeviceSink>>>,
-    /// 目标音量
+    /// 目标音量（与 sink 实际生效的渐变音量区分）
     pub target_volume: Arc<Mutex<f32>>,
-    /// 当前音频设备名称
     pub current_device_name: Arc<Mutex<String>>,
-    /// 是否启用独占模式
     pub exclusive_mode: Arc<Mutex<bool>>,
     /// 独占/直出播放器：字段名沿用早期只有 WASAPI 时的叫法，实际装的是 [`crate::app_state::PlatformPlayer`]
     pub wasapi_player: Arc<Mutex<Option<PlatformPlayer>>>,
@@ -120,18 +113,15 @@ pub struct AudioOutputState {
 
 /// 当前播放曲目状态
 pub struct TrackState {
-    /// 当前播放文件路径
     pub current_path: Arc<Mutex<Option<String>>>,
 }
 
 /// 可视化相关状态
 pub struct VisualizationState {
-    /// 频谱数据（用于可视化）
     pub spectrum_data: Arc<Mutex<Vec<f32>>>,
-    /// 目标刷新率（用于可视化FFT计算，默认60fps）
+    /// 可视化 FFT 的目标刷新率，默认 60fps
     pub target_fps: Arc<AtomicU64>,
-    /// 频谱计算门控：可视化面板在屏、且应用在前台才算 FFT 并发送事件。
-    /// 面板是 `spectrum-update` 唯一的订阅者，两者任一不成立时算出来都没人消费。
+    /// 频谱门控：面板是 `spectrum-update` 唯一的订阅者，面板在屏且应用在前台才算 FFT
     pub spectrum_gate: Arc<audio::spectrum::SpectrumGate>,
 }
 
@@ -144,41 +134,29 @@ pub struct DecodeThreadState {
 }
 
 /// 淡入淡出控制
-///
-/// generation 用于取消陈旧的 fade 线程;
-/// enabled 控制是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音)
 pub struct FadeControl {
-    /// 共享模式淡入淡出代际计数器(每次新的 fade 操作递增,用于取消陈旧的 fade 线程)
+    /// 共享模式淡入淡出代际：每次新的 fade 操作递增，用于取消陈旧的 fade 线程
     pub generation: Arc<AtomicU32>,
-    /// 是否启用淡入淡出(运行时读取,避免每次访问配置文件)
+    /// 是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音)；运行时读取，避免每次访问配置文件
     pub enabled: Arc<AtomicBool>,
 }
 
 /// 播放器状态，按职责域分组
 pub struct PlayerState {
-    /// 音频输出 (sink/流/音量/设备/独占模式/独占播放器)
     pub output: AudioOutputState,
-    /// 当前曲目路径
     pub track: TrackState,
-    /// 频谱数据与目标帧率
     pub visualization: VisualizationState,
-    /// 解码线程管理
     pub decode: DecodeThreadState,
-    /// 设备监听器
     pub device_monitor: Arc<Mutex<DeviceMonitor>>,
     /// 播放队列（Android 后台自动切歌；桌面端不启用自动推进）
     pub queue: Arc<Mutex<PlaybackQueue>>,
-    /// 淡入淡出控制
     pub fade: FadeControl,
 }
 
 /// 应用全局状态
 pub struct AppState {
-    /// 播放器状态
     pub player: PlayerState,
-    /// 配置管理器
     pub config_manager: ConfigManager,
-    /// 全局均衡器
     pub equalizer: GlobalEqualizer,
 }
 
@@ -189,8 +167,8 @@ use cpal::traits::HostTrait;
 /// 桌面由 `main.rs` 调用，移动端由 `mobile_entry_point` 生成的 JNI `Rust.create()` 调用。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Android：current_exe() 位于只读 APK 内，必须在首个 ConfigManager 创建前
-    // 把数据目录 override 指向应用沙箱（config.json 等落盘依赖它）
+    // Android：current_exe() 位于只读 APK 内，必须在首个 ConfigManager 创建前把数据目录
+    // override 指向应用沙箱（config.json 等落盘依赖它）
     #[cfg(target_os = "android")]
     {
         match android::saf::get_app_data_dir() {
@@ -203,10 +181,9 @@ pub fn run() {
         }
     }
 
-    // 创建配置管理器并加载配置(独占模式 / 淡入淡出 / 记忆的输出设备都来自这里)
+    // 独占模式 / 淡入淡出 / 记忆的输出设备都来自这份配置
     let config_manager = ConfigManager::new();
 
-    // 初始化配置文件
     if let Err(e) = config_manager.initialize_config_files() {
         log::error!("Failed to initialize config files: {e}");
     }
@@ -240,10 +217,9 @@ pub fn run() {
         "Loaded exclusive mode from config: {exclusive_mode_enabled}, fade enabled: {fade_enabled}"
     );
 
-    // 初始化 cpal host,并解析实际使用的输出设备:
-    // 用户曾在设置页手动选择过设备时,用落盘的平台原生标识恢复(设备仍在线才生效),
-    // 否则跟随系统默认输出设备。标识各平台不同(WASAPI endpoint ID / CoreAudio
-    // DeviceUID / ALSA PCM 名),由 audio::device 统一解析。
+    // 解析实际使用的输出设备：用户在设置页手动选过就用落盘的平台原生标识恢复（设备仍在线才生效），
+    // 否则跟随系统默认。标识各平台不同（WASAPI endpoint ID / CoreAudio DeviceUID / ALSA PCM 名），
+    // 由 audio::device 统一解析。
     let host = cpal::default_host();
     let preferred_id = config
         .as_ref()
@@ -272,7 +248,6 @@ pub fn run() {
         (dev, name)
     };
 
-    // 根据独占模式设置创建播放器
     let output = {
         let result = if exclusive_mode_enabled {
             app_setup::create_exclusive_mode_player(&device_name)
@@ -289,7 +264,6 @@ pub fn run() {
         }
     };
 
-    // 创建应用程序状态
     let app_state = app_state::build_app_state(
         output,
         device_name,
@@ -307,8 +281,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_log::Builder::new()
-                // dev: Debug (含 debug!, 不含 trace!); release: Info
-                // 关键: 关闭 wasapi crate 的 trace 日志,避免 WASAPI 消费线程被 I/O 阻塞导致音频毛刺
+                // dev: Debug（含 debug!，不含 trace!）；release: Info
+                // wasapi 的 trace 日志会把它自己的消费线程堵在 I/O 上造成音频毛刺，故压到 Warn
                 .level(if cfg!(debug_assertions) {
                     log::LevelFilter::Debug
                 } else {
@@ -392,7 +366,7 @@ pub fn run() {
             system::commands::get_font_cache_stats,
             system::commands::clear_font_caches,
             system::commands::get_platform,
-            // 应用内界面字号（Android 走 WebView textZoom；桌面端 no-op）
+            // 界面字号 / 系统栏（Android 专属，桌面端 no-op）
             system::commands::set_app_font_scale,
             system::commands::set_system_ui_hidden,
             // 显示器刷新率查询依赖 display-info（经 wayland 依赖链），仅桌面端可用
@@ -456,11 +430,11 @@ pub fn run() {
             desktop_lyrics::set_desktop_lyrics_color_preset,
             // 前端日志落盘
             system::logging::write_log,
-            // 系统版本命令（保留 get_app_version 用于前端显示）
+            // 系统版本命令
             system::commands::get_app_version,
             // 便携化数据文件路径（config.json / library-cache.json 存放位置）
             system::commands::resolve_data_file,
-            // 应用更新命令（多线程分片下载，桌面端）
+            // 应用更新命令（桌面端）
             #[cfg(desktop)]
             updater::updater_check,
             #[cfg(desktop)]

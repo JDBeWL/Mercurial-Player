@@ -1,20 +1,6 @@
-//! 应用统一错误类型 [`AppError`]：序列化为 Display 字符串，与历史 `Result<T, String>` 的 IPC
-//! 表现一致，前端契约不变。`From<String>` 与 `From<AppError> for String` 双向转换让新旧签名互通。
+//! 应用统一错误类型 [`AppError`]：序列化为 Display 字符串，前端 IPC 契约与历史 `Result<T, String>` 一致。
 //!
-//! ## 示例
-//!
-//! ```no_run
-//! use mercurial_player_lib::error::AppError;
-//!
-//! fn read_config(path: &str) -> Result<String, AppError> {
-//!     std::fs::read_to_string(path).map_err(AppError::from) // io::Error -> AppError
-//! }
-//!
-//! fn legacy_api() -> Result<String, String> {
-//!     let content = read_config("config.json")?; // AppError -> String 自动转换
-//!     Ok(content)
-//! }
-//! ```
+//! `From<String>` 与 `From<AppError> for String` 双向转换让新旧签名互通。
 
 use std::fmt;
 
@@ -31,9 +17,7 @@ impl serde::Serialize for AppError {
 /// 应用统一错误类型
 #[derive(Debug)]
 pub enum AppError {
-    /// 文件/目录 IO 错误
     Io(std::io::Error),
-    /// JSON 序列化/反序列化错误
     Serde(serde_json::Error),
     /// Mutex/RwLock 中毒错误（理论上 `lock_or_log!` 已自动恢复，此变体用于显式传播）
     Lock(String),
@@ -69,24 +53,21 @@ impl AppError {
 
 /// 从错误消息中的路径段提取末尾文件名(纯文本级,不依赖宿主平台)。
 ///
-/// 不能用 `std::path::Path::file_name()`:Linux/macOS 上 `\` 不是路径分隔符,
-/// `Path::new(r"D:\a\b\f.txt").file_name()` 会返回整段字符串导致脱敏失效;
-/// Windows 盘符/UNC 前缀(反斜杠或正斜杠风格)统一按 `\` `/` 双分隔符切分。
+/// 不用 `std::path::Path::file_name()`：Linux/macOS 上 `\` 不是分隔符，它会返回整段字符串，脱敏就此失效。
 fn file_name_in_segment(segment: &str) -> Option<&str> {
-    // 取最后一个分隔符之后的部分;以分隔符结尾(如裸盘符 `C:\`)视为无文件名
+    // 以分隔符结尾(如裸盘符 `C:\`)视为无文件名
     match segment.rfind(['\\', '/']) {
         Some(idx) if idx + 1 < segment.len() => Some(&segment[idx + 1..]),
         Some(_) => None,
-        // 无任何分隔符(理论不会出现,因调用方已识别盘符/UNC 前缀)
+        // 调用方已识别盘符/UNC 前缀，走到这里说明段内无分隔符
         None => Some(segment),
     }
 }
 
 /// 抹去错误信息中的绝对路径(Windows 盘符路径与 UNC 路径)。
 ///
-/// `Display` 文案会经 IPC 原样回传前端，用户可见的错误不应暴露本机目录
-/// 结构；完整路径仅保存在 `From` 转换处的 `log::debug!` 中。路径替换为
-/// 保留文件名的形式，便于用户定位问题文件。
+/// `Display` 文案会经 IPC 原样回传前端，用户可见的错误不应暴露本机目录结构；
+/// 完整路径只留在 `From` 转换处的 `log::debug!` 里。替换后保留文件名，便于用户定位问题文件。
 #[must_use]
 fn sanitize_path_in_message(msg: &str) -> String {
     const PATH_END: &[u8] = b" \t\r\n\"'()<>,;";
@@ -95,7 +76,6 @@ fn sanitize_path_in_message(msg: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
-        // Windows 盘符路径 (X:\ 或 X:/) 或 UNC 路径 (\\server\share)
         let is_drive = b.is_ascii_alphabetic()
             && i + 2 < bytes.len()
             && bytes[i + 1] == b':'
@@ -125,7 +105,7 @@ fn sanitize_path_in_message(msg: &str) -> String {
 impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            // Display 文案经 IPC 回传前端:OS 错误原文可能含绝对路径,统一脱敏
+            // OS 原文可能带路径，Io/Serde 两个变体一律过 sanitize_path_in_message
             Self::Io(e) => write!(f, "IO 错误: {}", sanitize_path_in_message(&e.to_string())),
             Self::Serde(e) => {
                 write!(
@@ -156,11 +136,8 @@ impl std::error::Error for AppError {
     }
 }
 
-// From 转换：让 `?` 自动传播常见错误类型
-
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
-        // OS 错误原文可能含绝对路径,完整信息仅供诊断日志,Display 侧已脱敏
         log::debug!("完整 IO 错误(仅供诊断,可能含路径): {e}");
         Self::Io(e)
     }
@@ -185,11 +162,9 @@ impl From<&str> for AppError {
     }
 }
 
-// 音频库错误:让 `?` 直接归入 Audio,避免 `.to_string().into()` 落入 Other
-//
-// 注:cpal 0.15+ 已无统一的 `cpal::Error`,错误按操作拆分
-// (BuildStreamError/StreamError/DevicesError/...);rodio 0.22 在根路径
-// 导出 `PlayError`/`DeviceSinkError`(无 `StreamError`,其由 `PlayError` 携带)。
+// 音频库错误归入 Audio，避免 `.to_string().into()` 落入 Other
+// 清单随依赖版本而变：cpal 0.15+ 把统一的 `cpal::Error` 按操作拆分；rodio 0.22 的 `StreamError`
+// 由 `PlayError` 携带，根路径只导出 `PlayError`/`DeviceSinkError`
 
 macro_rules! impl_audio_from {
     ($($ty:ty => $desc:literal),+ $(,)?) => {

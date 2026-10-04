@@ -45,32 +45,19 @@ scripts/*
 # ============================================================================
 # Android / Tauri 移动端
 # ============================================================================
-# gen/android 只提交手工维护的部分：MainActivity / SafBridge / PlaybackService / MediaBridge /
-# AudioBridge / FontScaleBridge 六个 Kotlin，加上 AndroidManifest.xml、两个 build.gradle.kts、
-# settings.gradle、gradle.properties、proguard-rules.pro 与 res/ 下的 XML 图标。
-# Tauri 自带的 gen/android/.gitignore 已排除 generated/、*.so、local.properties、build。
 
-# tauri android init 可再生成的脚手架
-src-tauri/gen/android/gradlew
-src-tauri/gen/android/gradlew.bat
-src-tauri/gen/android/gradle/wrapper/
-src-tauri/gen/android/buildSrc/
-
-# 启动图标位图：pnpm tauri icon src-tauri/icons/icon.png 可重新生成
-src-tauri/gen/android/app/src/main/res/mipmap-hdpi/*.png
-src-tauri/gen/android/app/src/main/res/mipmap-mdpi/*.png
-src-tauri/gen/android/app/src/main/res/mipmap-xhdpi/*.png
-src-tauri/gen/android/app/src/main/res/mipmap-xxhdpi/*.png
-src-tauri/gen/android/app/src/main/res/mipmap-xxxhdpi/*.png
-
-# 打包时拷贝到 assets 的前端产物（自包含 APK 用）
+# 打包时拷贝到 assets 的前端产物
 src-tauri/gen/android/app/src/main/assets/
+src-tauri/gen/android/app/src/main/res/mipmap-*/ic_launcher.png
+src-tauri/gen/android/app/src/main/res/mipmap-*/ic_launcher_round.png
+src-tauri/gen/android/app/src/main/res/mipmap-*/ic_launcher_foreground.png
+src-tauri/gen/android/app/src/main/res/mipmap-*/ic_launcher_monochrome.png
 
-# 图标生成脚本的预览产物（脚本本身在 scripts/* 里，不入库）
+# 图标生成脚本的预览产物
 icon-preview.png
 __pycache__/
 
-# 签名与发布产物（私钥绝对不能入库）
+# 签名与发布产物
 *.keystore
 *.jks
 key.properties

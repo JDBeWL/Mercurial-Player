@@ -6,10 +6,7 @@ import errorHandler, { ErrorType, ErrorSeverity } from '@/utils/errorHandler'
 import { isAndroid } from './queue'
 import type { usePlayerStore } from './index'
 
-/**
- * Player store 的监听器设置函数,从 player.ts 抽离以降低单文件复杂度。
- * 所有函数接收 store 实例参数,在运行时与 player store 共享同一 Pinia 实例。
- */
+/** Player store 的 Tauri 事件监听与全局媒体键注册实现。 */
 type PlayerStore = ReturnType<typeof usePlayerStore>
 
 /** 设置 track-ended 事件监听,返回 unlisten 函数 */
@@ -77,9 +74,7 @@ export async function setupTaskbarListeners(store: PlayerStore): Promise<Taskbar
   return result
 }
 
-/**
- * 注册全局媒体键快捷方式 (MediaPlayPause / MediaTrackNext / MediaTrackPrevious)
- */
+/** 注册全局媒体键快捷方式 (MediaPlayPause / MediaTrackNext / MediaTrackPrevious) */
 export async function setupGlobalShortcuts(store: PlayerStore): Promise<void> {
   // 移动端没有 global-shortcut 插件：媒体键由 MediaSession / PlaybackService 经 JNI 下发
   if (await isAndroid()) return
@@ -103,7 +98,7 @@ export async function setupGlobalShortcuts(store: PlayerStore): Promise<void> {
         handler()
       })
     } catch (err: unknown) {
-      // 如果错误信息包含 "already registered",说明已经注册过了,可以忽略
+      // 错误信息含 "already registered" 表示别处已注册,可忽略
       const errorMsg = String(err)
       if (errorMsg.includes('already registered')) {
         logger.debug(`Shortcut ${key} was already registered (caught exception)`)
@@ -116,7 +111,6 @@ export async function setupGlobalShortcuts(store: PlayerStore): Promise<void> {
   logger.info('Global media shortcuts setup complete')
 }
 
-/** 注销所有全局媒体键快捷方式 */
 export async function unregisterGlobalShortcuts(): Promise<void> {
   try {
     await unregisterAll()
@@ -133,9 +127,7 @@ interface DeviceListeners {
   defaultChanged: UnlistenFn | null
 }
 
-/**
- * 设置音频设备事件监听 (设备移除/切换请求/无可用设备/默认设备变更)
- */
+/** 设置音频设备事件监听 (设备移除 / 切换请求 / 无可用设备 / 默认设备变更) */
 export async function setupDeviceListeners(store: PlayerStore): Promise<DeviceListeners> {
   const result: DeviceListeners = {
     removed: null,
@@ -144,7 +136,6 @@ export async function setupDeviceListeners(store: PlayerStore): Promise<DeviceLi
     defaultChanged: null,
   }
   try {
-    // 监听设备移除事件
     result.removed = await listen<{ eventType: string; deviceName: string | null }>(
       'device-removed',
       (event) => {
@@ -154,7 +145,6 @@ export async function setupDeviceListeners(store: PlayerStore): Promise<DeviceLi
       },
     )
 
-    // 监听设备切换请求事件
     result.switchRequired = await listen<{ eventType: string; deviceName: string | null }>(
       'device-switch-required',
       async (event) => {
@@ -173,12 +163,10 @@ export async function setupDeviceListeners(store: PlayerStore): Promise<DeviceLi
       },
     )
 
-    // 监听无可用设备事件
     result.noDevice = await listen('no-device-available', () => {
       if (store._isDestroyed) return
       logger.error('No audio device available')
 
-      // 暂停播放
       store.pause()
 
       errorHandler.handle(new Error('No audio device available'), {
@@ -190,7 +178,7 @@ export async function setupDeviceListeners(store: PlayerStore): Promise<DeviceLi
       })
     })
 
-    // 监听默认设备变更事件 (新设备添加且为系统默认)
+    // 新设备被设为系统默认输出时触发
     result.defaultChanged = await listen<{ eventType: string; deviceName: string | null }>(
       'device-default-changed',
       async (event) => {

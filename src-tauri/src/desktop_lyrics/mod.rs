@@ -1,13 +1,8 @@
-//! 桌面歌词显示模块
+//! 桌面歌词显示模块：屏幕底部的置顶窗口，Direct2D 渲染，支持双行歌词。
 //!
-//! 在屏幕底部显示一个置顶窗口，展示当前播放歌词。
-//! 使用 Direct2D 渲染，确保文字边缘平滑无毛刺。
-//! 支持点击穿透（锁定模式）和顶部拖拽（解锁模式）。
-//! 悬浮时显示锁定按钮和关闭按钮。
-//! 支持双行歌词。
-//! 字体族跟随前端歌词字体设置（原文/译文可分别指定）：
-//! 优先使用系统已安装字体，未安装时尝试把 fonts/ 目录的外部字体
-//! 加载为 DirectWrite 内存字体集后使用。
+//! 锁定模式点击穿透、解锁模式顶部拖拽，悬浮时才显示锁定/关闭按钮。
+//! 字体族跟随前端歌词字体设置（原文/译文可分别指定）：优先系统已安装字体，
+//! 未安装时把 fonts/ 目录的外部字体加载为 DirectWrite 内存字体集。
 
 #![allow(unsafe_code)]
 
@@ -146,7 +141,7 @@ mod tests {
 
     /// 用 dev 运行目录（target/debug/fonts）中的真实字体文件验证
     /// DirectWrite 内存字体集加载链路：
-    /// Factory5 → InMemoryFontFileLoader → FontSetBuilder → 集合 → FindFamilyName。
+    /// Factory5 -> InMemoryFontFileLoader -> FontSetBuilder -> 集合 -> FindFamilyName。
     /// 目录不存在或没有可用字体时跳过
     #[test]
     fn dwrite_external_font_load_pipeline() {

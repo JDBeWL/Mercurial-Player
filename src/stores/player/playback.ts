@@ -1,7 +1,6 @@
 /**
- * 从 player.ts 拆出的纯逻辑层，避免 options store 膨胀。
- * 接收最小 store 形状而非 import player，以免循环依赖；行为与原实现一致。
- * play/pause/next/previous 与播放列表强耦合，故留在 player.ts。
+ * 播放控制的纯逻辑层:接收最小 store 形状(与 Pinia player store 结构兼容)以避免循环依赖。
+ * play/pause/next/previous 与播放列表强耦合,仍留在 index.ts。
  */
 import type { Track } from '@/types'
 import { ErrorSeverity } from '../../utils/errorHandler'
@@ -29,7 +28,7 @@ export function seekTrack(store: PlayerPlaybackTarget, time: number): void {
   const wasPlaying = store.isPlaying
   const newTime = Math.max(0, Math.min(time, store.duration))
 
-  // rethrow:true + catch(() => {}) → 仅在成功后刷新状态,失败已由 safeInvoke 记入 errorHandler
+  // rethrow:true + catch(() => {}) -> 仅在成功后刷新状态,失败已由 safeInvoke 记入 errorHandler
   safeInvoke<void>(
     'seek_track',
     { time: newTime },
@@ -38,24 +37,21 @@ export function seekTrack(store: PlayerPlaybackTarget, time: number): void {
     .then(() => {
       store.currentTime = newTime
       if (!wasPlaying) {
-        // 后端 seek 总是 play，如果之前是暂停状态需要重新暂停
         void safeInvoke('pause_track', undefined, { severity: ErrorSeverity.LOW })
       }
     })
     .catch(() => {})
 }
 
-/** 设置音量(0-1),成功后同步配置防抖落盘 */
+/** 设置音量(取值 0-1),成功后防抖落盘 */
 export function setPlayerVolume(store: PlayerPlaybackTarget, volume: number): void {
   const newVolume = Math.max(0, Math.min(1, volume))
   store.volume = newVolume
 
-  // 如果设置音量大于0，取消静音状态
   if (newVolume > 0 && store.isMuted) {
     store.isMuted = false
   }
 
-  // 如果音量大于0，更新 previousVolume
   if (newVolume > 0) {
     store.previousVolume = newVolume
   }
@@ -67,9 +63,7 @@ export function setPlayerVolume(store: PlayerPlaybackTarget, volume: number): vo
   ).then(() => {
     const configStore = useConfigStore()
     configStore.audio.volume = newVolume
-    // 拖动音量条时每次 mousemove 都会走到这里：saveConfig 会对整个 config
-    // (含 lastSession 的播放队列快照)做深比较 + 深拷贝 + 写盘,大队列下足以
-    // 卡住主线程、让滑块掉帧;故用防抖保存(2s),关闭应用前有 flushPendingSave 兜底
+    // 拖动音量条每次 mousemove 都走到这里,必须走防抖 saveConfig(理由见 config.ts 的 saveConfig)
     configStore.saveConfig()
   })
 }
@@ -77,7 +71,6 @@ export function setPlayerVolume(store: PlayerPlaybackTarget, volume: number): vo
 /** 静音/取消静音:静音保存当前音量,取消时恢复到 previousVolume */
 export function togglePlayerMute(store: PlayerPlaybackTarget): void {
   if (store.isMuted) {
-    // 取消静音，恢复之前的音量
     store.isMuted = false
     const volumeToRestore = store.previousVolume > 0 ? store.previousVolume : 0.5
     store.volume = volumeToRestore
@@ -93,7 +86,6 @@ export function togglePlayerMute(store: PlayerPlaybackTarget): void {
       })
       .catch(() => {})
   } else {
-    // 静音，保存当前音量
     store.previousVolume = store.volume > 0 ? store.volume : store.previousVolume
     store.isMuted = true
     void safeInvoke('set_volume', { volume: 0 }, { severity: ErrorSeverity.MEDIUM })

@@ -1,13 +1,11 @@
-/**
- * 通用对象工具:深拷贝、深比较
- */
+/** 通用对象工具: 深拷贝与深比较 */
 
-/** JSON 安全的深拷贝(不保留 undefined/函数/Date 等,适合纯数据对象) */
+/** JSON round-trip 深拷贝, 会丢掉 undefined/函数/Date, 只适合纯数据对象 */
 export function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-/** 深度比较两个对象是否相等 */
+/** 深比较只遍历自有可枚举键, 因此 Date/RegExp 这类无键对象一律判为相等 */
 export function deepEqual(obj1: unknown, obj2: unknown): boolean {
   if (obj1 === obj2) return true
   if (typeof obj1 !== 'object' || typeof obj2 !== 'object') return false

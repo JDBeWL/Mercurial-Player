@@ -1,8 +1,4 @@
-/**
- * 错误通知 Composable
- *
- * 提供统一的错误通知机制，用于向用户显示友好的错误消息
- */
+/** 错误通知 composable: 模块级通知队列, 并把 errorHandler 的错误桥接成用户可见通知 */
 
 import { ref } from 'vue'
 import errorHandler, { AppError, ErrorSeverity } from '../utils/errorHandler'
@@ -15,25 +11,16 @@ interface ErrorNotification {
   timestamp: Date
 }
 
-/**
- * 错误通知状态
- */
+/** 通知队列 (模块级单例, 所有调用方共享同一份) */
 const errorNotifications = ref<ErrorNotification[]>([])
 const maxNotifications = 5
-// 存储所有活动的 timeout ID，用于清理
+// 每条通知挂一个自动关闭的 timeout: 通知以任何方式离开队列 (超出上限被丢弃 / 手动移除 / 清空) 时都必须清掉它
 const activeTimeouts = new Map<number, ReturnType<typeof setTimeout>>()
 
-// errorHandler 监听器为模块级单例：无论 useErrorNotification() 被调用多少次，
-// 只注册一次桥接监听器，避免设置页组件反复挂载导致同一通知被多次渲染
+// errorHandler 桥接监听器只注册一次: 设置页等组件反复挂载会让同一条错误渲染成多条通知
 let bridgeUnsubscribe: (() => void) | null = null
 
-/**
- * 使用错误通知
- */
 export function useErrorNotification() {
-  /**
-   * 显示错误通知
-   */
   const showError = (
     message: string,
     severity: 'error' | 'warning' | 'info' | 'success' = 'error',
@@ -49,17 +36,15 @@ export function useErrorNotification() {
 
     errorNotifications.value.push(notification)
 
-    // 限制通知数量
     if (errorNotifications.value.length > maxNotifications) {
       const removed = errorNotifications.value.shift()
-      // 清理被移除通知的 timeout
       if (removed && activeTimeouts.has(removed.id)) {
         clearTimeout(activeTimeouts.get(removed.id))
         activeTimeouts.delete(removed.id)
       }
     }
 
-    // 自动关闭
+    // duration 单位 ms, <= 0 表示常驻不自动关闭
     if (duration > 0) {
       const timeoutId = setTimeout(() => {
         removeError(notification.id)
@@ -71,24 +56,14 @@ export function useErrorNotification() {
     return notification.id
   }
 
-  /**
-   * 显示成功通知
-   *
-   * 复用通知 UI 机制（success 为独立严重程度，App.vue 渲染对应的成功样式），
-   * title 可选，提供时以「title: message」形式合并为单行文案。
-   * 成功提示默认 3 秒自动关闭，比错误通知更短暂。
-   */
+  /** 成功通知: 'success' 是独立严重程度 (App.vue 渲染对应样式), 默认 3 秒关闭; 传 title 时合成 "title: message" 单行 */
   const showSuccess = (message: string, title?: string, duration: number = 3000): number =>
     showError(title ? `${title}: ${message}` : message, 'success', duration)
 
-  /**
-   * 移除错误通知
-   */
   const removeError = (id: number): void => {
     const index = errorNotifications.value.findIndex((n) => n.id === id)
     if (index > -1) {
       errorNotifications.value.splice(index, 1)
-      // 清理对应的 timeout
       if (activeTimeouts.has(id)) {
         clearTimeout(activeTimeouts.get(id))
         activeTimeouts.delete(id)
@@ -96,11 +71,7 @@ export function useErrorNotification() {
     }
   }
 
-  /**
-   * 清空所有错误通知
-   */
   const clearErrors = (): void => {
-    // 清理所有 timeout
     activeTimeouts.forEach((timeoutId) => {
       clearTimeout(timeoutId)
     })
@@ -108,7 +79,7 @@ export function useErrorNotification() {
     errorNotifications.value = []
   }
 
-  // 注册错误处理器监听器（模块级单例，仅首次调用时注册）
+  // 首次调用才注册桥接, 见 bridgeUnsubscribe 声明处
   if (!bridgeUnsubscribe) {
     bridgeUnsubscribe = errorHandler.onError(
       (error: AppError, options: { showToUser: boolean; userMessage: string }) => {
@@ -127,7 +98,7 @@ export function useErrorNotification() {
     )
   }
 
-  // 返回的 unsubscribe 会注销全局桥接监听器并复位，允许后续调用重新注册
+  // unsubscribe 注销全局桥接并复位单例, 之后的 useErrorNotification() 调用会重新注册
   const unsubscribe = (): void => {
     if (bridgeUnsubscribe) {
       bridgeUnsubscribe()

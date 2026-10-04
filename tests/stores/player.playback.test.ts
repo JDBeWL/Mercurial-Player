@@ -306,7 +306,7 @@ describe('player.playback > seek', () => {
 
     store.seek(10)
     await vi.waitFor(() => {
-      // safeInvoke 统一经 errorHandler 记录(MEDIUM → logger.warn)
+      // safeInvoke 统一经 errorHandler 记录(MEDIUM -> logger.warn)
       expect(loggerMock.warn).toHaveBeenCalledWith('[UNKNOWN] seek failed', expect.anything())
     })
   })
@@ -333,7 +333,7 @@ describe('player.playback > playTrack extras', () => {
 
     await store.playTrack(tracks[0]!)
 
-    // 找不到文件 → 自动播放下一首
+    // 找不到文件 -> 自动播放下一首
     expect(invokeMock).toHaveBeenCalledWith('play_track', { path: '/music/track1.mp3' })
   })
 
@@ -409,7 +409,7 @@ describe('player.playback > playTrack extras', () => {
     const tracks = makePlaylist(3)
     store.playlist = tracks
     store.isShuffle = true
-    // 顺序里不含目标索引 → 作废等待懒生成
+    // 顺序里不含目标索引 -> 作废等待懒生成
     store._shuffleOrder = [0, 2]
 
     await store.playTrack(tracks[1]!)
@@ -598,7 +598,7 @@ describe('player.playback > playTrack extras', () => {
     await play
     await vi.advanceTimersByTimeAsync(AUTO_NEXT_TRACK_DELAY_MS * 3)
 
-    // 无后续曲目 → 只尝试过一次 play
+    // 无后续曲目 -> 只尝试过一次 play
     const playCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === 'play_track')
     expect(playCalls).toHaveLength(1)
     expect(store.isPlaying).toBe(false)

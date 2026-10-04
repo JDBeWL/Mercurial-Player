@@ -1,7 +1,4 @@
-/**
- * 插件加载器
- * 负责从文件系统加载和解析插件
- */
+/** 插件加载器:从文件系统读取 manifest,解析入口并交给 pluginManager 注册 */
 
 import { invoke } from '@tauri-apps/api/core'
 import logger from '../utils/logger'
@@ -26,13 +23,11 @@ const builtinManifests = import.meta.glob<PluginManifest>('../../plugins/*/manif
   import: 'default',
 })
 
-// 构建 id -> 模块加载器 的映射
 const builtinPluginMap = new Map<string, (typeof builtinPluginModules)[string]>()
 for (const [manifestPath, manifest] of Object.entries(builtinManifests)) {
   const pluginId = manifest?.id
   if (!pluginId) continue
-  // manifest 路径: ../../plugins/lyrics-share/manifest.json
-  // 对应的模块路径: ../../plugins/lyrics-share/index.js (或 .ts)
+  // 内置插件按目录配对:../../plugins/<id>/manifest.json 对应同目录的 index.js/index.ts
   const baseDir = manifestPath.replace(/manifest\.json$/, '')
   for (const modulePath of Object.keys(builtinPluginModules)) {
     if (modulePath.startsWith(baseDir)) {
@@ -43,10 +38,9 @@ for (const [manifestPath, manifest] of Object.entries(builtinManifests)) {
 }
 
 /**
- * 加载所有插件
+ * 并发加载全部插件,单个插件故障不影响其余插件
  *
- * 并发加载 + 单插件故障隔离:各插件的 init/runMain/回调均有超时保护
- * (见 workerSandboxHost.ts),一个插件挂起不会阻塞其余插件加载。
+ * 各插件的 init/runMain/回调都有超时保护(见 workerSandboxHost.ts),一个插件挂起不会阻塞整批加载
  */
 export async function loadAllPlugins(): Promise<void> {
   try {
@@ -54,16 +48,13 @@ export async function loadAllPlugins(): Promise<void> {
 
     logger.info(`发现 ${pluginDirs.length} 个插件`)
 
-    // 并发加载;loadPlugin 内部已捕获并记录单插件错误
     await Promise.allSettled(pluginDirs.map((pluginDir) => loadPlugin(pluginDir)))
   } catch (error) {
     logger.error('加载插件列表失败:', error)
   }
 }
 
-/**
- * 验证插件清单
- */
+/** 校验 manifest 的必填字段,ID 字符集与版本号 x.y.z 格式;不合规即抛错 */
 function validateManifest(manifest: PluginManifest): void {
   if (!manifest.id || typeof manifest.id !== 'string') {
     throw new Error('插件清单缺少有效的 id 字段')
@@ -73,12 +64,10 @@ function validateManifest(manifest: PluginManifest): void {
     throw new Error('插件清单缺少有效的 name 字段')
   }
 
-  // 验证ID格式（只允许字母、数字、连字符、下划线）
   if (!/^[a-zA-Z0-9_-]+$/.test(manifest.id)) {
     throw new Error('插件ID只能包含字母、数字、连字符和下划线')
   }
 
-  // 验证权限
   if (manifest.permissions) {
     const validPermissions = Object.values(PluginPermission)
     for (const permission of manifest.permissions) {
@@ -88,15 +77,13 @@ function validateManifest(manifest: PluginManifest): void {
     }
   }
 
-  // 验证版本格式（如果提供）
+  // 版本可选,提供了就必须是 x.y.z
   if (manifest.version && !/^\d+\.\d+\.\d+/.test(manifest.version)) {
     throw new Error('版本号格式无效，应为 x.y.z 格式')
   }
 }
 
-/**
- * 加载单个插件
- */
+/** 读取 manifest 并注册单个插件;失败记录日志后抛出,隔离由 loadAllPlugins 保证 */
 export async function loadPlugin(pluginPath: string): Promise<void> {
   try {
     const manifest = await invoke<PluginManifest | null>('read_plugin_manifest', {
@@ -107,15 +94,13 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
       throw new Error('无法读取插件清单')
     }
 
-    // 验证清单
     validateManifest(manifest)
 
-    // 如果插件已存在，先卸载它
     if (pluginManager.plugins.has(manifest.id)) {
       logger.info(`插件 ${manifest.id} 已存在，正在重新加载`)
       try {
         await pluginManager.deactivate(manifest.id)
-        await pluginManager.uninstall(manifest.id, false) // 不清除存储
+        await pluginManager.uninstall(manifest.id, false) // 重载不清插件存储
       } catch (error) {
         logger.warn(`卸载现有插件失败: ${manifest.id}`, error)
       }
@@ -124,7 +109,7 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
     let mainFn: PluginMainFunction
     let workerHost: PluginWorkerHost | undefined
 
-    // 优先使用内置插件
+    // 同 id 时内置(bundled)插件优先,忽略磁盘上的外置副本
     const builtinLoader = builtinPluginMap.get(manifest.id)
     if (builtinLoader) {
       logger.info(`加载内置插件 (bundled): ${manifest.id}`)
@@ -134,18 +119,15 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
         return await pluginFactory(api)
       }
     } else {
-      // 外置插件：在 Worker 沙箱中执行。
-      // 插件代码运行于独立 Dedicated Worker (无 DOM / localStorage / Tauri IPC),
-      // 通过 postMessage RPC 访问受权限控制的 PluginAPI,与主窗口权限物理隔离。
+      // 外置插件跑在独立 Dedicated Worker:无 DOM / localStorage / Tauri IPC,只能经 postMessage RPC 访问受权限控制的 PluginAPI
+      // 这里建立的是与主窗口权限的物理隔离;内置插件不进 Worker,由 pluginSandbox 在主窗口执行
       const mainCode = await invoke<string>('read_plugin_main', {
         path: pluginPath,
         main: manifest.main || 'index.js',
       })
 
-      // 静态检查为「告警不阻断」:正则黑名单可被等价变形绕过
-      // (如 `(()=>{}).constructor('x')()`、字符串拼接关键字),阈值规则
-      // 也可能误伤正常插件;安全边界由 Worker 沙箱 + CSP + 宿主侧 API
-      // 白名单承担,这里仅保留纵深观测价值,不再拦截加载。
+      // 静态检查只告警不阻断:正则黑名单可被等价变形绕过,阈值规则也会误伤正常插件
+      // 安全边界由 Worker 沙箱 + CSP + 宿主侧 API 白名单承担,这里只有纵深观测价值
       try {
         validatePluginCode(mainCode)
       } catch (error) {
@@ -190,9 +172,7 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
   }
 }
 
-/**
- * 卸载插件
- */
+/** 卸载插件:先释放运行态与存储映射,再让后端删除磁盘上的插件目录 */
 export async function uninstallPlugin(pluginId: string): Promise<void> {
   try {
     await pluginManager.uninstall(pluginId)

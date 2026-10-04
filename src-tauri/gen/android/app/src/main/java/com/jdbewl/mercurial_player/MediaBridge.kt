@@ -25,7 +25,13 @@ object MediaBridge {
   @JvmStatic
   fun update(payload: String) {
     val context = appContext ?: return
-    val state = runCatching { JSONObject(payload) }.getOrElse { return }
+    val state =
+      runCatching { JSONObject(payload) }.getOrElse { e ->
+        // 静默返回的话，Rust 侧改字段名/发错内容会表现为"通知栏完全不更新"，
+        // 而应用内一切正常，无法排查问题
+        android.util.Log.e(TAG, "播放状态 JSON 解析失败，本次同步被丢弃: ${e.message}")
+        return
+      }
     mainHandler.post {
       runCatching {
         val hasTrack = state.optBoolean("hasTrack", false)
@@ -38,7 +44,8 @@ object MediaBridge {
         val coverPath = state.optString("coverPath", "")
 
         if (!hasTrack && !playing) {
-          PlaybackService.stop(context)
+          // 防御性设计
+          if (PlaybackService.isRunning()) PlaybackService.stop(context)
           return@post
         }
 

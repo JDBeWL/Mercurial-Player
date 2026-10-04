@@ -1,17 +1,10 @@
-/**
- * 歌词解析器类，支持多种歌词格式
- */
+/** 歌词解析器: LRC / ASS / SRT 互转, 时间统一为秒 */
 import logger from './logger'
 import type { LyricLine, LyricsFormat, KaraokeWord } from '@/types'
 
-// 让出主线程的辅助函数
 const yieldToMain = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
-/**
- * 二分查找当前应高亮的歌词索引(最后一条 time <= time 的行)
- *
- * 供 useLyrics 与 pluginAPI 共用,调用方各自负责换算偏移后的时间。
- */
+/** 二分查找最后一条 time <= time 的行, 无则 -1; 要求 lyrics 按 time 升序, 偏移由调用方换算 */
 export function findLyricIndex(lyrics: Pick<LyricLine, 'time'>[], time: number): number {
   let l = 0
   let r = lyrics.length - 1
@@ -29,9 +22,7 @@ export function findLyricIndex(lyrics: Pick<LyricLine, 'time'>[], time: number):
 }
 
 export class LyricsParser {
-  /**
-   * 解析歌词文件（同步版本，用于简单场景）
-   */
+  /** 同步解析, 不处理卡拉OK与翻译行 */
   static parse(content: string, format: LyricsFormat = 'auto'): LyricLine[] {
     if (!content || typeof content !== 'string') {
       return []
@@ -54,9 +45,7 @@ export class LyricsParser {
     }
   }
 
-  /**
-   * 异步解析歌词文件（支持卡拉OK、翻译，分块处理避免阻塞主线程）
-   */
+  /** 异步解析, 保留卡拉OK与翻译行; 其余走 parse */
   static async parseAsync(content: string, format: LyricsFormat = 'auto'): Promise<LyricLine[]> {
     if (!content || typeof content !== 'string') {
       return []
@@ -76,9 +65,7 @@ export class LyricsParser {
     }
   }
 
-  /**
-   * 自动检测歌词格式
-   */
+  /** 按区块标记识别 ass/srt, 都不匹配时按 lrc 处理 */
   static detectFormat(content: string): LyricsFormat {
     if (
       content.includes('[Script Info]') ||
@@ -93,9 +80,7 @@ export class LyricsParser {
     return 'lrc'
   }
 
-  /**
-   * 异步解析 LRC 格式歌词（支持卡拉OK、翻译、分块处理）
-   */
+  /** 异步 LRC: 一行多时间戳视作同一行, 第二个起作为卡拉OK逐字时间点 */
   static async parseLRCAsync(content: string): Promise<LyricLine[]> {
     const lines = content.split('\n')
     const pattern = /\[(\d{2}):(\d{2}):(\d{2})\]|\[(\d{2}):(\d{2})\.(\d{2,3})\]/g
@@ -103,6 +88,7 @@ export class LyricsParser {
     const CHUNK_SIZE = 100
 
     for (let i = 0; i < lines.length; i++) {
+      // 每 CHUNK_SIZE 行让出一次主线程, 防止长文件解析卡住 UI
       if (i > 0 && i % CHUNK_SIZE === 0) {
         await yieldToMain()
       }
@@ -114,8 +100,10 @@ export class LyricsParser {
       while ((match = linePattern.exec(line)) !== null) {
         let time: number
         if (match[1] !== undefined) {
+          // 三段时间戳 [mm:ss:cs], 末段是百分秒
           time = parseInt(match[1]) * 60 + parseInt(match[2]!) + parseInt(match[3]!) / 100
         } else {
+          // 小数段给 2 位时按百分秒读, 补齐 3 位再换算毫秒
           time =
             parseInt(match[4]!) * 60 +
             parseInt(match[5]!) +
@@ -139,19 +127,19 @@ export class LyricsParser {
     return Object.values(resultMap).sort((a, b) => a.time - b.time)
   }
 
-  /**
-   * 异步解析 ASS 格式歌词（支持卡拉OK、翻译、分块处理）
-   */
+  /** 异步 ASS: 不读 Format 行, 按 v4.00+ 固定列序取 Start/End/Style/Text */
   static async parseASSAsync(content: string): Promise<LyricLine[]> {
     const lines = content.split('\n')
     const dialogues: Array<{ startTime: number; endTime: number; style: string; text: string }> = []
     const toSeconds = (t: string): number => {
+      // ASS 时间形如 h:mm:ss.cc, 秒段的小数部分即百分秒
       const [h, m, s] = t.split(':')
       return parseInt(h!) * 3600 + parseInt(m!) * 60 + parseFloat(s!)
     }
     const CHUNK_SIZE = 100
 
     for (let i = 0; i < lines.length; i++) {
+      // 分块让出主线程, 同 parseLRCAsync
       if (i > 0 && i % CHUNK_SIZE === 0) {
         await yieldToMain()
       }
@@ -163,14 +151,14 @@ export class LyricsParser {
       const start = parts[1]!.trim()
       const end = parts[2]!.trim()
       const style = parts[3]!.trim()
+      // 第 10 列起都是 Text: 正文里的逗号不能被当列边界, split 后要用逗号拼回
       const text = parts.slice(9).join(',').trim()
       dialogues.push({ startTime: toSeconds(start), endTime: toSeconds(end), style, text })
     }
 
-    // 智能识别 style 名称
     const isTranslationStyle = (style: string): boolean => {
       const lowerStyle = style.toLowerCase()
-      // 翻译相关的 style 关键词
+      // 翻译判定优先于原文: style 名小写包含任一关键词即算译文
       const translationKeywords = [
         'ts',
         'translation',
@@ -191,7 +179,7 @@ export class LyricsParser {
 
     const isOriginalStyle = (style: string): boolean => {
       const lowerStyle = style.toLowerCase()
-      // 原歌词相关的 style 关键词（优先级低于翻译判断）
+      // 原文关键词, 优先级低于翻译判定
       const originalKeywords = [
         'orig',
         'original',
@@ -221,6 +209,7 @@ export class LyricsParser {
       }
     >()
     dialogues.forEach((d) => {
+      // 分组键取起止时间(3 位小数): 同一时间窗内不同 style 的行合成一条歌词
       const key = d.startTime.toFixed(3) + '-' + d.endTime.toFixed(3)
       if (!groupedMap.has(key)) {
         groupedMap.set(key, {
@@ -234,20 +223,17 @@ export class LyricsParser {
       const group = groupedMap.get(key)!
       group.styles.add(d.style)
 
-      // 智能判断是原歌词还是翻译
       if (isTranslationStyle(d.style)) {
-        // 明确是翻译的 style
         group.texts.ts = d.text
       } else if (isOriginalStyle(d.style) || group.texts.orig === '') {
-        // 明确是原歌词的 style，或者原歌词还是空的（第一个遇到的作为原歌词）
+        // 原文槽为空时首个非译文行占位, 之后的再落进译文槽
         if (group.texts.orig === '') {
           group.texts.orig = d.text
         } else if (!isTranslationStyle(d.style) && group.texts.ts === '') {
-          // 如果原歌词已有内容，且当前不是翻译 style，且翻译为空，则作为翻译
           group.texts.ts = d.text
         }
       } else {
-        // 其他情况：如果翻译为空，则作为翻译
+        // 角色无法识别的 style 只补译文槽, 不覆盖已有原文
         if (group.texts.ts === '') {
           group.texts.ts = d.text
         }
@@ -257,6 +243,7 @@ export class LyricsParser {
     const result: LyricLine[] = []
     groupedMap.forEach((group) => {
       const parseKaraoke = (text: string): KaraokeWord[] => {
+        // ASS 逐字标签 {\k} / {\kf}, 数值单位是百分秒, 时间点按累加时长推
         const karaokeTag = /{\\k[f]?(\d+)}([^{}]*)/g
         const words: KaraokeWord[] = []
         let accTime = group.startTime
@@ -270,7 +257,7 @@ export class LyricsParser {
       }
       const enWords = parseKaraoke(group.texts.orig)
       const plainText = group.texts.orig.replace(/{.*?}/g, '')
-      // 没有 karaoke 标记时，生成覆盖整行的虚拟 word
+      // 无逐字标记时合成一个覆盖整行的虚拟 word
       const finalWords =
         enWords.length > 0
           ? enWords
@@ -287,9 +274,7 @@ export class LyricsParser {
     return result.sort((a, b) => a.time - b.time)
   }
 
-  /**
-   * 解析 LRC 格式歌词（同步版本）
-   */
+  /** 同步 LRC: 一行多时间戳共享同一文本; 小数段 2 位按百分秒补齐为毫秒 */
   static parseLRC(content: string): LyricLine[] {
     const lines = content.split('\n')
     const lyrics: LyricLine[] = []
@@ -331,9 +316,7 @@ export class LyricsParser {
     return lyrics
   }
 
-  /**
-   * 解析 ASS 格式歌词（同步版本）
-   */
+  /** 同步 ASS: 按 Format 行给出的列序定位 Start/Text, 兼容非标准字段排布 */
   static parseASS(content: string): LyricLine[] {
     const lines = content.split('\n')
     const lyrics: LyricLine[] = []
@@ -388,9 +371,7 @@ export class LyricsParser {
     return lyrics
   }
 
-  /**
-   * 解析 SRT 格式歌词
-   */
+  /** SRT: 空行分块, 时间行在第 2 行, 其余行合并为文本; 只取 cue 起始时间 */
   static parseSRT(content: string): LyricLine[] {
     const blocks = content.trim().split(/\n\s*\n/)
     const lyrics: LyricLine[] = []
@@ -419,9 +400,7 @@ export class LyricsParser {
     return lyrics
   }
 
-  /**
-   * 解析 ASS 时间格式
-   */
+  /** ASS 时间 h:mm:ss.cc, 末段是百分秒; 格式不符返回 null 由调用方丢弃该行 */
   static parseASSTime(timeStr: string): number | null {
     const match = timeStr.match(/^(\d+):(\d{2}):(\d{2})\.(\d{2})$/)
     if (match) {
@@ -435,9 +414,7 @@ export class LyricsParser {
     return null
   }
 
-  /**
-   * 将歌词数组转换为指定格式的字符串
-   */
+  /** 序列化为目标格式字符串, 未识别格式返回空串并告警 */
   static stringify(lyrics: LyricLine[], format: LyricsFormat = 'lrc'): string {
     if (!lyrics || !Array.isArray(lyrics)) {
       return ''
@@ -461,6 +438,7 @@ export class LyricsParser {
       .map((item) => {
         const minutes = Math.floor(item.time / 60)
         const seconds = Math.floor(item.time % 60)
+        // LRC 标签只到百分秒, 多余精度直接截断
         const milliseconds = Math.floor((item.time % 1) * 100)
         const timeTag = `[${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}]`
         return `${timeTag}${item.text || ''}`
@@ -491,6 +469,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             const cs = Math.floor((t % 1) * 100)
             return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`
           }
+          // 结束时间取下一条的起始时间, 末行没有下一条则 +5 秒兜底
           const nextTime = index < lyrics.length - 1 ? lyrics[index + 1]!.time : item.time + 5
           return `Dialogue: 0,${formatTime(item.time)},${formatTime(nextTime)},Default,,0,0,0,,${item.text || ''}`
         })
@@ -508,6 +487,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           const ms = Math.floor((t % 1) * 1000)
           return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`
         }
+        // 结束时间规则同 stringifyASS
         const nextTime = index < lyrics.length - 1 ? lyrics[index + 1]!.time : item.time + 5
         return `${index + 1}\n${formatTime(item.time)} --> ${formatTime(nextTime)}\n${item.text || ''}\n`
       })

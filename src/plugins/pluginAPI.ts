@@ -1,6 +1,7 @@
 /**
- * 插件 API
- * 为插件提供安全的接口访问应用功能
+ * PluginAPI 的可信侧实现:每个插件一份实例,权限在动作执行前校验(动作与权限的映射见 apiRegistry)
+ *
+ * 这里列出的方法就是对第三方插件承诺的接口面,插件不应依赖它们之外的宿主能力
  */
 
 import { readonly } from 'vue'
@@ -42,10 +43,7 @@ import { findLyricIndex } from '../utils/lyricsParser'
 /**
  * 插件存储快照:只保留可结构化克隆的纯数据
  *
- * storage 底层是 Vue reactive 代理,`{ ...storage }` 的浅展开对嵌套对象
- * 仍然会拿到 reactive 代理;代理对象在 postMessage / structuredClone 下行为
- * 不稳定,且插件拿到后可直接改动宿主状态。这里统一转成纯值快照,
- * 顺带过滤掉函数等不可克隆的值(防御性:任何来源污染都不应让整份镜像报废)。
+ * reactive 代理经 postMessage 行为不稳定,且插件拿到代理可直接改宿主状态,故一律转纯值;函数等不可克隆的值顺带过滤
  */
 function toCloneableSnapshot(source: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -83,10 +81,9 @@ function canvasToBlob(
 }
 
 /**
- * Blob → base64（去掉 data URL 前缀）。
+ * Blob -> base64(去掉 data URL 前缀)
  *
- * 截图走 IPC 传给 Rust 时，数字数组会让每个字节膨胀成 ~4 个 JSON 字符（2MB 图片 → ~8MB），
- * base64 只有 ~1.33 倍；而且 Tauri 在 Android 上不支持 raw IPC body，base64 是唯一选择。
+ * 数字数组每字节膨胀成约 4 个 JSON 字符(2MB 图片变约 8MB),base64 约 1.33 倍;且 Tauri 在 Android 上不支持 raw IPC body
  */
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -126,9 +123,7 @@ function dataURLToBlob(
   return new Blob([u8arr], { type: mime })
 }
 
-/**
- * 创建插件 API
- */
+/** 为一个插件创建 API 实例:绑定它的 pluginId 与权限清单 */
 export function createPluginAPI(
   pluginId: string,
   permissions: PluginPermissionType[],
@@ -143,7 +138,7 @@ export function createPluginAPI(
     }
   }
 
-  /** 按动作名查 apiRegistry 统一校验;null 表示该动作无需权限 */
+  /** 按动作名查 apiRegistry 校验权限 */
   const requireAction = (action: string): void => {
     const permission = permissionForAction(action)
     if (permission !== null) {
@@ -151,7 +146,6 @@ export function createPluginAPI(
     }
   }
 
-  // 歌词行格式转换辅助函数
   const convertLyricLine = (line: {
     time: number
     texts?: string[]
@@ -174,7 +168,7 @@ export function createPluginAPI(
     } as LyricLine
   }
 
-  // 延迟初始化 stores
+  // store 按需初始化:插件可能只用到其中一个域
   let playerStore: ReturnType<typeof usePlayerStore> | null = null
   let musicLibraryStore: ReturnType<typeof useMusicLibraryStore> | null = null
   let themeStore: ReturnType<typeof useThemeStore> | null = null
@@ -198,7 +192,6 @@ export function createPluginAPI(
     pluginId,
     permissions: readonly(permissions) as readonly string[],
 
-    // ========== 日志 ==========
     log: {
       info: (...args: unknown[]) => logger.info(`[Plugin:${pluginId}]`, ...args),
       warn: (...args: unknown[]) => logger.warn(`[Plugin:${pluginId}]`, ...args),
@@ -206,13 +199,12 @@ export function createPluginAPI(
       debug: (...args: unknown[]) => logger.debug(`[Plugin:${pluginId}]`, ...args),
     },
 
-    // ========== 播放器 API ==========
     player: {
       getState(): PlayerState {
         requireAction('player.getState')
         const store = getPlayerStore()
         return {
-          // Track 全是标量字段，浅拷贝即完整快照；JSON 往返每次都要重新序列化一遍对象
+          // Track 全是标量字段,浅拷贝即完整快照;JSON 往返每次都要重新序列化整个对象
           currentTrack: store.currentTrack ? { ...store.currentTrack } : null,
           isPlaying: store.isPlaying,
           currentTime: store.currentTime,
@@ -227,14 +219,11 @@ export function createPluginAPI(
         requireAction('player.getLyrics')
         const store = getPlayerStore()
 
-        // 如果 store 中已有歌词，直接返回
         if (store.lyrics && store.lyrics.length > 0) {
           return store.lyrics.map(convertLyricLine)
         }
 
-        // 如果没有歌词但有当前歌曲，尝试加载歌词
         if (store.currentTrack?.path) {
-          // 先检查歌词文件是否存在
           try {
             const lyricsPath = await FileUtils.findLyricsFile(store.currentTrack.path)
 
@@ -247,10 +236,9 @@ export function createPluginAPI(
           }
 
           try {
-            // 先尝试触发 store 的歌词加载
             await store.loadLyrics(store.currentTrack.path)
 
-            // 重试机制：最多等待 1 秒，每 100ms 检查一次
+            // 歌词异步加载:轮询 10 次 x 100ms,最多等 1s
             for (let i = 0; i < 10; i++) {
               if (store.lyrics && store.lyrics.length > 0) {
                 return store.lyrics.map(convertLyricLine)
@@ -269,7 +257,7 @@ export function createPluginAPI(
         requireAction('player.getCurrentLyricIndex')
         const store = getPlayerStore()
 
-        // 如果没有歌词，返回 -1
+        // 无歌词时返回 -1
         if (!store.lyrics || store.lyrics.length === 0) {
           return -1
         }
@@ -318,8 +306,7 @@ export function createPluginAPI(
 
       setLyrics(lyrics: LyricLine[]): void {
         requireAction('player.setLyrics')
-        // 转换为 store 的格式 (pluginAPI LyricLine.texts 是 {text,translation?}[],
-        // store 期望 @/types LyricLine.texts 为 string[]
+        // LyricLine 双契约:插件侧 texts 是 {text,translation?}[],store 侧是 string[](见 pluginTypes)
         const store = getPlayerStore()
         const storeLyrics = lyrics.map((line) => ({
           time: line.time,
@@ -333,12 +320,11 @@ export function createPluginAPI(
         requireAction('player.getCoverPath')
         const store = getPlayerStore()
 
-        // 先检查 store 中是否已有 coverPath（可能已异步加载完成）
         if (store.currentTrack?.coverPath) {
           return store.currentTrack.coverPath
         }
 
-        // store 中没有，直接调用后端获取（不依赖 store 的异步加载时序）
+        // 不经 store 的异步加载时序,直接问后端取封面路径
         const trackPath = store.currentTrack?.path
         if (!trackPath) return null
 
@@ -351,14 +337,13 @@ export function createPluginAPI(
       },
     },
 
-    // ========== 音乐库 API ==========
     library: {
       getPlaylists(): Playlist[] {
         requireAction('library.getPlaylists')
         const store = getMusicLibraryStore()
         if (!store.playlists) return []
         return store.playlists.map((p) => ({
-          id: p.name, // 使用 name 作为 id
+          id: p.name, // 库中歌单没有独立 id,以 name 充当,重命名即改变 id
           name: p.name,
           tracks: p.files?.map((f) => ({ ...f })) || [],
         }))
@@ -382,7 +367,6 @@ export function createPluginAPI(
       },
     },
 
-    // ========== 主题 API ==========
     theme: {
       getCurrent(): ThemeInfo {
         requireAction('theme.getCurrent')
@@ -468,7 +452,6 @@ export function createPluginAPI(
       },
     },
 
-    // ========== UI 扩展 API ==========
     ui: {
       registerSettingsPanel(panel: SettingsPanel): void {
         requireAction('ui.registerSettingsPanel')
@@ -515,7 +498,6 @@ export function createPluginAPI(
       },
     },
 
-    // ========== 歌词源 API ==========
     lyrics: {
       registerProvider(provider: LyricsProvider): void {
         requireAction('lyrics.registerProvider')
@@ -527,7 +509,6 @@ export function createPluginAPI(
       },
     },
 
-    // ========== 可视化 API ==========
     visualizer: {
       register(visualizer: Visualizer): void {
         requireAction('visualizer.register')
@@ -539,7 +520,6 @@ export function createPluginAPI(
       },
     },
 
-    // ========== 命令 API ==========
     commands: {
       register(command: Command): void {
         requireAction('commands.register')
@@ -550,8 +530,7 @@ export function createPluginAPI(
       },
 
       async execute(commandId: string): Promise<void> {
-        // 仅允许执行本插件注册的命令:命令在注册插件自身的权限上下文中运行,
-        // 跨插件执行等价于借道其他插件的权限提权
+        // 只能执行本插件注册的命令:命令在注册插件自身的权限上下文中运行,跨插件执行等于借道他人权限提权
         const commands = manager.getExtensions('commands')
         const command = commands.find(
           (c: Command & { pluginId: string }) => c.id === commandId && c.pluginId === pluginId,
@@ -562,7 +541,6 @@ export function createPluginAPI(
       },
     },
 
-    // ========== 快捷键 API ==========
     shortcuts: {
       register(shortcut: Shortcut): void {
         requireAction('shortcuts.register')
@@ -570,6 +548,7 @@ export function createPluginAPI(
           throw new Error('快捷键必须包含 id, name, key 和 action')
         }
 
+        // 按键串规范化:小写 + 按 ctrl/alt/shift/meta 排序,与 shortcutManager 的匹配串同一约定
         const normalizedKey = shortcut.key
           .toLowerCase()
           .split('+')
@@ -580,8 +559,7 @@ export function createPluginAPI(
           })
           .join('+')
 
-        // 冲突检测:同一按键组合已被其他快捷键占用时拒绝注册,
-        // 防止后注册者静默遮蔽/劫持既有快捷键 (shortcutManager 取首个匹配)
+        // 冲突检测:同一按键组合被占用即拒绝注册,防止后注册者遮蔽既有快捷键(shortcutManager 取首个匹配)
         const conflicting = manager.extensions.shortcuts.find(
           (s: Shortcut & { pluginId: string }) => s.key === normalizedKey && s.id !== shortcut.id,
         )
@@ -590,7 +568,7 @@ export function createPluginAPI(
             `快捷键 ${normalizedKey} 已被 ${conflicting.name} (${conflicting.pluginId}) 注册，无法重复绑定`,
           )
         }
-        // 同 id 重复注册 (重复激活):替换旧条目而非追加
+        // 同 id 重复注册(如重复激活):替换旧条目而非追加
         const selfIndex = manager.extensions.shortcuts.findIndex(
           (s: Shortcut & { pluginId: string }) => s.id === shortcut.id && s.pluginId === pluginId,
         )
@@ -618,7 +596,6 @@ export function createPluginAPI(
       },
     },
 
-    // ========== 存储 API ==========
     storage: {
       get<T>(key: string, defaultValue: T | null = null): T {
         requireAction('storage.get')
@@ -644,10 +621,9 @@ export function createPluginAPI(
       },
     },
 
-    // ========== 事件 API ==========
     events: {
       on(event: string, callback: EventCallback): void {
-        // 白名单 + 权限校验 (player:* 事件载荷含曲目路径等敏感数据,见 pluginTypes)
+        // 白名单 + 权限校验(player:* 载荷含曲目路径等敏感数据),规则见 pluginTypes
         assertPluginEventSubscriptionAllowed(event, hasPermission, pluginId)
         manager.on(event, pluginId, callback)
       },
@@ -661,7 +637,6 @@ export function createPluginAPI(
       },
     },
 
-    // ========== 网络 API ==========
     network: {
       async fetch(url: string, options: RequestInit = {}): Promise<Response> {
         requireAction('network.fetch')
@@ -671,8 +646,7 @@ export function createPluginAPI(
         }
 
         try {
-          // redirect 用 follow：manual 的话响应永不跟随跳转，response.url 恒等于原始
-          // https 地址，下面那道"重定向到非 HTTPS"的检查就是空转
+          // redirect 用 follow:manual 时 response.url 恒等于原始 https 地址,下面那道重定向检查就成了空转
           const response = await tauriFetch(url, {
             ...options,
             headers: {
@@ -682,7 +656,6 @@ export function createPluginAPI(
             redirect: 'follow',
           })
 
-          // 检查最终URL是否仍为HTTPS
           if (response.url && !response.url.startsWith('https://')) {
             throw new Error('请求被重定向到非HTTPS地址')
           }
@@ -695,7 +668,6 @@ export function createPluginAPI(
       },
     },
 
-    // ========== 工具 API ==========
     utils: {
       createCanvas(
         width: number,
@@ -715,7 +687,6 @@ export function createPluginAPI(
       },
 
       async loadImage(src: string): Promise<HTMLImageElement> {
-        // 对于 http/data/asset URL，直接加载（外部图片）
         if (src.startsWith('http') || src.startsWith('data:') || src.startsWith('asset:')) {
           return new Promise((resolve, reject) => {
             const img = new Image()
@@ -727,9 +698,8 @@ export function createPluginAPI(
           })
         }
 
-        // 对于本地文件路径，通过 readFile + Blob 加载
-        // 避免 convertFileSrc + crossOrigin 导致的 CORS 问题（asset 协议不返回 CORS 头）
-        // 同时 Blob URL 是同源的，不会 taint Canvas
+        // 本地路径走 readFile + Blob:convertFileSrc + crossOrigin 会撞 CORS(asset 协议不返回 CORS 头)
+        // Blob URL 同源,不会 taint Canvas
         try {
           const data = await readFile(src)
           const blob = new Blob([data])
@@ -766,7 +736,6 @@ export function createPluginAPI(
       },
     },
 
-    // ========== 文件 API ==========
     file: {
       async saveAs(
         data: Blob | Uint8Array | string,
@@ -839,7 +808,6 @@ export function createPluginAPI(
       },
     },
 
-    // ========== 剪贴板 API ==========
     clipboard: {
       async writeImage(image: HTMLCanvasElement | Blob | string): Promise<void> {
         requireAction('clipboard.writeImage')

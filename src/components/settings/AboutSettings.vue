@@ -8,9 +8,7 @@
       <div class="app-header">
         <div class="app-name">Mercurial Player</div>
         <div class="app-version">v{{ appVersion }}</div>
-        <!-- .app-actions 原来是一段内联 style（margin-left:auto + 右对齐）。
-           内联样式没法被媒体查询覆盖，窄屏下这颗「检查更新」按钮会整块顶出右边界，
-           所以挪成类名，竖屏规则见文件末尾。 -->
+        <!-- .app-actions 用类名而非内联 style: 内联样式媒体查询覆盖不了, 窄屏下按钮会顶出右边界; 竖屏规则见文件末尾 -->
         <div class="app-actions">
           <div>
             <button class="filled-button" :disabled="isChecking" @click="checkForUpdates">
@@ -158,7 +156,6 @@ import { useDeveloperMode } from '@/composables/useDeveloperMode'
 import { openExternalUrl as openExternalUrlCommand } from '../../services/appService'
 import logger from '../../utils/logger'
 
-// 技术栈条目
 interface TechItem {
   name: string
   desc: string
@@ -166,7 +163,6 @@ interface TechItem {
   repo?: string
 }
 
-// 技术栈分类
 interface TechCategory {
   name: string
   icon: string
@@ -180,13 +176,11 @@ const appVersion = ref<string>('0.0.0')
 const githubUrl = 'https://github.com/JDBeWL/Mercurial-Player'
 const showLicenseDetails = ref<boolean>(false)
 
-// 自动更新
 const { isChecking, checkForUpdates, error } = useAutoUpdate()
 
 // 开发者模式开关(开启后设置导航栏出现"开发者选项"页)
 const { developerMode, setDeveloperMode } = useDeveloperMode()
 
-// 技术栈分类数据
 const techCategories = computed<TechCategory[]>(() => [
   {
     name: t('config.techCategoryCore'),
@@ -333,7 +327,7 @@ const loadAppVersion = async (): Promise<void> => {
 
 const openExternalUrl = async (url: string): Promise<void> => {
   try {
-    // 前端前置校验协议，与后端 HTTPS 白名单校验形成双重防御
+    // 前端先校验协议, 与后端 HTTPS 白名单校验形成双重防御
     if (!url.startsWith('https://')) {
       logger.error('Blocked non-HTTPS URL:', url)
       return
@@ -353,7 +347,6 @@ const openLink = async (url: string): Promise<void> => {
 }
 
 const openLicense = async (): Promise<void> => {
-  // 打开 LICENSE 文件或 GitHub 上的许可证页面
   await openExternalUrl('https://www.gnu.org/licenses/gpl-3.0.html')
 }
 
@@ -393,7 +386,7 @@ onMounted(() => {
   gap: 20px;
 }
 
-/* 「检查更新」那一列（原来写死在模板的内联 style 里，现在挪出来才能被媒体查询覆盖） */
+/* 同模板注释: 内联 style 挪成类名才能被媒体查询覆盖 */
 .app-actions {
   margin-left: auto;
   display: flex;
@@ -777,10 +770,8 @@ onMounted(() => {
   margin-top: 2px;
 }
 
-/* ===== 窄屏（手机竖屏）=====
-   「Mercurial Player」字号 2.25rem（36px），加上版本号与「检查更新」按钮本来就排不进
-   411px 宽的一行：真机上那颗按钮被整个顶到屏幕外（只露出左边半颗）。
-   竖屏改成上下排：标题 → 版本号 → 按钮，按钮占满整行居中。 */
+/* 窄屏(手机竖屏): 标题 36px + 版本号 + 检查更新按钮排不进 411px 宽的一行,
+   真机上按钮被整个顶到屏幕外; 竖屏改成上下排: 标题 -> 版本号 -> 按钮占满整行居中 */
 @media (orientation: portrait) {
   .app-header {
     flex-direction: column;
@@ -799,7 +790,7 @@ onMounted(() => {
     justify-content: center;
   }
 
-  /* 仓库链接等长 URL 兜底：宁可断词换行，也不要横向顶出去 */
+  /* 仓库链接等长 URL 兜底: 宁可断词换行, 不要横向顶出去 */
   .link-url {
     word-break: break-all;
   }

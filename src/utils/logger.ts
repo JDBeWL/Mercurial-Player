@@ -1,9 +1,4 @@
-/**
- * 日志系统
- *
- * 提供统一的日志管理，支持不同日志级别和环境配置
- * 在生产环境自动禁用调试日志
- */
+/** 统一日志入口: 级别阈值过滤, 控制台与文件双输出, 并保留内存历史供导出 */
 
 import type { LogData } from '@/types'
 
@@ -23,7 +18,7 @@ const LEVEL_NAMES: Record<LogLevel, string> = {
   [LogLevel.NONE]: 'NONE',
 }
 
-// 日志等级持久化 key(开发者选项中设置,跨启动生效)
+// 日志等级持久化 key(开发者选项中设置, 跨启动生效)
 const LOG_LEVEL_STORAGE_KEY = 'mercurial-player.log-level'
 
 const LEVEL_COLORS: Record<LogLevel, string> = {
@@ -40,7 +35,7 @@ class Logger {
   private minLevel: LogLevel
   private enableConsole: boolean
   private enableFile: boolean
-  /** 落盘失败是否已告警过(只告警一次,避免循环刷屏) */
+  /** 落盘失败告警去重标记, 原因见 outputToFile */
   private fileWriteWarned: boolean
   private logHistory: LogData[]
   private maxHistorySize: number
@@ -50,7 +45,7 @@ class Logger {
     this.isDebug = import.meta.env.MODE === 'development' || import.meta.env.DEBUG === 'true'
     this.minLevel = this.resolveInitialLevel()
 
-    // 经 Tauri 后端写日志目录，每次启动把旧日志轮转为 -prev.log
+    // 经 Tauri 后端写日志目录, 每次启动把旧日志轮转为 -prev.log
     this.enableConsole = true
     this.enableFile = true
     this.fileWriteWarned = false
@@ -58,7 +53,7 @@ class Logger {
     this.maxHistorySize = 100
   }
 
-  /** 优先读取开发者选项中持久化的等级,否则按环境默认 */
+  /** 优先读取开发者选项中持久化的等级, 否则按环境默认 */
   private resolveInitialLevel(): LogLevel {
     try {
       const saved = localStorage.getItem(LOG_LEVEL_STORAGE_KEY)
@@ -67,12 +62,12 @@ class Logger {
         return parsed as LogLevel
       }
     } catch {
-      // localStorage 不可用(如非浏览器环境)时忽略,回落默认值
+      // localStorage 不可用(如非浏览器环境)时忽略, 回落默认值
     }
     return this.isDev || this.isDebug ? LogLevel.DEBUG : LogLevel.INFO
   }
 
-  /** 持久化到 localStorage,跨启动生效 */
+  /** 写入 localStorage, 生效范围见 LOG_LEVEL_STORAGE_KEY */
   setMinLevel(level: LogLevel): void {
     this.minLevel = level
     try {
@@ -103,7 +98,7 @@ class Logger {
     return `${hours}:${minutes}:${seconds}.${milliseconds}`
   }
 
-  /** 写入日志文件时用于跨天区分,控制台输出不展示 */
+  /** 写入日志文件时用于跨天区分, 控制台输出不展示 */
   private formatDate(): string {
     const now = new Date()
     const year = now.getFullYear()
@@ -158,12 +153,12 @@ class Logger {
     if (!this.enableFile) return
 
     try {
-      // 动态导入以避免在非Tauri环境中出错
+      // 动态导入: 非 Tauri 环境下没有 invoke 后端, 不能顶层依赖它
       const { invoke } = await import('@tauri-apps/api/core')
       await invoke('write_log', { logData })
       this.fileWriteWarned = false
     } catch (error) {
-      // 落盘失败只告警一次(如参数不匹配、磁盘不可写),避免日志系统循环报错刷屏
+      // 落盘失败只告警一次(如参数不匹配, 磁盘不可写), 避免日志系统自身循环报错刷屏
       if (!this.fileWriteWarned) {
         this.fileWriteWarned = true
         console.warn('[logger] 日志落盘失败,后续同类错误不再提示:', error)
@@ -189,7 +184,7 @@ class Logger {
     this.outputToConsole(logData)
 
     this.outputToFile(logData).catch(() => {
-      // 静默处理文件输出错误
+      // 落盘错误已在 outputToFile 内去重告警
     })
   }
 

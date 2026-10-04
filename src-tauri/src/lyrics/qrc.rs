@@ -306,7 +306,7 @@ fn crypt_block(input: [u8; 8], key: &[[u8; 6]; 16]) -> [u8; 8] {
     inverse_permutation(s0, s1)
 }
 
-/// 8 → 16 轮密钥调度
+/// 8 -> 16 轮密钥调度
 fn key_schedule(key: [u8; 8], decrypt: bool) -> [[u8; 6]; 16] {
     let mut schedule = [[0u8; 6]; 16];
 
@@ -377,7 +377,7 @@ fn inflate(data: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// 十六进制 → 3DES → zlib → UTF-8
+/// 十六进制 -> 3DES -> zlib -> UTF-8
 pub(crate) fn decrypt_payload(payload: &str) -> Option<String> {
     let trimmed = payload.trim();
     let Some(bytes) = hex_decode(trimmed) else {
@@ -387,7 +387,7 @@ pub(crate) fn decrypt_payload(payload: &str) -> Option<String> {
         return None;
     }
 
-    // 解密顺序 D(K3) → E(K2) → D(K1)
+    // 解密顺序 D(K3) -> E(K2) -> D(K1)
     let schedules = [
         key_schedule(KEY_3, true),
         key_schedule(KEY_2, false),
@@ -445,7 +445,7 @@ fn extract_lyric_content(xml: &str) -> String {
     xml.trim().to_string()
 }
 
-/// 毫秒 → LRC 时间戳 `mm:ss.cc`
+/// 毫秒 -> LRC 时间戳 `mm:ss.cc`
 fn format_lrc_time(ms: i64) -> String {
     let total = ms.max(0);
     format!(

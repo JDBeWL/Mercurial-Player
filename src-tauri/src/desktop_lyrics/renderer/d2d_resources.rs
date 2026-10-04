@@ -1,9 +1,9 @@
-//! Direct2D / DirectWrite 资源生命周期管理。
+//! Direct2D / DirectWrite 资源生命周期管理：D2D 工厂、DC 渲染目标、文本格式缓存、
+//! 外部字体名字索引与内存字体加载器的创建、缓存与按代数重建。
 //!
-//! 持有渲染线程的 [`Direct2DState`]：D2D 工厂、DC 渲染目标、文本格式缓存、
-//! 外部字体名字索引与内存字体加载器，负责这些资源的创建、缓存与按代数重建。
-//! 所有 unsafe 方法都必须在已初始化 COM（`CoInitializeEx`）的
-//! desktop-lyrics 渲染线程上调用。
+//! 本模块是线程契约的持有者：所有 unsafe 方法（含 [`Direct2DState`] 的每一个）都必须
+//! 在已初始化 COM（`CoInitializeEx`）的 desktop-lyrics 渲染线程上调用，因为工厂与
+//! 渲染目标都是单线程的，thread_local [`D2D_STATE`] 也只在该线程存在。
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -42,17 +42,18 @@ pub(super) struct Direct2DState {
     text_format_cache: HashMap<(String, i32), IDWriteTextFormat>,
     /// fonts/ 目录外部字体的名字索引（懒构建，随 SharedLyricState::font_generation 重建）
     external_index: Option<ExternalFontIndex>,
-    /// 内存字体加载器（懒创建，创建时自动注册到 factory；字体文件引用
-    /// 与其绑定，需在渲染线程存活期间一直持有）
+    /// 内存字体加载器（懒创建）：字体文件引用与其绑定，需在渲染线程存活期间一直持有
     memory_loader: Option<IDWriteInMemoryFontFileLoader>,
-    /// 已按需加载的外部字体：前端族名（小写）→ 自定义字体集合
+    /// 已按需加载的外部字体：前端族名（小写）-> 自定义字体集合
     external_collections: HashMap<String, ExternalFontCollection>,
 }
 
 impl Direct2DState {
+    /// 创建 Direct2D / DirectWrite 工厂与 DC 渲染目标。
+    ///
     /// # Safety
-    /// 创建 Direct2D / DirectWrite 工厂与 DC 渲染目标。必须在已初始化 COM
-    /// （`CoInitializeEx`）的线程上调用，且仅在同一线程内使用单线程工厂。
+    /// 必须在已初始化 COM（`CoInitializeEx`）的 desktop-lyrics 渲染线程上调用；
+    /// 工厂是 `D2D1_FACTORY_TYPE_SINGLE_THREADED`，句柄不可跨线程传递。
     pub(super) unsafe fn new() -> windows::core::Result<Self> {
         // SAFETY: 调用者保证当前线程已执行 CoInitializeEx
         let d2d_factory: ID2D1Factory =
@@ -86,11 +87,9 @@ impl Direct2DState {
         })
     }
 
-    /// 懒构建/按代数重建外部字体名字索引。
-    /// 指向的文件可能已变化，重建时同时丢弃按需加载的集合与文本格式缓存
+    /// 懒构建/按代数重建外部字体名字索引；重建时必须一并丢弃按需加载的集合与文本格式缓存
     fn ensure_external_index(&mut self) {
-        // 阻塞锁：try_lock 失败时读不到代数，会把回退格式的结果缓存下来
-        // 且永远不会再重建，这里必须保证读到真实代数
+        // 必须阻塞锁：try_lock 失败就读不到真实代数，回退格式会被永久缓存
         let Some(generation) = SHARED_STATE
             .get()
             .map(|state| lock_or_log!(state.lock()).font_generation)
@@ -108,20 +107,18 @@ impl Direct2DState {
         }
     }
 
-    /// 懒创建内存字体加载器（需要 IDWriteFactory5，Windows 10 1709+；
-    /// 不可用时外部字体功能整体禁用，回落系统字体）。
-    /// 加载器必须注册到 factory 后才能创建字体文件引用
+    /// 懒创建内存字体加载器：需 IDWriteFactory5（Windows 10 1709+），不可用时外部字体
+    /// 功能整体禁用、回落系统字体。注册到 factory 的要求见 [`build_memory_loader`]。
     fn ensure_memory_loader(&mut self) -> Option<&IDWriteInMemoryFontFileLoader> {
         if self.memory_loader.is_none() {
-            // SAFETY: Direct2DState 方法仅在已初始化 COM 的渲染线程（D2D_STATE）调用
+            // SAFETY: 满足模块级线程契约（已初始化 COM 的渲染线程）
             self.memory_loader = unsafe { build_memory_loader(&self.dwrite_factory) };
         }
         self.memory_loader.as_ref()
     }
 
-    /// 解析 family 实际使用的字体集合与族名：系统已安装的字体优先
-    /// （与前端 @font-face 中 local() 优先的语义一致），否则按需加载
-    /// fonts/ 目录下同名族的外部字体，都不存在时交给系统回退
+    /// 解析 family 实际用的字体集合与族名：系统已安装优先（对齐前端 @font-face 的
+    /// local() 语义），否则按需加载 fonts/ 下同名族的外部字体，都不存在则交给系统回退
     fn resolve_font_source(&mut self, family: &str) -> (Option<IDWriteFontCollection>, String) {
         if family_has_system_face(&self.dwrite_factory, family) {
             return (None, family.to_string());
@@ -146,7 +143,7 @@ impl Direct2DState {
             return (None, family.to_string());
         };
         for path in &paths {
-            // SAFETY: 当前处于 D2D_STATE 渲染线程上下文（COM 已初始化）
+            // SAFETY: 满足模块级线程契约（已初始化 COM 的渲染线程）
             if let Some(loaded) =
                 unsafe { try_load_external_font(&self.dwrite_factory, &loader, path, family) }
             {
@@ -163,9 +160,10 @@ impl Direct2DState {
         (None, family.to_string())
     }
 
+    /// 创建/缓存 `IDWriteTextFormat`；`font_size_scaled` 经 `max(1)` 钳制以免 0 或负字号。
+    ///
     /// # Safety
-    /// 创建/缓存 `IDWriteTextFormat`，必须在已初始化 COM 的同一线程调用。
-    /// `font_size_scaled` 会被 `max(1)` 钳制，避免传入 0 或负数。
+    /// 见模块级线程契约
     unsafe fn text_format(
         &mut self,
         font_size_scaled: i32,
@@ -176,8 +174,7 @@ impl Direct2DState {
             return Ok(format.clone());
         }
         let (collection, resolved_family) = self.resolve_font_source(family);
-        // SAFETY: family_wide 以 NUL 结尾且在本调用期间存活；
-        // font_size 经 max(1) 保证为正
+        // SAFETY: family_wide 以 NUL 结尾且在本调用期间存活
         let family_wide: Vec<u16> = resolved_family
             .encode_utf16()
             .chain(std::iter::once(0))
@@ -203,9 +200,10 @@ impl Direct2DState {
         Ok(format)
     }
 
+    /// 创建 `IDWriteTextLayout`；`text` 允许含尾部 NUL，width/height 经 `max(1.0)` 钳制。
+    ///
     /// # Safety
-    /// 创建 `IDWriteTextLayout`，`text` 必须是有效的 UTF-16 切片（允许含尾部 NUL），
-    /// width/height 经 `max(1.0)` 钳制。必须在已初始化 COM 的同一线程调用。
+    /// 见模块级线程契约
     pub(super) unsafe fn create_layout(
         &mut self,
         text: &[u16],

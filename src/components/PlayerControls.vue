@@ -1,9 +1,8 @@
 <template>
   <div class="player-controls">
     <div class="controls-row">
-      <!-- 播放模式：把原来的「随机播放」「循环播放」两颗按钮压成一颗，按一次走一格（顺序、列表循环、
-           单曲循环、随机，再回到顺序），底部那一行因此从 6 颗减到 5 颗，手机上不再拥挤、play 按钮也刚好
-           落在正中间。图标只表明"当前是什么模式"，不加 active 高亮：四种模式各有各的样子，高亮是冗余。 -->
+      <!-- 四态压成单键循环（顺序 -> 列表循环 -> 单曲循环 -> 随机），省出的宽度让 play 键居中；
+           图标本身就是当前模式，再加 active 高亮是冗余 -->
       <button class="icon-button" :title="playModeTitle" @click="playerStore.cyclePlayMode">
         <span
           class="material-symbols-rounded play-mode-icon"
@@ -40,8 +39,7 @@
         <span class="material-symbols-rounded">skip_next</span>
       </button>
 
-      <!-- 附加按钮（播放列表）由宿主插到这里：桌面端与手机横屏这一行有富余宽度，让它跟传输键成组；
-           竖屏已经接近满宽，宿主会把它留在右侧那一组 -->
+      <!-- 附加按钮由宿主插到传输键之后：桌面与横屏此行有富余宽度，竖屏接近满宽时宿主会换到右组 -->
       <slot name="after-next" />
     </div>
   </div>
@@ -63,7 +61,7 @@ const isPlayModeActive = computed<boolean>(
 const playModeIcon = computed<string>(() => {
   if (playerStore.isShuffle) return 'shuffle'
   if (playerStore.repeatMode === 'track') return 'repeat_one'
-  // 列表循环与顺序播放共用 repeat，区别只在顺序态多一道斜线（见 .is-order）
+  // 列表循环与顺序播放共用 repeat 图标；斜线的做法与约束见样式里的 .is-order 注释
   return 'repeat'
 })
 
@@ -114,8 +112,8 @@ const playModeTitle = computed<string>(() => {
   font-size: 32px;
 }
 
-/* 竖屏（手机）：行内间距拉开，避免误触。按钮尺寸不在这里定义，底部那一行里还有播放列表 / 音量等不属于
-   本组件的按钮，尺寸分散在两处就会不一致。统一尺寸见 App.css 的 `@media (orientation: portrait)` 规则。 */
+/* 竖屏只改间距：按钮尺寸不在这里定义，同一行还有播放列表 / 音量等非本组件按钮，
+   分散两处会不一致；统一尺寸见 App.css 的 orientation: portrait 规则。 */
 @media (orientation: portrait) {
   .controls-row {
     gap: 14px;
@@ -126,9 +124,9 @@ const playModeTitle = computed<string>(() => {
   }
 }
 
-/* 「顺序播放」= repeat 图标加一道斜线，Material Symbols 没有 repeat_off。斜线必须长过字形盒 (1.25em 大于
-   1em)、且取 45° 那条对角线：短了两端埋在字形里、与 repeat 自身的箭头连成"Z"；另一条对角线横穿回环笔画。
-   不要给斜线加"背景色描边"留白：沉浸模式的 --immersive-bg 不在按钮的继承链上，写死 surface 色会露错色。 */
+/* 顺序态 = repeat 加一道斜线（Material Symbols 无 repeat_off）。斜线要长过字形盒（1.25em > 1em）、
+   取 -45deg 那条对角线：短了两端埋进字形、与 repeat 箭头连成 Z 形，另一条会横穿回环笔画。
+   别用背景色描边留白：--immersive-bg 不在按钮继承链上，写死 surface 色会露错色。 */
 .play-mode-icon {
   position: relative;
 }

@@ -1,8 +1,7 @@
-/** 配置默认值与旧版本配置迁移。从 config store 抽离的纯逻辑：store 只保留状态与读写流程，
- *  默认值兜底、字段迁移在此集中维护。 */
+/** 配置默认值兜底与旧版本字段迁移：从 config store 抽离的纯逻辑，store 只保留状态与读写 */
 import type { AppConfig, LyricsConfig } from '@/types'
 
-/** 歌词配置默认值(desktopLyrics 含全部字段) */
+/** 歌词配置默认值；desktopLyrics 含全部字段，迁移兜底也复用它 */
 export function createDefaultLyricsConfig(): LyricsConfig {
   return {
     enableOnlineFetch: false,
@@ -15,7 +14,7 @@ export function createDefaultLyricsConfig(): LyricsConfig {
     lyricsFontFamily: 'Noto Sans SC',
     translationFontFamily: '',
     lyricsStyle: 'modern',
-    /* 主歌词面板字号倍率，1 = 样式表原始大小（字体被系统放大时也能由用户自行调整） */
+    /* 字号倍率：1 = 样式表原始大小，供用户在系统放大字体时自行调整 */
     fontScale: 1,
     showNoLyricsHint: true,
     showFetchLyricsButton: true,
@@ -29,9 +28,7 @@ export function createDefaultLyricsConfig(): LyricsConfig {
   }
 }
 
-/**
- * 确保歌词配置包含所有必需字段(旧版本配置文件兼容),原样返回
- */
+/** 补齐缺失字段的旧版本兼容默认值，原地修改并返回同一对象 */
 export function ensureLyricsConfigDefaults(lyrics: LyricsConfig): LyricsConfig {
   if (!lyrics.lyricsAlignment) lyrics.lyricsAlignment = 'center'
   if (!lyrics.lyricsFontFamily) lyrics.lyricsFontFamily = 'Noto Sans SC'
@@ -50,8 +47,7 @@ export function ensureLyricsConfigDefaults(lyrics: LyricsConfig): LyricsConfig {
   return lyrics
 }
 
-/** 把旧版本存放在 general 分区下的歌词字段迁移到 lyrics 分区，返回是否发生了迁移
- *  （调用方据此标记配置为脏）。 */
+/** 把旧版 general 分区的歌词字段迁移到 lyrics 分区；返回是否迁移，调用方据此标记配置为脏 */
 export function migrateLyricsFieldsFromGeneral(configData: Partial<AppConfig>): boolean {
   if (!configData.general) return false
 

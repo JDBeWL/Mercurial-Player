@@ -1,14 +1,14 @@
-/** 歌词候选匹配工具：归一化与打分，用于在"多来源多候选"里挑选最贴合当前歌曲的歌词 */
+/** 歌词候选匹配工具: 归一化与打分, 从多来源候选里挑选最贴合当前歌曲的歌词 */
 
 /** 可参与匹配的最小结构 */
 export interface MatchableSong {
   title: string
   artist: string
-  /** 时长(毫秒)，0 表示未知 */
+  /** 时长(毫秒), 0 表示未知 */
   duration_ms?: number
 }
 
-/** 归一化歌名/艺人：去空白、连字符、下划线、括号及其中内容 */
+/** 归一化歌名/艺人: 转小写, 去空白/连字符/下划线/括号及括号内内容 */
 export function normalizeLyricStr(str: string): string {
   return str
     .toLowerCase()
@@ -17,7 +17,7 @@ export function normalizeLyricStr(str: string): string {
     .trim()
 }
 
-/** 从候选里挑最匹配的歌词（返回打分最高项），低于阈值返回 null */
+/** 从候选里挑打分最高项, 低于阈值则返回 null */
 export function findBestLyricMatch<T extends MatchableSong>(
   items: T[],
   title: string,
@@ -66,5 +66,6 @@ export function findBestLyricMatch<T extends MatchableSong>(
     }
   }
 
+  // 阈值 50 分: 标题或艺人至少命中一项才入选, 只有时长接近不够
   return bestScore >= 50 ? bestMatch : null
 }

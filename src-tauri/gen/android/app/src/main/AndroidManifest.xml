@@ -8,27 +8,26 @@
     <!-- Android 13+ 通知运行时权限 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- AndroidTV support -->
-    <uses-feature android:name="android.software.leanback" android:required="false" />
-
     <application
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:theme="@style/Theme.mercurial_player"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
+        <!-- 播放数据与设置是明文 JSON / SharedPreferences：allowBackup 默认 true 会交出它们，
+             且 Android 12 起 allowBackup=false 不覆盖设备间直传，故另配 dataExtractionRules
+             关掉两条通道；也刻意不声明 leanback/LEANBACK_LAUNCHER -->
         <!-- fontScale|density 必须列出：否则改系统字号会重建 Activity，onConfigurationChanged 不触发 -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|fontScale|density|layoutDirection"
             android:launchMode="singleTask"
-            android:label="@string/main_activity_title"
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-                <!-- AndroidTV support -->
-                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
 

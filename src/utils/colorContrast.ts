@@ -1,7 +1,4 @@
-/**
- * 颜色对比度工具
- * 用于检查颜色是否符合 WCAG 无障碍标准
- */
+/** 颜色对比度工具：检查颜色是否符合 WCAG 无障碍标准 */
 
 interface RGB {
   r: number
@@ -27,14 +24,9 @@ interface AdjustColorOptions extends ContrastCheckOptions {
   step?: number
 }
 
-/**
- * 将十六进制颜色转换为 RGB
- */
 function hexToRgb(hex: string): RGB {
-  // 移除 # 符号
   hex = hex.replace('#', '')
 
-  // 处理 3 位十六进制颜色
   if (hex.length === 3) {
     hex = hex
       .split('')
@@ -49,11 +41,8 @@ function hexToRgb(hex: string): RGB {
   return { r, g, b }
 }
 
-/**
- * 计算相对亮度（根据 WCAG 标准）
- */
+/** 相对亮度：WCAG 定义的 sRGB 线性化与加权系数（0.2126/0.7152/0.0722），非经验值 */
 function getRelativeLuminance(r: number, g: number, b: number): number {
-  // 转换为 0-1 范围
   const [rs, gs, bs] = [r, g, b].map((val) => {
     val = val / 255
     return val <= 0.03928 ? val / 12.92 : Math.pow((val + 0.055) / 1.055, 2.4)
@@ -62,9 +51,7 @@ function getRelativeLuminance(r: number, g: number, b: number): number {
   return 0.2126 * rs! + 0.7152 * gs! + 0.0722 * bs!
 }
 
-/**
- * 计算两个颜色之间的对比度
- */
+/** 对比度：WCAG 公式 (L1+0.05)/(L2+0.05) */
 export function getContrastRatio(color1: string, color2: string): number {
   const rgb1 = hexToRgb(color1)
   const rgb2 = hexToRgb(color2)
@@ -78,9 +65,6 @@ export function getContrastRatio(color1: string, color2: string): number {
   return (lighter + 0.05) / (darker + 0.05)
 }
 
-/**
- * 检查颜色对比度是否符合 WCAG 标准
- */
 export function checkContrast(
   foreground: string,
   background: string,
@@ -90,7 +74,7 @@ export function checkContrast(
 
   const ratio = getContrastRatio(foreground, background)
 
-  // WCAG 标准
+  // WCAG 对比度阈值：AA/AAA x 正常/大字号
   const standards = {
     AA: {
       normal: 4.5,
@@ -120,9 +104,7 @@ export function checkContrast(
   }
 }
 
-/**
- * 调整颜色亮度以确保符合对比度要求
- */
+/** 只朝纯白/纯黑方向逐步调整亮度，直至满足对比度阈值 */
 export function adjustColorForContrast(
   color: string,
   targetBackground: string,
@@ -133,7 +115,6 @@ export function adjustColorForContrast(
   let currentColor = color
   let check = checkContrast(currentColor, targetBackground, { level, largeText })
 
-  // 如果已经符合要求，直接返回
   if (check.pass) {
     return currentColor
   }
@@ -142,22 +123,19 @@ export function adjustColorForContrast(
   const bgRgb = hexToRgb(targetBackground)
   const bgLum = getRelativeLuminance(bgRgb.r, bgRgb.g, bgRgb.b)
 
-  // 确定需要变亮还是变暗（让颜色远离背景色以增加对比度）
+  // 让颜色远离背景以增大对比度：比背景亮则变亮，否则变暗
   const currentLum = getRelativeLuminance(rgb.r, rgb.g, rgb.b)
   const shouldLighten = currentLum > bgLum
 
-  // 调整颜色
   let attempts = 0
   const maxAttempts = 100
 
   while (!check.pass && attempts < maxAttempts) {
     if (shouldLighten) {
-      // 变亮
       rgb.r = Math.min(255, Math.round(rgb.r + (255 - rgb.r) * step))
       rgb.g = Math.min(255, Math.round(rgb.g + (255 - rgb.g) * step))
       rgb.b = Math.min(255, Math.round(rgb.b + (255 - rgb.b) * step))
     } else {
-      // 变暗
       rgb.r = Math.max(0, Math.round(rgb.r * (1 - step)))
       rgb.g = Math.max(0, Math.round(rgb.g * (1 - step)))
       rgb.b = Math.max(0, Math.round(rgb.b * (1 - step)))
@@ -174,9 +152,6 @@ export function adjustColorForContrast(
   return currentColor
 }
 
-/**
- * 从 CSS 变量获取颜色值
- */
 export function getColorFromCSSVar(varName: string): string | null {
   if (typeof window === 'undefined') return null
 
@@ -184,7 +159,6 @@ export function getColorFromCSSVar(varName: string): string | null {
 
   if (!value) return null
 
-  // 如果是 rgb/rgba，转换为十六进制
   if (value.startsWith('rgb')) {
     const matches = value.match(/\d+/g)
     if (matches && matches.length >= 3) {

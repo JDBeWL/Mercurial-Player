@@ -1,6 +1,4 @@
-//! 音频设备管理模块
-//!
-//! 提供音频设备的检测、切换和管理功能。
+//! 音频设备管理：设备枚举、友好名解析与跨平台稳定设备标识。
 
 use crate::error::AppError;
 use cpal::traits::{DeviceTrait, HostTrait};
@@ -19,20 +17,15 @@ pub struct AudioDeviceInfo {
 
 /// 从 cpal 设备获取友好名称。
 ///
-/// cpal 0.17 WASAPI 后端的 `description().name()` 返回的是 `DEVPKEY_Device_DeviceDesc`
-/// （如 "Speakers"），而不是 `DEVPKEY_Device_FriendlyName`（如 "Speakers (Realtek High Definition Audio)"）。
-/// FriendlyName 在 DeviceDesc 和 FriendlyName 不同时会被放到 `extended()[0]` 中。
-///
-/// wasapi crate 的 `get_friendlyname()` 使用的是 FriendlyName，所以我们需要优先使用 FriendlyName
-/// 来保持与 wasapi crate 的一致性，同时也能显示完整的设备名称给用户。
+/// cpal 0.17 的 WASAPI 后端把 `DEVPKEY_Device_FriendlyName` 放进 `extended()[0]`，
+/// `description().name()` 只给 `DEVPKEY_Device_DeviceDesc`（如 "Speakers" 而非 "Speakers (Realtek...)"）。
+/// wasapi crate 按 FriendlyName 匹配设备，这里必须与它一致，同时给用户显示完整名称。
 pub fn get_device_friendly_name(device: &cpal::Device) -> Option<String> {
     let desc = device.description().ok()?;
     if let Some(friendly) = desc.extended().first() {
         Some(friendly.clone())
     } else {
-        // 没有 extended 信息意味着：
-        // 1. name() 就是 FriendlyName（因为没有 DeviceDesc 可用）
-        // 2. 或者 DeviceDesc == FriendlyName（两者相同，不需要 extended）
+        // 无 extended 时 name() 已是 FriendlyName（没有 DeviceDesc 可用），或两者相同
         Some(desc.name().to_string())
     }
 }
@@ -58,9 +51,8 @@ pub fn get_all_audio_devices() -> Result<Vec<AudioDeviceInfo>, AppError> {
 
     for device in devices {
         if let Some(name) = get_device_friendly_name(&device) {
-            // 同名设备去重：切换设备是按 name 匹配的（见 name_to_device_id），
-            // 同名意味着其中只有第一个可被选中，其余项点了没反应；
-            // 前端又拿 name 当 v-for 的 key，重复名字还会触发 key 冲突。
+            // 同名设备去重：切换按 name 匹配（见 name_to_device_id），同名只有第一个能被选中，
+            // 而前端拿 name 当 v-for 的 key，重复会触发 key 冲突
             if device_infos
                 .iter()
                 .any(|d: &AudioDeviceInfo| d.name == name)
@@ -102,18 +94,12 @@ fn check_wasapi_exclusive_support(device_name: &str) -> bool {
     }
 }
 
-// 跨平台音频设备标识 (Device ID)
-// 设备友好名会随驱动更新、系统语言而变化,不适合作为持久化标识。cpal 的
-// `DeviceTrait::id()` 在各平台返回的都是原生稳定标识:
-//   - Windows (WASAPI)  : IMMDevice::GetId() 的 endpoint ID
-//                         {0.0.0.00000000}.{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}
-//   - macOS (CoreAudio) : kAudioDevicePropertyDeviceUID,跨重启/重插保持稳定
-//   - Linux (ALSA)      : PCM 名,如 hw:CARD=PCH,DEV=0
+// 跨平台设备标识：友好名会随驱动更新、系统语言变化，不能当持久化标识。落盘用 cpal `DeviceId`
+// 的字符串形式("host:id", config.audio.preferredDeviceId)，启动时再解析回具体设备。
+// `DeviceTrait::id()` 各平台返回的都是原生稳定标识：Windows 是 WASAPI endpoint ID、
+// macOS 是 CoreAudio DeviceUID、Linux 是 ALSA PCM 名(如 hw:CARD=PCH,DEV=0)；
 // Android 走 AAudio，输出设备由系统接管，不参与这里的设备选择。
-// 用户手动选择的设备以 `DeviceId` 的字符串形式("host:id")落盘
-// (config.audio.preferredDeviceId),启动时再解析回具体设备。
-//
-// 注意:标识是机器绑定的,换机器或重装驱动后可能失效,此时静默回退到系统默认设备。
+// 标识是机器绑定的，换机器或重装驱动后可能失效，此时静默回退到系统默认设备。
 // 同芯片的公版方案（如 CX31993 未要求 PID 唯一）可能让不同设备得到相同标识，属已知问题。
 
 /// 枚举全部输出设备,返回 (device_id, friendly_name) 列表。
@@ -175,7 +161,7 @@ pub fn resolve_preferred_device(preferred_id: &str) -> Option<cpal::Device> {
         }
     }
 
-    // 兼容早期无 host 前缀的落盘格式
+    // 兼容早期无 host 前缀的落盘格式，判据见 device_id_matches
     host.output_devices().ok()?.find(|device| {
         device
             .id()

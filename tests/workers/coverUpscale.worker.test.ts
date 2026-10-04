@@ -124,7 +124,7 @@ describe('coverUpscale.worker', () => {
   })
 
   it('respects the 98% threshold for the no-upscale boundary', async () => {
-    // 768 * 0.98 = 752.64 → 753 刚好跨过阈值,无需放大
+    // 768 * 0.98 = 752.64 -> 753 刚好跨过阈值,无需放大
     await runRequest({ targetSide: 768 }, { width: 753, height: 753 })
     expect(lastResponse()).toEqual({ id: 1, needUpscale: false })
 
@@ -151,7 +151,7 @@ describe('coverUpscale.worker', () => {
   it('crops a wide source to the left square', async () => {
     await runRequest({ targetSide: 768 }, { width: 400, height: 200 })
 
-    // side = 200,宽图取左上角方形 → sy = 0
+    // side = 200,宽图取左上角方形 -> sy = 0
     expect(canvasState.drawImage).toHaveBeenCalledWith(
       expect.anything(),
       0,
@@ -168,7 +168,7 @@ describe('coverUpscale.worker', () => {
   it('crops a tall source to a vertically centred square', async () => {
     await runRequest({ targetSide: 768 }, { width: 200, height: 400 })
 
-    // side = 200,高图垂直居中 → sy = (400 - 200) / 2 = 100
+    // side = 200,高图垂直居中 -> sy = (400 - 200) / 2 = 100
     expect(canvasState.drawImage).toHaveBeenCalledWith(
       expect.anything(),
       0,

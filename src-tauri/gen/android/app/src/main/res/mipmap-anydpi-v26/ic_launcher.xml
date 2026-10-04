@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 前景/单色图只留一份放 drawable-nodpi/：自适应图标由启动器按需缩放，按密度放 5 份是重复。
+     minSdk=26，mipmap-anydpi-v26 这一份对所有设备都适用，旧式 mipmap-* 图已删除。 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
-    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
-    <monochrome android:drawable="@mipmap/ic_launcher_monochrome" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
 </adaptive-icon>

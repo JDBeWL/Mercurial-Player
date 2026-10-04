@@ -1,11 +1,10 @@
-// 主题 token 完整性护栏：组件引用的 `var(--md-sys-color-*)` 若没有来源，声明会在运行时
-// 静默失效（background-color 退回 transparent）。歌词候选选择器就因 surface-container-high
-// 未被输出却写了深色兜底而踩过坑。
+// 主题 token 完整性护栏: 组件引用的 `var(--md-sys-color-*)` 若没有来源, 声明会在运行时静默失效
+// (background-color 退回 transparent)
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { argbFromHex, themeFromSourceColor } from '@material/material-color-utilities'
 
-/** 主题库实际输出的角色色 → CSS 变量名 */
+/** 主题库实际输出的角色色 -> CSS 变量名 */
 const toKebab = (key: string): string => key.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()
 
 // 与 theme store 同一调用方式(先 argbFromHex 再生成),确保这里枚举的正是应用真实拿到的 token
@@ -28,10 +27,8 @@ const sources = import.meta.glob('@/../src/**/*.{vue,ts}', {
 const stripComments = (text: string): string => text.replace(/\/\*[\s\S]*?\*\//g, '')
 
 /**
- * 本应用主题**不存在**的 MD3 容器层级角色（只输出 29 个基础角色色）。仍有 19 个文件按
- * MD3 语义引用它们，声明失效后表现为"透明"，而界面观感正是按透明设计的：补上真实颜色会
- * 让各区域拿到不同层级色而出现接缝（"统一补齐 7 个容器层级色"那版即如此，已回退）。
- * 这里登记为"已知缺失"：允许存在，但不允许新增引用（见棘轮断言）。
+ * 主题库只输出 29 个基础角色色, 这些 MD3 容器层级角色在本应用不存在: 既有引用允许 (声明失效表现为
+ * 透明, 正是当前观感的前提), 新增不允许 -> 见下面的棘轮断言
  */
 const KNOWN_ABSENT_ROLES = new Set([
   '--md-sys-color-surface-container',
@@ -59,7 +56,7 @@ describe('主题 token 完整性', () => {
     const missing = [...usedTokens.entries()]
       .filter(([token]) => !themeTokens.has(token) && !definedTokens.has(token))
       .filter(([token]) => !KNOWN_ABSENT_ROLES.has(token))
-      .map(([token, files]) => `${token} ← ${files.join(', ')}`)
+      .map(([token, files]) => `${token} <- ${files.join(', ')}`)
 
     expect(missing).toEqual([])
   })

@@ -141,7 +141,7 @@ fn frontend_family_from_file_name_conventions() {
 
 #[test]
 fn internal_font_families_rejects_unparseable() {
-    // fixture 表数据是任意的，Face::parse 无法解析 → 返回空
+    // fixture 表数据是任意的，Face::parse 无法解析 -> 返回空
     let member: &[([u8; 4], &[u8])] = &[(*b"HEA1", b"x")];
     let single = build_sfnt(0, member);
     assert!(internal_font_families(&single).is_empty());

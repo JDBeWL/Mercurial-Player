@@ -41,7 +41,7 @@ const rustFields = (name: string): string[] | null => {
   return [...match[1]!.matchAll(/pub (\w+):/g)].map((m) => m[1]!)
 }
 
-/** snake_case → camelCase（Rust 侧统一 `#[serde(rename_all = "camelCase")]`） */
+/** snake_case -> camelCase（Rust 侧统一 `#[serde(rename_all = "camelCase")]`） */
 const toCamel = (snake: string): string => {
   const parts = snake.split('_')
   return (
@@ -53,7 +53,7 @@ const toCamel = (snake: string): string => {
   )
 }
 
-/** 前端类型 → 后端结构体（个别类型名不同，如 UIConfig ⇄ UiConfig） */
+/** 前端类型 -> 后端结构体（个别类型名不同，如 UIConfig ⇄ UiConfig） */
 const SECTIONS: Array<[string, string]> = [
   ['AppConfig', 'AppConfig'],
   ['UIConfig', 'UiConfig'],
@@ -87,7 +87,7 @@ describe('配置字段前后端镜像', () => {
         if (backCamel.has(field)) continue
         const path = `${tsName}.${field}`
         if (FRONTEND_ONLY.includes(path)) continue
-        missing.push(`${path} ← 后端 struct ${rsName} 缺字段(或命名不一致)`)
+        missing.push(`${path} <- 后端 struct ${rsName} 缺字段(或命名不一致)`)
       }
     }
 

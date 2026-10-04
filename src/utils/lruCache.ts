@@ -1,8 +1,9 @@
 import type { CacheItem } from '@/types'
 
 /**
- * 基于 Map 的 LRU 缓存,支持 TTL 过期。
- * 利用 Map 保持插入顺序的特性,delete + set 实现 O(1) 的 LRU 更新。
+ * 基于 Map 插入顺序的 LRU 缓存, 支持 TTL 过期。
+ *
+ * 队首即最久未用, 淘汰只发生在队首; delete + set 是把条目移到队尾的 O(1) 手法。
  */
 export class LRUCache<T> {
   private maxSize: number
@@ -19,25 +20,23 @@ export class LRUCache<T> {
     const item = this.cache.get(key)
     if (!item) return null
 
-    // 检查是否过期
     if (Date.now() - item.timestamp > this.ttl) {
       this.cache.delete(key)
       return null
     }
 
-    // 移到末尾（最近使用）
+    // 移到末尾, 见类注释的 LRU 约定
     this.cache.delete(key)
     this.cache.set(key, item)
     return item.value
   }
 
   set(key: string, value: T): void {
-    // 如果已存在,先删除
     if (this.cache.has(key)) {
       this.cache.delete(key)
     }
 
-    // 如果达到最大大小,删除最旧的
+    // 满载时从队首淘汰, 条目数不会超过 maxSize
     while (this.cache.size >= this.maxSize) {
       const firstKey = this.cache.keys().next().value
       if (firstKey) this.cache.delete(firstKey)

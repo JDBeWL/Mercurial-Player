@@ -1,8 +1,6 @@
 /**
- * Worker 沙箱通信协议
- *
- * 主窗口 (workerSandboxHost) 与插件 Worker (workerCore) 之间的消息契约。
- * 仅包含类型与纯序列化函数,两侧共用,不得引入任何运行时依赖。
+ * Worker 沙箱通信协议:主窗口 (workerSandboxHost) 与插件 Worker (workerCore) 之间的消息契约。
+ * 仅含类型与纯序列化函数,两侧共用,不得引入任何运行时依赖。
  */
 
 import type { PlayerState, Playlist, ThemeInfo, Track } from '../pluginTypes'
@@ -35,9 +33,8 @@ export function deserializeError(error: SerializedError): Error {
 }
 
 /**
- * 镜像状态:主窗口侧定期推送的快照数据。
- * Worker 侧同步读 API (player.getState / storage.get / library.* / theme.*) 从中取值,
- * 使沙箱插件无需异步化即可保持原有 API 契约。
+ * 主窗口定期推送的快照:Worker 侧同步读 API (player.getState / storage.get / library.* / theme.*)
+ * 从中取值,使沙箱插件无需异步化即可保持原有 API 契约。
  */
 export interface MirrorData {
   playerState: PlayerState
@@ -52,7 +49,7 @@ export interface MirrorData {
   tracks: Track[]
 }
 
-// ---------- 主窗口 → Worker ----------
+// ---------- 主窗口 -> Worker ----------
 
 export type HostToWorkerMessage =
   | { type: 'init'; pluginId: string; permissions: string[]; code: string }
@@ -63,7 +60,7 @@ export type HostToWorkerMessage =
   /** callId: 主窗口侧挂起调用 id (回执关联);cbId: Worker 侧回调句柄 id */
   | { type: 'callback-call'; callId: number; cbId: number; args: unknown[] }
 
-// ---------- Worker → 主窗口 ----------
+// ---------- Worker -> 主窗口 ----------
 
 export type WorkerToHostMessage =
   | { type: 'init-result'; ok: true }

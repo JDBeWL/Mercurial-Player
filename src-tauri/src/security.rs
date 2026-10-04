@@ -1,8 +1,7 @@
-//! 安全校验工具
+//! 安全校验工具：路径与文件名的统一校验，防路径穿越、任意文件读写。
 //!
-//! 提供路径与文件名的统一校验，防止路径穿越、任意文件读写等攻击。
-//! 除 [`is_within_dir`] / [`is_within_music_dirs`] 需要 canonicalize 外，其余检查均为
-//! 词法检查，可直接用于前端传入的参数。
+//! 除 [`is_within_dir`] / [`is_within_music_dirs`] 需要 canonicalize 外，其余检查都是词法检查，
+//! 可以直接作用在前端传入的参数上。
 
 use std::path::Path;
 
@@ -14,16 +13,16 @@ fn starts_with_dir(path: &str, dir: &str, sep: char) -> bool {
             .is_some_and(|rest| rest.starts_with(sep))
 }
 
-/// 判断路径（词法检查）是否位于敏感系统目录
+/// 判断路径（词法检查）是否位于敏感系统目录：Windows 系统目录、启动项、凭据目录与 Unix 系统目录
 ///
-/// 覆盖 Windows 系统目录、启动项、凭据目录与 Unix 系统目录。
+/// 空路径也判为敏感，调用方无需先排除。
 #[must_use]
 pub fn is_sensitive_path(path: &str) -> bool {
     if path.is_empty() {
         return true;
     }
 
-    // 统一分隔符后做小写匹配
+    // 两种分隔符风格各归一化一遍，任一命中即拒绝
     let win_style = path.replace('/', "\\").to_lowercase();
     let unix_style = path.replace('\\', "/").to_lowercase();
 
@@ -65,8 +64,8 @@ pub fn is_sensitive_path(path: &str) -> bool {
 
 /// 判断是否为简单文件名：单个路径组件，不含分隔符、`..`、`.`、盘符或根。
 ///
-/// 显式检查 `/`、`\`、`:` 而不依赖 `Path::components()`——后者按宿主平台
-/// 解析分隔符，`\` 在 Unix 上是普通字符，会导致跨平台校验结果不一致。
+/// 显式检查 `/`、`\`、`:` 而不用 `Path::components()`：后者按宿主平台解析分隔符，
+/// `\` 在 Unix 上是普通字符，跨平台校验结果会不一致。
 #[must_use]
 pub fn is_simple_filename(name: &str) -> bool {
     if name.is_empty() || name.len() > 255 {
@@ -80,7 +79,7 @@ pub fn is_simple_filename(name: &str) -> bool {
 
 /// 判断是否为安全的相对路径：非绝对路径、不含 `..`、`.`、空组件、盘符或根。
 ///
-/// 与 `is_simple_filename` 同理，按两种分隔符切分做跨平台一致的校验。
+/// 跨平台分隔符处理的理由与 [`is_simple_filename`] 相同。
 #[must_use]
 pub fn is_safe_relative_path(path: &str) -> bool {
     if path.is_empty() || path.len() > 1024 {
@@ -101,7 +100,8 @@ pub fn is_valid_plugin_id(id: &str) -> bool {
 }
 
 /// 判断路径（canonicalize 后）是否仍位于指定目录内，防止符号链接逃逸。
-/// 路径与目录都必须存在。
+///
+/// 路径与目录都必须存在，任一 canonicalize 失败即判为不在内。
 #[must_use]
 pub fn is_within_dir(path: &Path, base: &Path) -> bool {
     match (path.canonicalize(), base.canonicalize()) {
@@ -113,7 +113,7 @@ pub fn is_within_dir(path: &Path, base: &Path) -> bool {
 /// 目录扫描类命令的白名单门禁：路径必须是已登记的 `music_directories` 之一或其子目录。
 ///
 /// `is_sensitive_path` 只是黑名单，挡不住"传一个用户从没添加过的目录"，而整树枚举加元数据
-/// 回传正是被攻破的渲染进程最想要的能力。Android 的 SAF 树 URI 本身就代表用户授权，放行。
+/// 回传正是被攻破的渲染进程最想要的能力。Android 的 SAF 树 URI 本身就代表用户授权，放行；
 /// 目录不存在时 `is_within_dir` 返回 false，因此卸载的外置盘会自然被拒。
 #[must_use]
 pub fn is_within_music_dirs(path: &str, music_dirs: &[String]) -> bool {

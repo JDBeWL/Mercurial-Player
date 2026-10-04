@@ -1,6 +1,6 @@
 <template>
-  <!-- v-if 放在 Teleport 上:隐藏时不向 body 留下占位注释节点,
-       挂载/卸载路径更干净,也避免"Teleport + 内部 v-if"的注释锚点复用 -->
+  <!-- v-if 放在 Teleport 上：隐藏时不给 body 留占位注释节点，挂载 / 卸载路径更干净，
+       也避开 Teleport + 内部 v-if 的注释锚点复用 -->
   <Teleport v-if="visible" to="body">
     <div class="picker-overlay" @click.self="close">
       <div class="picker-dialog" role="dialog" aria-modal="true">
@@ -141,7 +141,7 @@ const kindOptions = computed(() => [
 
 const previewLrc = computed(() => {
   if (!preview.value) return ''
-  // 预览走 LRC 视图：逐字 bundle 的 ASS 只给播放器渲染用，直接展示会是一堆 Dialogue 行
+  // 预览走 LRC 视图：逐字 bundle 的 ASS 只给播放器渲染用，贴出来是一堆 Dialogue 行
   return (
     buildPreviewLyric(
       preview.value.bundle,
@@ -152,7 +152,7 @@ const previewLrc = computed(() => {
 })
 
 const handleKindChange = (): void => {
-  // 只需要触发 previewLrc 重新计算
+  // 空实现：v-model 已经改了 kindModel，previewLrc 自己重算
 }
 
 watch(
@@ -207,20 +207,9 @@ function formatMs(ms: number): string {
 </script>
 
 <style scoped>
-/* =========================================
-   主题适配说明
-   -----------------------------------------
-   本应用的主题系统(material-color-utilities 的 Scheme.light/dark)只输出 29 个
-   基础角色色:primary / secondary / tertiary / error / background / surface /
-   surface-variant / outline / outline-variant / on-* / inverse-* 等。
-   MD3 的容器层级色 surface-container(-low/-high/-highest) 在本应用的主题里**不存在**
-   (主题只输出 29 个基础角色色),所以这里一律使用真实存在的 token,也不写深浅色兜底值:
-   之前 surface-container-high 配 #1e1e24 兜底,会让浅色模式出现
-   「深色底 + 深色 on-surface 文字」而看不清。
-   层级:panel=surface(配遮罩+阴影) / 内嵌块=surface-variant /
-        次级块=surface-variant / 悬停=hover-overlay。
-   注意:不要在这里改回 surface-container*,那会让弹窗底色随主题缺失而失效。
-   ========================================= */
+/* 主题只输出 29 个基础角色色，surface-container* 在本应用里不存在：只用真实存在的 token，
+   也不写深浅色兜底值（深色兜底会让浅色模式变成深底深字）。
+   层级：panel=surface（配遮罩+阴影）/ 内嵌块与次级块=surface-variant / 悬停=hover-overlay。 */
 .picker-overlay {
   position: fixed;
   inset: 0;

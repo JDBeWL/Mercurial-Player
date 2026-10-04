@@ -113,7 +113,7 @@ fn is_digits(text: &str) -> bool {
     !text.is_empty() && text.chars().all(|c| c.is_ascii_digit())
 }
 
-/// 毫秒 → LRC 时间戳 `MM:SS.xx`（四舍五入到厘秒，小时并入分钟）
+/// 毫秒 -> LRC 时间戳 `MM:SS.xx`（四舍五入到厘秒，小时并入分钟）
 fn lrc_time(ms: i64) -> String {
     let total_cs = (ms.max(0) + 5) / 10;
     let (m, s, cs) = (total_cs / 6000, total_cs / 100 % 60, total_cs % 100);
@@ -367,7 +367,7 @@ fn find_word_marker(text: &str, from: usize) -> Option<(usize, usize, i64, i64)>
     None
 }
 
-/// 一行内容 → 逐字单元（文本取相邻标记之间的部分，保留空字以维持罗马音的下标对齐）
+/// 一行内容 -> 逐字单元（文本取相邻标记之间的部分，保留空字以维持罗马音的下标对齐）
 fn parse_krc_words(content: &str, line_start: i64) -> Vec<super::ass::Word> {
     let mut markers: Vec<(usize, usize, i64, i64)> = Vec::new();
     let mut from = 0;
@@ -792,7 +792,7 @@ mod tests {
         assert!(lrc.starts_with("[ti:Lemon]\n[ar:米津玄師]\n[offset:0]\n"));
         assert!(lrc.contains("[00:00.89]夢ならば"));
         assert!(!lrc.contains("<0,551,0>"));
-        // 无内容的标签值为空 → 不输出
+        // 无内容的标签值为空 -> 不输出
         assert!(!lrc.contains("[al:]"));
 
         let ass = parsed.to_ass("Lemon").expect("应生成逐字 ASS");

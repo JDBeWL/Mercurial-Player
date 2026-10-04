@@ -1,7 +1,6 @@
 //! SIMD 加速的样本转换：AVX2/FMA + SSE2 intrinsics 做 f32 到 i16/i32 的字节转换。
 //!
-//! SIMD intrinsics 必须 unsafe，故在模块级统一 allow；
-//! 该 allow 仅限本模块，不影响其他代码的 unsafe_code 审查。
+//! intrinsics 必须 unsafe，故在模块级统一 allow；该 allow 仅限本模块，不影响其它代码的 unsafe_code 审查。
 
 #![allow(unsafe_code)]
 
@@ -12,7 +11,6 @@ pub fn convert_samples_to_bytes_into(
     is_float: bool,
     out: &mut Vec<u8>,
 ) {
-    // 预先计算所需容量,避免多次扩容
     let bytes_per_sample = match bits {
         16 => 2,
         24 => 3,
@@ -24,22 +22,20 @@ pub fn convert_samples_to_bytes_into(
 
     match (bits, is_float) {
         (32, true) => {
-            // 32-bit float: f32 的内存表示即 LE 字节,可整块 memcpy
-            // 安全性: f32 与 [u8; 4] 都是 POD,size 一致(f32 恒为 4 字节)
+            // SAFETY: f32 的内存表示就是小端 4 字节,与 [u8; 4] 同 size 且都是 POD,可整块 memcpy
             let bytes = unsafe {
                 core::slice::from_raw_parts(samples.as_ptr().cast::<u8>(), samples.len() * 4)
             };
             out.extend_from_slice(bytes);
         }
         (32, false) => {
-            // f32 → i32 (AVX2 加速,无 AVX2 时回落 SSE2)
             #[cfg(target_arch = "x86_64")]
             {
                 if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
                     unsafe { f32_to_i32_bytes_avx2(samples, out) };
                     return;
                 }
-                // SSE2 是 x86_64 baseline,所有 64 位 Intel/AMD CPU 必然支持
+                // SSE2 是 x86_64 baseline,所有 64 位 Intel/AMD CPU 必然支持,无需运行时检测
                 unsafe { f32_to_i32_bytes_sse2(samples, out) };
                 return;
             }
@@ -50,7 +46,7 @@ pub fn convert_samples_to_bytes_into(
             }
         }
         (24, _) => {
-            // 24-bit: 字节打包(取 i32 低 3 字节)难以 SIMD 化,暂用标量
+            // 24-bit: 字节打包(取 i32 低 3 字节)难以 SIMD 化,只能标量
             for &s in samples {
                 let int_val = (s.clamp(-1.0, 1.0) * 8_388_607.0) as i32;
                 let bytes = int_val.to_le_bytes();
@@ -58,7 +54,6 @@ pub fn convert_samples_to_bytes_into(
             }
         }
         (16, _) => {
-            // f32 → i16 (AVX2 加速,无 AVX2 时回落 SSE2)
             #[cfg(target_arch = "x86_64")]
             {
                 if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
@@ -76,6 +71,7 @@ pub fn convert_samples_to_bytes_into(
         }
         _ => {
             // 兜底:按 32-bit float 处理
+            // SAFETY: 同 (32, true) 分支，f32 按字节直读
             let bytes = unsafe {
                 core::slice::from_raw_parts(samples.as_ptr().cast::<u8>(), samples.len() * 4)
             };
@@ -84,24 +80,12 @@ pub fn convert_samples_to_bytes_into(
     }
 }
 
-// SIMD 优化: f32 → i16/i32 字节流
-// 三层分发架构(运行时由 is_x86_feature_detected! 选择):
-// 1. AVX2 + FMA path (Haswell 2013+ / Zen 2017+) - 一次 8/16 个 f32,最快
-// 2. SSE2 path (所有 x86_64 CPU,含老至强) - 一次 4/8 个 f32,中等加速
-// 3. 标量 fallback (非 x86_64 平台) - 逐样本循环
-//
-// 关键技术细节:
-// - _mm_cvtps_epi32 / _mm256_cvtps_epi32 在输入超过 i32 范围时返回 0x80000000
-//   (saturation indefinite),故 i32 路径必须先 clamp 到 2147483520.0
-//   (小于 2^31 的最大 f32 = 2^31 - 128)
-// - _mm256_packs_epi32 存在 256-bit lane 交错,需 _mm256_permute4x64_epi64(0xD8) 修复
-//   SSE2 的 _mm_packs_epi32 只有 128-bit 单 lane,无交错问题
-// - 舍入模式: Rust `as i32/i16` 是 truncation-toward-zero,
-//   MXCSR 默认 RNE (round to nearest even),在 .5 边界处差 1 LSB
+// 分发：AVX2+FMA -> SSE2 -> 标量(非 x86_64)，由 convert_samples_to_bytes_into 运行时选择。
+// 两条 SIMD 路径都按 MXCSR 默认的 RNE 舍入，Rust 的 `as i32/i16` 是 toward-zero，.5 边界差 1 LSB。
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
-#[allow(unsafe_op_in_unsafe_fn)] // 整个函数由 target_feature 限定为 unsafe,内联 unsafe 块冗余
+#[allow(unsafe_op_in_unsafe_fn)] // 函数整体由 target_feature 限定为 unsafe,内联 unsafe 块冗余
 #[allow(clippy::wildcard_imports)] // SIMD intrinsics 数量多,逐个导入冗长
 pub(super) unsafe fn f32_to_i16_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
     use core::arch::x86_64::*;
@@ -111,34 +95,30 @@ pub(super) unsafe fn f32_to_i16_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
     let scale = _mm256_set1_ps(i16::MAX as f32); // 32767.0
 
     let mut i = 0;
-    let chunk = 16; // 16 个 f32 → 32 bytes (i16)
+    let chunk = 16; // 16 个 f32 -> 32 bytes (i16)
 
     while i + chunk <= samples.len() {
         let a = _mm256_loadu_ps(samples.as_ptr().add(i));
         let b = _mm256_loadu_ps(samples.as_ptr().add(i + 8));
 
-        // clamp(-1, 1) * scale
         let a = _mm256_mul_ps(_mm256_max_ps(neg_one, _mm256_min_ps(one, a)), scale);
         let b = _mm256_mul_ps(_mm256_max_ps(neg_one, _mm256_min_ps(one, b)), scale);
 
-        // f32 → i32 (round to nearest even)
         let a_i32 = _mm256_cvtps_epi32(a);
         let b_i32 = _mm256_cvtps_epi32(b);
 
-        // pack i32 → i16 (saturating) + 修复 lane 交错
-        // packs_epi32(a, b) 输出顺序: [a0..3, b0..3, a4..7, b4..7]
-        // permute 0xD8 (= 0b11_01_10_00) 重排为: [a0..7, b0..7]
+        // packs_epi32 的输出有 256-bit lane 交错: [a0..3, b0..3, a4..7, b4..7]
+        // permute 0xD8 (= 0b11_01_10_00) 重排回 [a0..7, b0..7];SSE2 单 lane 无此问题
         let packed = _mm256_packs_epi32(a_i32, b_i32);
         let packed = _mm256_permute4x64_epi64(packed, 0xD8);
 
-        // __m256i → [u8; 32]: 同 size(32B) POD 转换
+        // __m256i -> [u8; 32]: 同 size(32B) POD 转换
         let bytes: [u8; 32] = core::mem::transmute(packed);
         out.extend_from_slice(&bytes);
 
         i += chunk;
     }
 
-    // 处理剩余尾部
     while i < samples.len() {
         let int_val = (samples[i].clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
         out.extend_from_slice(&int_val.to_le_bytes());
@@ -156,17 +136,15 @@ pub(super) unsafe fn f32_to_i32_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
     let one = _mm256_set1_ps(1.0);
     let neg_one = _mm256_set1_ps(-1.0);
     let scale = _mm256_set1_ps(i32::MAX as f32); // 2147483648.0 (f32 精度损失)
-    // 2147483648.0 触发 cvtps_epi32 的 saturation indefinite(返回 0x80000000)
-    // 故 clamp 到 2147483520.0(小于 2^31 的最大 f32 = 2^31 - 128)
+    // cvtps_epi32 超范围输入返回 saturation indefinite(0x80000000)，故上限取小于 2^31 的最大 f32
     let max_safe = _mm256_set1_ps(2_147_483_520.0);
     let min_safe = _mm256_set1_ps(-2_147_483_648.0);
 
     let mut i = 0;
-    let chunk = 8; // 8 个 f32 → 32 bytes (i32)
+    let chunk = 8; // 8 个 f32 -> 32 bytes (i32)
 
     while i + chunk <= samples.len() {
         let a = _mm256_loadu_ps(samples.as_ptr().add(i));
-        // clamp(-1, 1) * scale,再 clamp 到 i32 安全范围
         let a = _mm256_mul_ps(_mm256_max_ps(neg_one, _mm256_min_ps(one, a)), scale);
         let a = _mm256_max_ps(min_safe, _mm256_min_ps(max_safe, a));
         let a_i32 = _mm256_cvtps_epi32(a);
@@ -184,7 +162,7 @@ pub(super) unsafe fn f32_to_i32_bytes_avx2(samples: &[f32], out: &mut Vec<u8>) {
     }
 }
 
-// SSE2 path: 所有 x86_64 CPU 的兜底加速(baseline feature),一次处理 4/8 个 f32
+// SSE2 兜底路径:一次处理 4/8 个 f32
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
@@ -198,7 +176,7 @@ pub(super) unsafe fn f32_to_i16_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
     let scale = _mm_set1_ps(i16::MAX as f32);
 
     let mut i = 0;
-    let chunk = 8; // 8 个 f32 → 16 bytes (i16)
+    let chunk = 8; // 8 个 f32 -> 16 bytes (i16)
 
     while i + chunk <= samples.len() {
         let a = _mm_loadu_ps(samples.as_ptr().add(i));
@@ -239,7 +217,7 @@ pub(super) unsafe fn f32_to_i32_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
     let min_safe = _mm_set1_ps(-2_147_483_648.0);
 
     let mut i = 0;
-    let chunk = 4; // 4 个 f32 → 16 bytes (i32)
+    let chunk = 4; // 4 个 f32 -> 16 bytes (i32)
 
     while i + chunk <= samples.len() {
         let a = _mm_loadu_ps(samples.as_ptr().add(i));
@@ -265,9 +243,7 @@ pub(super) unsafe fn f32_to_i32_bytes_sse2(samples: &[f32], out: &mut Vec<u8>) {
 mod simd_tests {
     use super::*;
 
-    /// 验证 AVX2 路径与标量路径产生相同字节流(允许 i32 路径 1 LSB 差异)
-    /// 样本总数对齐到 16 的倍数,确保 SSE2(chunk=8) 和 AVX2(chunk=16)
-    /// 的 SIMD path 都不进入尾部标量循环,从而可以精确对比两条 SIMD path
+    /// 样本长度对齐到 16（SSE2 chunk=8 与 AVX2 chunk=16 的 LCM），让两条 SIMD 路径都不走尾部标量循环
     fn make_test_samples(n: usize) -> Vec<f32> {
         let mut samples = Vec::with_capacity(n);
         for i in 0..n {
@@ -275,14 +251,12 @@ mod simd_tests {
             // 覆盖 [-1, 1] 全范围,含边界
             samples.push((t * 2.0 - 1.0).clamp(-1.0, 1.0));
         }
-        // 包含一些特殊值: 0、极值、超过 1.0 的值(测试 clamp)
-        // 总数 16 个,确保 SIMD path 不进入尾部标量循环
+        // 特殊值: 0、极值、超过 1.0 的值(测试 clamp)
         samples.extend([
             0.0_f32, 1.0, -1.0, 1.5, -1.5, // clamp 边界测试
             0.5, -0.5, 0.25, -0.25, 0.125, -0.125, // .5 边界舍入测试
             0.0, 0.0, 0.0, 0.0, 0.0, // 填充对齐
         ]);
-        // 断言总长度是 16 的倍数(SSE2 chunk=8, AVX2 chunk=16 的 LCM)
         debug_assert!(samples.len() % 16 == 0, "测试样本长度需对齐到 16");
         samples
     }
@@ -318,8 +292,7 @@ mod simd_tests {
 
         for (i, (s, v)) in scalar_i16.iter().zip(simd_i16.iter()).enumerate() {
             let diff = s.abs_diff(*v);
-            // 标量 `as i16` 与 SIMD _mm256_cvtps_epi32 在 .5 边界处采用不同舍入模式
-            // (Rust as 是 truncation-toward-zero, MXCSR 默认 RNE),最大差异 1 LSB
+            // 容差 1 LSB：舍入模式差异见模块顶部分发说明
             assert!(
                 diff <= 1,
                 "i16 差异过大 at {i}: scalar={s}, simd={v}, diff={diff}"
@@ -340,9 +313,7 @@ mod simd_tests {
 
         convert_samples_to_bytes_into(&samples, 32, false, &mut simd_out);
 
-        // i32 路径: SIMD 用 2147483520.0 作上限,标量用 i32::MAX as f32 饱和
-        // 输入 = 1.0 时:标量得 i32::MAX(2147483647),SIMD 得 2147483520,差 127
-        // 逐字节比较,允许差异时跳过
+        // i32 路径: SIMD 夹到 2147483520.0，输入 1.0 时比标量的 i32::MAX 小 127
         assert_eq!(scalar_out.len(), simd_out.len(), "输出长度不一致");
 
         let scalar_i32: Vec<i32> = scalar_out
@@ -360,7 +331,7 @@ mod simd_tests {
 
         for (i, (s, v)) in scalar_i32.iter().zip(simd_i32.iter()).enumerate() {
             let diff = (s.abs_diff(*v)) as i64;
-            // SIMD scale 比标量小最多 128,允许 1 LSB 误差
+            // 容差即上面 clamp 上限与 i32::MAX 之差
             assert!(
                 diff <= 128,
                 "i32 差异过大 at {i}: scalar={s}, simd={v}, diff={diff}"
@@ -374,7 +345,6 @@ mod simd_tests {
         let mut out = Vec::new();
         convert_samples_to_bytes_into(&samples, 32, true, &mut out);
 
-        // 32-bit float 应该是直接的字节拷贝
         assert_eq!(out.len(), samples.len() * 4);
         let as_f32: Vec<f32> = out
             .as_chunks::<4>()
@@ -393,8 +363,7 @@ mod simd_tests {
         assert_eq!(out.len(), samples.len() * 3);
     }
 
-    /// 直接测试 SSE2 path(强制使用,绕过 is_x86_feature_detected 检测)
-    /// 确保老 CPU 上的兜底路径输出正确
+    /// 直接调用 SSE2 兜底路径（绕过运行时检测），确保老 CPU 上的输出正确
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn test_sse2_i16_matches_scalar() {
@@ -407,7 +376,6 @@ mod simd_tests {
             scalar_out.extend_from_slice(&int_val.to_le_bytes());
         }
 
-        // 直接调用 SSE2 path
         unsafe { f32_to_i16_bytes_sse2(&samples, &mut sse2_out) };
 
         assert_eq!(scalar_out.len(), sse2_out.len(), "SSE2 i16 长度不一致");
@@ -427,8 +395,7 @@ mod simd_tests {
 
         for (i, (s, v)) in scalar_i16.iter().zip(sse2_i16.iter()).enumerate() {
             let diff = s.abs_diff(*v);
-            // SSE2 _mm_cvtps_epi32 与 AVX2 一样使用 MXCSR 默认 RNE
-            // 标量 `as i16` 是 truncation-toward-zero,.5 边界处差 1 LSB
+            // 容差 1 LSB：舍入模式差异见模块顶部分发说明
             assert!(
                 diff <= 1,
                 "SSE2 i16 差异过大 at {i}: scalar={s}, sse2={v}, diff={diff}"

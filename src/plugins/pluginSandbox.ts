@@ -1,11 +1,7 @@
-/**
- * 插件沙箱
- * 提供安全的执行环境
- */
+/** 主窗口侧插件沙箱:白名单全局 + 安全 console + 可清理定时器;外置插件走 sandbox/workerSandboxHost 的 Worker 隔离 */
 
 import type { PluginAPI, PluginInstance, PluginMainFunction } from './pluginTypes'
 
-// 安全的 console 类型
 interface SafeConsole {
   log: (...args: unknown[]) => void
   info: (...args: unknown[]) => void
@@ -14,7 +10,7 @@ interface SafeConsole {
   debug: (...args: unknown[]) => void
 }
 
-// 允许的全局对象类型
+// 插件在沙箱内可见的全部全局;名单之外的宿主全局一律不可访问
 interface AllowedGlobals {
   Object: typeof Object
   Array: typeof Array
@@ -55,16 +51,13 @@ interface AllowedGlobals {
   Infinity: number
 }
 
-// 沙箱类型
 export interface PluginSandbox {
   globals: AllowedGlobals
   execute: <T>(fn: PluginMainFunction | (() => T | Promise<T>)) => Promise<T | PluginInstance>
   cleanup: () => void
 }
 
-/**
- * 创建安全的 console 代理(log/info 映射到 info,其余映射到同级方法)
- */
+/** 安全 console 代理:log 与 info 都走 api.log.info,其余映射到同名方法 */
 function createSafeConsole(log: PluginAPI['log']): SafeConsole {
   return {
     log: log.info,
@@ -75,7 +68,6 @@ function createSafeConsole(log: PluginAPI['log']): SafeConsole {
   }
 }
 
-// 共享的安全定时器组
 interface SafeTimers {
   setTimeout: (fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => number
   clearTimeout: (id: number) => void
@@ -85,12 +77,9 @@ interface SafeTimers {
 }
 
 /**
- * 创建带清理追踪的安全定时器组
- * - setTimeout 延迟上限 60s
- * - setInterval 最小间隔 100ms
- * - 回调执行出错时交给 onError 处理(错误文案由调用方注入)
+ * 安全定时器组:setTimeout 延迟上限 60s,setInterval 最小间隔 100ms,回调抛错交给 onError
  *
- * pluginSandbox 与 pluginLoader 原本各自维护一份逐行同构的实现,现统一到此处。
+ * cleanup 回收所有未触发的定时器,插件停用时调用,防止插件泄漏的定时器一直跑
  */
 function createSafeTimers(onError: (error: unknown) => void): SafeTimers {
   const timers = new Set<number>()
@@ -149,9 +138,6 @@ function createSafeTimers(onError: (error: unknown) => void): SafeTimers {
     setInterval: safeSetInterval,
     clearInterval: safeClearInterval,
 
-    /**
-     * 清理所有未触发的定时器
-     */
     cleanup(): void {
       for (const id of timers) {
         clearTimeout(id)
@@ -165,17 +151,12 @@ function createSafeTimers(onError: (error: unknown) => void): SafeTimers {
   }
 }
 
-/**
- * 创建插件沙箱环境
- */
+/** 为单个插件创建沙箱:注入白名单 globals 并绑定该插件的 api */
 export function createPluginSandbox(api: PluginAPI): PluginSandbox {
-  // 安全的 console 代理
   const safeConsole = createSafeConsole(api.log)
 
-  // 安全的定时器（带清理追踪）
   const safeTimers = createSafeTimers((e) => api.log.error('定时器执行错误:', e))
 
-  // 允许插件访问的全局对象
   const allowedGlobals: AllowedGlobals = Object.freeze({
     Object,
     Array,
@@ -223,10 +204,9 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
     globals: allowedGlobals,
 
     /**
-     * 在沙箱中执行代码
+     * 在沙箱中执行插件函数
      *
-     * 第二参数 globals 注入沙箱全局对象（安全 console 代理 + 可清理的定时器），
-     * 供外置插件模块的旧格式包装代码解构使用（新格式/内置插件可忽略）
+     * 第二参数 globals 注入沙箱全局(安全 console + 可清理定时器),供外置插件的旧格式包装代码解构;新格式与内置插件可忽略
      */
     async execute<T>(fn: PluginMainFunction | (() => T | Promise<T>)): Promise<T | PluginInstance> {
       try {
@@ -239,40 +219,31 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
       }
     },
 
-    /**
-     * 清理所有定时器
-     */
     cleanup(): void {
       safeTimers.cleanup()
     },
   }
 }
 
-// 禁止的模式类型
 interface ForbiddenPattern {
   pattern: RegExp
   msg: string
 }
 
-/**
- * 验证插件代码安全性
- */
+/** 静态黑名单扫描,命中即抛错;调用方按告警处理,不阻断加载(原因见 pluginLoader) */
 export function validatePluginCode(code: string): boolean {
-  // 基本长度检查
   if (code.length > 1024 * 1024) {
-    // 1MB限制
     throw new Error('插件代码过大，超过1MB限制')
   }
 
-  // 移除注释（更严格的注释移除）
+  // 先剥离注释,避免注释里的内容触发黑名单
   const codeWithoutComments = code
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/\/\/.*$/gm, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
 
-  // 字符串形式的危险属性访问必须在字符串剥离之前检查:
-  // 这些模式的命中依赖字符串内容 (如 obj['\x63onstructor']),
-  // 而下方字符串剥离会把内容替换为 "" 使规则永远无法命中。
+  // 字符串形式的危险属性访问必须在下方字符串剥离之前检查:这些模式依赖字符串内容(如 obj['\x63onstructor']),
+  // 剥离后内容变成 "",规则将永远命中不到
   const stringFormForbidden: ForbiddenPattern[] = [
     { pattern: /\[\s*['"`]constructor['"`]\s*\]/, msg: '字符串形式的constructor访问' },
     { pattern: /\[\s*['"`]\\x/, msg: '十六进制转义访问' },
@@ -284,13 +255,13 @@ export function validatePluginCode(code: string): boolean {
     }
   }
 
-  // 移除字符串内容（更严格的字符串移除）
+  // 再剥离字符串内容,只在代码骨架上匹配
   const codeWithoutStrings = codeWithoutComments
     .replace(/"(?:[^"\\]|\\.)*"/g, '""')
     .replace(/'(?:[^'\\]|\\.)*'/g, "''")
     .replace(/`(?:[^`\\]|\\.)*`/g, '``')
 
-  // 禁止的模式
+  // 黑名单:原型链逃逸,宿主全局,二次求值与常见绕过手法
   const forbidden: ForbiddenPattern[] = [
     { pattern: /\beval\b/, msg: 'eval' },
     { pattern: /\bFunction\b/, msg: 'Function 构造函数' },
@@ -325,7 +296,6 @@ export function validatePluginCode(code: string): boolean {
     { pattern: /fromCharCode/, msg: 'fromCharCode' },
     { pattern: /fromCodePoint/, msg: 'fromCodePoint' },
     { pattern: /\bnew\s+Proxy\b/, msg: 'Proxy' },
-    // 新增的安全检查
     { pattern: /String\s*\.\s*fromCharCode/, msg: 'String.fromCharCode' },
     { pattern: /Array\s*\.\s*from/, msg: 'Array.from (可能用于绕过检查)' },
     { pattern: /Object\s*\.\s*keys\s*\(\s*this\s*\)/, msg: '遍历this对象' },
@@ -340,15 +310,14 @@ export function validatePluginCode(code: string): boolean {
     }
   }
 
-  // 检查可疑的属性访问模式
+  // 非数字下标的动态属性访问超过 15 次视为绕过企图
   const bracketAccessPattern = /\[\s*[^0-9\]]/g
   const bracketMatches = codeWithoutStrings.match(bracketAccessPattern)
   if (bracketMatches && bracketMatches.length > 15) {
-    // 降低阈值
     throw new Error('插件代码包含过多动态属性访问，可能存在安全风险')
   }
 
-  // 检查嵌套函数调用深度
+  // 三层及以上的直接嵌套调用判为可疑
   const nestedCallPattern = /\(\s*[^)]*\(\s*[^)]*\(\s*[^)]*\(/g
   if (nestedCallPattern.test(codeWithoutStrings)) {
     throw new Error('插件代码包含过深的嵌套调用，可能存在安全风险')

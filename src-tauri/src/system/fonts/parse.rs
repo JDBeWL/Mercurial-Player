@@ -245,7 +245,7 @@ pub fn frontend_family_from_file_name(file_name: &str) -> String {
 }
 
 /// 字体文件内全部面的内部族名（去重、保持出现顺序）。
-/// 供桌面歌词建立 前端族名 → 内部族名 的映射；无法解析的文件返回空
+/// 供桌面歌词建立 前端族名 -> 内部族名 的映射；无法解析的文件返回空
 pub fn internal_font_families(data: &[u8]) -> Vec<String> {
     let mut families = Vec::new();
     for meta in collection_member_metas(data) {

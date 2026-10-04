@@ -96,7 +96,7 @@ const {
   resetUpdateState,
 } = useAutoUpdate()
 
-/** 将release notes渲染为HTML */
+/** Markdown -> HTML；渲染来源与安全豁免见模板里 v-html 处的注释 */
 const renderedNotes = computed(() => {
   if (!releaseNotes.value) return ''
   return renderMarkdown(releaseNotes.value)
@@ -122,7 +122,6 @@ const onDismiss = () => {
 </script>
 
 <style scoped>
-/* ======== 遮罩层 ======== */
 .update-dialog-overlay {
   position: fixed;
   top: 0;
@@ -147,7 +146,6 @@ const onDismiss = () => {
   }
 }
 
-/* ======== 对话框主体 ======== */
 .update-dialog {
   background-color: var(--md-sys-color-surface-container, var(--md-sys-color-surface));
   color: var(--md-sys-color-on-surface);
@@ -172,7 +170,6 @@ const onDismiss = () => {
   }
 }
 
-/* ======== Header ======== */
 .dialog-header {
   display: flex;
   align-items: flex-start;
@@ -198,7 +195,6 @@ const onDismiss = () => {
   margin-left: 16px;
 }
 
-/* ======== Content ======== */
 .dialog-content {
   flex: 1;
   padding: 24px;
@@ -206,7 +202,6 @@ const onDismiss = () => {
   overflow-y: auto;
 }
 
-/* 错误消息 */
 .error-message {
   display: flex;
   align-items: center;
@@ -224,7 +219,6 @@ const onDismiss = () => {
   flex-shrink: 0;
 }
 
-/* 下载进度 */
 .download-section {
   display: flex;
   flex-direction: column;
@@ -251,7 +245,6 @@ const onDismiss = () => {
   color: var(--md-sys-color-on-surface-variant);
 }
 
-/* 更新日志区域 */
 .release-notes {
   display: flex;
   flex-direction: column;
@@ -270,7 +263,7 @@ const onDismiss = () => {
   overflow-y: auto;
 }
 
-/* ======== Markdown 渲染样式 ======== */
+/* v-html 注入的节点不带 scoped 属性，必须用 :deep() 才能命中 */
 .markdown-body {
   font-size: 14px;
   line-height: 1.7;
@@ -394,7 +387,7 @@ const onDismiss = () => {
   margin: 8px 0;
 }
 
-/* 表格 */
+/* display:block + overflow-x:auto：窄屏让宽表格横向滚，而不是撑破对话框 */
 .markdown-body :deep(table) {
   width: 100%;
   border-collapse: collapse;
@@ -428,7 +421,6 @@ const onDismiss = () => {
   background-color: var(--md-sys-color-surface-container-low, var(--md-sys-color-surface));
 }
 
-/* ======== Footer ======== */
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
@@ -457,14 +449,12 @@ const onDismiss = () => {
   }
 }
 
-/* 禁用状态 */
 .text-button:disabled,
 .filled-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-/* Scrollbar */
 .dialog-content::-webkit-scrollbar,
 .notes-content::-webkit-scrollbar {
   width: 6px;

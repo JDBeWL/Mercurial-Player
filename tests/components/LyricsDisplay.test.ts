@@ -309,7 +309,7 @@ describe('LyricsDisplay.vue', () => {
       wrapper = mountComponent()
       await nextTick()
 
-      // 改变 currentTime 触发 watch(currentTime) → 设置 visualTime → 触发 visualTime watcher
+      // 改变 currentTime 触发 watch(currentTime) -> 设置 visualTime -> 触发 visualTime watcher
       const store = mocks.playerStore as { currentTime: number }
       store.currentTime = 2
       await nextTick()
@@ -419,7 +419,7 @@ describe('LyricsDisplay.vue', () => {
         lyrics: makeLyrics(),
         loading: false,
         currentTime: 12,
-        lyricsOffset: 3, // 12 - 3 = 9 → 对应 time=5 的第二行
+        lyricsOffset: 3, // 12 - 3 = 9 -> 对应 time=5 的第二行
         isPlaying: false,
       })
       wrapper = mountComponent()

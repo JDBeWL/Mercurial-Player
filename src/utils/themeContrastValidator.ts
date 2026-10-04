@@ -1,7 +1,4 @@
-/**
- * 主题对比度验证器
- * 在应用主题时验证颜色对比度是否符合 WCAG 标准
- */
+/** 主题对比度检查: validateThemeContrast 只出诊断日志, enforceThemeContrast 才会回写颜色 */
 
 import { checkContrast, getColorFromCSSVar, adjustColorForContrast } from './colorContrast'
 import logger from './logger'
@@ -31,9 +28,7 @@ interface ColorPairConfig {
   required: boolean
 }
 
-/**
- * 验证 Material Design 3 颜色系统的对比度
- */
+/** 校验当前主题的全部关键颜色对, required 项不达标进 failed, 其余进 warnings */
 export function validateThemeContrast(_isDark: boolean = false): ValidationResults {
   const results: ValidationResults = {
     passed: [],
@@ -41,9 +36,7 @@ export function validateThemeContrast(_isDark: boolean = false): ValidationResul
     warnings: [],
   }
 
-  // 需要验证的颜色组合
   const colorPairs: ColorPairConfig[] = [
-    // 关键文本颜色组合（必须符合标准）
     {
       name: 'On Surface on Background',
       foreground: '--md-sys-color-on-surface',
@@ -65,7 +58,6 @@ export function validateThemeContrast(_isDark: boolean = false): ValidationResul
       largeText: false,
       required: true,
     },
-    // 容器颜色组合
     {
       name: 'On Primary Container on Primary Container',
       foreground: '--md-sys-color-on-primary-container',
@@ -87,7 +79,6 @@ export function validateThemeContrast(_isDark: boolean = false): ValidationResul
       largeText: false,
       required: true,
     },
-    // 按钮和交互元素
     {
       name: 'On Primary on Primary',
       foreground: '--md-sys-color-on-primary',
@@ -95,7 +86,7 @@ export function validateThemeContrast(_isDark: boolean = false): ValidationResul
       largeText: false,
       required: false,
     },
-    // 大文本
+    // largeText=true 时 AA 阈值从 4.5:1 降到 3:1
     {
       name: 'Headline on Background (Large)',
       foreground: '--md-sys-color-on-background',
@@ -103,7 +94,6 @@ export function validateThemeContrast(_isDark: boolean = false): ValidationResul
       largeText: true,
       required: true,
     },
-    // Primary 作为文本颜色
     {
       name: 'Primary on Background (Links/Accents)',
       foreground: '--md-sys-color-primary',
@@ -125,7 +115,6 @@ export function validateThemeContrast(_isDark: boolean = false): ValidationResul
       return
     }
 
-    // 检查 AA 级别
     const checkAA = checkContrast(fgColor, bgColor, {
       level: 'AA',
       largeText,
@@ -163,7 +152,6 @@ export function validateThemeContrast(_isDark: boolean = false): ValidationResul
     }
   })
 
-  // 记录结果
   if (results.failed.length > 0) {
     logger.warn('主题对比度验证失败（关键组合）:', results.failed)
     if (results.warnings.length > 0) {
@@ -178,15 +166,12 @@ export function validateThemeContrast(_isDark: boolean = false): ValidationResul
   return results
 }
 
-/**
- * 在主题应用后自动验证
- */
+/** 挂上 MutationObserver, 主题属性变化后自动跑一次验证 */
 export function setupThemeContrastValidation(): void {
   if (typeof window === 'undefined') return
 
-  // 防抖调度:拖动取色器时 applyTheme 会高频触发(每个 input 事件一次),
-  // 每次都全量验证(18 次 getComputedStyle + 9 组对比计算)会造成取色卡顿;
-  // 验证只是诊断用途,静默期后跑一次即可
+  // 防抖: 拖动取色器时每个 input 事件都会 applyTheme, 全量验证要 18 次 getComputedStyle + 9 组对比计算, 会卡取色
+  // 验证只写诊断日志不改颜色, 静默期后跑一次就够
   const VALIDATE_DEBOUNCE_MS = 300
   let validateTimer: ReturnType<typeof setTimeout> | null = null
   const scheduleValidation = (): void => {
@@ -197,7 +182,6 @@ export function setupThemeContrastValidation(): void {
     }, VALIDATE_DEBOUNCE_MS)
   }
 
-  // 监听主题变化
   const observer = new MutationObserver(() => {
     scheduleValidation()
   })
@@ -207,11 +191,10 @@ export function setupThemeContrastValidation(): void {
     attributeFilter: ['data-theme', 'style'],
   })
 
-  // 初始验证:主题颜色由 theme store 异步应用(config 加载完成后才有第一次 applyTheme),
-  // 轮询等待 --md-sys-color-* 变量就绪,避免在颜色未应用时产生一轮
-  // "无法获取颜色值" 的噪音告警;超时后照常验证,保留缺失诊断价值
+  // 主题色由 theme store 在 config 加载后才异步应用, 变量缺失时验证只会刷"无法获取颜色值"噪音告警
+  // 故轮询等 --md-sys-color-* 就绪; 超时后照常验证, 保留缺失颜色的诊断价值
   const INIT_POLL_INTERVAL_MS = 100
-  const INIT_MAX_ATTEMPTS = 50 // 最长等待 5s
+  const INIT_MAX_ATTEMPTS = 50 // 上限 5s
   let attempts = 0
   const initialValidate = (): void => {
     if (attempts < INIT_MAX_ATTEMPTS && !getColorFromCSSVar('--md-sys-color-primary')) {
@@ -225,11 +208,7 @@ export function setupThemeContrastValidation(): void {
 }
 
 /**
- * 强制执行 WCAG 2.1 AA 合规
- *
- * 验证当前主题的关键颜色对，对未达标的 required 组合调用
- * adjustColorForContrast 主动调整 foreground 并回写 CSS 变量，
- * 确保所有关键文本/容器对比度满足 WCAG 2.1 AA 标准。
+ * 强制执行 WCAG 2.1 AA: 未达标的 required 颜色对交由 adjustColorForContrast 修前景色, 再回写 CSS 变量。
  *
  * @returns 修复的颜色对数量
  */
@@ -237,7 +216,7 @@ export function enforceThemeContrast(): number {
   const root = document.documentElement
   let fixedCount = 0
 
-  // 复用 validateThemeContrast 的配置，但这里需要同步处理
+  // 与 validateThemeContrast 里的 colorPairs 是同一份配置的副本, 增删颜色对时两处都要改
   const colorPairs: ColorPairConfig[] = [
     {
       name: 'On Surface on Background',
@@ -298,7 +277,6 @@ export function enforceThemeContrast(): number {
 
     const check = checkContrast(fgColor, bgColor, { level: 'AA', largeText })
     if (!check.pass) {
-      // 主动调整 foreground 颜色以满足对比度要求
       const adjusted = adjustColorForContrast(fgColor, bgColor, {
         level: 'AA',
         largeText,
@@ -306,7 +284,7 @@ export function enforceThemeContrast(): number {
       root.style.setProperty(foreground, adjusted)
       fixedCount++
       logger.info(
-        `WCAG 修复: ${name} 对比度 ${check.ratio}:1 → 已调整 foreground (${fgColor} → ${adjusted})`,
+        `WCAG 修复: ${name} 对比度 ${check.ratio}:1 -> 已调整 foreground (${fgColor} -> ${adjusted})`,
       )
     }
   }

@@ -1,7 +1,4 @@
-/**
- * 插件管理器
- * 提供插件的加载、卸载、生命周期管理
- */
+/** 插件生命周期管理器:注册/激活/停用/卸载,并持有扩展注册表,事件总线与插件存储 */
 
 import { reactive, markRaw, watch, type WatchStopHandle } from 'vue'
 import logger from '../utils/logger'
@@ -34,8 +31,7 @@ import {
   type Visualizer,
 } from './pluginTypes'
 
-// 纯类型契约定义已拆分至 pluginTypes.ts,此处 re-export 保持向后兼容
-// (现有 `import { pluginManager, PluginState, PluginPermission } from './pluginManager'` 等不受影响)
+// 纯类型契约在 pluginTypes.ts;此处 re-export 保持既有 `from './pluginManager'` 的 import 路径可用
 export { PluginState, PluginPermission } from './pluginTypes'
 export type {
   Track,
@@ -65,14 +61,12 @@ export type {
   Plugin,
 } from './pluginTypes'
 
-// 插件实例数据
 interface PluginInstanceData {
   instance: PluginInstance
   api: PluginAPI
   sandbox: PluginSandbox
 }
 
-// 扩展注册表类型
 interface Extensions {
   lyricsProviders: (LyricsProvider & { pluginId: string })[]
   visualizers: (Visualizer & { pluginId: string })[]
@@ -85,28 +79,21 @@ interface Extensions {
   actionButtons: (ActionButton & { pluginId: string })[]
 }
 
-// 事件监听器类型
 interface EventListener {
   pluginId: string
   callback: EventCallback
 }
 
 class PluginManager {
-  // 已注册的插件
   plugins: Map<string, Plugin>
-  // 插件实例
   private instances: Map<string, PluginInstanceData>
-  // 扩展点注册表
   extensions: Extensions
-  // 事件监听器
   private eventListeners: Map<string, EventListener[]>
-  // 插件存储
   private storage: Map<string, PluginPersistentStorage>
-  // 播放器状态监听器
   private _playerWatcherStop: WatchStopHandle | null
-  // Worker 沙箱宿主注册表 (外置插件;停用即 terminate,卸载时移除)
+  // 外置插件的 Worker 宿主:停用即 terminate,卸载时移除引用
   private workerHosts: Map<string, PluginWorkerHost>
-  // 每个插件的激活代数:deactivate/uninstall 递增它来作废在途的 activate 结果
+  // 每个插件的激活代数:deactivate/uninstall 递增它,作废在途的 activate 结果(提交点校验见 activate)
   private activationGens: Map<string, number>
 
   constructor() {
@@ -130,9 +117,7 @@ class PluginManager {
     this.workerHosts = new Map()
   }
 
-  /**
-   * 初始化插件管理器
-   */
+  /** 安装播放器状态 watcher,把曲目/播放态变化转发为插件事件 */
   async init(): Promise<void> {
     const playerStore = usePlayerStore()
 
@@ -166,13 +151,9 @@ class PluginManager {
   }
 
   /**
-   * 清理插件管理器
+   * 释放管理器占用的全部资源(应用关闭路径调用)
    *
-   * 完整资源释放流程:
-   * 1. 停止 player watcher
-   * 2. 逐个停用所有 active 插件(触发插件的 deactivate、沙箱 cleanup、扩展清理)
-   * 3. 清理所有事件监听器
-   * 4. 强制保存所有插件存储
+   * 单个插件 deactivate 抛错不影响其余插件,存储落盘始终执行
    */
   async cleanup(): Promise<void> {
     if (this._playerWatcherStop) {
@@ -180,8 +161,7 @@ class PluginManager {
       this._playerWatcherStop = null
     }
 
-    // 停用所有 active 插件(顺序执行,避免并发资源竞争)
-    // 收集 active 插件 id 后再调用 deactivate,避免迭代时修改 Map
+    // 顺序停用避免并发资源竞争;先快照 id,防止迭代时修改 Map
     const activePluginIds = Array.from(this.plugins.values())
       .filter((p) => p.state === PluginState.ACTIVE)
       .map((p) => p.id)
@@ -194,10 +174,10 @@ class PluginManager {
       }
     }
 
-    // 清理所有残留的事件监听器(防止 deactivate 遗漏)
+    // deactivate 可能漏清,这里兜底
     this.eventListeners.clear()
 
-    // 强制保存所有插件存储(覆盖未在 deactivate 中处理的场景)
+    // 覆盖 deactivate 未处理到的存储
     for (const [pluginId, storage] of this.storage) {
       try {
         void storage.flush()
@@ -207,9 +187,7 @@ class PluginManager {
     }
   }
 
-  /**
-   * 注册插件
-   */
+  /** 登记插件元数据并置为 INACTIVE;同 id 重复注册抛错 */
   async register(pluginDef: PluginDefinition | BuiltinPluginDefinition): Promise<Plugin> {
     const { id, name, version, author, description, permissions = [], main } = pluginDef
 
@@ -221,7 +199,6 @@ class PluginManager {
       throw new Error(`插件 ${id} 已存在`)
     }
 
-    // 外置插件的 Worker 沙箱宿主 (生命周期随插件管理)
     const workerHost = (pluginDef as PluginDefinition).workerHost
     if (workerHost) {
       this.workerHosts.set(id, workerHost)
@@ -245,9 +222,7 @@ class PluginManager {
     return plugin
   }
 
-  /**
-   * 激活插件
-   */
+  /** 创建该插件的 API 与沙箱,执行 main 并置为 ACTIVE;已 ACTIVE 时为空操作 */
   async activate(pluginId: string): Promise<void> {
     const plugin = this.plugins.get(pluginId)
     if (!plugin) {
@@ -263,15 +238,14 @@ class PluginManager {
     }
 
     plugin.state = PluginState.LOADING
-    // 本次激活的代数快照：在途期间若被 deactivate/uninstall 递增，结果就必须丢弃
+    // 取本次激活的代数快照,提交前据此作废(机制见 activationGens 字段)
     const generation = (this.activationGens.get(pluginId) ?? 0) + 1
     this.activationGens.set(pluginId, generation)
 
     try {
       const api = createPluginAPI(pluginId, plugin.permissions, this)
 
-      // 外置插件:在 Worker 沙箱中执行 (与主窗口权限物理隔离);
-      // 内置插件:受信任代码,直接在主窗口执行
+      // 外置插件走 Worker 宿主;内置插件是受信任代码,直接在主窗口执行(隔离原因见 pluginLoader)
       const workerHost = this.workerHosts.get(pluginId)
       let sandbox: PluginSandbox
       let instance: PluginInstance
@@ -287,8 +261,8 @@ class PluginManager {
         await sandbox.execute(() => instance.activate!())
       }
 
-      // 内置插件的 await 打断不了（只有 Worker 能被 terminate），所以在这里验收：
-      // 激活期间被停用过，这份实例绝不能登记，否则就是带着活定时器的僵尸插件
+      // 内置插件的 await 打不断(只有 Worker 能被 terminate),只能在提交点验收:
+      // 代数已变说明激活期间被停用过,这份实例登记下去就是带活定时器的僵尸插件
       if (this.activationGens.get(pluginId) !== generation) {
         logger.warn(`插件 ${pluginId} 在激活期间已被停用，丢弃这次激活结果`)
         try {
@@ -326,20 +300,16 @@ class PluginManager {
     }
   }
 
-  /**
-   * 停用插件
-   */
+  /** 停用插件:执行插件自身 deactivate,回收扩展与沙箱,落盘存储;非 ACTIVE 状态直接返回 */
   async deactivate(pluginId: string): Promise<void> {
     const plugin = this.plugins.get(pluginId)
     if (!plugin) return
 
     if (plugin.state === PluginState.LOADING) {
-      // 作废在途激活：Worker 插件靠 terminate 打断，内置插件打不断，
-      // 只能靠代数让它在提交点自己放弃结果（见 activate 的验收分支）
+      // 递增代数作废在途激活(验收分支见 activate)
       this.activationGens.set(pluginId, (this.activationGens.get(pluginId) ?? 0) + 1)
-      // 强制终止:插件在激活流程中挂起(init/runMain 超时或死循环)。
-      // terminate 会 reject 挂起的 activate Promise,其 catch 分支会置 ERROR;
-      // 这里同步置 ERROR 保证 deactivate 返回后状态立即可用
+      // 走到这里说明激活挂起(init/runMain 超时或死循环),强制 terminate;
+      // terminate 会让在途 activate 的 catch 置 ERROR,这里同步置一次保证返回后状态立即可用
       const workerHost = this.workerHosts.get(pluginId)
       if (workerHost) {
         try {
@@ -378,7 +348,7 @@ class PluginManager {
       } catch (error) {
         logger.error(`插件停用出错: ${plugin.name}`, error)
       } finally {
-        // 确保沙箱清理总是被执行，即使 deactivate 抛出错误
+        // 即使插件 deactivate 抛错,沙箱清理也必须执行
         if (instanceData.sandbox && typeof instanceData.sandbox.cleanup === 'function') {
           try {
             instanceData.sandbox.cleanup()
@@ -393,7 +363,7 @@ class PluginManager {
 
     this.cleanupPluginExtensions(pluginId)
 
-    // 确保插件存储立即保存（清除 debounce 并立即保存）
+    // 停用即落盘:flush 会取消防抖并立即写入
     if (this.storage.has(pluginId)) {
       try {
         void this.storage.get(pluginId)!.flush()
@@ -407,12 +377,10 @@ class PluginManager {
     this.emit('plugin:deactivated', { pluginId, plugin })
   }
 
-  /**
-   * 卸载插件
-   */
+  /** 卸载插件:先 deactivate,再释放引用;clearStorage 默认 false,即保留插件存储 */
   async uninstall(pluginId: string, clearStorage = false): Promise<void> {
     await this.deactivate(pluginId)
-    // 移除沙箱宿主注册 (deactivate 已 terminate Worker,此处释放引用)
+    // deactivate 已 terminate Worker,这里只释放宿主引用
     this.workerHosts.delete(pluginId)
     this.plugins.delete(pluginId)
     this.storage.delete(pluginId)
@@ -430,9 +398,7 @@ class PluginManager {
     this.emit('plugin:uninstalled', { pluginId })
   }
 
-  /**
-   * 清理插件注册的扩展
-   */
+  /** 摘除该插件在所有扩展表与事件监听表中的条目 */
   cleanupPluginExtensions(pluginId: string): void {
     for (const key of Object.keys(this.extensions) as (keyof Extensions)[]) {
       const filtered = this.extensions[key].filter((ext) => ext.pluginId !== pluginId)
@@ -446,9 +412,7 @@ class PluginManager {
     }
   }
 
-  /**
-   * 注册扩展
-   */
+  /** 登记扩展并绑定 pluginId,卸载时才能按插件回收 */
   registerExtension<K extends keyof Extensions>(
     type: K,
     pluginId: string,
@@ -461,16 +425,12 @@ class PluginManager {
     logger.debug(`插件 ${pluginId} 注册了 ${type} 扩展`)
   }
 
-  /**
-   * 获取扩展
-   */
+  /** 取某类扩展的当前列表,返回的是内部响应式数组引用 */
   getExtensions<K extends keyof Extensions>(type: K): Extensions[K] {
     return this.extensions[type] || []
   }
 
-  /**
-   * 事件系统
-   */
+  /** 登记事件监听;插件侧的白名单与权限校验在 pluginAPI.events.on */
   on(event: string, pluginId: string, callback: EventCallback): void {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, [])
@@ -493,8 +453,7 @@ class PluginManager {
     if (listeners) {
       for (const { callback } of listeners) {
         try {
-          // 沙箱回调通常返回 Promise,同步 try/catch 无法捕获其拒绝 →
-          // 统一包一层 Promise.resolve 并挂 .catch,避免每次事件产生 unhandledrejection
+          // 回调多返回 Promise,同步 catch 捕不到拒绝;包一层 Promise.resolve 挂 .catch,避免 unhandledrejection
           void Promise.resolve(callback(data)).catch((error) => {
             logger.error(`事件处理出错: ${event}`, error)
           })
@@ -505,10 +464,7 @@ class PluginManager {
     }
   }
 
-  /**
-   * 插件存储
-   * 具体的存储实现(1MB 限额、紧急清理、防抖保存)在 pluginStorage.ts
-   */
+  /** 按插件惰性创建持久化存储;1MB 限额,紧急清理与防抖规则见 pluginStorage.ts */
   getStorage(pluginId: string): PluginPersistentStorage {
     if (!this.storage.has(pluginId)) {
       this.storage.set(pluginId, createPluginStorage(pluginId))
@@ -516,22 +472,15 @@ class PluginManager {
     return this.storage.get(pluginId)!
   }
 
-  /**
-   * 获取所有插件
-   */
   getAllPlugins(): Plugin[] {
     return Array.from(this.plugins.values())
   }
 
-  /**
-   * 获取活跃插件
-   */
   getActivePlugins(): Plugin[] {
     return this.getAllPlugins().filter((p) => p.state === PluginState.ACTIVE)
   }
 }
 
-// 单例
 export const pluginManager = new PluginManager()
 export { PluginManager }
 export default pluginManager

@@ -1,12 +1,10 @@
 //! 上次播放会话恢复
 //!
-//! 启动时根据配置中的 last_session 进行校验并恢复:
+//! 启动时校验配置里的 last_session:
 //! - L1: 文件存在（桌面 `Path::exists`；SAF content URI 交由打开时校验）
 //! - L2: 文件大小 + 修改时间一致 (检测被替换)
 //!
-//! 文件不存在: 静默清除记录 (前端负责从播放列表移除)
-//! 文件被替换: 视为新文件,从 0 开始播放
-//! 全部通过: 恢复到 position_secs
+//! 不过 L1 时静默清除记录(播放列表由前端维护)，被替换则从 0 开始，全通过则恢复到 position_secs。
 
 use crate::AppState;
 use crate::config::manager::{LAST_SESSION_MAX_AGE_SECS, LastSession, TrackSnapshot};
@@ -32,9 +30,7 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// 获取文件大小和最后修改时间 (Unix 秒)
-///
-/// 失败返回 None
+/// 获取文件大小和最后修改时间 (Unix 秒)；读不到返回 None
 fn get_file_metadata(path: &str) -> Option<(u64, u64)> {
     // content URI 没有可 stat 的路径，只能从 SAF fd 上取
     let metadata = if crate::android::saf::is_content_uri(path) {
@@ -66,15 +62,12 @@ pub struct ResumeResult {
     pub track_title: Option<String>,
     pub track_artist: Option<String>,
     pub duration_secs: Option<f32>,
-    /// 实际恢复到的位置 (秒)
-    /// - 文件被替换时返回 0
-    /// - 恢复成功时返回原 position
+    /// 实际恢复到的位置 (秒)：文件被替换时返回 0，恢复成功时返回原 position
     pub position_secs: Option<f32>,
     /// 所在播放列表名 (用于上下首导航)
     pub playlist_name: Option<String>,
     pub track_index_in_playlist: Option<usize>,
-    /// 播放队列快照 (用于恢复 player.playlist)
-    /// 前端直接用此数组构造 Track[],不依赖 musicLibrary 缓存
+    /// 播放队列快照 (用于恢复 player.playlist)，前端直接构造 Track[]，不依赖 musicLibrary 缓存
     pub playlist_tracks: Vec<TrackSnapshot>,
     /// 文件状态描述 (用于前端日志/调试)
     pub status: String,
@@ -88,8 +81,7 @@ pub async fn try_resume_last_session(
     state: &State<'_, AppState>,
 ) -> Result<ResumeResult, AppError> {
     // 取出会话记录：「读-改-写」在写锁内一次完成，避免与 save_last_session 并发丢更新。
-    // 下面的各提前返回都不再写回——此时 last_session 已是 None。
-    // std 锁守卫不能跨 await，所以成功路径的写回另起临界区。
+    // 各提前返回都不再写回，此时 last_session 已是 None
     let session = match state
         .config_manager
         .update_config(|config| config.last_session.take())?
@@ -111,7 +103,6 @@ pub async fn try_resume_last_session(
         Some(s) => s,
     };
 
-    // 过期检查 (30 天)
     let now = now_secs();
     if now.saturating_sub(session.saved_at) > LAST_SESSION_MAX_AGE_SECS {
         log::info!(
@@ -141,8 +132,7 @@ pub async fn try_resume_last_session(
             "Last session track not found, clearing: {}",
             session.track_path
         );
-        // 静默清除记录 - 前端通过 status="not_found" 决定是否从播放列表移除
-        // (播放列表管理在前端 store 中，后端不直接动它)
+        // 只回 status="not_found"，是否从播放列表移除由前端 store 决定
         return Ok(ResumeResult {
             resumed: false,
             track_path: Some(session.track_path),
@@ -158,7 +148,7 @@ pub async fn try_resume_last_session(
         });
     }
 
-    // L2: 文件大小 + 修改时间校验 (检测文件被替换)
+    // L2 校验，定义见模块头
     let (actual_size, actual_mtime) = if let Some(meta) = get_file_metadata(&session.track_path) {
         meta
     } else {
@@ -183,7 +173,6 @@ pub async fn try_resume_last_session(
 
     let file_replaced = actual_size != session.file_size || actual_mtime != session.file_mtime;
 
-    // 实际恢复位置: 文件被替换则从 0 开始,否则用原位置
     let resume_position = if file_replaced {
         log::info!(
             "Last session file replaced (size {}->{}, mtime {}->{}), restarting from 0",
@@ -209,7 +198,6 @@ pub async fn try_resume_last_session(
         log::warn!("写回归档位置失败，下次启动可能从错误位置续播: {e}");
     }
 
-    // 按 exclusive_mode 派发到对应播放路径
     let exclusive_mode = state
         .player
         .output
@@ -292,9 +280,7 @@ pub fn save_last_session(
     track_index_in_playlist: Option<usize>,
     playlist_tracks: Vec<TrackSnapshot>,
 ) -> Result<(), AppError> {
-    // 节流检查: 距上次写盘不足 SAVE_THROTTLE_DURATION 则跳过本次写入,
-    // 避免对大型播放列表频繁全量序列化 + 写盘。
-    // 检查与更新 last_save_time 在同一把锁内完成,保证原子性。
+    // 节流窗口见 SAVE_THROTTLE_DURATION；检查与更新时间在同一把锁内完成，保证原子性
     {
         let mut guard = LAST_SAVE_TIME
             .lock()
@@ -308,12 +294,10 @@ pub fn save_last_session(
                 return Ok(());
             }
         }
-        // 标记本次写入时间,后续在节流窗口内的调用将被跳过
         *guard = Some(Instant::now());
     }
 
-    // L2 校验需要文件大小和修改时间
-    // 如果文件不存在或无法读取,则不保存 (避免无效记录)
+    // L2 校验要用文件大小与修改时间；读不到就不保存，避免写入无效记录
     let (file_size, file_mtime) = if let Some(meta) = get_file_metadata(&track_path) {
         meta
     } else {

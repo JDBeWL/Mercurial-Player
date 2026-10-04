@@ -16,7 +16,7 @@ use crate::error::AppError;
 pub fn init(app: &tauri::App) {
     use tauri::Manager;
 
-    // 轮转前端日志:上一轮运行的 mercurial-player.log → -prev.log
+    // 轮转前端日志:上一轮运行的 mercurial-player.log -> -prev.log
     system::logging::init_log_rotation();
 
     // 一次性迁移:把旧版 Roaming 目录下的 store 文件搬到主程序同级 data/
@@ -89,13 +89,11 @@ pub fn init(app: &tauri::App) {
         }
     }
 
-    // Android：缓存与配置文件迁移到应用沙箱目录
-    // 桌面端默认用系统临时目录 + 主程序同级 data/（免安装包体积、便携化）；
-    // Android 的 /tmp 多数情况不可写、current_exe() 在只读 APK 内，统一收敛到 app 数据目录。
+    // Android 收敛到 app 数据目录：/tmp 多数情况不可写（桌面端用系统临时目录 + 同级 data/ 以便携化）
     #[cfg(target_os = "android")]
     {
         use tauri::Manager;
-        // JNI 反向调用（通知栏 / MediaSession / 耳机线控）需要进程级 AppHandle
+        // JNI 反向调用要进程级 AppHandle，约束见 crate::android::entry 的 APP_HANDLE
         crate::android::set_app_handle(app.handle());
         if let Ok(data_dir) = app.path().app_data_dir() {
             // 只作回退：`run()` 的 JNI 目录已先设则此处不生效（见 set_data_dir_override）
@@ -116,7 +114,7 @@ pub fn init(app: &tauri::App) {
             )) {
                 log::warn!("设置 Android 缓存路径失败: {e}");
             }
-            // 封面临入经 asset 协议提供前端，须放开访问范围
+            // 封面经 asset 协议提供给前端，须放开访问范围
             if let Err(e) = app
                 .asset_protocol_scope()
                 .allow_directory(&media_cache, true)
@@ -129,7 +127,6 @@ pub fn init(app: &tauri::App) {
     // 启动设备监听器（Android 上为降级 no-op，见 device_monitor.rs）
     {
         let state: tauri::State<AppState> = app.state();
-        // 锁中毒时自动恢复而非 panic
         let mut monitor = match state.player.device_monitor.lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
@@ -141,7 +138,6 @@ pub fn init(app: &tauri::App) {
         log::info!("Device monitor started");
     }
 
-    // 清理封面缓存
     {
         use crate::media::metadata;
         let state: tauri::State<AppState> = app.state();
@@ -163,7 +159,7 @@ pub fn init(app: &tauri::App) {
         }
     }
 
-    // 初始化Windows任务栏缩略图工具栏
+    // Windows 任务栏缩略图工具栏
     #[cfg(windows)]
     {
         let Some(window) = app.get_webview_window("main") else {
@@ -174,12 +170,11 @@ pub fn init(app: &tauri::App) {
 
         // 延迟初始化任务栏，确保窗口已完全创建
         std::thread::spawn(move || {
-            // 等待窗口完全初始化
             std::thread::sleep(std::time::Duration::from_millis(500));
 
-            // 初始化COM库
             #[allow(unsafe_code)]
             {
+                // SAFETY: Win32 C ABI 调用，无指针参数；本线程稍后作为消息钩子宿主需要 STA
                 unsafe {
                     let _ = windows::Win32::System::Com::CoInitializeEx(
                         None,
@@ -188,17 +183,13 @@ pub fn init(app: &tauri::App) {
                 }
             }
 
-            // 获取窗口句柄
             if let Ok(hwnd) = window.hwnd() {
                 let hwnd_value = hwnd.0 as isize;
 
-                // 初始化任务栏
                 if let Err(e) = taskbar::init_taskbar(hwnd_value) {
                     log::error!("Failed to initialize taskbar: {e}");
                 } else {
                     log::info!("Taskbar initialized successfully");
-
-                    // 设置窗口消息钩子来处理按钮点击
                     setup_taskbar_hook(hwnd_value, app_handle);
                 }
             }
@@ -211,14 +202,12 @@ pub fn init(app: &tauri::App) {
 pub fn create_exclusive_mode_player(device_name: &str) -> Result<AudioOutput, AppError> {
     log::info!("Starting in WASAPI exclusive mode");
 
-    // 创建一个空的rodio sink
     let mixer_sink = DeviceSinkBuilder::from_default_device()
         .map_err(|e| format!("Failed to create default device sink builder: {e}"))?
         .open_stream()
         .map_err(|e| format!("Failed to create default mixer sink: {e}"))?;
     let player = rodio::Player::connect_new(mixer_sink.mixer());
 
-    // 创建 WASAPI 独占播放器
     let wasapi_playback = WasapiExclusivePlayback::new();
     match wasapi_playback.initialize(Some(device_name)) {
         Ok((sample_rate, channels, actual_name)) => {
@@ -244,11 +233,11 @@ pub fn create_exclusive_mode_player(device_name: &str) -> Result<AudioOutput, Ap
 }
 
 /// 创建独占模式播放器（Android：AAudio 独占 / USB DAC 位完美）
-/// AAudio 要的是系统设备 id（原因见 [`crate::audio::aaudio::device`]），故让 `initialize` 自己找当前 USB 设备。
+///
+/// AAudio 要的是系统设备 id（原因见 [`crate::audio::aaudio::device`]），故让 `initialize` 自己找设备。
 #[cfg(target_os = "android")]
 pub fn create_exclusive_mode_player(_device_name: &str) -> Result<AudioOutput, AppError> {
-    // 共享模式的 sink 照旧创建：USB 拔出后要能立刻回落到它，
-    // 否则设置页关掉开关时会出现"没有播放器可用"的空窗
+    // 共享 sink 照旧创建：拔掉 DAC 后要能立刻回落，否则设置页关开关时出现"没有播放器可用"的空窗
     let mixer_sink = DeviceSinkBuilder::from_default_device()
         .map_err(|e| format!("Failed to create default device sink builder: {e}"))?
         .open_stream()
@@ -266,8 +255,7 @@ pub fn create_exclusive_mode_player(_device_name: &str) -> Result<AudioOutput, A
             })
         }
         Err(e) => {
-            // 没有 USB DAC（或设备被占用）时不能让应用起不来：回落共享模式，
-            // 由设置页把"未检测到 USB 音频设备"如实显示出来
+            // 没有 USB DAC（或设备被占用）时不能让应用起不来：回落共享模式，由设置页如实显示
             log::warn!("AAudio 独占初始化失败，回落共享模式: {e}");
             Ok(AudioOutput {
                 sink: player,
@@ -300,7 +288,6 @@ pub fn create_exclusive_mode_player(_device_name: &str) -> Result<AudioOutput, A
 pub fn create_shared_mode_player(device: &cpal::Device) -> Result<AudioOutput, AppError> {
     log::info!("Starting in shared mode");
 
-    // 从选定的设备创建音频输出流
     let mixer_sink = DeviceSinkBuilder::from_device(device.clone())
         .map_err(|e| format!("Failed to create device sink builder: {e}"))?
         .open_stream()
@@ -325,20 +312,17 @@ fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
         CallWindowProcW, GWLP_WNDPROC, SetWindowLongPtrW, WM_COMMAND, WNDPROC,
     };
 
-    // 存储原始窗口过程和app handle
     static ORIGINAL_WNDPROC: OnceLock<isize> = OnceLock::new();
     static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
     let _ = APP_HANDLE.set(app_handle);
 
-    // 自定义窗口过程
     unsafe extern "system" fn custom_wndproc(
         hwnd: HWND,
         msg: u32,
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
-        // 检查是否是任务栏按钮点击消息
         if msg == WM_COMMAND {
             let cmd_id = (wparam.0 & 0xFFFF) as u32;
             let notify_code = ((wparam.0 >> 16) & 0xFFFF) as u32;
@@ -348,6 +332,7 @@ fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
                 if let Some(app) = APP_HANDLE.get() {
                     use tauri::Emitter;
 
+                    // cmd_id 就是按钮在 taskbar::init_taskbar 里的添加序号
                     match cmd_id {
                         0 => {
                             // BTN_PREVIOUS
@@ -370,9 +355,9 @@ fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
             }
         }
 
-        // 调用原始窗口过程
         if let Some(&original) = ORIGINAL_WNDPROC.get() {
-            // 将存储的原始窗口过程指针转换回WNDPROC类型
+            // SAFETY: original 是替换前 SetWindowLongPtrW 返回的原窗口过程，ABI 同为
+            // extern "system"，转发回去即未子类化前的默认行为
             unsafe {
                 let original_proc: WNDPROC = std::mem::transmute(original);
                 CallWindowProcW(original_proc, hwnd, msg, wparam, lparam)
@@ -382,7 +367,7 @@ fn setup_taskbar_hook(hwnd: isize, app_handle: tauri::AppHandle) {
         }
     }
 
-    // 替换窗口过程
+    // SAFETY: hwnd 由 window.hwnd() 取得仍存活；custom_wndproc 为 extern "system"，与原过程同 ABI
     unsafe {
         let hwnd = HWND(hwnd as *mut std::ffi::c_void);
         let original = SetWindowLongPtrW(

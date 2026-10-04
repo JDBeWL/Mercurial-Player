@@ -19,15 +19,40 @@ import org.json.JSONObject
 object SafBridge {
     private const val PREFS_NAME = "saf_access"
     private const val KEY_TREE_URI = "tree_uri"
-    /** 每次选择器返回（成功或失败）都递增：前端靠它判定"选择器回来了"，而不是比较 URI
-     *  是否变化（重新授权同一个目录时 URI 完全相同，比较 URI 会永远等不到结果）。
-     *  成功与否再看 uri / [KEY_PICK_ERROR]：失败时绝不写 KEY_TREE_URI */
+    /** 每次选择器返回（成功或失败）都递增：前端靠它判定"选择器回来了"，而非比较 URI 是否变化
+     *  （重新授权同一目录时 URI 不变）。写入用 commit 而非 apply——这条记录是前端轮询的唯一
+     *  判据，异步落盘在对话框期间进程被杀就会丢，前端会空转到超时。 */
     private const val KEY_PICK_VERSION = "pick_version"
     /** 最近一次目录选择失败的原因（空串表示没有失败） */
     private const val KEY_PICK_ERROR = "pick_error"
 
+    /** 用户主动取消时的 [KEY_PICK_ERROR] 文案：前端据此立刻收尾，不必等轮询超时 */
+    private const val PICK_CANCELLED = "用户取消了目录选择"
+
+    /**
+     * SAF 树扫描的深度上限（防 DoS / 防环状结构）。与桌面端 `media/filesystem.rs` 的
+     * `MAX_SCAN_DEPTH` 无关，此处独断；超限会记入 `failedDirs` 让本次扫描报"不完整"，
+     * 因此刻意保留更宽松的 12，收紧只会让更多库导入失败。
+     */
+    private const val MAX_SCAN_DEPTH = 12
+
+    /**
+     * 一次目录选择的兜底超时（毫秒），与前端轮询上限一致。选择器在 Activity 重建、进程被回收时
+     * 可能永不回调，而 [pendingPick] 卡在 true 就再也调不起选择器）。
+     */
+    private const val PICK_TIMEOUT_MS = 3 * 60 * 1000L
+
     private var pickLauncher: ActivityResultLauncher<Intent>? = null
+
+    /** 是否有一次目录选择正在进行。Rust 会从任意线程调 [requestPick]，故 volatile */
+    @Volatile
     private var pendingPick = false
+
+    /** 当前这次选择发起的时刻（`SystemClock.elapsedRealtime()`），用于 [PICK_TIMEOUT_MS] 兜底 */
+    @Volatile
+    private var pendingPickStartedAt = 0L
+
+    /** 由 [init] 在主线程写、[requestPick] 读 */
     private var appContext: Context? = null
 
     /** [displayNameForVersion] 的缓存。getPickState 可能来自任意 Rust 线程，
@@ -42,11 +67,20 @@ object SafBridge {
     @JvmStatic
     fun init(activity: ComponentActivity) {
         appContext = activity.applicationContext
+        // Activity 重建后上一次的在途选择已经作废，它的回调挂在旧实例上，必须复位，
+        // 否则 pendingPick 会永久卡住，之后再也调不起选择器
+        pendingPick = false
+        pendingPickStartedAt = 0L
         pickLauncher = activity.registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
             pendingPick = false
-            if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+            if (result.resultCode != Activity.RESULT_OK) {
+                // 取消是最常见的"返回"路径，同样必须递增 version：前端靠 version 变化判定
+                // 选择器已返回（见 KEY_PICK_VERSION 注释），不递增就要空转到 3 分钟超时
+                recordPickFailure(PICK_CANCELLED)
+                return@registerForActivityResult
+            }
             val uri = result.data?.data
             if (uri == null) {
                 recordPickFailure("系统未返回目录 URI")
@@ -74,7 +108,7 @@ object SafBridge {
                 ?.putString(KEY_TREE_URI, uri.toString())
                 ?.putString(KEY_PICK_ERROR, "")
                 ?.putLong(KEY_PICK_VERSION, currentPickVersion() + 1)
-                ?.apply()
+                ?.commit()
             android.util.Log.i("SafBridge", "picked tree: $uri (version=${currentPickVersion()})")
         }
     }
@@ -90,15 +124,37 @@ object SafBridge {
             ?.edit()
             ?.putString(KEY_PICK_ERROR, reason)
             ?.putLong(KEY_PICK_VERSION, currentPickVersion() + 1)
-            ?.apply()
+            ?.commit()
     }
 
     /** Rust 命令 saf_pick_directory 调起系统目录选择器 */
     @JvmStatic
     fun requestPick() {
-        if (pendingPick) return
+        if (pendingPick && !pickTimedOut()) return
+        val launcher = pickLauncher
+        if (launcher == null) {
+            // init 没跑到（Activity 尚未创建）时以前直接 return，前端于是空转到超时。
+            // 这里必须回报一次失败：前端靠 version 变化判定"选择器已返回"
+            pendingPick = false
+            recordPickFailure("目录选择器未就绪（应用尚未初始化）")
+            return
+        }
         pendingPick = true
-        pickLauncher?.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE))
+        pendingPickStartedAt = android.os.SystemClock.elapsedRealtime()
+        try {
+            launcher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE))
+        } catch (e: Exception) {
+            // 重复 launch / Activity 状态异常
+            pendingPick = false
+            recordPickFailure("调起目录选择器失败: ${e.message}")
+        }
+    }
+
+    /** [pendingPick] 是否已超过 [PICK_TIMEOUT_MS]（选择器回调永远不来的兜底） */
+    private fun pickTimedOut(): Boolean {
+        val startedAt = pendingPickStartedAt
+        return startedAt > 0L &&
+            android.os.SystemClock.elapsedRealtime() - startedAt > PICK_TIMEOUT_MS
     }
 
     /** 返回应用数据目录（Rust 侧配置/缓存落盘用，替代只读的 current_exe 目录） */
@@ -113,6 +169,24 @@ object SafBridge {
     /** 返回持久化的树 URI（无则 null） */
     @JvmStatic
     fun getSavedTreeUri(): String? = prefs()?.getString(KEY_TREE_URI, null)
+
+    /**
+     * 某个树 URI 是否仍持有持久读授权。持久授权会被系统回收（撤销、清数据、提供方被卸载），
+     * 之后用旧 URI 查询/开 fd 只抛 SecurityException；`persistedUriPermissions` 是唯一可靠判据。
+     * 判据必须落在传入的 URI 上而非"已保存的那棵树"——配置里可能有多个 SAF 目录。
+     */
+    @JvmStatic
+    fun isTreePermissionValid(treeUri: String): Boolean {
+        if (treeUri.isBlank()) return false
+        val resolver = appContext?.contentResolver ?: return false
+        val target = Uri.parse(treeUri)
+        return runCatching {
+            resolver.persistedUriPermissions.any { it.uri == target && it.isReadPermission }
+        }.getOrElse { e ->
+            android.util.Log.w("SafBridge", "查询持久授权失败: ${e.message}")
+            false
+        }
+    }
 
     /**
      * 授权状态快照。前端轮询 `version` 判断选择器是否返回：
@@ -148,19 +222,54 @@ object SafBridge {
         return displayNameValue
     }
 
-    /** 清除持久化的树 URI（同时递增 version，避免前端轮询拿到陈旧状态） */
+    /**
+     * 移除某个 SAF 目录时由 Rust 调用：释放该树 URI 的持久授权。只删 SharedPreferences 会把
+     * grant 永久留在系统里，反复增删累积到上限后系统会拒绝新授权请求；若清掉的正是
+     * "当前记住的那棵树"，一并清除记录并递增 version。
+     */
     @JvmStatic
-    fun clearSavedTree() {
-        prefs()
-            ?.edit()
-            ?.remove(KEY_TREE_URI)
-            ?.remove(KEY_PICK_ERROR)
-            ?.putLong(KEY_PICK_VERSION, currentPickVersion() + 1)
-            ?.apply()
-        android.util.Log.i("SafBridge", "cleared saved tree")
+    fun clearSavedTree(treeUri: String) {
+        releasePersistableTreePermission(treeUri)
+        if (treeUri.isBlank() || treeUri == getSavedTreeUri()) {
+            prefs()
+                ?.edit()
+                ?.remove(KEY_TREE_URI)
+                ?.remove(KEY_PICK_ERROR)
+                ?.putLong(KEY_PICK_VERSION, currentPickVersion() + 1)
+                ?.commit()
+        }
+        android.util.Log.i("SafBridge", "cleared saved tree: $treeUri")
     }
 
-    private val AUDIO_EXTS = setOf("mp3", "flac", "wav", "ogg", "m4a", "aac")
+    /** 释放指定树 URI 的持久授权 */
+    private fun releasePersistableTreePermission(treeUri: String) {
+        if (treeUri.isBlank()) return
+        val resolver = appContext?.contentResolver ?: return
+        val target = Uri.parse(treeUri)
+        runCatching {
+            val flags =
+                resolver.persistedUriPermissions
+                    .firstOrNull { it.uri == target }
+                    ?.let { p ->
+                        (if (p.isReadPermission) Intent.FLAG_GRANT_READ_URI_PERMISSION else 0) or
+                            (if (p.isWritePermission) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0)
+                    }
+                    ?: 0
+            if (flags != 0) {
+                resolver.releasePersistableUriPermission(target, flags)
+                android.util.Log.i("SafBridge", "released persistable permission: $target")
+            }
+        }.onFailure { e ->
+            android.util.Log.w("SafBridge", "释放持久授权失败: ${e.message}")
+        }
+    }
+
+    /**
+     * 扫描时认可的音频扩展名。必须与 Rust 的 `AUDIO_EXTENSIONS` 及前端 `FileUtils.isAudioFile`
+     * 是同一份集合，否则同一批文件经本地目录与 SAF 会扫出不同结果
+     */
+    private val AUDIO_EXTS =
+        setOf("mp3", "flac", "wav", "ogg", "m4a", "aac", "aiff", "aif", "caf")
 
     /**
      * 递归枚举已授权树下的音频文件，返回
@@ -185,24 +294,44 @@ object SafBridge {
         val out = JSONArray()
         // 读取失败的目录（相对路径或可读名）。查询式枚举在个别子目录失败时不再静默跳过
         val failedDirs = ArrayList<String>()
+        // 授权被系统回收后，每个子目录都会各自抛一次 SecurityException；
+        // 这里先判一次，直接给出"需要重新授权"这一条可操作的失败
+        if (!isTreePermissionValid(treeUri)) {
+            return JSONObject()
+                .put("files", JSONArray())
+                .put("failedDirs", JSONArray().put("(目录授权已失效，请重新添加该目录)"))
+                .toString()
+        }
         val rootId = runCatching { DocumentsContract.getTreeDocumentId(tree) }.getOrNull()
-        if (rootId != null) {
+        if (rootId == null) {
+            failedDirs.add("(无法解析树根文档)")
+        } else {
             // 树根的解码值与可读名整趟遍历都不变，各算一次；根目录自身的相对路径是空串
             val rootDecoded = decode(rootId)
             val rootName = rootDisplayName(rootId)
-            walkQuery(ctx, tree, rootId, "", rootDecoded, rootName, out, failedDirs, 0)
-        }
-        if (out.length() == 0) {
-            // 查询式一个都没拿到：整体回退 DocumentFile（provider 不支持 child documents 查询）
-            val root = runCatching { DocumentFile.fromTreeUri(ctx, tree) }.getOrNull()
-            if (root != null) walkLegacy(root, out, 0)
-            // 回退扫到结果时按完整扫描处理（与旧行为一致）；回退也拿不到则保留失败记录，
-            // 让调用方知道"读不到"而不是"目录是空的"
-            if (out.length() > 0) failedDirs.clear()
+            // 返回值 = provider 是否**明确拒绝**了子文档查询（IllegalArgumentException）。
+            // 只有这种情况才值得回退 DocumentFile；"目录里本来就没歌"不再触发一次全量慢速递归
+            val childQueryUnsupported =
+                walkQuery(ctx, tree, rootId, "", rootDecoded, rootName, out, failedDirs, 0)
+            if (childQueryUnsupported) {
+                android.util.Log.i("SafBridge", "provider 不支持子文档查询，回退 DocumentFile 递归")
+                val root = runCatching { DocumentFile.fromTreeUri(ctx, tree) }.getOrNull()
+                if (root != null) {
+                    walkLegacy(root, out, 0)
+                    // 回退路径跑完即视为完整扫描（与旧行为一致）；跑不起来则保留 walkQuery
+                    // 记下的失败，让调用方知道"读不到"而不是"目录是空的"
+                    failedDirs.clear()
+                }
+            }
         }
         return JSONObject().put("files", out).put("failedDirs", JSONArray(failedDirs)).toString()
     }
 
+    /**
+     * 查询式递归枚举。返回 `true` 表示 provider **明确不支持**子文档查询
+     * （`IllegalArgumentException`，如部分老式 DocumentsProvider），调用方据此回退 DocumentFile。
+     * 权限、IO 等真实错误仍记为 [failedDirs] 并返回 `false`。
+     */
     private fun walkQuery(
         ctx: Context,
         tree: Uri,
@@ -213,9 +342,15 @@ object SafBridge {
         out: JSONArray,
         failedDirs: MutableList<String>,
         depth: Int,
-    ) {
-        if (depth > 12) return // 与 Rust 侧 MAX_SCAN_DEPTH 对齐，防 DoS
+    ): Boolean {
         val label = relDir.ifEmpty { rootName }
+        if (depth > MAX_SCAN_DEPTH) {
+            // 静默丢弃整棵子树会让"部分歌曲消失"被当成用户删了歌，必须记进 failedDirs，
+            // 由 Rust 侧据此拒绝把这次扫描当完整结果
+            android.util.Log.w("SafBridge", "目录深度超过 $MAX_SCAN_DEPTH，跳过: $label")
+            failedDirs.add(label)
+            return false
+        }
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId)
         val projection =
             arrayOf(
@@ -223,16 +358,22 @@ object SafBridge {
                 DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                 DocumentsContract.Document.COLUMN_MIME_TYPE,
             )
+        var unsupported = false
         val cursor =
             try {
                 ctx.contentResolver.query(childrenUri, projection, null, null, null)
+            } catch (e: IllegalArgumentException) {
+                // provider 不认这个 URI 形状 = 不支持子文档查询，不是失败
+                android.util.Log.i("SafBridge", "provider 不支持子文档查询: $docId")
+                unsupported = true
+                null
             } catch (e: Exception) {
                 android.util.Log.w("SafBridge", "query children failed: $docId", e)
                 null
             }
         if (cursor == null) {
-            failedDirs.add(label)
-            return
+            if (!unsupported) failedDirs.add(label)
+            return unsupported
         }
 
         // 先收集子目录 id，避免在 cursor 未关闭时递归嵌套查询
@@ -242,15 +383,21 @@ object SafBridge {
                 val iId = c.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
                 val iName = c.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                 val iMime = c.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
-                if (iId < 0 || iName < 0) return
+                if (iId < 0 || iName < 0) {
+                    // return@use 而非 return：非局部返回会连后面的子目录递归一起跳过，
+                    // 而这里只是本目录的列缺失，必须记进失败列表而不是静默丢一棵子树
+                    android.util.Log.w("SafBridge", "查询结果缺少必需列: $docId")
+                    failedDirs.add(label)
+                    return@use
+                }
                 while (c.moveToNext()) {
                     val id = c.getString(iId) ?: continue
                     val name = c.getString(iName) ?: continue
                     val mime = if (iMime >= 0) c.getString(iMime) ?: "" else ""
                     when {
                         mime == DocumentsContract.Document.MIME_TYPE_DIR -> subDirs.add(id)
-                        // relDir 就是本目录的路径，曲目直接用它：先前每首曲目要为
-                        // folder/folderPath 各解一遍 docId 与 rootId（4 次 URLDecoder.decode，
+                        // relDir 就是本目录的路径，曲目直接用它：先前每首曲目都要为
+                        // folder/folderPath 各解一遍 docId 与 rootId（4 次百分号解码，
                         // 其中 2 次在解同一个不变的 rootId），万曲规模就是几万趟白活
                         isAudioName(name) ->
                             out.put(
@@ -266,26 +413,28 @@ object SafBridge {
         } catch (e: Exception) {
             android.util.Log.w("SafBridge", "walk children failed: $docId", e)
             failedDirs.add(label)
-            return
+            return unsupported
         }
         for (sub in subDirs) {
-            walkQuery(
-                ctx,
-                tree,
-                sub,
-                dirRelativePath(sub, rootDecoded),
-                rootDecoded,
-                rootName,
-                out,
-                failedDirs,
-                depth + 1,
-            )
+            unsupported =
+                walkQuery(
+                    ctx,
+                    tree,
+                    sub,
+                    dirRelativePath(sub, rootDecoded),
+                    rootDecoded,
+                    rootName,
+                    out,
+                    failedDirs,
+                    depth + 1,
+                ) || unsupported
         }
+        return unsupported
     }
 
-    /** 回退路径：DocumentFile 递归（仅当查询式枚举拿不到结果时使用） */
+    /** 回退路径：DocumentFile 递归（仅当查询式枚举明确不被 provider 支持时使用） */
     private fun walkLegacy(dir: DocumentFile, out: JSONArray, depth: Int) {
-        if (depth > 12) return
+        if (depth > MAX_SCAN_DEPTH) return
         val children = dir.listFiles() ?: return
         for (child in children) {
             if (child.isDirectory) {
@@ -311,8 +460,13 @@ object SafBridge {
         return ext in AUDIO_EXTS
     }
 
+    /**
+     * 百分号解码 document id（`primary%3AMusic%2FSong.mp3` → `primary:Music/Song.mp3`）。
+     * 用 [Uri.decode] 而非 `URLDecoder.decode`：后者会把 `+` 解成空格，而 Rust 侧
+     * `saf.rs::percent_decode` 原样保留 `+`，同一目录在两处会得出不同相对路径。
+     */
     private fun decode(value: String): String =
-        runCatching { java.net.URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
+        runCatching { Uri.decode(value) }.getOrDefault(value)
 
     /**
      * 目录文档 id 相对树根的解码路径，根目录返回空串。
@@ -400,15 +554,23 @@ object SafBridge {
                 ctx.contentResolver
                     .query(
                         parsed,
-                        arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+                        arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
                         null,
                         null,
                         null,
                     )
-                    ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                    ?.use { c ->
+                        // 必须按列名取下标，不能写 getString(0)：投影顺序不由调用方保证，
+                        // provider 可能（且确实会）调整返回列的顺序，取到别的字段就会把
+                        // 一个非文件名当成文件名交给 Rust 做扩展名白名单校验
+                        val index =
+                            c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (index >= 0 && c.moveToFirst()) c.getString(index) else null
+                    }
             }
             .getOrNull()
         if (!fromProvider.isNullOrEmpty()) return fromProvider
+        // provider 没给列名时再退到 DocumentFile
         return runCatching { DocumentFile.fromSingleUri(ctx, parsed)?.name }.getOrNull() ?: ""
     }
 }

@@ -27,13 +27,12 @@ import { useConfigStore } from './config'
 import type { TonalVariants, HarmonyColors, ThemePreference } from '@/types'
 
 // 换主题时的统一过渡（配合 style.css 的 html.theme-fading）
-// 须 ≥ 那份过渡的时长（--transition-normal），否则会在跑完前摘掉类、把它截断成瞬变
+// 须 >= 那份过渡的时长（--transition-normal），否则会在跑完前摘掉类、把它截断成瞬变
 const THEME_FADE_MS = 300
 let themeFadeTimer: ReturnType<typeof setTimeout> | null = null
 let themeAppliedOnce = false
 
-/** 换主题时给 `<html>` 挂 `theme-fading`，让所有元素用同一份过渡换色（见 style.css）；
- *  否则中间帧会出现区域间色差。过渡跑完摘掉。 */
+/** 换主题时给 `<html>` 挂 `theme-fading`，让所有元素用同一份过渡换色，避免中间帧出现区域间色差 */
 function scheduleThemeFade(): void {
   const root = document.documentElement
   root.classList.add('theme-fading')
@@ -44,12 +43,10 @@ function scheduleThemeFade(): void {
   }, THEME_FADE_MS)
 }
 
-// 缓存已生成的主题样式
-// 复用通用 LRU 实现(上限 20 条);TTL Infinity 表示 CSS 文本不过期
+// 已生成的主题 CSS 文本缓存,复用通用 LRU(上限 20 条,TTL Infinity 表示不过期)
 const customStyleCache = new LRUCache<string>(20, Infinity)
 let customStyleElement: HTMLStyleElement | null = null
 
-// 检测是否为中性灰色（低饱和度）
 function isNeutralGray(hexColor: string): boolean {
   const argb = argbFromHex(hexColor)
   const hct = Hct.fromInt(argb)
@@ -57,7 +54,7 @@ function isNeutralGray(hexColor: string): boolean {
   return hct.chroma < 15
 }
 
-// 辅助函数：从 HEX 颜色生成色调变体
+/** 从 HEX 颜色生成色调变体 */
 function generateTonalVariants(hexColor: string): TonalVariants {
   const argb = argbFromHex(hexColor)
   const hct = Hct.fromInt(argb)
@@ -71,7 +68,7 @@ function generateTonalVariants(hexColor: string): TonalVariants {
   return result
 }
 
-// 辅助函数：生成互补色和类似色
+/** 生成互补色与类似色 */
 function generateHarmonyColors(hexColor: string): HarmonyColors {
   const argb = argbFromHex(hexColor)
   const hct = Hct.fromInt(argb)
@@ -149,7 +146,6 @@ function generateGrayThemeColors(hexColor: string, isDark: boolean) {
   }
 }
 
-// 生成自定义 CSS 变量
 function generateCustomCSS(
   primaryColor: string,
   isDark: boolean,
@@ -159,7 +155,6 @@ function generateCustomCSS(
   const primaryHct = Hct.fromInt(argbFromHex(primaryColor))
   const isLightColor = primaryHct.tone > 50
 
-  // 生成色调变体和和谐色
   const tones = generateTonalVariants(primaryColor)
   const harmony = generateHarmonyColors(primaryColor)
   const accentTones = generateTonalVariants(harmony.complementary)
@@ -168,43 +163,36 @@ function generateCustomCSS(
 
   let css = ''
 
-  // 主题源颜色
   css += `--theme-source-color: ${primaryColor};\n`
   css += `--theme-on-primary: ${onPrimaryColor};\n`
 
-  // 主色调变体
   for (const [key, value] of Object.entries(tones)) {
     css += `--theme-primary-${key}: ${value};\n`
   }
 
-  // 和谐色
   css += `--theme-complementary: ${harmony.complementary};\n`
   css += `--theme-analogous-1: ${harmony.analogous1};\n`
   css += `--theme-analogous-2: ${harmony.analogous2};\n`
   css += `--theme-triadic-1: ${harmony.triadic1};\n`
   css += `--theme-triadic-2: ${harmony.triadic2};\n`
 
-  // 强调色变体
   for (const [key, value] of Object.entries(accentTones)) {
     css += `--theme-accent-${key}: ${value};\n`
   }
 
-  // 阴影
   const shadowAlpha = isDark ? [0.5, 0.6, 0.7] : [0.08, 0.12, 0.16]
   css += `--shadow-soft: 0 4px 20px rgba(0, 0, 0, ${shadowAlpha[0]});\n`
   css += `--shadow-medium: 0 8px 30px rgba(0, 0, 0, ${shadowAlpha[1]});\n`
   css += `--shadow-strong: 0 12px 40px rgba(0, 0, 0, ${shadowAlpha[2]});\n`
 
-  // Hover 叠加层 - 暗色模式用白色，亮色模式用黑色
+  // Hover 叠加层：暗色模式用白色，亮色模式用黑色
   css += `--md-sys-color-hover-overlay: ${isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'};\n`
 
-  // 主色透明度变体
   css += `--primary-alpha-5: color-mix(in srgb, var(--md-sys-color-primary) 5%, transparent);\n`
   css += `--primary-alpha-10: color-mix(in srgb, var(--md-sys-color-primary) 10%, transparent);\n`
   css += `--primary-alpha-20: color-mix(in srgb, var(--md-sys-color-primary) 20%, transparent);\n`
   css += `--primary-alpha-30: color-mix(in srgb, var(--md-sys-color-primary) 30%, transparent);\n`
 
-  // 玻璃态效果
   if (enableGlass) {
     css += `--glass-blur: 12px;\n`
     css += `--glass-opacity: ${isDark ? '0.75' : '0.85'};\n`
@@ -217,7 +205,6 @@ function generateCustomCSS(
     css += `--glass-shadow: var(--md-sys-elevation-level2);\n`
   }
 
-  // 渐变效果
   if (enableGradients) {
     css += `--gradient-primary: linear-gradient(135deg, var(--md-sys-color-primary) 0%, var(--md-sys-color-primary) 100%);\n`
     css += `--gradient-surface: none;\n`
@@ -271,12 +258,7 @@ export const useThemeStore = defineStore('theme', {
 
     /**
      * 设置自定义主色(取色器选择的任意 hex)并持久化。
-     * 注意:本方法与预设主题共用 `themePreference` 字段 —— 写入 hex 颜色字符串
-     * 即表示"自定义色"模式,写入预设 id 表示"预设"模式,读取方按是否以 '#' 开头区分。
-     */
-    /**
-     * 设置自定义主色并持久化(写入 hex 即表示"自定义色"模式,与预设 id 共用
-     * themePreference 字段,读取方按是否以 '#' 开头区分)
+     * 与预设主题共用 themePreference 字段:写入 hex 即"自定义色"模式,读取方按是否以 '#' 开头区分。
      */
     async setPrimaryColor(color: string): Promise<void> {
       this.setPrimaryColorLive(color)
@@ -284,8 +266,8 @@ export const useThemeStore = defineStore('theme', {
     },
 
     /**
-     * 仅在本次会话生效的主色更新(取色器拖动预览用):
-     * 不写配置文件,持久化由调用方在拖动结束后调用 saveThemeToConfig 完成
+     * 仅本次会话生效的主色更新,供取色器拖动预览。
+     * 不写配置文件,持久化由调用方在拖动结束后调用 saveThemeToConfig 完成。
      */
     setPrimaryColorLive(color: string): void {
       this.primaryColor = color
@@ -311,9 +293,8 @@ export const useThemeStore = defineStore('theme', {
     },
 
     /**
-     * 沉浸式模式的深浅主题覆盖。
-     * - dark = true/false：按封面主色亮度临时切换深/浅模式（不写入配置）。
-     * - dark = null：退出沉浸式，恢复用户主题偏好（auto 跟随系统）对应的深浅模式。
+     * 沉浸式深浅覆盖。
+     * true/false 按封面主色亮度临时切换且不写配置，null 退出并恢复用户主题偏好。
      */
     setImmersiveDarkMode(dark: boolean | null): void {
       if (dark === null) {
@@ -356,11 +337,10 @@ export const useThemeStore = defineStore('theme', {
       }
       themeAppliedOnce = true
 
-      // 1. 使用 MD3 库设置基础颜色
       const theme = themeFromSourceColor(argbFromHex(this.primaryColor))
       applyTheme(theme, { target: root, dark: this.isDarkMode })
 
-      // 2. 如果是灰色，覆盖 MD3 生成的彩色为真正的灰色
+      // 灰色主题要把 MD3 生成的彩色覆盖成真正的灰色
       if (isGray) {
         const grayColors = generateGrayThemeColors(this.primaryColor, this.isDarkMode)
 
@@ -392,7 +372,6 @@ export const useThemeStore = defineStore('theme', {
         root.style.setProperty('--md-sys-color-outline-variant', grayColors.outlineVariant)
       }
 
-      // 3. 生成并应用自定义 CSS
       const cacheKey = `${this.primaryColor}-${this.isDarkMode}-${this.enableGlassEffect}-${this.enableGradients}`
 
       let customCSS = customStyleCache.get(cacheKey)
@@ -414,7 +393,6 @@ export const useThemeStore = defineStore('theme', {
 
       customStyleElement.textContent = `:root {\n${customStyleCache.get(cacheKey)}}`
 
-      // 移除旧的覆盖样式
       const overrideStyle = document.getElementById('theme-gray-override')
       if (overrideStyle) {
         overrideStyle.remove()
@@ -424,10 +402,10 @@ export const useThemeStore = defineStore('theme', {
 
       logger.debug('Theme applied:', cacheKey, isGray ? '(gray mode)' : '')
 
-      // 强制 WCAG 2.1 AA 合规：验证关键颜色对，主动修复未达标的对比度
+      // 强制 WCAG 2.1 AA:验证关键颜色对并主动修复未达标的对比度
       enforceThemeContrast()
 
-      // 异步记录对比度验证结果(用于调试,防抖避免拖动取色时卡顿)
+      // 异步诊断验证走防抖调度(理由见 VALIDATE_DEBOUNCE_MS)
       scheduleContrastValidation(this.isDarkMode)
     },
 

@@ -1,11 +1,6 @@
-/**
- * 轻量级 Markdown 渲染器
- *
- * 专为 GitHub Release Notes 设计，支持常用 Markdown 语法。
- * 输出经过 HTML 转义，防止 XSS 攻击。
- */
+/** 轻量 Markdown 渲染器, 面向 GitHub Release Notes; 文本一律先 HTML 转义再拼标签, 防 XSS */
 
-/** HTML 特殊字符转义 */
+/** 转义 HTML 特殊字符, 是所有行内渲染的前置步骤 */
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -16,21 +11,22 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * 校验 URL 协议：仅允许 http/https/mailto（或无协议的相对路径）
- * 防止 javascript:、data: 等危险协议注入；不合法时返回 null
+ * 校验 URL 协议: 只放行 http/https/mailto 与无协议的相对路径, 其余返回 null。
+ *
+ * 目的是挡掉 javascript:/data: 之类可注入协议, 调用方拿到 null 时降级为纯文本。
  */
 function sanitizeUrl(url: string): string | null {
-  // 拒绝包含控制字符的 URL（如 "jav\tascript:" 可绕过简单前缀检查）
+  // 控制字符会拆坏前缀(如 jav[TAB]ascript:), 含控制字符直接拒绝
   // eslint-disable-next-line no-control-regex -- 安全检查需要匹配控制字符
   if (/[\u0000-\u001f\u007f]/.test(url)) return null
 
   const trimmed = url.trim().toLowerCase()
   const colonIndex = trimmed.indexOf(':')
 
-  // 无协议：相对路径或锚点，视为安全
+  // 无冒号即相对路径或锚点, 视为安全
   if (colonIndex === -1) return url
 
-  // 协议部分必须是合法的 scheme，且在白名单内
+  // 协议段还要形如合法 scheme, 避免把 "foo bar:" 之类当成协议
   const scheme = trimmed.slice(0, colonIndex)
   if (!/^[a-z][a-z0-9+.-]*$/.test(scheme)) return null
   if (scheme === 'http' || scheme === 'https' || scheme === 'mailto') return url
@@ -38,14 +34,14 @@ function sanitizeUrl(url: string): string | null {
   return null
 }
 
-/** 处理行内 Markdown 语法（bold、italic、code、link 等） */
+/** 行内语法渲染; 替换顺序即优先级, 不要重排 */
 function renderInline(text: string): string {
   let result = escapeHtml(text)
 
-  // 行内代码 `code`（最先处理，内部不再解析其他语法）
+  // 行内代码最先处理: 反引号内的内容不再做二次替换
   result = result.replace(/`([^`]+)`/g, '<code>$1</code>')
 
-  // 图片 ![alt](url) — 在链接之前匹配；URL 协议不合法时仅保留 alt 文本
+  // 图片必须先于链接匹配, 否则 ![..](..) 会被当成链接; 非法 URL 降级见 sanitizeUrl
   result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, alt: string, url: string) => {
     const safeUrl = sanitizeUrl(url)
     return safeUrl === null
@@ -53,7 +49,7 @@ function renderInline(text: string): string {
       : `<img src="${safeUrl}" alt="${alt}" style="max-width:100%;border-radius:4px;" />`
   })
 
-  // 链接 [text](url)；URL 协议不合法时仅保留链接文本
+  // 链接 [text](url); 非法 URL 只保留文本, 降级规则见 sanitizeUrl
   result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, text: string, url: string) => {
     const safeUrl = sanitizeUrl(url)
     return safeUrl === null
@@ -61,44 +57,37 @@ function renderInline(text: string): string {
       : `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`
   })
 
-  // 粗斜体 ***text*** 或 ___text___
   result = result.replace(/\*{3}(.+?)\*{3}/g, '<strong><em>$1</em></strong>')
   result = result.replace(/_{3}(.+?)_{3}/g, '<strong><em>$1</em></strong>')
 
-  // 粗体 **text** 或 __text__
   result = result.replace(/\*{2}(.+?)\*{2}/g, '<strong>$1</strong>')
   result = result.replace(/_{2}(.+?)_{2}/g, '<strong>$1</strong>')
 
-  // 斜体 *text* 或 _text_（排除 ** 和 __）
+  // 斜体靠前后断言排除成对的 ** 与 __, 否则粗体会被拆坏
   result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
   result = result.replace(/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g, '<em>$1</em>')
 
-  // 删除线 ~~text~~
   result = result.replace(/~~(.+?)~~/g, '<del>$1</del>')
 
   return result
 }
 
-/** 判断是否是无序列表项 */
 function isUnorderedListItem(line: string): boolean {
   return /^[-*+]\s+/.test(line.trim())
 }
 
-/** 判断是否是有序列表项 */
 function isOrderedListItem(line: string): boolean {
   return /^\d+\.\s+/.test(line.trim())
 }
 
-/** 提取列表项内容 */
 function getListItemContent(line: string): string {
   return line.trim().replace(/^[-*+]\s+|^\d+\.\s+/, '')
 }
 
-/** 判断是否为表格分隔行（如 |---|---| 或 |:---:|---:|） */
+/** 表格分隔行: 剥掉首尾 | 后逐格判定, 每格只含 - : 空格且至少一个 -, 如 |---| 或 |:---:| */
 function isTableSeparator(line: string): boolean {
   const trimmed = line.trim()
   if (!trimmed.includes('|')) return false
-  // 去掉首尾的 |，按 | 分割后，每个单元格应只包含 -、:、空格，且至少有一个 -
   const inner = trimmed.replace(/^\||\|$/g, '')
   const cells = inner.split('|')
   if (cells.length === 0) return false
@@ -108,17 +97,14 @@ function isTableSeparator(line: string): boolean {
   })
 }
 
-/** 解析表格行，返回各单元格内容（已 trim） */
+/** 表格行 -> 单元格数组(已 trim), 分隔行与数据行共用 */
 function parseTableRow(line: string): string[] {
   const trimmed = line.trim()
-  // 去掉首尾的 |，然后按 | 分割
   const inner = trimmed.replace(/^\||\|$/g, '')
   return inner.split('|').map((cell) => cell.trim())
 }
 
-/**
- * 将 Markdown 文本渲染为 HTML
- */
+/** Markdown -> HTML: 先按行做块级切分, 块内文本再交给 renderInline */
 export function renderMarkdown(markdown: string): string {
   if (!markdown || typeof markdown !== 'string') return ''
 
@@ -130,13 +116,11 @@ export function renderMarkdown(markdown: string): string {
     const line = lines[i]!
     const trimmed = line.trim()
 
-    // —— 空行 ——
     if (trimmed === '') {
       i++
       continue
     }
 
-    // —— 代码块 ```  ——
     if (trimmed.startsWith('```')) {
       const codeLines: string[] = []
       i++ // 跳过开始的 ```
@@ -144,12 +128,11 @@ export function renderMarkdown(markdown: string): string {
         codeLines.push(escapeHtml(lines[i]!))
         i++
       }
-      i++ // 跳过结束的 ```
+      i++ // 跳过结束的 ```; 缺失结束标记时整块吃到文件末尾
       htmlParts.push(`<pre><code>${codeLines.join('\n')}</code></pre>`)
       continue
     }
 
-    // —— 标题 # ——
     const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/)
     if (headingMatch) {
       const level = headingMatch[1]!.length
@@ -159,14 +142,13 @@ export function renderMarkdown(markdown: string): string {
       continue
     }
 
-    // —— 水平线 ---, ***, ___ ——
+    // 水平线判定要先于列表, 否则 --- / *** 会被当作列表项吞掉
     if (/^[-*_]{3,}$/.test(trimmed)) {
       htmlParts.push('<hr />')
       i++
       continue
     }
 
-    // —— 引用块 > ——
     if (trimmed.startsWith('>')) {
       const quoteLines: string[] = []
       while (i < lines.length && lines[i]!.trim().startsWith('>')) {
@@ -178,12 +160,11 @@ export function renderMarkdown(markdown: string): string {
       continue
     }
 
-    // —— 表格（GFM 风格：| header | ... | 后跟 |---|---| 分隔行）——
+    // GFM 表格: 仅当表头行的下一行是分隔行才认定为表格, 光有 | 不算
     if (trimmed.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1]!)) {
       const headerCells = parseTableRow(trimmed)
       i += 2 // 跳过表头和分隔行
 
-      // 收集数据行
       const bodyRows: string[][] = []
       while (i < lines.length && lines[i]!.trim().includes('|') && lines[i]!.trim() !== '') {
         bodyRows.push(parseTableRow(lines[i]!))
@@ -200,7 +181,7 @@ export function renderMarkdown(markdown: string): string {
       continue
     }
 
-    // —— 无序列表 ——
+    // 列表只支持单层, 缩进不产生嵌套
     if (isUnorderedListItem(trimmed)) {
       const items: string[] = []
       while (i < lines.length && isUnorderedListItem(lines[i]!.trim())) {
@@ -212,7 +193,6 @@ export function renderMarkdown(markdown: string): string {
       continue
     }
 
-    // —— 有序列表 ——
     if (isOrderedListItem(trimmed)) {
       const items: string[] = []
       while (i < lines.length && isOrderedListItem(lines[i]!.trim())) {
@@ -224,7 +204,7 @@ export function renderMarkdown(markdown: string): string {
       continue
     }
 
-    // —— 普通段落 ——
+    // 兜底段落: 连续取行, 直到空行或遇到任一块级起始标记
     const paragraphLines: string[] = []
     while (
       i < lines.length &&
@@ -235,7 +215,7 @@ export function renderMarkdown(markdown: string): string {
       !/^[-*_]{3,}$/.test(lines[i]!.trim()) &&
       !isUnorderedListItem(lines[i]!.trim()) &&
       !isOrderedListItem(lines[i]!.trim()) &&
-      // 表格起始行：当前行含 | 且下一行是分隔行
+      // 表格起始行的判定与上面分支保持一致, 否则表格会被段落吃掉
       !(lines[i]!.trim().includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1]!))
     ) {
       paragraphLines.push(lines[i]!.trim())

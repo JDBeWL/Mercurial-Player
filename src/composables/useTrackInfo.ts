@@ -15,17 +15,17 @@ interface ProcessedTrackInfo {
 }
 
 /**
- * 缓存上限,避免长期使用后无限增长。
- * 200 条在真实曲库下会频繁触发清理(扫一次目录就顶满),上调到 5000 条。
+ * 缓存条数上限,超出按 LRU 驱逐
  *
- * 导出供单测读取,避免测试里再硬编码一份上限。
+ * 取值须容得下一次目录扫描的曲目数,过小会让缓存刚填满就被清空
+ * 导出供单测读取,避免测试里再硬编码一份上限
  */
 export const MAX_PROCESSED_TRACKS = 5000
 
 /**
- * 访问顺序追踪,用于 LRU 驱逐。
- * 利用 Map 保持插入顺序的特性,用 delete + set 实现 O(1) 的 LRU 更新,
- * 最近访问的在末尾,最久未访问的在头部。
+ * LRU 访问顺序表,依赖 Map 的插入顺序特性
+ *
+ * delete + set 即 O(1) 地把 key 挪到"最近使用"的末尾,头部就是最久未使用的
  */
 const accessOrder = new Map<string, void>()
 
@@ -48,15 +48,12 @@ function evictIfNeeded(cache: Map<string, ProcessedTrackInfo>): void {
   }
 }
 
-// 模块级别的共享缓存,确保所有 useTrackInfo 实例共享同一份数据,
-// 避免 App.vue 和 MiniPlayer.vue 各创建一份独立缓存。
-// 使用 Map 而非 Record,避免频繁 delete 触发 V8 hidden class 降级 (slow properties),
-// 保证增删操作始终是均摊 O(1) 且常数稳定。
-// Vue 3 的 reactive proxy 原生支持 Map 的增删查改响应式追踪,
-// processTrackInfo 完成后模板会自动更新。
+// 模块级共享缓存,所有实例共用一份 (原因见 useTrackInfo 的 JSDoc)
+// 用 Map 而非 Record:频繁 delete 会让 V8 hidden class 降级 (slow properties),增删查改始终均摊 O(1)
+// reactive proxy 原生追踪 Map 的增删,processTrackInfo 完成后模板会自动更新
 const sharedProcessedTracks = ref<Map<string, ProcessedTrackInfo>>(new Map())
 
-// 模块级别的 store 引用(在首次调用 useTrackInfo 时赋值)
+// 模块级 store 引用,首次调用 useTrackInfo 时赋值
 let _configStore: ReturnType<typeof useConfigStore> | null = null
 
 function ensureConfigStore(): ReturnType<typeof useConfigStore> {
@@ -94,7 +91,6 @@ function getCached(trackPath: string): ProcessedTrackInfo | undefined {
 /** 写入缓存并更新访问顺序 (LRU) */
 function setCached(trackPath: string, value: ProcessedTrackInfo): void {
   if (!sharedProcessedTracks.value.has(trackPath)) {
-    // 新 key,可能需要驱逐
     evictIfNeeded(sharedProcessedTracks.value)
   }
   sharedProcessedTracks.value.set(trackPath, value)
@@ -107,19 +103,14 @@ function deleteCached(trackPath: string): void {
   sharedProcessedTracks.value.delete(trackPath)
 }
 
-/**
- * 异步处理音轨信息
- */
+/** 异步提取单条音轨的标题信息,结果写入共享缓存 */
 async function processTrackInfo(trackPath: string): Promise<void> {
   try {
-    // 如果已经在处理中,跳过
     if (getCached(trackPath)?.processing) return
 
-    // 标记为处理中
     setCached(trackPath, { processing: true })
 
     const configStore = ensureConfigStore()
-    // 获取配置
     const config = {
       preferMetadata: configStore.titleExtraction?.preferMetadata ?? true,
       hideFileExtension: configStore.titleExtraction?.hideFileExtension ?? true,
@@ -128,17 +119,14 @@ async function processTrackInfo(trackPath: string): Promise<void> {
       customSeparators: configStore.titleExtraction?.customSeparators ?? ['-', '_', '.'],
     }
 
-    // 使用 TitleExtractor 智能提取标题信息
     const titleInfo = await TitleExtractor.extractTitle(trackPath, config)
 
-    // 更新处理结果
     setCached(trackPath, {
       processing: false,
       ...titleInfo,
     })
   } catch (error) {
     logger.error('处理音轨信息失败:', trackPath, error)
-    // 出错时使用文件名作为标题
     setCached(trackPath, {
       processing: false,
       title: getFallbackDisplayName(trackPath),
@@ -152,17 +140,13 @@ async function processTrackInfo(trackPath: string): Promise<void> {
 /**
  * 音轨信息处理 composable
  *
- * 使用模块级共享缓存 (sharedProcessedTracks),所有 useTrackInfo 实例
- * 共享同一份数据,避免 App.vue 和 MiniPlayer.vue 各创建一份独立缓存。
- * 缓存有 LRU 上限 (MAX_PROCESSED_TRACKS 条),防止长期使用后无限增长。
+ * 缓存是模块级共享的 (sharedProcessedTracks),App.vue 与 MiniPlayer.vue 因此只算一次,
+ * 并有 LRU 上限兜住长期增长
  */
 export function useTrackInfo() {
-  // 确保模块级 configStore 引用已初始化
   ensureConfigStore()
 
-  /**
-   * 获取音轨标题
-   */
+  /** 获取音轨标题 */
   const getTrackTitle = (track: Track | null | undefined, fallback: string = ''): string => {
     if (!track || !track.path) {
       return fallback
@@ -170,26 +154,23 @@ export function useTrackInfo() {
 
     const trackPath = track.path
 
-    // 如果已经处理过该音轨,直接返回结果
     const cached = getCached(trackPath)
     if (cached && !cached.processing) {
       return (cached.title && stripTitleExt(trackPath, cached.title)) || fallback
     }
 
-    // 异步处理音轨信息,但不阻塞当前渲染
+    // 异步补全,不阻塞本次渲染
     if (!cached || !cached.processing) {
       void processTrackInfo(trackPath)
     }
 
-    // 优先读 store 已用元数据填充的 title 字段,避免显示原始文件名
+    // 缓存未就绪时优先用 store 已填的 title,避免露出原始文件名
     return (
       (track.title && stripTitleExt(trackPath, track.title)) || getFallbackDisplayName(trackPath)
     )
   }
 
-  /**
-   * 获取音轨艺术家
-   */
+  /** 获取音轨艺术家 */
   const getTrackArtist = (track: Track | null | undefined, fallback: string = ''): string => {
     if (!track || !track.path) {
       return fallback
@@ -197,25 +178,23 @@ export function useTrackInfo() {
 
     const trackPath = track.path
 
-    // 如果已经处理过该音轨,直接返回结果
     const cached = getCached(trackPath)
     if (cached && !cached.processing) {
       return cached.artist || fallback
     }
 
-    // 异步处理音轨信息,但不阻塞当前渲染
+    // 同 getTrackTitle:异步补全,不阻塞渲染
     if (!cached || !cached.processing) {
       void processTrackInfo(trackPath)
     }
 
-    // 处理中:读 store 已填充的 artist 字段
     return track.artist || fallback
   }
 
   /**
    * 设置音轨变化监听器
-   * 切换曲目时先用 track.title/artist（store 已用元数据填充）预填缓存,
-   * 再触发异步精细提取,避免首次渲染返回原始文件名造成视觉抖动。
+   *
+   * 切歌时先用 track.title/artist 预填缓存,再触发异步精细提取,避免首帧显示原始文件名而抖动
    */
   const watchTrack = (trackGetter: () => Track | null | undefined): WatchStopHandle => {
     return watch(
@@ -223,8 +202,7 @@ export function useTrackInfo() {
       (newTrack) => {
         if (newTrack && newTrack.path) {
           const path = newTrack.path
-          // 如果尚无缓存或仍在处理中,先用已有的 title/artist 预填
-          // 让 getTrackTitle/getTrackArtist 在异步完成前也能返回有意义的值
+          // 预填值让 getTrackTitle / getTrackArtist 在异步完成前就返回有意义的结果
           const existing = getCached(path)
           if (!existing || existing.processing) {
             const preTitle = newTrack.title || getFallbackDisplayName(path)
@@ -244,18 +222,14 @@ export function useTrackInfo() {
     )
   }
 
-  /**
-   * 清除指定音轨的缓存
-   */
+  /** 清除指定音轨的缓存 */
   const clearCache = (trackPath: string): void => {
     if (trackPath) {
       deleteCached(trackPath)
     }
   }
 
-  /**
-   * 清除所有缓存
-   */
+  /** 清除所有缓存 */
   const clearAllCache = (): void => {
     accessOrder.clear()
     sharedProcessedTracks.value.clear()

@@ -4,26 +4,16 @@ import type { Track, ResumeResult, TrackSnapshot } from '@/types'
 import type { usePlayerStore } from './index'
 import { useMusicLibraryStore } from '../musicLibrary'
 
-/**
- * Player store 的会话持久化与启动恢复,从 player.ts 抽离以降低单文件复杂度。
- * 函数接收 store 实例参数,在运行时与 player store 共享同一 Pinia 实例。
- */
+/** Player store 的会话持久化与启动恢复。 */
 type PlayerStore = ReturnType<typeof usePlayerStore>
 
 /**
- * 立即保存 last_session (无节流,用于 pause/切曲/关闭等关键节点)
- *
- * 不在 playback-position 事件中写入,避免播放期间频繁写盘。
- * 仅在以下场景触发:
- * - pause():暂停时立即保存
- * - playTrack():切曲前保存上一曲的最后位置
- * - cleanup():关闭窗口前 await 保存
- * 风险:程序崩溃/断电时丢失自上次关键节点以来的进度。
+ * 立即保存 last_session(无节流)：仅在 pause、切曲前、cleanup 关闭前这几个关键节点触发，
+ * 不在 playback-position 中写入，代价是崩溃/断电时丢失自上次关键节点以来的进度。
  */
 export async function saveLastSessionNow(store: PlayerStore): Promise<void> {
   if (!store.currentTrack || store._isDestroyed) return
   const track = store.currentTrack
-  // 从 musicLibraryStore 获取当前播放列表名 (用于启动恢复)
   let playlistName: string | null = null
   let trackIndexInPlaylist: number | null = null
   try {
@@ -36,8 +26,7 @@ export async function saveLastSessionNow(store: PlayerStore): Promise<void> {
   } catch (err) {
     logger.debug('Failed to get current playlist name:', err)
   }
-  // 提取 player.playlist 的元数据快照 (不依赖 musicLibrary 缓存)
-  // 这样启动恢复时即使 musicLibrary 还没加载,也能直接重建 player.playlist
+  // 随会话存一份 playlist 元数据快照,恢复时就不依赖 musicLibrary 是否已加载
   const playlistTracks: TrackSnapshot[] = store.playlist.map((t) => ({
     path: t.path,
     title: t.title ?? null,
@@ -76,8 +65,7 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
     if (result.resumed && result.trackPath) {
       const trackPath = result.trackPath
 
-      // 1. 用返回的 playlistTracks 直接构造 player.playlist
-      //    不依赖 musicLibrary 缓存是否加载,保证恢复后播放列表完整
+      // 1. 用快照里的 playlistTracks 重建播放列表(理由见 saveLastSessionNow)
       const playlistTracks = result.playlistTracks ?? []
       const playlist: Track[] = playlistTracks.map((s) => ({
         path: s.path,
@@ -95,10 +83,10 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
       }))
       store._setPlaylist(playlist)
 
-      // 2. 在 playlist 中查找当前曲目 (含完整元数据: bitrate/sampleRate 等)
+      // 2. 在 playlist 中找到含完整元数据(bitrate/sampleRate 等)的当前曲目
       let matchedTrack: Track | null = playlist.find((t) => t.path === trackPath) ?? null
 
-      // 3. 如果 playlistTracks 为空或没找到,用 lastSession 快照构造一个最小 Track
+      // 3. 快照里没有时,用 lastSession 的字段构造一个最小 Track 并追加到列表末尾
       if (!matchedTrack) {
         matchedTrack = {
           path: trackPath,
@@ -108,11 +96,10 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
           displayArtist: result.trackArtist || undefined,
           duration: result.durationSecs ?? undefined,
         }
-        // 当前曲目不在 playlistTracks 中,把它加到 playlist 末尾
         store._setPlaylist([...store.playlist, matchedTrack])
       }
 
-      // 4. 尝试同步 musicLibrary 的 currentPlaylist (让 UI 高亮,但不依赖它)
+      // 4. 同步 musicLibrary 的 currentPlaylist,只为 UI 高亮,不依赖它
       if (result.playlistName) {
         try {
           const musicLibraryStore = useMusicLibraryStore()
@@ -133,18 +120,17 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
         }
       }
 
-      // 5. 触发元数据缓存和封面预加载 (与 loadPlaylist 一致)
+      // 5. 与 loadPlaylist 一致:作废旧缓存任务后触发元数据缓存与封面预加载
       if (store._cacheAbortController) {
         store._cacheAbortController.abort()
       }
       void store._cachePlaylistMetadata(store.playlist)
       void store._loadPlaylistCovers(store.playlist)
 
-      // 6. 设置播放状态 (currentTrack/audioInfo/duration/currentTime)
+      // 6. 写入播放状态,后端 positionSecs/durationSecs 的单位是秒
       store.currentTrack = matchedTrack
       store.duration = matchedTrack.duration ?? result.durationSecs ?? 0
       store.currentTime = result.positionSecs ?? 0
-      // 从 matchedTrack 提取完整音频元数据 (bitrate/sampleRate/channels/bitDepth/format)
       store.audioInfo = {
         bitrate: matchedTrack.bitrate || null,
         sampleRate: matchedTrack.sampleRate || null,
@@ -152,21 +138,20 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
         bitDepth: matchedTrack.bitDepth || null,
         format: matchedTrack.format || null,
       }
-      // 保持暂停状态 - 用户主动点播放才会开始
+      // 保持暂停:只有用户主动点播放才开始
       store.isPlaying = false
       store._updateTaskbarState()
       logger.info(
         `Resumed last session (paused): ${trackPath} @ ${result.positionSecs}s (${result.status}), playlist=${playlist.length} tracks`,
       )
 
-      // 7. 加载当前曲目封面 (异步,不阻塞恢复)
+      // 7. 异步加载当前曲目封面,不阻塞恢复
       invoke<string | null>('get_track_cover_path', { path: trackPath })
         .then((coverPath) => {
           // 守卫:应用关闭后不再修改已销毁的 store state
           if (store._isDestroyed) return
           const current = store.currentTrack
-          // 整体重新赋值:封面回填可能已写过同一个对象(markRaw 后元素不再是代理),
-          // 就地写不会触发渲染,大封面会停在占位图
+          // 整体重新赋值而非就地写字段(markRaw 约束见 index.ts 的 _setPlaylist)
           if (
             current &&
             current.path === trackPath &&
@@ -178,7 +163,7 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
         })
         .catch((err) => logger.debug('Failed to load cover for resumed track:', err))
     } else if (result.status === 'not_found' && result.trackPath) {
-      // 静默处理:从当前播放列表移除该文件 (用户选择)
+      // not_found:静默从当前播放列表移除该文件
       const idx = store.playlist.findIndex((t) => t.path === result.trackPath)
       if (idx >= 0) {
         store._setPlaylist(store.playlist.filter((_, i) => i !== idx))

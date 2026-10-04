@@ -41,7 +41,7 @@ const container = ref<HTMLElement | null>(null)
 const volumeSlider = ref<HTMLElement | null>(null)
 const showVolume = ref(false)
 
-/** 是否由触摸操作展开的（鼠标靠 hover，离开自动收起；手指没有"离开"这一说） */
+/** 由触摸展开的标记：手指没有 mouseleave，hover 收起那套不适用，只能靠再点一次或点容器外 */
 const openedByTouch = ref(false)
 
 const isCoarsePointer = (): boolean => {
@@ -49,8 +49,7 @@ const isCoarsePointer = (): boolean => {
   return window.matchMedia('(pointer: coarse)').matches
 }
 
-// 触摸设备没有 hover 态，滑块永远出不来，改由喇叭按钮负责展开/收起；
-// 静音仍可经滑块拖到 0 达到，鼠标设备保持原来点按钮即静音
+// 触摸下喇叭按钮负责展开/收起，静音改由滑块拖到 0；鼠标设备点击即静音
 const handleVolumeButtonClick = (): void => {
   if (isCoarsePointer()) {
     if (showVolume.value && openedByTouch.value) {
@@ -65,7 +64,7 @@ const handleVolumeButtonClick = (): void => {
 }
 
 const handleMouseLeave = (): void => {
-  if (openedByTouch.value) return // 触摸展开的不由 pointerleave 收起
+  if (openedByTouch.value) return // 触摸展开的交给 closeTouchPopup，不走 pointerleave
   showVolume.value = false
 }
 
@@ -74,7 +73,7 @@ const closeTouchPopup = (): void => {
   showVolume.value = false
 }
 
-// 触摸端：点容器外任意处收起，否则滑块会一直挂着
+// 触摸端点容器外任意处收起，否则滑块会一直挂着
 const onDocumentPointerDown = (event: PointerEvent): void => {
   const target = event.target
   if (target instanceof Node && container.value?.contains(target)) return
@@ -93,7 +92,7 @@ onUnmounted(() => {
   document.removeEventListener('pointerdown', onDocumentPointerDown)
 })
 
-// 垂直滑块: 从底部计算百分比;拖拽骨架 (document 级监听/清理) 由 useDragValue 提供
+// 竖直滑块：比例自底部起算（0..1）；拖拽骨架由 useDragValue 提供
 const { isDragging, startDrag } = useDragValue({
   getPercent: (event) => {
     if (!volumeSlider.value) return 0
@@ -101,12 +100,12 @@ const { isDragging, startDrag } = useDragValue({
     return Math.max(0, Math.min(1, (rect.bottom - event.clientY) / rect.height))
   },
   onStart: (percent, event) => {
-    // 如果点击的是滑柄本身，不立即更新音量值，避免跳动
+    // 按在滑柄本身时不立即写音量，避免起点跳动
     const isThumb = (event.target as HTMLElement)?.classList?.contains('slider-thumb')
     if (!isThumb) {
       playerStore.setVolume(percent)
     }
-    // 防止文本选择
+    // 阻止选中滑块外的文字
     event.preventDefault()
   },
   onMove: (percent) => {
@@ -114,9 +113,7 @@ const { isDragging, startDrag } = useDragValue({
   },
 })
 
-// 音量图标相关函数
 const getVolumeIcon = () => {
-  // 如果静音，显示静音图标
   if (playerStore.isMuted) {
     return 'volume_off'
   }
@@ -165,7 +162,7 @@ const getVolumeIcon = () => {
   border-radius: 4px;
   cursor: pointer;
   margin: 8px auto;
-  /* 竖直拖动手势：不禁用默认滚动手势会被判定为页面滚动而被 pointercancel 打断 */
+  /* 竖直拖动：不禁默认手势会被判成页面滚动并用 pointercancel 打断 */
   touch-action: none;
 }
 
@@ -230,7 +227,6 @@ const getVolumeIcon = () => {
   text-align: center;
 }
 
-/* 音量弹出动画 */
 .volume-fade-enter-active,
 .volume-fade-leave-active {
   transition:

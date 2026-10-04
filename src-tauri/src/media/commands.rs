@@ -1,6 +1,4 @@
-//! 媒体相关的 Tauri 命令
-//!
-//! 包含文件系统操作和元数据获取命令。
+//! 媒体相关的 Tauri 命令：文件系统操作与元数据获取。
 use crate::error::AppError;
 
 use super::filesystem::{
@@ -16,7 +14,7 @@ use crate::AppState;
 use crate::security::is_within_music_dirs;
 use tauri::{State, command};
 
-/// 扫描前先按已登记的音乐目录收口，避免被攻破的渲染进程拿任意目录做整树枚举
+/// 扫描前的白名单门禁，理由见 [`is_within_music_dirs`]
 fn ensure_scannable(music_dirs: &[String], path: &str) -> Result<(), AppError> {
     if is_within_music_dirs(path, music_dirs) {
         Ok(())
@@ -25,7 +23,6 @@ fn ensure_scannable(music_dirs: &[String], path: &str) -> Result<(), AppError> {
     }
 }
 
-/// 读取指定目录中的子目录列表
 #[command]
 pub fn read_directory(state: State<'_, AppState>, path: String) -> Result<Vec<String>, AppError> {
     let music_dirs = state.config_manager.load_config()?.music_directories;
@@ -33,10 +30,7 @@ pub fn read_directory(state: State<'_, AppState>, path: String) -> Result<Vec<St
     read_dir(&path)
 }
 
-/// 获取指定目录中的所有音频文件，并创建播放列表
-///
-/// 扫描是 CPU + IPC 密集型（Android 上还要逐个走 SAF fd 桥），放到阻塞线程池执行，
-/// 避免占用主线程导致界面卡死。
+/// 扫描是 CPU + IPC 密集型，放到阻塞线程池执行
 #[command]
 pub async fn get_audio_files(
     state: State<'_, AppState>,
@@ -49,7 +43,6 @@ pub async fn get_audio_files(
         .map_err(|e| AppError::msg(format!("扫描任务异常退出: {e}")))?
 }
 
-/// 获取多个目录中的所有音频文件，并创建播放列表
 #[command]
 pub async fn get_all_audio_files(
     state: State<'_, AppState>,
@@ -64,33 +57,27 @@ pub async fn get_all_audio_files(
         .map_err(|e| AppError::msg(format!("批量扫描任务异常退出: {e}")))?
 }
 
-/// 检查文件是否存在
 #[command]
 pub fn check_file_exists(path: String) -> Result<bool, AppError> {
     Ok(check_file_exists_internal(&path))
 }
 
-/// 读取歌词文件内容
 #[command]
 pub fn read_lyrics_file(path: String) -> Result<String, AppError> {
     read_lyrics_file_internal(&path)
 }
 
-/// 写入歌词文件内容
 #[command]
 pub fn write_lyrics_file(path: String, content: String) -> Result<(), AppError> {
     write_lyrics_file_internal(&path, &content)
 }
 
-/// 获取音轨的元数据信息（轻量）
 #[command]
 pub fn get_track_metadata(path: String) -> Result<TrackMetadata, AppError> {
     get_track_metadata_internal(&path)
 }
 
-/// 批量获取多个音轨的元数据信息
-///
-/// 并行提取（rayon）：Android 上每首都要经 SAF fd 桥打开，串行会明显拖慢首次扫描。
+/// 批量获取多个音轨的元数据信息；rayon 并行的理由见 `filesystem::scan_content_tree`
 #[command]
 pub async fn get_tracks_metadata_batch(paths: Vec<String>) -> Vec<TrackMetadata> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -111,49 +98,42 @@ pub async fn get_tracks_metadata_batch(paths: Vec<String>) -> Vec<TrackMetadata>
     })
 }
 
-/// 按需提取并返回音轨封面缓存路径
 #[command]
 pub fn get_track_cover_path(path: String) -> Result<Option<String>, AppError> {
     get_track_cover_path_internal(&path)
 }
 
-/// 提取音频文件的封面并保存到指定路径
 #[command]
 pub fn extract_cover(audio_path: String, output_path: String) -> Result<String, AppError> {
     extract_cover_internal(&audio_path, &output_path)
 }
 
-/// 清理封面缓存
 #[command]
 pub fn clean_cover_cache_command(max_cache_size_mb: Option<u64>) -> Result<usize, AppError> {
     clean_cover_cache(max_cache_size_mb)
 }
 
-/// 设置封面缓存路径
 #[command]
 pub fn set_cover_cache_path_command(path: Option<String>) -> Result<(), AppError> {
     set_cover_cache_path(path)
 }
 
-/// 清除元数据缓存
 #[command]
 pub fn clear_metadata_cache_command() -> Result<(), AppError> {
     clear_metadata_cache()
 }
 
-/// 获取元数据缓存统计信息
 #[command]
 pub fn get_metadata_cache_stats_command() -> (usize, u64) {
     get_metadata_cache_stats()
 }
 
-/// 手动刷新元数据缓存到磁盘
 #[command]
 pub fn flush_metadata_cache_command() -> Result<(), AppError> {
     flush_metadata_cache()
 }
 
-/// 获取系统临时目录路径
+/// 系统临时目录路径（未设置封面缓存路径时，设置页展示的就是它）
 #[command]
 pub fn get_temp_dir_command() -> String {
     std::env::temp_dir().to_string_lossy().to_string()
@@ -173,15 +153,14 @@ pub fn saf_get_saved_tree() -> Result<Option<String>, AppError> {
 
 /// 获取 SAF 授权状态（URI + 授权版本号 + 显示名）
 ///
-/// 前端轮询 `version` 判断系统选择器是否已返回：重新授权同一个目录时 URI 不变，
-/// 只有 version 会递增（早期版本比较 URI，导致"删掉目录再加同一个"永远加不上）。
+/// 前端轮询 `version` 判断系统选择器是否已返回：重新授权同一目录时 URI 不变，只有 version 递增。
 #[command]
 pub fn saf_get_pick_state() -> Result<crate::android::saf::SafPickState, AppError> {
     crate::android::saf::get_pick_state()
 }
 
-/// 清除已保存的 SAF 树（移除音乐目录时同步清理，避免残留状态影响重新授权）
+/// 移除某个 SAF 目录时调用：释放该树的持久授权（并清掉残留记录，避免影响重新授权）
 #[command]
-pub fn saf_clear_saved_tree() -> Result<(), AppError> {
-    crate::android::saf::clear_saved_tree()
+pub fn saf_clear_saved_tree(uri: String) -> Result<(), AppError> {
+    crate::android::saf::clear_saved_tree(&uri)
 }

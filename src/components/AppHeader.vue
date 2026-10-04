@@ -1,16 +1,15 @@
 <template>
-  <!-- 拖拽区在 Android 上没有对应实现（系统标题栏/手势返回才是移动端范式） -->
+  <!-- Android 没有拖拽区实现（系统标题栏/手势返回才是移动端范式）。本窗口无边框，顶栏是移动窗口的唯一手段，
+       所以整条用 "deep"：空值/"true" 会在遍历中提前 return、短路掉外层 header 的 "deep"，.nav-center 也必须 "deep" -->
   <header
     class="nav-bar"
     :data-mobile="isAndroid ? 'true' : undefined"
     :data-settings-open="settingsOpen ? 'true' : undefined"
-    :data-tauri-drag-region="isAndroid ? null : ''"
+    :data-tauri-drag-region="isAndroid ? null : 'deep'"
   >
-    <!-- 左侧控制区 -->
     <div class="nav-left">
-      <!-- 音乐库入口。图标按平台分开：汉堡(menu) 的语义是"展开侧边栏抽屉"，
-           在手机上指代"音乐库"太含糊，换成 library_music 直接表达内容。
-           桌面端保留 menu —— 那里汉堡就是标准的侧栏开关。 -->
+      <!-- 图标按平台分开：menu 的语义是"展开侧边栏抽屉"，手机上指代"音乐库"太含糊，改用 library_music；
+           桌面端保留 menu，那里汉堡就是标准的侧栏开关 -->
       <button
         class="icon-button"
         data-tauri-drag-region="false"
@@ -39,8 +38,7 @@
       </button>
       <ThemeSelector ref="themeSelectorRef" data-tauri-drag-region="false" />
     </div>
-    <!-- 中间：当前曲目信息（双行显示） -->
-    <div class="nav-center" data-tauri-drag-region>
+    <div class="nav-center" data-tauri-drag-region="deep">
       <Transition name="fade" mode="out-in">
         <div :key="currentTrack ? currentTrack.path : 'no-track-nav'" class="nav-track-info">
           <template v-if="currentTrack">
@@ -48,7 +46,7 @@
               class="nav-track-title"
               :title="getTrackTitle(currentTrack) || $t('player.noTrack')"
             >
-              <span class="nav-track-title-text">
+              <span class="nav-track-title-text selectable" data-tauri-drag-region="false">
                 {{ getTrackTitle(currentTrack) || $t('player.noTrack') }}
               </span>
               <span
@@ -61,22 +59,22 @@
             </div>
             <div
               v-if="getTrackArtist(currentTrack)"
-              class="nav-track-artist"
+              class="nav-track-artist selectable"
               :title="getTrackArtist(currentTrack)"
+              data-tauri-drag-region="false"
             >
               {{ getTrackArtist(currentTrack) }}
             </div>
           </template>
           <template v-else>
-            <div class="nav-track-artist">{{ $t('player.noTrack') }}</div>
+            <!-- 占位文案与真实艺术家同一套处理：可见的文字都不当拖拽区 -->
+            <div class="nav-track-artist selectable" data-tauri-drag-region="false">
+              {{ $t('player.noTrack') }}
+            </div>
           </template>
         </div>
       </Transition>
     </div>
-    <!-- 右侧控制区 -->
-    <!-- 迷你模式 / 最小化 / 全屏 / 关闭都是桌面窗口概念：
-         手机上本就是全屏 Activity，"最小化/关闭"由系统手势负责；
-         留着四个按钮既出不了效果，又占掉顶栏一大半宽度 -->
     <div v-if="!isAndroid" class="nav-right">
       <button
         class="icon-button"
@@ -128,8 +126,13 @@
         <span class="material-symbols-rounded">more_vert</span>
       </button>
       <Transition name="menu-fade">
-        <div v-if="overflowOpen" ref="overflowMenuRef" class="overflow-menu" role="menu">
-          <!-- 已经在设置面板里了就不再提供"设置"入口（点了等于自己关自己） -->
+        <div
+          v-if="overflowOpen"
+          ref="overflowMenuRef"
+          class="overflow-menu"
+          role="menu"
+          data-tauri-drag-region="false"
+        >
           <button
             v-if="!settingsOpen"
             class="overflow-item"
@@ -168,8 +171,8 @@ import { usePlatform } from '@/composables/usePlatform'
 import { useOrientation } from '@/composables/useOrientation'
 import ThemeSelector from './ThemeSelector.vue'
 
-/** 顶栏导航(曲目信息 + 主题/窗口/库入口)。从 App.vue 拆出:自身状态走 store,窗口控制函数与全屏
- *  状态由父级注入(App 的 useWindowControls 实例是唯一状态源),避免二次订阅。 */
+/** 顶栏导航(曲目信息 + 主题/窗口/库入口)。自身状态走 store，窗口控制函数与全屏状态由父级注入:
+ *  App 的 useWindowControls 实例是唯一状态源，避免二次订阅 */
 defineProps<{
   /** 全屏状态(决定全屏按钮标题与图标) */
   isFullscreen: boolean
@@ -193,10 +196,10 @@ const { getTrackTitle, getTrackArtist } = useTrackInfo()
 const { isAndroid } = usePlatform()
 const { isPortrait } = useOrientation()
 
-/** 溢出菜单只在手机竖屏出现（横屏与桌面端维持原来的平铺按钮） */
+/** 溢出菜单只在手机竖屏出现 */
 const showOverflowMenu = computed<boolean>(() => isAndroid.value && isPortrait.value)
 
-/** 设置面板打开时顶栏让出中间那块曲名（面板自己带标题，同屏两份是重复信息） */
+/** 设置面板打开时顶栏让出中间那块曲名 */
 const settingsOpen = computed<boolean>(() => configStore.ui.showConfigPanel)
 
 const overflowOpen = ref<boolean>(false)
@@ -225,8 +228,7 @@ const onOverflowSelect = (action: OverflowAction): void => {
   }
 }
 
-// 点菜单外的任意位置关闭。点触发按钮自身的冒泡由模板的 @click.stop 拦掉，
-// 否则「打开」会在同一次点击里被这里立刻收回去。
+// 点菜单外任意位置关闭。点触发按钮自身的冒泡由模板的 @click.stop 拦掉，否则"打开"会在同一次点击里被这里收回去
 const handleDocumentClick = (event: MouseEvent): void => {
   if (!overflowOpen.value) return
   if (overflowMenuRef.value?.contains(event.target as Node)) return
@@ -243,12 +245,13 @@ watch(showOverflowMenu, (visible) => {
 </script>
 
 <style scoped>
-/* 三列栅格把曲目信息真正钉在窗口正中。flex 下 .nav-center 只能在"左侧按钮之后剩下的空间"里居中，
-   Android 上右侧窗口按钮整组被 v-if 掉，那 ~200px 就全成了偏移量，标题明显偏右；栅格左右各 1fr
-   恒等宽，中间列的中心即窗口中心。中间列 minmax(0, auto) 让长曲名压成省略号而不顶掉两侧按钮。 */
+/* 三列栅格把曲目信息钉在窗口正中（flex 下 Android 右侧按钮被 v-if 掉会让标题偏右） */
 .nav-bar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
+  grid-template-columns:
+    minmax(min-content, 1fr)
+    minmax(0, auto)
+    minmax(min-content, 1fr);
   align-items: center;
   column-gap: 8px;
 }
@@ -261,10 +264,11 @@ watch(showOverflowMenu, (visible) => {
   justify-self: end;
 }
 
-/* 曲目信息：留一点内边距避免长曲名贴着按钮；
-   原来那 120px 是 flex 时代给两侧按钮预留的对称留白，栅格下已无必要 */
+/* 上下各 8px 内边距避免长曲名贴着按钮。box-sizing 必须 border-box：项目只在 #app 设了它，
+   content-box 下 padding 会让整盒比栅格列宽出 16px、两侧各溢出 8px */
 .nav-center {
   justify-self: center;
+  box-sizing: border-box;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -310,19 +314,17 @@ watch(showOverflowMenu, (visible) => {
   text-overflow: ellipsis;
 }
 
-/* 文件不存在警告图标（曲名右侧） */
 .nav-file-warning {
   flex-shrink: 0;
   font-size: 16px;
   color: var(--md-sys-color-error);
 }
 
-/* 窗口窄到 640px 以下（手机竖屏）没法两全其美：左侧按钮群本身就占掉大半宽度，
-   再把曲名塞进同一行就只能剩几十像素。这时才退化成两行——第一行按钮、第二行曲名。
-   栅格版的"两行"要用 grid-template-areas 表达，flex 的 order/flex-basis 在栅格里不生效。 */
+/* 窄到 640px 以下（手机竖屏）：左侧按钮群已占掉大半宽度，曲名塞进同一行只剩几十像素，才退化成两行
+   （第一行按钮、第二行曲名）。栅格版的两行要用 grid-template-areas 表达，flex 的 order/flex-basis 在栅格里不生效 */
 @media (max-width: 640px) {
   .nav-bar {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(min-content, 1fr) auto;
     grid-template-areas:
       'left right'
       'center center';
@@ -349,9 +351,9 @@ watch(showOverflowMenu, (visible) => {
   }
 }
 
-/* 手机竖屏：低频操作收进溢出菜单，.nav-left 的盒子消失（display: contents）让子项直接成为栅格项。
+/* 手机竖屏：.nav-left 用 display: contents 让子项直接成为栅格项，低频操作收进溢出菜单。
    整块用 [data-mobile='true'] 守卫，(orientation: portrait) 在桌面把窗口拉成窄高时同样会命中。
-   必须撤掉 640px 那条窄屏规则留下的两行 areas，否则曲名会被自动放置甩到第二行、顶栏高度翻倍。 */
+   必须撤掉 640px 那条留下的两行 areas，否则曲名会被自动放置甩到第二行、顶栏高度翻倍 */
 @media (orientation: portrait) {
   .nav-bar[data-mobile='true'] .nav-left {
     display: contents;
@@ -373,9 +375,8 @@ watch(showOverflowMenu, (visible) => {
     grid-area: 1 / 1;
   }
 
-  /* 2 = 设置、3 = 明暗：手机上收进溢出菜单。
-     第 4 个是 ThemeSelector，由它自己在组件内部隐藏触发按钮 ——
-     颜色面板还挂在那个节点上，整体 display:none 会把面板一起藏掉。 */
+  /* 2 = 设置、3 = 明暗：手机上收进溢出菜单。第 4 个是 ThemeSelector，它自己在组件内部隐藏触发按钮：
+     颜色面板还挂在那个节点上，整体 display:none 会把面板一起藏掉 */
   .nav-bar[data-mobile='true'] .nav-left > :nth-child(2),
   .nav-bar[data-mobile='true'] .nav-left > :nth-child(3) {
     display: none;
@@ -396,15 +397,14 @@ watch(showOverflowMenu, (visible) => {
     display: block;
   }
 
-  /* 设置面板打开时整行让位：面板自己那一条头部（Settings 的 mobile-app-bar）已经把返回、
-     标题和这里的明暗/主题色入口都收进去了，两行摞在一起会有两个返回键，还白吃 60px 高度。
-     状态栏的避让不受影响 —— safe-area 的 padding 挂在 #app 上，不在这一行里。 */
+  /* 设置面板打开时整行让位：Settings 的 mobile-app-bar 已收进返回、标题和这里的明暗/主题色入口，
+     两行摞在一起会有两个返回键，还白吃 60px 高度；safe-area 的 padding 挂在 #app 上，不受影响 */
   .nav-bar[data-mobile='true'][data-settings-open='true'] {
     display: none;
   }
 }
 
-/* ===== 溢出菜单（只有手机竖屏会渲染）===== */
+/* 溢出菜单（只有手机竖屏会渲染） */
 .overflow-menu {
   position: absolute;
   top: calc(100% - 2px);
@@ -416,9 +416,8 @@ watch(showOverflowMenu, (visible) => {
   padding: 6px;
   border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: 16px;
-  /* 不能用 surface-container-* 系列：本应用主题只输出 29 个基础角色，
-     那一族全部不存在，声明会静默失效变透明（见 tests/utils/themeTokens.test.ts
-     的棘轮断言）。浮层用真实存在的 surface。 */
+  /* 不能用 surface-container-* 系列：本应用主题只输出 29 个基础角色，那一族全部不存在，
+     声明会静默失效变透明（见 tests/utils/themeTokens.test.ts 的棘轮断言）。浮层用真实存在的 surface */
   background-color: var(--md-sys-color-surface);
   box-shadow: var(--md-sys-elevation-level3);
 }

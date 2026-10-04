@@ -1,14 +1,11 @@
 /**
- * 播放统计插件。数据分三层：单曲 tracks、每日 daily、明细 history。
- * 口径（阈值见下方常量）：≥30s 计次、覆盖 90% 算完播、循环/回退 >30s 算新一轮。
- * 未落盘时长每 5 分钟分段提交；存储 1MB 上限，故 history 升序，宿主裁剪末尾时保留最新。
+ * 播放统计插件:数据分三层(单曲 tracks / 每日 daily / 明细 history)
+ * 阈值与口径见下方常量,由 tests/plugins/playCount.test.ts 守护
  */
 
 import i18n from '@/i18n'
 import { PluginPermission, type PluginAPI, type BuiltinPluginDefinition } from '../pluginManager'
 import type { Track } from '@/types'
-
-// ============ 统计口径与容量常量 ============
 
 /** 持久化数据结构版本,用于旧数据迁移 */
 const SCHEMA_VERSION = 2
@@ -26,18 +23,16 @@ const DAILY_RETENTION_DAYS = 400
 const MAX_TRACK_AGGREGATES = 3000
 /** 单次结算最多计入的收听时长(秒),防止挂后台等异常场景写入离谱数值 */
 const MAX_SESSION_SECONDS = 6 * 60 * 60
-/** 轮询间隔(毫秒):3 秒比原先的 5 秒更容易命中"播完自动切歌"的结算时机 */
+/** 轮询间隔(毫秒),需足够短以命中"播完自动切歌"的结算时机 */
 const POLL_INTERVAL_MS = 3000
-/** 未落盘时长达到该秒数时先做一次分段提交 */
+/** 未落盘时长达到该秒数时先做一次分段提交,避免异常退出丢掉整段 */
 const CHECKPOINT_SECONDS = 300
-/** 播放位置相对上一次回退超过该秒数时,视为开始新一轮播放 */
+/** 播放位置相对上一次回退超过该秒数时,视为新一轮播放(单曲循环或手动重播) */
 const REWIND_THRESHOLD_SECONDS = 30
 /** 单次会话低于该秒数视为误触,不写入统计 */
 const MIN_SETTLE_SECONDS = 1
 /** 趋势图默认跨度(天) */
 export const TREND_DEFAULT_DAYS = 14
-
-// ============ 数据结构 ============
 
 /** 已归档的旧版播放历史条目(v1.0 / v1.1) */
 interface LegacyHistoryEntry {
@@ -47,7 +42,7 @@ interface LegacyHistoryEntry {
   timestamp?: unknown
 }
 
-/** 单条播放明细(时间升序存放,读取时倒序返回) */
+/** 单条播放明细:落盘按时间升序(存储超限时宿主只保数组尾部),读取时倒序返回 */
 export interface PlayHistoryEntry {
   path: string
   timestamp: number
@@ -59,16 +54,15 @@ export interface PlayHistoryEntry {
   completed: boolean
   /** 本次是否计入播放次数 */
   counted: boolean
-  /** 曲名(读取时由单曲聚合补全,写入时不落盘) */
+  /** 曲名,读取时补全 */
   title: string
-  /** 歌手(读取时由单曲聚合补全,写入时不落盘) */
+  /** 歌手,读取时补全 */
   artist: string
 }
 
 /** 落盘用的明细条目:不含 title / artist,避免与 tracks 重复占用存储 */
 type StoredHistoryEntry = Omit<PlayHistoryEntry, 'title' | 'artist'>
 
-/** 单曲聚合统计 */
 interface TrackAggregate {
   plays: number
   seconds: number
@@ -83,14 +77,12 @@ interface TrackAggregate {
   lastPlayedAt: number
 }
 
-/** 单日聚合统计 */
 interface DailyStat {
   plays: number
   seconds: number
   completed: number
 }
 
-/** 插件持久化数据结构 */
 interface PlayCountData {
   version: number
   tracks: Record<string, TrackAggregate>
@@ -132,7 +124,6 @@ export interface PlayCountStats {
   detailTruncated: boolean
 }
 
-/** 榜单条目 */
 export interface TopTrack {
   path: string
   title: string
@@ -142,13 +133,12 @@ export interface TopTrack {
   secondsFormatted: string
   completed: number
   judged: number
-  /** 完播率(0~1),无可判定样本时为 null */
+  /** 完播率,口径见 PlayCountStats.completionRate */
   completionRate: number | null
   duration: number
   lastPlayedAt: number
 }
 
-/** 趋势图数据点 */
 export interface DailyPoint {
   /** YYYY-MM-DD */
   date: string
@@ -165,8 +155,6 @@ export interface TopTrackQuery {
   /** 统计范围(天),null / 不传表示全部 */
   days?: number | null
 }
-
-// ============ 时间与格式化工具 ============
 
 /** 取本地时区的 YYYY-MM-DD */
 const dayKey = (timestamp: number): string => {
@@ -198,7 +186,7 @@ const recentDayKeys = (days: number): string[] => {
   return keys
 }
 
-/** 格式化收听时长(秒 → 本地化文案),页面侧复用同一口径 */
+/** 格式化收听时长(秒 -> 本地化文案),页面侧复用同一口径 */
 export function formatDuration(seconds: number): string {
   const safe = Math.max(0, Math.round(seconds))
   const hours = Math.floor(safe / 3600)
@@ -214,23 +202,20 @@ export function formatDuration(seconds: number): string {
   return i18n.global.t('player.durationS', { seconds: secs })
 }
 
-// ============ 统计判定 ============
-
-/** 单次收听是否达到计次门槛 */
+/** 计次口径:满最短收听时长,或覆盖 COMPLETE_RATIO 的曲目时长 */
 const meetsCountThreshold = (listened: number, trackSeconds: number): boolean =>
   listened >= MIN_COUNTED_SECONDS || (trackSeconds > 0 && listened >= trackSeconds * COMPLETE_RATIO)
 
-/** 单次收听是否构成完播 */
 const meetsCompleteThreshold = (listened: number, trackSeconds: number): boolean =>
   trackSeconds > 0
     ? Math.min(listened, trackSeconds) >= trackSeconds * COMPLETE_RATIO
     : listened >= COMPLETE_FALLBACK_SECONDS
 
-/** 播放位置是否已到曲目末尾(播放停止时用于判定"这一轮是不是听完了") */
+/** 播放位置距曲目末尾 2 秒内即视为听完 */
 const isTrackFinished = (position: number, trackSeconds: number): boolean =>
   trackSeconds > 0 && position >= trackSeconds - 2
 
-/** 计算完播率,无判定样本时返回 null(而不是误导性的 0) */
+/** 完播率:无可判定样本时返回 null,而不是误导性的 0 */
 const toCompletionRate = (completed: number, judged: number): number | null =>
   judged > 0 ? Math.min(1, completed / judged) : null
 
@@ -243,30 +228,26 @@ export const playCountPlugin: BuiltinPluginDefinition = {
   permissions: [PluginPermission.PLAYER_READ, PluginPermission.STORAGE],
 
   main: (api: PluginAPI) => {
-    // ---- 当前播放会话状态(仅内存,不落盘) ----
+    // 当前播放会话状态:仅内存,不落盘
     let lastTrack: Track | null = null
     /** 本轮"未提交分段"的起点,暂停时置空 */
     let playStartTime: number | null = null
-    /** 已暂停但尚未提交的分段时长 */
+    /** 尚未提交的分段时长(秒) */
     let accumulatedPlayTime = 0
     /** 当前曲目会话的累计收听时长(含已提交分段) */
     let sessionListened = 0
     /** 当前曲目时长(秒),来自播放器状态或曲目元信息 */
     let sessionDuration = 0
-    /** 上一次轮询到的播放位置,用于识别回退(重播/单曲循环) */
+    /** 上一次轮询到的播放位置,用于识别回退 */
     let lastPosition = 0
-    /** 本会话是否已计一次播放 */
     let sessionCounted = false
-    /** 本会话是否已记一次完播 */
     let sessionCompleted = false
 
     let pollingInterval: ReturnType<typeof setInterval> | null = null
 
-    // 保存事件回调引用以便正确清理
+    // off 按引用移除监听,故须长期持有这两个回调引用,否则停用时订阅泄漏
     let trackChangedCallback: (data: unknown) => void
     let stateChangedCallback: (data: unknown) => void
-
-    // ========== 数据读写 ==========
 
     const emptyAggregate = (): TrackAggregate => ({
       plays: 0,
@@ -289,10 +270,9 @@ export const playCountPlugin: BuiltinPluginDefinition = {
     })
 
     /**
-     * 把旧版(1.0 / 1.1)数据转换成 v2 结构。纯函数、不落盘,插件未激活也能看到迁移结果。
+     * 把旧版(1.0 / 1.1)数据转换成 v2 结构:纯函数,不落盘,插件未激活也能看到迁移结果
      *
-     * 旧版只有播放次数与总时长:tracks[].plays 沿用旧计数,seconds/judged 保持 0;
-     * 用旧历史回填曲目元信息、最近播放时间与每日播放次数(趋势图立即可用)。
+     * 旧版只有播放次数与总时长:plays 沿用旧计数,seconds/judged 保持 0,元信息与每日次数由旧历史回填
      */
     const migrateLegacyData = (): PlayCountData => {
       const legacyCounts = api.storage.get<Record<string, number>>('playCounts', {}) ?? {}
@@ -344,7 +324,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         if (timestamp > 0) {
           const key = dayKey(timestamp)
           const day = data.daily[key] ?? { plays: 0, seconds: 0, completed: 0 }
-          // 旧历史只保留了最近 100 条,按条数回填"播放次数"是此处唯一可用的近似
+          // 旧历史只保留最近 100 条,按条数回填次数是唯一可用的近似
           day.plays += 1
           data.daily[key] = day
         }
@@ -355,7 +335,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       return data
     }
 
-    /** 读取数据;数据结构落后时返回内存中的迁移结果(仍不写盘) */
+    /** 读取数据;版本落后时返回 migrateLegacyData 的内存结果,不写盘 */
     const loadData = (): PlayCountData => {
       const version = api.storage.get<number>('version', 0) ?? 0
       if (version < SCHEMA_VERSION) {
@@ -382,7 +362,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       api.storage.set('totalPlayTime', data.totalPlayTime)
     }
 
-    /** 首次激活时把迁移结果落盘,并清掉不再使用的旧键 */
+    /** 首次激活才把迁移结果落盘,并清掉废弃旧键 playCounts / playHistory */
     const persistMigrationIfNeeded = (): void => {
       const version = api.storage.get<number>('version', 0) ?? 0
       if (version >= SCHEMA_VERSION) return
@@ -410,7 +390,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       return created
     }
 
-    /** 容量裁剪:日期保留窗口 + 曲目聚合上限(优先淘汰零计次的曲目) */
+    /** 容量裁剪:日期保留窗口 + 曲目聚合上限,淘汰优先级见两个常量 */
     const pruneData = (data: PlayCountData): void => {
       const dayKeys = Object.keys(data.daily).sort()
       if (dayKeys.length > DAILY_RETENTION_DAYS) {
@@ -429,8 +409,6 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       }
     }
 
-    // ========== 会话计时 ==========
-
     /** 尚未落盘的时长(秒) */
     const pendingSeconds = (): number =>
       accumulatedPlayTime + (playStartTime ? (Date.now() - playStartTime) / 1000 : 0)
@@ -442,7 +420,6 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       playStartTime = Date.now()
     }
 
-    /** 把运行中的分段并入"未提交时长" */
     const pauseSegment = (): void => {
       if (playStartTime) {
         accumulatedPlayTime += (Date.now() - playStartTime) / 1000
@@ -450,7 +427,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       }
     }
 
-    /** 提交时长:只累计收听秒数,不决定播放次数与完播 */
+    /** 只累计收听秒数,不判定计次与完播 */
     const commitTime = (track: Track | null, seconds: number): void => {
       if (seconds <= 0) return
       const data = loadData()
@@ -466,7 +443,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       saveData(data)
     }
 
-    /** 提交结果:写播放次数、完播次数与一条播放明细 */
+    /** 落盘判定结果(判定口径见 settleSegment):计次与完播次数,加一条明细 */
     const commitOutcome = (
       track: Track,
       listenedSeconds: number,
@@ -498,7 +475,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       if (counted) day.plays += 1
       if (completed) day.completed += 1
 
-      // 明细按时间升序存放:宿主在存储超限时裁剪数组末尾之外的部分,升序可保住最新记录
+      // 新记录追加末尾,维持 PlayHistoryEntry 的升序约定
       data.history.push({
         path,
         timestamp: now,
@@ -520,9 +497,9 @@ export const playCountPlugin: BuiltinPluginDefinition = {
     }
 
     /**
-     * 结算当前分段:把未提交时长写进聚合、并入会话累计。
-     * 是否计次/完播由会话累计决定,统一在会话结束时经 commitOutcome 落盘,
-     * 因此分段提交不会把一次收听拆成多次播放。
+     * 结算当前分段:未提交时长写入聚合并计入会话累计
+     *
+     * 计次/完播按会话累计判定,只在会话结束时经 commitOutcome 落盘,故分段提交不会把一次收听拆成多次播放
      */
     const settleSegment = (): void => {
       pauseSegment()
@@ -541,7 +518,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       }
     }
 
-    /** 结束当前曲目会话:落盘播放次数与完播,并重置会话状态 */
+    /** 结束当前曲目会话:判定结果经 commitOutcome 落盘,并重置会话状态 */
     const endSession = (): void => {
       const track = lastTrack
       if (track?.path && sessionListened > 0) {
@@ -560,8 +537,6 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       accumulatedPlayTime = 0
     }
 
-    // ========== 播放状态跟踪 ==========
-
     const handlePlaybackState = (
       track: Track | null,
       isPlaying: boolean,
@@ -572,7 +547,6 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       const lastPath = lastTrack?.path ?? null
       const trackSeconds = duration > 0 ? duration : (track?.duration ?? 0)
 
-      // 切歌:结算并归档上一首,然后开新会话
       if (trackPath !== lastPath) {
         settleSegment()
         endSession()
@@ -585,7 +559,6 @@ export const playCountPlugin: BuiltinPluginDefinition = {
 
       if (trackSeconds > 0) sessionDuration = trackSeconds
 
-      // 位置大幅回退 = 单曲循环或手动重播,按新一轮播放结算
       if (isPlaying && position + REWIND_THRESHOLD_SECONDS < lastPosition) {
         settleSegment()
         endSession()
@@ -598,8 +571,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
 
       if (isPlaying && track) {
         if (!playStartTime) startSegment()
-        // 每满 5 分钟先落一次盘,避免异常退出丢掉整段时长;
-        // 提交后立刻续上计时,否则会漏掉结算瞬间这一个轮询间隔
+        // 分段提交后立即续上计时,否则会漏掉结算瞬间这一个轮询间隔
         if (pendingSeconds() >= CHECKPOINT_SECONDS) {
           settleSegment()
           startSegment()
@@ -607,15 +579,14 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         return
       }
 
-      // 暂停:先把已收听时长落盘,分段与后续继续播放会接着累计
+      // 暂停只结算分段,不结束会话:继续播放要在同一轮里累计
       const finished = isTrackFinished(position, sessionDuration)
       settleSegment()
-      // 播放位置已经到底而播放停止(列表播完 / 手动暂停在结尾),直接归档本次播放,
-      // 否则这一次播放要等到下次切歌或退出应用才会计数
+      // 位置到底即归档,否则本轮要等到下次切歌或退出应用才计数
       if (finished) endSession()
     }
 
-    // 暂停/空闲时不累计收听时长，也就没必要每 3 秒醒一次
+    // 暂停/空闲时计时不推进,轮询无需唤醒
     let lastObservedPlaying = false
 
     const pollPlayerState = async (): Promise<void> => {
@@ -627,8 +598,6 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         // 播放器尚未就绪时忽略本轮轮询
       }
     }
-
-    // ========== 查询实现 ==========
 
     interface ScopeSummary {
       totalTracks: number
@@ -654,9 +623,9 @@ export const playCountPlugin: BuiltinPluginDefinition = {
     }
 
     /**
-     * 汇总指定范围的数据。
-     * days === null 取单曲聚合(含旧版迁移部分,数值最完整);days > 0 取每日聚合
-     * (不受明细窗口限制),但完播口径仍取自明细——旧版每日聚合没有"可判定次数"。
+     * 汇总指定范围的数据:days === null 取单曲聚合(含旧版迁移,数值最完整)
+     *
+     * days > 0 取每日聚合(不受明细窗口限制),但完播与判定次数仍取自明细,旧版每日聚合没有可判定次数
      */
     const summarizeScope = (data: PlayCountData, days: number | null): ScopeSummary => {
       const live = liveSeconds()
@@ -673,7 +642,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         for (const aggregate of Object.values(data.tracks)) {
           completedPlays += aggregate.completed
           judgedPlays += aggregate.judged
-          // "播放过的歌曲"只统计真正计次的曲目:试听十几秒就切走的不算
+          // 播放过的歌曲只统计计次曲目,试听十几秒就切走的不算
           if (aggregate.plays > 0) {
             totalTracks += 1
             totalPlays += aggregate.plays
@@ -753,7 +722,6 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       }
     }
 
-    /** 连续收听天数(截至今天或昨天)与历史最长连续天数 */
     const computeStreaks = (data: PlayCountData): { current: number; longest: number } => {
       const activeKeys = Object.keys(data.daily)
         .filter((key) => (data.daily[key]?.plays ?? 0) > 0 || (data.daily[key]?.seconds ?? 0) > 0)
@@ -770,7 +738,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         if (run > longest) longest = run
       }
 
-      // 今天还没听时,连续天数截至昨天仍然有意义
+      // 连续天数含今天或截至昨天,见 PlayCountStats.currentStreak
       const today = dayKey(Date.now())
       const yesterdayKey = dayKeyOffset(today, -1).key
       const last = activeKeys[activeKeys.length - 1]!
@@ -858,8 +826,6 @@ export const playCountPlugin: BuiltinPluginDefinition = {
         lastPosition = 0
         api.log.info('播放统计插件已停用')
       },
-
-      // ---------- 对外查询 API ----------
 
       getStats(rangeDays: number | null = null): PlayCountStats {
         const data = loadData()
@@ -973,7 +939,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
             if (entry.completed) bucket.completed += 1
             bucket.seconds += entry.listenedSeconds
             bucket.lastPlayedAt = Math.max(bucket.lastPlayedAt, entry.timestamp)
-            // 明细库时间升序,顺序遍历后留下的即最近一次记录到的曲目时长
+            // history 升序(见 PlayHistoryEntry),顺序覆盖后留下最近一次记录的曲目时长
             if (entry.trackSeconds > 0) bucket.trackSeconds = entry.trackSeconds
             buckets.set(entry.path, bucket)
           }

@@ -2,9 +2,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPluginStorage, PLUGIN_STORAGE_PREFIX } from '@/plugins/pluginStorage'
 
-// vitest 4 + happy-dom 环境不把 localStorage 暴露为全局,补一个内存实现。
-// 插件存储代码通过全局 localStorage 读写,shim 必须在用例执行前就位。
-// (与 pluginManager.test.ts 同样的处理)
+// vitest 4 + happy-dom 不把 localStorage 暴露为全局, 而插件存储代码经全局 localStorage 读写,
+// shim 必须在用例执行前就位 (与 pluginManager.test.ts 同样的处理)
 if (typeof localStorage === 'undefined') {
   const backing = new Map<string, string>()
   vi.stubGlobal('localStorage', {
@@ -20,13 +19,8 @@ if (typeof localStorage === 'undefined') {
 }
 
 /**
- * 插件存储回归测试 (P1-3)
- *
- * 历史 bug:flush/cleanup 以普通数据键写入 reactive 对象,导致
- * 1. `{ ...storage }` 展开带上函数 → 宿主 postMessage 结构化克隆抛
- *    DataCloneError,整份状态镜像被静默丢弃;
- * 2. 插件可用 api.storage.set('flush', 1) 覆盖生命周期方法。
- * 现在两者必须以不可枚举、不可覆盖的能力暴露。
+ * P1-3 回归: flush/cleanup 若是普通数据键, 展开快照会带上函数 -> 宿主 postMessage 结构化克隆抛
+ * DataCloneError 使整份状态镜像被静默丢弃, 且插件能用 api.storage.set('flush', 1) 覆盖生命周期方法
  */
 describe('pluginStorage - 生命周期方法隔离 (P1-3 回归)', () => {
   beforeEach(() => {
@@ -91,7 +85,6 @@ describe('pluginStorage - 生命周期方法隔离 (P1-3 回归)', () => {
     expect(typeof storage.flush).toBe('function')
     expect(typeof storage.cleanup).toBe('function')
 
-    // 数据键读写不受影响
     mutable.normal = 'ok'
     expect(storage.normal).toBe('ok')
     delete mutable.normal

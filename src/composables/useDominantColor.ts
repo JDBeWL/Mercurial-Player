@@ -4,23 +4,21 @@ import type { ImmersiveColorScheme } from '@/types'
 import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
 
 /**
- * 从封面提取主色，用于沉浸式背景填充。取样前先按 object-fit: cover 裁剪到实际显示区域。
- * - 'album'：整张均匀取样 + K‑Means 选代表性色（偏中亮度高彩度，抑制过暗/过亮与灰）。
- * - 'fusion'：只取最右 5% 羽化条带求平均，与封面右缘一致，过渡最无痕。
- * 结果在 OKLab 保色相并二分查找最大合法彩度以免 RGB 溢出；纯色/透明过多时返回后备色。
+ * 从封面提取主色,用于沉浸式背景填充;取样区域由 decodePixels 按 .full-cover 规则裁出
+ *
+ * - 'album': 整张均匀取样 + K-Means 选代表性色 (偏中亮度高彩度,抑制过暗/过亮与灰)
+ * - 'fusion': 只取最右 5% 羽化条带求平均,与封面右缘一致,过渡最无痕
  */
 export function useDominantColor(
   coverPath: Ref<string | undefined | null>,
   mode: Ref<ImmersiveColorScheme> = ref('album'),
 ) {
   const dominantColor = ref('')
-  // 主色的 OKLab 亮度（0~1），取色失败时为 null。
-  // 沉浸式模式据此自动切换应用的深/浅主题，保证前景文字可读。
+  // 主色的 OKLab 亮度 (0~1),取色失败时为 null;沉浸式据此切换深/浅主题,保证前景文字可读
   const dominantLuminance = ref<number | null>(null)
   let generation = 0
 
-  // ===================== 色彩空间转换（Björn Ottosson） =====================
-
+  // OKLab 转换,下面的矩阵常量取自 Björn Ottosson 的参考实现
   const srgbToLinear = (c: number): number => {
     const v = c / 255
     return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
@@ -45,7 +43,7 @@ export function useDominantColor(
     }
   }
 
-  // 返回 0-1 浮点数（未取整），用于色域映射时的精确判断
+  // 返回 0~1 浮点 (未取整),色域映射时要靠越界的小数部分判断
   const oklabToRgbFloat = (L: number, a: number, b: number) => {
     const l_ = L + 0.3963377774 * a + 0.2158037573 * b
     const m_ = L - 0.1055613458 * a - 0.0638541728 * b
@@ -60,7 +58,7 @@ export function useDominantColor(
     }
   }
 
-  // 返回取整后的 0-255 整数（用于最终输出）
+  // 返回取整后的 0~255 整数,用于最终输出
   const oklabToRgb = (L: number, a: number, b: number) => {
     const { r, g, b: blue } = oklabToRgbFloat(L, a, b)
     return {
@@ -70,8 +68,6 @@ export function useDominantColor(
     }
   }
 
-  // ===================== 辅助函数 =====================
-
   const mimeFromPath = (path: string): string => {
     const ext = path.split('.').pop()?.toLowerCase() ?? ''
     if (ext === 'png') return 'image/png'
@@ -79,10 +75,9 @@ export function useDominantColor(
     return 'image/jpeg'
   }
 
-  /**
-   * 读取图片并降采样为 32x32 像素数组
-   */
+  /** 读图片并降采样为 32x32 像素数组:取色只需低频统计,固定小尺寸让算法代价与原图分辨率无关 */
   const decodePixels = async (path: string): Promise<Uint8ClampedArray | null> => {
+    // 远程与本地路径都先拿到 Blob 再解码:把跨域 URL 直接画进 canvas 会污染画布,getImageData 就抛错
     let blob: Blob
     if (
       path.startsWith('http://') ||
@@ -101,12 +96,12 @@ export function useDominantColor(
     const canvas = document.createElement('canvas')
     canvas.width = SIZE
     canvas.height = SIZE
+    // getImageData 是热路径,willReadFrequently 让浏览器留在 CPU 后端而非 GPU 回读
     const ctx = canvas.getContext('2d', { willReadFrequently: true })
     if (!ctx) return null
 
-    // 与显示端 CSS（object-fit: cover + object-position: left center）保持一致：
-    // 等比缩放铺满 SIZE 后左对齐、垂直居中，画布外区域自然被裁掉。
-    // 这样非方形图取样到的就是用户实际看到的裁剪区域。
+    // 与显示端 CSS (object-fit: cover + object-position: left center) 一致:等比铺满 SIZE 后左对齐、
+    // 垂直居中,画布外自然裁掉,这样非方形图取样到的就是用户实际看到的区域
     const drawCoverCropped = (source: CanvasImageSource, sw: number, sh: number) => {
       const scale = Math.max(SIZE / sw, SIZE / sh)
       const dw = sw * scale
@@ -136,19 +131,17 @@ export function useDominantColor(
     return ctx.getImageData(0, 0, SIZE, SIZE).data
   }
 
-  // ===================== 核心取色算法 =====================
-
-  /** 亮度上限压缩 + 彩度等比缩放 + 色域映射，输出最终 rgb() 字符串与亮度（两种模式共用） */
+  /** 亮度上限压缩 + 彩度等比缩放 + 色域映射,输出最终 rgb() 字符串与亮度 (两种模式共用) */
   const finalizeColor = (L: number, a: number, b: number): { color: string; luminance: number } => {
-    // 亮度上限：早期取 0.65，实测偏暗影响歌词可读性，上调到 0.95
+    // 亮度封顶 0.95:再压低主色会偏暗,盖在上面的歌词反而看不清
     const targetL = Math.min(L, 0.95)
 
-    // 按亮度压缩比例缩放彩度，防止压缩后彩度不变导致偏色
+    // 彩度按亮度压缩比例等比缩放,否则压暗后仍保持原彩度会偏色
     const dimRatio = targetL / Math.max(L, 0.001)
     let finalA = a * dimRatio
     let finalB = b * dimRatio
 
-    // 色域映射：保持色相，二分查找最大合法彩度，保证 RGB 在 [0,1] 内
+    // 色域映射:固定色相二分找出彩度的最大合法值,保证 RGB 落在 [0,1]
     if (Math.hypot(finalA, finalB) > 0) {
       let lo = 0
       let hi = 1
@@ -180,9 +173,7 @@ export function useDominantColor(
     pixels: Uint8ClampedArray,
     mode: ImmersiveColorScheme,
   ): { color: string; luminance: number } => {
-    // 1. 将不透明像素转入 OKLab 空间。
-    //    - album：整张封面均匀取样，选出最具代表性的主题色
-    //    - fusion：只保留最右侧 5%（x >= 0.95）的羽化条带，其余像素不参与
+    // 不透明像素转入 OKLab;fusion 只留最右 5% 的羽化条带 (两种模式的定义见文件头)
     const width = Math.round(Math.sqrt(pixels.length / 4))
     const pts: { L: number; a: number; b: number }[] = []
     for (let p = 0; p * 4 < pixels.length; p++) {
@@ -195,12 +186,11 @@ export function useDominantColor(
     }
 
     if (pts.length === 0) {
-      // 无有效像素 => 返回深灰色后备（OKLab L≈0.19）
+      // 无有效像素 => 深灰后备色 (OKLab L ~= 0.19)
       return { color: 'rgb(40, 40, 40)', luminance: 0.19 }
     }
 
-    // fusion：直接对条带取平均——融合模式下背景色应贴近右缘真实观感，
-    // 平均色是渐隐区颜色的最佳估计（K-Means 选主色在双色条带时反而造成突兀过渡）
+    // fusion 取条带平均而非 K-Means:背景要贴近右缘真实观感,双色条带下主色会造成突兀过渡
     if (mode === 'fusion') {
       let sumL = 0,
         suma = 0,
@@ -213,7 +203,7 @@ export function useDominantColor(
       return finalizeColor(sumL / pts.length, suma / pts.length, sumb / pts.length)
     }
 
-    // 如果像素极少（例如几乎全透明），直接返回平均色（彩度减半避免浑浊）
+    // 有效采样点少于 20 个:样本太少不足以聚类,直接取平均色,彩度减半避免浑浊
     if (pts.length < 20) {
       let sumL = 0,
         suma = 0,
@@ -226,10 +216,9 @@ export function useDominantColor(
       return finalizeColor(sumL / pts.length, (suma / pts.length) * 0.5, (sumb / pts.length) * 0.5)
     }
 
-    // 2. K‑means++ 初始化种子（最多 6 个）
+    // K-means++ 初始化种子,最多 6 个簇
     const k = Math.min(6, pts.length)
     const seeds: typeof pts = []
-    // 随机选取第一个
     const firstIdx = Math.floor(Math.random() * pts.length)
     seeds.push({ ...pts[firstIdx]! })
 
@@ -243,7 +232,7 @@ export function useDominantColor(
         return minD * minD
       })
       const total = distSq.reduce((a, b) => a + b, 0)
-      if (total === 0) break // 所有点已被选为种子（理论上不会）
+      if (total === 0) break // 所有点都已成为种子,理论上到不了这里
       let r = Math.random() * total
       for (let j = 0; j < distSq.length; j++) {
         r -= distSq[j]!
@@ -254,12 +243,11 @@ export function useDominantColor(
       }
     }
 
-    // 3. K‑Means 迭代
+    // K-Means 主迭代,最多 10 轮,通常由下面的收敛判断提前 break
     let centers = seeds.map((s) => [s.L, s.a, s.b] as [number, number, number])
     const assign = new Int32Array(pts.length)
 
     for (let iter = 0; iter < 10; iter++) {
-      // 分配
       for (let p = 0; p < pts.length; p++) {
         let best = 0
         let bestD = Infinity
@@ -276,7 +264,6 @@ export function useDominantColor(
         assign[p] = best
       }
 
-      // 更新中心
       const sums = centers.map(() => ({ n: 0, L: 0, a: 0, b: 0 }))
       for (let p = 0; p < pts.length; p++) {
         const s = sums[assign[p]!]!
@@ -299,28 +286,27 @@ export function useDominantColor(
         return nc
       })
       centers = newCenters
-      if (maxMove < 1e-5) break // 收敛
+      if (maxMove < 1e-5) break // 簇中心位移小于 1e-5 (OKLab 单位) 视为收敛
     }
 
-    // 4. 计算各簇占比
     const counts = new Array<number>(centers.length).fill(0)
     for (let p = 0; p < pts.length; p++) counts[assign[p]!]!++
 
-    // 5. 综合打分
+    // 综合打分挑代表色
     let best = { score: -1, L: 0, a: 0, b: 0 }
     for (let c = 0; c < centers.length; c++) {
       const [L, a, b] = centers[c]!
       const share = counts[c]! / pts.length
       const chroma = Math.hypot(a, b)
 
-      // 基础分：占比重、彩度高
+      // 基础分:占比重、彩度高
       let score = Math.sqrt(share) * (0.2 + chroma * 2.5)
 
-      // 偏好中等亮度（适合深色背景）
+      // 偏好中等亮度 (适合深色背景),过暗过亮都降权
       if (L >= 0.25 && L <= 0.45) score *= 1.3
       else if (L < 0.2 || L > 0.65) score *= 0.6
 
-      // 抑制灰色
+      // 抑制接近灰的簇
       if (chroma < 0.02) score *= 0.3
 
       if (score > best.score) {
@@ -328,15 +314,13 @@ export function useDominantColor(
       }
     }
 
-    // 6. 亮度压缩 + 色域映射后输出
     return finalizeColor(best.L, best.a, best.b)
   }
-
-  // ===================== 监听封面路径 / 取色模式变化 =====================
 
   watch(
     [coverPath, mode],
     ([path, currentMode]) => {
+      // 代次守卫:每次封面/模式变化都递增,过期的异步回调不许再写入结果
       const gen = ++generation
       if (!path) {
         dominantColor.value = ''
@@ -358,7 +342,7 @@ export function useDominantColor(
           }
         })
         .catch((e) => {
-          // 取色失败：回退为无主色状态，沉浸层使用主题后备色
+          // 取色失败:回退为无主色,沉浸层改用主题后备色
           errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
           if (gen === generation) {
             dominantColor.value = ''

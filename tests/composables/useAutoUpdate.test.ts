@@ -247,7 +247,7 @@ describe('useAutoUpdate > downloadAndInstall', () => {
   })
 
   it('smooths the speed with exponential moving average on later intervals', async () => {
-    // 第一次测得 100B/s,第二次瞬时 200B/s → 0.6 * 100 + 0.4 * 200 = 140
+    // 第一次测得 100B/s,第二次瞬时 200B/s -> 0.6 * 100 + 0.4 * 200 = 140
     const samples = recordDuringDownload((push) => {
       nowMs = 0
       push({ downloaded: 0, total: 300 })
@@ -269,7 +269,7 @@ describe('useAutoUpdate > downloadAndInstall', () => {
       if (cmd === 'updater_download') {
         nowMs = 500
         progressHandler?.({ payload: { downloaded: 0, total: 100 } })
-        // 时钟未推进 → seconds === 0,应跳过速度计算
+        // 时钟未推进 -> seconds === 0,应跳过速度计算
         progressHandler?.({ payload: { downloaded: 100, total: 100 } })
         return Promise.resolve(undefined)
       }

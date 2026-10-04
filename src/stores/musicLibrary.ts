@@ -45,40 +45,32 @@ interface MusicLibraryState {
   _sortedSortOrder: SortOrder | ''
   /** 刷新代际，并发调用时只让最后一次的结果生效 */
   _refreshEpoch: number
-  /** 是否已从缓存加载 */
   _loadedFromCache: boolean
 }
 
 export const useMusicLibraryStore = defineStore('musicLibrary', {
   state: (): MusicLibraryState => ({
-    // 音乐文件夹管理
     musicFolders: [],
 
-    // 播放列表管理
     playlists: [],
     currentPlaylist: null,
 
-    // 加载状态
     isLoading: false,
     error: null,
 
-    // 惰性排序追踪
     _sortedPlaylists: new Set<string>(),
     _sortedSortOrder: '',
     _refreshEpoch: 0,
 
-    // 缓存标记
     _loadedFromCache: false,
   }),
 
   getters: {},
 
   actions: {
-    // ========== 音乐文件夹管理 ==========
+    // --- 音乐文件夹管理 ---
 
-    /**
-     * 加载音乐文件夹
-     */
+    /** 加载音乐文件夹 */
     async loadMusicFolders(): Promise<{ success: boolean; message: string }> {
       try {
         this.musicFolders = await invoke<string[]>('get_music_directories')
@@ -89,14 +81,12 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       }
     },
 
-    /**
-     * 添加音乐文件夹
-     */
+    /** 添加音乐文件夹 */
     async addMusicFolder(folderPath: string): Promise<{ success: boolean; message: string }> {
       try {
         const updatedFolders = await invoke<string[]>('add_music_directory', { path: folderPath })
         this.musicFolders = updatedFolders
-        // 同时更新配置存储中的音乐文件夹列表
+        // 后端是唯一数据源,变更须同步镜像到 config.musicDirectories,否则设置页与持久化副本不一致
         const configStore = useConfigStore()
         configStore.musicDirectories = updatedFolders
         return { success: true, message: 'Folder added successfully' }
@@ -106,22 +96,18 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       }
     },
 
-    /**
-     * 移除音乐文件夹
-     */
+    /** 移除音乐文件夹 */
     async removeMusicFolder(folderPath: string): Promise<{ success: boolean; message: string }> {
       try {
         const updatedFolders = await invoke<string[]>('remove_music_directory', {
           path: folderPath,
         })
         this.musicFolders = updatedFolders
-        // 同时更新配置存储中的音乐文件夹列表
+        // 镜像到 config.musicDirectories(理由见 addMusicFolder)
         const configStore = useConfigStore()
         configStore.musicDirectories = updatedFolders
 
-        // 如果当前播放列表受到影响，清空它
-        // 注意：folderPath 与 f.path 可能来自不同数据源，Windows 下斜杠方向可能不一致，
-        // 需要先规范化再比较，避免漏判
+        // 路径来自不同数据源,须先 normalizePath 再比较,否则 Windows 下会漏判
         const normalizedFolder = normalizePath(folderPath)
         if (
           this.currentPlaylist &&
@@ -137,14 +123,12 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       }
     },
 
-    /**
-     * 设置音乐文件夹
-     */
+    /** 设置音乐文件夹 */
     async setMusicFolders(folders: string[]): Promise<{ success: boolean; message: string }> {
       try {
         const updatedFolders = await invoke<string[]>('set_music_directories', { paths: folders })
         this.musicFolders = updatedFolders
-        // 同时更新配置存储中的音乐文件夹列表
+        // 镜像到 config.musicDirectories(理由见 addMusicFolder)
         const configStore = useConfigStore()
         configStore.musicDirectories = updatedFolders
         return { success: true, message: 'Music directories updated successfully' }
@@ -154,28 +138,23 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       }
     },
 
-    /**
-     * 刷新音乐文件夹
-     * 使用分批更新策略，避免一次性替换大数组导致前端卡顿
-     * 扫描完成后自动将播放列表缓存到 plugin-store 以加速下次启动
-     */
+    /** 刷新音乐文件夹，分批重建播放列表；完成后写入 plugin-store 缓存以加速下次启动 */
     async refreshMusicFolders(): Promise<{ success: boolean; message: string }> {
-      // 并发刷新会让「清空 → 分批 push」交错叠加,用代际只让最后一次生效
+      // 并发刷新会让「清空 -> 分批 push」交错叠加,用代际只让最后一次生效
       const epoch = ++this._refreshEpoch
       const superseded = { success: false, message: 'Superseded by a newer refresh' }
       try {
         // 先记录当前选中状态，刷新后重新绑定到新对象，避免封面/元数据显示不更新
         const currentPlaylistName = this.currentPlaylist?.name ?? null
 
-        // 获取新的播放列表数据
         const newPlaylists = await invoke<Playlist[]>('get_all_audio_files', {
           paths: this.musicFolders,
         })
         if (epoch !== this._refreshEpoch) return superseded
 
-        // 分批更新，避免一次性替换导致响应式风暴
-        const BATCH_SIZE = 10 // 每批处理 10 个播放列表
-        this.playlists = [] // 先清空
+        // 分批 push 而非整体替换:大列表一次性替换会触发响应式风暴卡住 UI
+        const BATCH_SIZE = 10
+        this.playlists = []
 
         for (let i = 0; i < newPlaylists.length; i += BATCH_SIZE) {
           if (epoch !== this._refreshEpoch) return superseded
@@ -188,19 +167,16 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
           }
         }
 
-        // 重置惰性排序追踪，让下次选择播放列表时重新排序
+        // 作废惰性排序记录，下次选择播放列表时重新排序
         this._sortedPlaylists = new Set<string>()
         this._sortedSortOrder = ''
 
-        // 重新绑定当前播放列表（指向刷新后的新对象）
         if (currentPlaylistName) {
           this.currentPlaylist = this.playlists.find((p) => p.name === currentPlaylistName) ?? null
         }
 
-        // 刷新后同步更新 player.playlist 中的曲目引用
-        // playlists 已重建为新对象，但 player.playlist 仍持有旧对象引用，元数据不会更新
-        // 注意：扫描走轻量模式，新对象不含 coverPath，直接整体替换会导致封面丢失，
-        // 且结构 watch 只比较 path，重新打开播放列表才会暴露，故沿用旧对象已加载的封面路径
+        // playlists 重建为新对象后 player.playlist 仍持旧引用;扫描是轻量模式不含 coverPath,
+        // 直接整体替换会丢封面,故沿用旧条目已加载的封面路径
         const playerStore = usePlayerStore()
         if (playerStore.playlist.length > 0) {
           const trackMap = new Map<string, Track>()
@@ -224,8 +200,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
           }
         }
 
-        // 异步缓存到 plugin-store（不阻塞当前流程）
-        // 失败已在 _savePlaylistsToCache 内部记录告警，这里不再重复 catch
+        // 异步写 plugin-store 缓存,不阻塞当前流程;失败已在 _savePlaylistsToCache 内部告警
         void this._savePlaylistsToCache()
 
         return { success: true, message: 'Library refreshed successfully' }
@@ -235,10 +210,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       }
     },
 
-    /**
-     * 从缓存中加载播放列表（启动时快速恢复）
-     * 返回是否成功加载了缓存
-     */
+    /** 启动时从缓存恢复播放列表，返回是否命中缓存 */
     async loadPlaylistsFromCache(): Promise<boolean> {
       try {
         const store = await getLibraryStore()
@@ -249,14 +221,13 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
           return false
         }
 
-        // 检查缓存是否过期（超过 7 天视为过期）
         const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000
         if (Date.now() - cached.timestamp > CACHE_MAX_AGE) {
           logger.info('Library cache is too old, will refresh')
           return false
         }
 
-        // 将缓存的播放列表恢复到 state（coverPath 字段为 undefined，后续按需加载）
+        // 缓存条目不含 coverPath，恢复到 state 后按需重新加载封面
         this.playlists = cached.playlists as Playlist[]
         this._loadedFromCache = true
         this._sortedPlaylists = new Set<string>()
@@ -271,14 +242,10 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       }
     },
 
-    /**
-     * 将当前播放列表保存到缓存
-     * 去除 cover 数据以减小缓存体积
-     */
+    /** 将当前播放列表写入缓存，剥离 coverPath 以减小体积 */
     async _savePlaylistsToCache(): Promise<void> {
       try {
         const store = await getLibraryStore()
-        // 去除 coverPath 字段以减小体积
         const lightPlaylists: CachedPlaylist[] = this.playlists.map((p) => ({
           name: p.name,
           files: p.files.map(({ coverPath: _coverPath, ...rest }) => rest),
@@ -295,9 +262,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       }
     },
 
-    /**
-     * 对播放列表进行惰性排序（只在首次访问时排序一次）
-     */
+    /** 惰性排序：只在首次访问某播放列表时排序一次 */
     _ensureSorted(playlist: Playlist): void {
       const configStore = useConfigStore()
       const sortOrder = configStore.playlist.sortOrder
@@ -327,21 +292,17 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       this._sortedPlaylists.add(playlist.name)
     },
 
-    // ========== 播放列表管理 ==========
+    // --- 播放列表管理 ---
 
-    /**
-     * 选择播放列表（触发惰性排序）
-     */
+    /** 选择播放列表（触发惰性排序） */
     selectPlaylist(playlist: Playlist): void {
       this._ensureSorted(playlist)
       this.currentPlaylist = playlist
     },
 
-    // ========== 文件操作 ==========
+    // --- 文件操作 ---
 
-    /**
-     * 从播放列表中移除文件
-     */
+    /** 从播放列表中移除文件 */
     removeFileFromPlaylist(filePath: string): void {
       if (!this.currentPlaylist) return
 
@@ -354,9 +315,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       }
     },
 
-    /**
-     * 重置播放列表状态
-     */
+    /** 重置播放列表状态 */
     reset(): void {
       this.currentPlaylist = null
       this.playlists = []

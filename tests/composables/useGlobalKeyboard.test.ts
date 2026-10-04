@@ -122,14 +122,14 @@ describe('useGlobalKeyboard', () => {
       expect(mockPlayerStore.setVolume).toHaveBeenCalledWith(0.45)
     })
 
-    it('音量上限为 1 (0.98 + 0.05 → 1)', () => {
+    it('音量上限为 1 (0.98 + 0.05 -> 1)', () => {
       mockPlayerStore.volume = 0.98
       wrapper = mountWithKeyboard()
       dispatchKey('ArrowUp')
       expect(mockPlayerStore.setVolume).toHaveBeenCalledWith(1)
     })
 
-    it('音量下限为 0 (0.02 - 0.05 → 0)', () => {
+    it('音量下限为 0 (0.02 - 0.05 -> 0)', () => {
       mockPlayerStore.volume = 0.02
       wrapper = mountWithKeyboard()
       dispatchKey('ArrowDown')

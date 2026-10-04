@@ -1,13 +1,13 @@
 //! WASAPI 独占模式音频输出：播放器句柄，以及它与渲染线程之间的命令/响应协议。
 //!
-//! 分工：`ring` 是无锁采样环形缓冲，`render` 是渲染线程主体，
-//! `device` 负责独占设备初始化与格式协商，`simd` 是 f32 到整型字节的转换。
+//! 分工：`ring` 无锁采样缓冲，`render` 渲染线程主体，`device` 设备初始化与格式协商，`simd` 采样转换。
 
 mod device;
 mod render;
 mod ring;
 mod simd;
 
+use crate::audio::PushOutcome;
 use crate::error::AppError;
 use crossbeam_channel::{Receiver, Sender, bounded};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -98,8 +98,7 @@ pub enum AudioResponse {
     Error(String),
 }
 
-// 播放器状态已提到平台无关的 `crate::audio::PlaybackState`：
-// Android 的 AAudio 独占通道与命令层共用同一套状态语义。
+// 状态语义与 AAudio 独占通道、命令层共用，故提到平台无关的 `crate::audio::PlaybackState`
 pub use crate::audio::PlaybackState;
 
 /// WASAPI 独占模式播放器
@@ -120,27 +119,58 @@ pub struct WasapiExclusivePlayback {
 
 /// 解码线程用的无锁写入端，由 `WasapiExclusivePlayback::producer` 取得。
 ///
-/// 拿到它之后，推送和水位查询都不再经过 `wasapi_player` 互斥量，
-/// 因此背压等待不会把命令线程（切设备、停止）一起堵死。
+/// 推送与水位查询都不再经过 `wasapi_player` 互斥量，背压等待因此堵不住命令线程。
 pub struct WasapiProducer {
     ring: Arc<SpscSampleRing>,
 }
 
 impl WasapiProducer {
-    // 恒为 Ok：签名与 AAudio 侧同名方法对齐，decode_push 是两端共用的代码
+    /// 本生产者要使用的写入世代，整个解码线程只取一次（原因见 `SpscSampleRing::write_epoch`）。
+    ///
+    /// WASAPI 的环构造时分配、途中不重建，故恒为 `Some`，返回 `Option` 只为与 AAudio 侧同一契约。
     #[allow(clippy::unnecessary_wraps)]
-    pub fn push_samples(&self, samples: &[f32]) -> Result<(), AppError> {
-        let written = self.ring.push_slice(samples);
-        if written < samples.len() {
-            // 生产者有 2 秒水位门控,正常不应满;截断意味着门控失效(如异常设备格式)
-            log::warn!("SPSC 缓冲已满,截断 {} 采样", samples.len() - written);
+    #[must_use]
+    pub fn write_epoch(&self) -> Option<u64> {
+        Some(self.ring.write_epoch())
+    }
+
+    /// 写入一批采样，被作废（`cancelled` 命中或 `epoch` 过期）时返回 [`PushOutcome::Partial`]。
+    ///
+    /// 恒为 `Ok`：`Result` 只为与 AAudio 侧对齐（那边流未打开会返回 `Err`）。
+    #[allow(clippy::unnecessary_wraps)]
+    pub fn push_samples(
+        &self,
+        samples: &[f32],
+        epoch: u64,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<PushOutcome, AppError> {
+        if cancelled() {
+            return Ok(PushOutcome::Partial);
         }
-        Ok(())
+        match self.ring.push_slice_checked(samples, epoch) {
+            // 世代过期：本线程的样本已被作废，剩余部分必须丢弃
+            None => Ok(PushOutcome::Partial),
+            Some(written) => {
+                if written < samples.len() {
+                    // 缓冲满即说明 2 秒水位门控失效（如异常设备格式），正常路径到不了这里
+                    log::warn!("SPSC 缓冲已满,截断 {} 采样", samples.len() - written);
+                    return Ok(PushOutcome::Partial);
+                }
+                Ok(PushOutcome::Complete)
+            }
+        }
     }
 
     #[must_use]
     pub fn buffer_size(&self) -> usize {
         self.ring.len()
+    }
+
+    /// 水位门控未通过时的等待。WASAPI 侧不做背压等待（环容量远大于门控、正常不会满），
+    /// 退化为一次普通睡眠，只为与 AAudio 侧保持同一套调用契约，供 `decode_push` 共用。
+    #[allow(clippy::unused_self)]
+    pub fn wait_for_space(&self, timeout: Duration) {
+        thread::sleep(timeout);
     }
 }
 
@@ -154,7 +184,7 @@ impl WasapiExclusivePlayback {
         let volume = Arc::new(Mutex::new(1.0f32));
         let is_running = Arc::new(AtomicBool::new(true));
         let samples_written = Arc::new(AtomicU64::new(0));
-        // 无锁环形缓冲:一次性按最坏情况预分配(见 SPSC_RING_CAPACITY 注释)
+        // 一次性按最坏情况预分配，容量理由见 SPSC_RING_CAPACITY
         let sample_buffer = Arc::new(SpscSampleRing::new(SPSC_RING_CAPACITY));
         let sample_rate = Arc::new(AtomicU32::new(48000));
 
@@ -197,7 +227,6 @@ impl WasapiExclusivePlayback {
             })
             .map_err(|e| format!("Failed to send initialize command: {e}"))?;
 
-        // 使用超时接收响应，防止无限等待
         match self.response_rx.recv_timeout(Duration::from_secs(5)) {
             Ok(AudioResponse::Initialized {
                 sample_rate,
@@ -207,16 +236,15 @@ impl WasapiExclusivePlayback {
                 self.sample_rate.store(sample_rate, Ordering::SeqCst);
                 self.channels.store(u32::from(channels), Ordering::SeqCst);
                 *lock_or_log!(self.state.lock()) = PlaybackState::Stopped;
-                // 采样缓冲(SPSC 环形缓冲)已按最坏情况预分配,无需按格式调整
+                // 不按协商出的格式调整 SPSC 缓冲，它已按最坏情况预分配（见 SPSC_RING_CAPACITY）
                 Ok((sample_rate, channels, device_name))
             }
             Ok(AudioResponse::InitFailed(e)) => Err(e.into()),
             Ok(other) => Err(format!("Unexpected response: {other:?}").into()),
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                 log::warn!("WASAPI initialize timed out, cleaning up stale responses");
-                // 清空可能残留的过时响应,避免影响后续命令
+                // 清空残留的过时响应，否则会错配到下一条命令上
                 while self.response_rx.try_recv().is_ok() {}
-                // 超时后设备未成功初始化,重置状态为 Uninitialized
                 *lock_or_log!(self.state.lock()) = PlaybackState::Uninitialized;
                 Err(
                     "Device initialization timeout - device may be in use or unavailable"
@@ -237,6 +265,8 @@ impl WasapiExclusivePlayback {
     }
 
     pub fn stop(&self) -> Result<(), AppError> {
+        // 先在命令线程侧作废在推送的解码线程，再让渲染线程停流清空（顺序理由见 SpscSampleRing::invalidate）
+        self.sample_buffer.invalidate();
         self.command_tx
             .send(AudioCommand::Stop)
             .map_err(|e| format!("Failed to send stop command: {e}"))?;
@@ -244,13 +274,12 @@ impl WasapiExclusivePlayback {
         Ok(())
     }
 
-    /// 带淡出的停止(用于切歌/退出)
-    /// 主线程发送命令后立即返回,音频线程内部完成淡出再 stop_stream
+    /// 带淡出的停止：命令立即返回，淡出与 stop_stream 都在音频线程内完成
     pub fn stop_with_fade_out(&self, duration_ms: u32) -> Result<(), AppError> {
         self.command_tx
             .send(AudioCommand::StopWithFadeOut { duration_ms })
             .map_err(|e| format!("Failed to send stop_with_fade_out command: {e}"))?;
-        // 状态标记为 Stopping,表示音频线程仍在淡出;淡出完成后由 FadeAction::Stop 转为 Stopped
+        // 音频线程仍在淡出，故先记 Stopping，淡出完成后由 FadeAction::Stop 转为 Stopped
         *lock_or_log!(self.state.lock()) = PlaybackState::Stopping;
         Ok(())
     }
@@ -268,12 +297,12 @@ impl WasapiExclusivePlayback {
         Ok(())
     }
 
-    /// 带淡出的暂停(默认用于用户暂停)
+    /// 带淡出的暂停：命令立即返回，淡出与随后的暂停都在音频线程内完成
     pub fn pause_with_fade_out(&self, duration_ms: u32) -> Result<(), AppError> {
         self.command_tx
             .send(AudioCommand::PauseWithFadeOut { duration_ms })
             .map_err(|e| format!("Failed to send pause_with_fade_out command: {e}"))?;
-        // 状态标记为 Pausing,表示音频线程仍在淡出;淡出完成后由 FadeAction::Pause 转为 Paused
+        // 同 stop_with_fade_out：Pausing 由淡出结束时的 FadeAction::Pause 落地为 Paused
         *lock_or_log!(self.state.lock()) = PlaybackState::Pausing;
         Ok(())
     }
@@ -291,7 +320,7 @@ impl WasapiExclusivePlayback {
         Ok(())
     }
 
-    /// 带淡入的恢复(默认用于用户恢复)
+    /// 带淡入的恢复：命令立即返回，淡入由音频线程在渲染回调里推进
     pub fn resume_with_fade_in(&self, duration_ms: u32) -> Result<(), AppError> {
         self.command_tx
             .send(AudioCommand::ResumeWithFadeIn { duration_ms })
@@ -308,7 +337,7 @@ impl WasapiExclusivePlayback {
             .map_err(|e| format!("Failed to send volume command: {e}").into())
     }
 
-    /// 取无锁写入端，见 [`WasapiProducer`]。WASAPI 的环在构造时就分配，故不会失败。
+    /// 取无锁写入端，见 [`WasapiProducer`]。
     #[must_use]
     pub fn producer(&self) -> WasapiProducer {
         WasapiProducer {
@@ -317,7 +346,8 @@ impl WasapiExclusivePlayback {
     }
 
     pub fn clear_buffer(&self) -> Result<(), AppError> {
-        self.sample_buffer.clear();
+        // invalidate 而非 clear：切歌/seek 时同时作废仍持有旧世代的解码线程
+        self.sample_buffer.invalidate();
         self.samples_written.store(0, Ordering::SeqCst);
         Ok(())
     }
@@ -342,13 +372,11 @@ impl WasapiExclusivePlayback {
         *lock_or_log!(self.volume.lock())
     }
 
-    /// 获取已写入硬件的采样数
     #[must_use]
     pub fn samples_written(&self) -> u64 {
         self.samples_written.load(Ordering::SeqCst)
     }
 
-    /// 重置已写入采样计数器
     pub fn reset_samples_written(&self) {
         self.samples_written.store(0, Ordering::SeqCst);
     }

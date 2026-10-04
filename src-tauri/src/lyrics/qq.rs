@@ -103,7 +103,7 @@ async fn search_songs(query: &LyricQuery, limit: u32) -> Result<Vec<SearchSong>,
         .unwrap_or_default())
 }
 
-/// 时间戳（mm:ss.xx 或 hh:mm:ss.xx）→ 毫秒
+/// 时间戳（mm:ss.xx 或 hh:mm:ss.xx）-> 毫秒
 fn qq_time_ms(tok: &str) -> Option<i64> {
     let parts: Vec<&str> = tok.split(':').collect();
     let secs: f64 = match parts.as_slice() {
@@ -136,7 +136,7 @@ fn strip_qq_word_times(line: &str) -> String {
     out
 }
 
-/// 解析逐字内容：`<mm:ss.xx>词<mm:ss.xx>词` → [(字开始毫秒, 字文本)]
+/// 解析逐字内容：`<mm:ss.xx>词<mm:ss.xx>词` -> [(字开始毫秒, 字文本)]
 fn parse_qq_word_timings(content: &str) -> Vec<(i64, String)> {
     let mut out: Vec<(i64, String)> = Vec::new();
     let mut pos = 0usize;
@@ -165,7 +165,7 @@ fn parse_qq_word_timings(content: &str) -> Vec<(i64, String)> {
     out
 }
 
-/// 解析普通逐行 LRC（trans/roma 用）→ [(start_ms, 文本)]
+/// 解析普通逐行 LRC（trans/roma 用）-> [(start_ms, 文本)]
 fn parse_plain_lines(text: &str) -> Vec<(i64, String)> {
     let mut out: Vec<(i64, String)> = Vec::new();
     for raw in text.lines() {

@@ -1,7 +1,4 @@
-/**
- * 快捷键管理器
- * 监听全局键盘事件，触发插件注册的快捷键
- */
+/** 快捷键管理器:监听全局 keydown,触发插件注册的快捷键 */
 
 import { pluginManager } from './pluginManager'
 import logger from '../utils/logger'
@@ -21,9 +18,6 @@ class ShortcutManager {
     this.handleKeyDown = this.handleKeyDown.bind(this)
   }
 
-  /**
-   * 启动快捷键监听
-   */
   start(): void {
     if (this.isListening) return
 
@@ -32,9 +26,6 @@ class ShortcutManager {
     logger.info('快捷键管理器已启动')
   }
 
-  /**
-   * 停止快捷键监听
-   */
   stop(): void {
     if (!this.isListening) return
 
@@ -43,35 +34,29 @@ class ShortcutManager {
     logger.info('快捷键管理器已停止')
   }
 
-  /**
-   * 处理键盘事件
-   */
   private handleKeyDown(event: KeyboardEvent): void {
-    // 如果焦点在输入框中，不处理快捷键
+    // 焦点在输入框或可编辑区时不抢按键
     const target = event.target as HTMLElement
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
       return
     }
 
-    // 构建当前按下的快捷键组合
     const keys: string[] = []
     if (event.ctrlKey) keys.push('ctrl')
     if (event.altKey) keys.push('alt')
     if (event.shiftKey) keys.push('shift')
     if (event.metaKey) keys.push('meta')
 
-    // 获取按下的主键
     let key = event.key.toLowerCase()
-    // 处理特殊键名
+    // 规范化特殊键名,与插件注册串的写法一致
     if (key === ' ') key = 'space'
     if (key === 'escape') key = 'esc'
 
-    // 避免重复添加修饰键
+    // 修饰键已收集过,避免重复加入
     if (!['control', 'alt', 'shift', 'meta'].includes(key)) {
       keys.push(key)
     }
 
-    // 如果只有修饰键，不处理
     if (
       keys.length === 0 ||
       (keys.length === 1 && ['ctrl', 'alt', 'shift', 'meta'].includes(keys[0]!))
@@ -86,8 +71,7 @@ class ShortcutManager {
       })
       .join('+')
 
-    // 查找匹配的快捷键 (按键串为规范化后的精确匹配;
-    // 注册侧已做冲突检测,此处多匹配仅作防御性告警)
+    // 按键串精确匹配;冲突在注册侧已挡住(见 pluginAPI 的 shortcuts.register),多匹配只作防御性告警
     const shortcuts = pluginManager.getExtensions('shortcuts') as ShortcutExtension[]
     const matched = shortcuts.filter((s) => s.key === pressedKey)
     if (matched.length > 1) {
@@ -105,7 +89,7 @@ class ShortcutManager {
 
       try {
         const result = shortcut.action()
-        // 如果返回 Promise，等待它完成
+        // 异步失败单独记录,不影响其他快捷键
         if (result instanceof Promise) {
           result.catch((err) => {
             logger.error(`快捷键执行失败: ${shortcut.name}`, err)
@@ -117,9 +101,6 @@ class ShortcutManager {
     }
   }
 
-  /**
-   * 获取所有已注册的快捷键
-   */
   getAllShortcuts(): ShortcutExtension[] {
     return pluginManager.getExtensions('shortcuts') as ShortcutExtension[]
   }

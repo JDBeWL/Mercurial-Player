@@ -24,12 +24,11 @@ const stopFns: Array<() => void> = []
 const unlistenFns: Array<() => void> = []
 // listen() 是异步注册:若卸载先于 Promise resolve,直接调用 unlisten 而不是 push 进数组
 let listenersDisposed = false
-// 在途的 update_desktop_lyric IPC 完成时可能已经卸载，靠它阻止回调再排下一帧
+// 在途的 update_desktop_lyric IPC 完成时可能已经卸载,靠它阻止回调再排下一帧
 let updatesStopped = false
 
-// 引用计数:跟踪当前有多少组件正在使用本 composable。
-// 只有最后一个组件卸载时 (refCount 归零) 才真正清理全局监听器/watcher,
-// 避免先卸载的组件停掉其他仍挂载组件共享的监听器。
+// 引用计数:只有最后一个使用方卸载时才清理全局监听器/watcher,
+// 否则先卸载的组件会停掉其它仍挂载组件共享的监听
 let refCount = 0
 
 function getSubLine(lyrics: LyricLine[], index: number): string {
@@ -87,10 +86,10 @@ function getCurrentLyricProgress(
   const current = lyrics[index]
   const words = Array.isArray(current?.words) ? current.words : []
 
-  // 只有真正带逐字/逐词时间轴的 ASS 歌词才做高亮推进。
-  // 普通 LRC 只有逐行时间，没有 words，这里固定返回 0，避免伪过渡效果。
+  // 只有带逐词时间轴的 ASS 歌词才推进卡拉OK高亮;普通 LRC 没有 words,固定 0 以免出现伪过渡
   if (words.length === 0) return 0
 
+  // 单位是秒:LyricsParser 已把 ASS 的百分秒 (\k) 换算成秒,与 currentTime / lyricsOffset 对齐
   const syncedTime = currentTime - (Number.isFinite(lyricsOffset) ? lyricsOffset : 0)
   const validWords = words
     .map((word: KaraokeWord) => ({
@@ -162,6 +161,7 @@ async function updateDesktopLyrics() {
   )
   const wordsKey = currentWords.map((word) => `${word.start}:${word.end}:${word.text}`).join('|')
 
+  // 去抖:时间与高亮进度变化小于阈值就不发 IPC,免得桌面歌词窗口每帧重绘
   if (
     currentLine === lastCurrentLine &&
     subLine === lastSubLine &&
@@ -181,6 +181,7 @@ async function updateDesktopLyrics() {
   lastIsPlaying = isPlaying
 
   try {
+    // 命令名与参数需匹配 Rust 侧 update_desktop_lyric 的 snake_case 签名,Tauri 自动转 camelCase
     await invoke('update_desktop_lyric', {
       currentLine,
       subLine,
@@ -190,7 +191,7 @@ async function updateDesktopLyrics() {
       isPlaying,
     })
   } catch (e) {
-    // non-Windows platform or not initialized
+    // 桌面歌词窗口只在 Windows 且已初始化时存在,其它情况静默降级 (下面的 sync* 同此)
     errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
   }
 }
@@ -256,7 +257,7 @@ async function syncLockState() {
   try {
     await invoke('set_desktop_lyrics_locked', { locked })
   } catch (e) {
-    // 桌面歌词窗口未初始化或非 Windows 平台，静默降级
+    // 见 updateDesktopLyrics:窗口未初始化或非 Windows 平台,静默降级
     errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
   }
 }
@@ -267,7 +268,7 @@ async function syncFontSize() {
   try {
     await invoke('set_desktop_lyrics_font_size', { size: fontSize })
   } catch (e) {
-    // 桌面歌词窗口未初始化或非 Windows 平台，静默降级
+    // 见 updateDesktopLyrics:窗口未初始化或非 Windows 平台,静默降级
     errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
   }
 }
@@ -279,7 +280,7 @@ async function syncFontFamily() {
   try {
     await invoke('set_desktop_lyrics_font_family', { fontFamily, translationFontFamily })
   } catch (e) {
-    // non-Windows platform or not initialized
+    // 见 updateDesktopLyrics:窗口未初始化或非 Windows 平台,静默降级
     errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
   }
 }
@@ -290,7 +291,7 @@ async function syncColorPreset() {
   try {
     await invoke('set_desktop_lyrics_color_preset', { preset })
   } catch (e) {
-    // 桌面歌词窗口未初始化或非 Windows 平台，静默降级
+    // 见 updateDesktopLyrics:窗口未初始化或非 Windows 平台,静默降级
     errorHandler.handle(e, { severity: ErrorSeverity.LOW, showToUser: false })
   }
 }
@@ -299,7 +300,6 @@ export function useDesktopLyrics() {
   const playerStore = usePlayerStore()
   const configStore = useConfigStore()
 
-  // 引用计数 +1,跟踪当前使用本 composable 的组件数
   refCount++
 
   if (!isInitialized) {
@@ -317,6 +317,7 @@ export function useDesktopLyrics() {
       })
     }
 
+    // 事件名必须与 Rust 侧 app.emit 一致 (desktop_lyrics/window.rs)
     registerListener(
       listen('desktop-lyrics-closed', () => {
         logger.info('Desktop lyrics closed from window button')
@@ -331,11 +332,7 @@ export function useDesktopLyrics() {
       }),
     )
 
-    // 原先分散的 9 个 watch 收敛为 4 个:
-    // 1) 播放进度/歌词变化 → 统一刷新桌面歌词
-    // 2) 桌面歌词开关 → 显示/隐藏 + 轮询启停
-    // 3) 锁定/字号/配色 → 按变化项分别同步
-    // 4) 字体族(原文/译文) → 同步字体
+    // 4 个 watcher 的职责:刷新桌面歌词 / 开关与轮询启停 / 锁定+字号+配色 / 字体族(原文与译文)
     // 每个 watcher 都 push 进 stopFns,由 onUnmounted 统一清理
     const stopWatchPlayerRefresh = watch(
       [
@@ -408,7 +405,7 @@ export function useDesktopLyrics() {
   })
 
   onUnmounted(() => {
-    // 引用计数 -1，归零才清理（原因见 refCount 声明处）
+    // 引用计数 -1,归零才清理 (原因见 refCount 声明处)
     refCount--
     if (refCount > 0) return
 
@@ -418,18 +415,16 @@ export function useDesktopLyrics() {
       window.cancelAnimationFrame(updateFrameId)
       updateFrameId = null
     }
-    // 模块级在途状态必须一起复位：残留的 updateInFlight/updateQueued 会让下一轮初始化
-    // 的第一帧被当成"已有请求在跑"而永久跳过
+    // 必须复位在途标记:残留的 updateInFlight/updateQueued 会让下轮初始化的首帧被当成"已有请求在跑"而永久跳过
     updateInFlight = false
     updateQueued = false
-    // 停止所有 watcher
     stopFns.forEach((fn) => fn())
     stopFns.length = 0
     // 取消所有 Tauri 事件监听 (此后才 resolve 的异步注册会立即自清理)
     listenersDisposed = true
     unlistenFns.forEach((fn) => fn())
     unlistenFns.length = 0
-    // 重置初始化标记,允许下次调用重新建立监听器/watcher
+    // 复位初始化标记,允许下次调用重新建立监听器与 watcher
     isInitialized = false
   })
 }

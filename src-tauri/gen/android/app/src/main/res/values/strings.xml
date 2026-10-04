@@ -1,4 +1,5 @@
 <resources>
+    <!-- Activity 不再单独设 label（原先 main_activity_title 与它逐字相同）：
+         不设时 Activity 会继承 application 的 label，桌面图标与最近任务里显示的名字一致。 -->
     <string name="app_name">"Mercurial Player"</string>
-    <string name="main_activity_title">"Mercurial Player"</string>
 </resources>

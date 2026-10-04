@@ -13,15 +13,16 @@ val tauriProperties = Properties().apply {
     }
 }
 
-// 正式发布签名配置放在 gen/android/keystore.properties（已 gitignore，绝不入库）：
-// storeFile / storePassword / keyAlias / keyPassword。缺该文件时 release 回退用 AGP 内置 debug
-// 密钥签名——能直接安装，但不能上架，也无法覆盖安装正式密钥签过的同包名应用。
+// 正式发布签名配置放在 gen/android/keystore.properties
+// 缺该文件时 release 会回退 debug 密钥——Play 拒收，且换正式密钥后同包名无法覆盖安装；
+// 故下面的校验让打包 release 显式失败，仅本机测试可加 -PallowDebugSigning=true 放行。
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) {
         keystorePropertiesFile.inputStream().use { load(it) }
     }
 }
+val allowDebugSigning = (findProperty("allowDebugSigning") as String?)?.toBoolean() == true
 
 android {
     compileSdk = 36
@@ -69,15 +70,25 @@ android {
                 signingConfigs.getByName("debug")
             }
             isMinifyEnabled = true
+            // 三个规则文件里有两个是生成物（proguard-tauri.pro、wry 的 proguard-wry.pro，
+            // 含 native/Ipc/WryActivity 的 `-keep`，都被 .gitignore 排除）：用 fileTree 在配置期
+            // 快照成文件列表，既不假设生成物已存在，又收窄为 *.pro + src/**/*.pro 并排除 build/。
             proguardFiles(
-                *fileTree(".") { include("**/*.pro") }
-                    .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
-                    .toList().toTypedArray()
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                *fileTree(".") {
+                    include("*.pro", "src/**/*.pro")
+                    exclude("build/**")
+                }.files.toTypedArray(),
             )
         }
     }
+    compileOptions {
+        // Java 与 Kotlin 统一到 17
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "17"
     }
     buildFeatures {
         buildConfig = true
@@ -86,6 +97,26 @@ android {
 
 rust {
     rootDirRel = "../../../"
+}
+
+// 打包 release 前的签名闸门
+gradle.taskGraph.whenReady {
+    val buildingRelease =
+        allTasks.any { task ->
+            task.project == project &&
+                task.name.contains("Release") &&
+                (task.name.startsWith("assemble") ||
+                    task.name.startsWith("bundle") ||
+                    task.name.startsWith("package"))
+        }
+    if (buildingRelease && !keystorePropertiesFile.exists() && !allowDebugSigning) {
+        throw GradleException(
+            "缺少 ${keystorePropertiesFile.path}：release 包只能用 AGP 的 debug 密钥签名，" +
+                "Google Play 会拒收，且无法覆盖安装正式密钥签过的应用。" +
+                "请在该文件写入 storeFile/storePassword/keyAlias/keyPassword 后重试；" +
+                "仅本机安装测试可加 -PallowDebugSigning=true 跳过此检查。"
+        )
+    }
 }
 
 dependencies {
@@ -97,9 +128,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
     // MediaSessionCompat / MediaStyle 通知 / MediaButtonReceiver（耳机线控）
     implementation("androidx.media:media:1.7.0")
-    testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.1.4")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
+    // 刻意不声明 testImplementation / androidTestImplementation
 }
 
 apply(from = "tauri.build.gradle.kts")

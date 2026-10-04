@@ -29,9 +29,9 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * 后台播放前台服务：只保活进程 + 托管 MediaSession/通知，不持有任何音频句柄（解码与输出都在 Rust 侧）。
- * 播放中以 `mediaPlayback` 类型常驻前台；暂停时保留通知但退出前台，用户仍可从通知恢复；
- * 无曲目时由 [MediaBridge] 调 [stop] 停止服务并释放 MediaSession。
+ * 后台播放前台服务：只保活进程 + 托管 MediaSession/通知，不持有音频句柄（解码与输出都在 Rust 侧）。
+ * 播放与暂停都常驻前台：退出前台会被系统回收、12+ 又禁止后台重启，通知/线控/MediaSession
+ * 会静默失效；无曲目时由 [MediaBridge] 停止。
  */
 class PlaybackService : Service() {
   companion object {
@@ -39,6 +39,9 @@ class PlaybackService : Service() {
     private const val CHANNEL_ID = "mercurial_playback"
     private const val NOTIFICATION_ID = 0x5A1D
     private const val REQ_CODE = 0x5A1D
+
+    /** 通知大图的最长边上限（px）。Binder 事务上限 1MB，超过这个尺寸有 TransactionTooLargeException 风险 */
+    private const val COVER_MAX_PX = 256
 
     const val ACTION_PLAY = "com.jdbewl.mercurial_player.ACTION_PLAY"
     const val ACTION_PAUSE = "com.jdbewl.mercurial_player.ACTION_PAUSE"
@@ -48,6 +51,10 @@ class PlaybackService : Service() {
 
     @Volatile
     private var running = false
+
+    /** 服务是否存活 */
+    @JvmStatic
+    fun isRunning(): Boolean = running
 
     /** 启动（或更新）服务。必须在 Activity 处于前台时首次调用，见 Android 12+ 限制。 */
     fun ensureStarted(
@@ -70,16 +77,27 @@ class PlaybackService : Service() {
           putExtra("playing", playing)
           putExtra("coverPath", coverPath)
         }
-      if (running) {
-        // 服务已在跑：仍走 onStartCommand 更新通知与 MediaSession
-        runCatching { ContextCompat.startForegroundService(context, intent) }
-          .onFailure { e -> android.util.Log.w(TAG, "startForegroundService 被拒绝: ${e.message}") }
-        return
-      }
-      runCatching {
-        ContextCompat.startForegroundService(context, intent)
-      }.onFailure { e ->
-        android.util.Log.w(TAG, "startForegroundService 被拒绝: ${e.message}")
+      // 服务已在跑时这次调用会走 onStartCommand 更新通知与 MediaSession
+      runCatching { ContextCompat.startForegroundService(context, intent) }
+        .onFailure { e -> reportStartFailure(e) }
+    }
+
+    /**
+     * 启动前台服务失败的分类上报。`ForegroundServiceStartNotAllowedException` 是 Android 12+
+     * 对后台启动的限制，属预期内拒绝，下次前台更新状态会自愈，单独给一条可检索的 error 日志
+     * 其余异常（服务未注册、Context 失效等）才是真正的配置问题
+     */
+    private fun reportStartFailure(e: Throwable) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+        e is android.app.ForegroundServiceStartNotAllowedException
+      ) {
+        android.util.Log.e(
+          TAG,
+          "后台启动前台服务被拒（Android 12+ 限制），本次不更新通知/线控，回到前台后会自动恢复",
+          e,
+        )
+      } else {
+        android.util.Log.e(TAG, "startForegroundService 失败", e)
       }
     }
 
@@ -191,15 +209,16 @@ class PlaybackService : Service() {
       artist = intent.getStringExtra("artist") ?: artist
       album = intent.getStringExtra("album") ?: album
       durationMs = intent.getLongExtra("durationMs", durationMs)
-      positionMs = intent.getLongExtra("positionMs", 0L)
+      // 默认值必须是"保留旧值"而不是 0
+      positionMs = intent.getLongExtra("positionMs", positionMs)
       playing = intent.getBooleanExtra("playing", playing)
       coverPath = intent.getStringExtra("coverPath") ?: coverPath
-      hasTrack = true
+      // 只有携带曲目信息的状态同步 intent 才算"有曲目"
+      if (intent.hasExtra("title")) hasTrack = true
     }
 
     val notification = buildNotification()
-    // 每次 startForegroundService 都必须在 5 秒内 startForeground，暂停态也不例外；
-    // 先入前台兑现契约，再按状态决定是否退出。
+    // startForegroundService 后必须在 5 秒内 startForeground，暂停态也不例外
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       startForeground(
         NOTIFICATION_ID,
@@ -212,14 +231,9 @@ class PlaybackService : Service() {
     if (playing) {
       requestAudioFocus()
     } else {
-      // 暂停时保留通知但退出前台，用户仍可从通知恢复播放
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-        stopForeground(STOP_FOREGROUND_DETACH)
-      } else {
-        @Suppress("DEPRECATION")
-        stopForeground(false)
-      }
-      notificationManager.notify(NOTIFICATION_ID, notification)
+      // 暂停时不退出前台：退出后服务会被系统回收，而 Android 12+ 又禁止在后台重新
+      // startForegroundService（见 ensureStarted），通知、线控与 MediaSession 会一起失效且无告警。
+      // 前台通知已由上面的 startForeground 下发，无需再 notify；用户仍可从通知恢复播放。
       abandonAudioFocus()
     }
     updateMediaSession()
@@ -233,6 +247,11 @@ class PlaybackService : Service() {
     runCatching { unregisterReceiver(noisyReceiver) }
     mediaSession?.release()
     mediaSession = null
+    // 通知是随前台服务存在的：服务没了通知必须一起撤掉，否则留下一个"僵尸通知"，
+    // 点它的按钮会拉起一个全新的空服务实例（无曲目、无 MediaSession）。
+    // 先退出前台再 cance，仅 cancel 的话前台服务的通知会被系统立刻重建。
+    stopForeground(STOP_FOREGROUND_REMOVE)
+    notificationManager.cancel(NOTIFICATION_ID)
     // shutdown（而非 shutdownNow）：已提交但未执行的命令要继续跑完，"停止播放"不能丢
     commandExecutor.shutdown()
     coverExecutor.shutdown()
@@ -243,7 +262,7 @@ class PlaybackService : Service() {
   override fun onBind(intent: Intent?) = null
 
   private fun createChannel() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+    // 通知渠道自 API 26 起必需，故不再有"低版本跳过"的分支
     if (notificationManager.getNotificationChannel(CHANNEL_ID) != null) return
     val channel =
       NotificationChannel(CHANNEL_ID, "播放控制", NotificationManager.IMPORTANCE_LOW).apply {
@@ -286,19 +305,27 @@ class PlaybackService : Service() {
 
   private fun updateMediaSession() {
     val session = mediaSession ?: return
-    session.setMetadata(
+    val metadata =
       MediaMetadataCompat.Builder()
         .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title.ifEmpty { "未知曲目" })
         .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
         .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, album)
         .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs)
-        .build(),
-    )
+    // 封面：锁屏、Android Auto 与穿戴设备读的是 ALBUM_ART，而不是通知大图。只能填当前
+    // 这一首已解码好的位图（≤ COVER_MAX_PX，约 256KB，仍在 Binder 1MB 预算内）；没装到
+    // 封面就留空，让系统显示默认占位而不是一张错图。
+    coverBitmap?.takeIf { coverBitmapPath == coverPath }?.let { art ->
+      metadata.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art)
+    }
+    session.setMetadata(metadata.build())
     val state =
       if (playing) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
+    // ACTION_STOP 必须声明：onStop 回调与 ACTION_STOP 的广播处理都已就绪，但位掩码里没有它，
+    // 系统 UI（通知展开态 / Android Auto / 穿戴）就画不出"停止"，只能走"暂停"
     val actions =
       PlaybackStateCompat.ACTION_PLAY or
         PlaybackStateCompat.ACTION_PAUSE or
+        PlaybackStateCompat.ACTION_STOP or
         PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
         PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
         PlaybackStateCompat.ACTION_SEEK_TO or
@@ -319,7 +346,8 @@ class PlaybackService : Service() {
         packageManager.getLaunchIntentForPackage(packageName)?.apply {
           flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         },
-        PendingIntent.FLAG_UPDATE_CURRENT or immutableFlag(),
+        // FLAG_IMMUTABLE 自 API 23 起存在，minSdk 26 下恒可用，无需按版本取舍
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
       )
 
     val style =
@@ -337,7 +365,9 @@ class PlaybackService : Service() {
         .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
         .setOnlyAlertOnce(true)
         .setStyle(style)
-        .setOngoing(playing)
+        // 媒体通知始终不可滑除：服务在暂停时也常驻前台（见 onStartCommand），一旦允许滑除，
+        // 通知消失而服务仍在跑，用户只能从应用内恢复；要停止请走通知的"停止"或应用内退出
+        .setOngoing(true)
 
     addAction(builder, ACTION_PREVIOUS, "上一首", R.drawable.ic_action_previous)
     if (playing) {
@@ -363,13 +393,10 @@ class PlaybackService : Service() {
         this,
         action.hashCode(),
         Intent(this, PlaybackService::class.java).setAction(action),
-        PendingIntent.FLAG_UPDATE_CURRENT or immutableFlag(),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
       )
     builder.addAction(NotificationCompat.Action(icon, label, pi))
   }
-
-  private fun immutableFlag(): Int =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
 
   /**
    * 取当前封面位图（主线程调用，只读缓存）。未命中时提交后台加载，完成后回主线程刷新通知；
@@ -393,6 +420,7 @@ class PlaybackService : Service() {
           coverBitmap = bitmap
           if (bitmap != null) {
             notificationManager.notify(NOTIFICATION_ID, buildNotification())
+            updateMediaSession() // 元数据里的 ALBUM_ART
           }
         }
       }
@@ -401,47 +429,70 @@ class PlaybackService : Service() {
   }
 
   /**
-   * 通知大图：封面路径由 Rust 侧 `get_track_cover_path` 给出（本地路径或 content://）。
-   * Binder 事务上限 1MB，必须降采样到 ≤256px 再 `setLargeIcon`，否则抛 TransactionTooLargeException。
-   * 只在 [coverExecutor] 线程调用：content:// 读取要走 provider，可能很慢。
+   * 通知大图：封面路径由 Rust 侧 `get_track_cover_path` 给出。Binder 事务上限 1MB，必须降采样到
+   * ≤256px 再 `setLargeIcon`，否则抛 TransactionTooLargeException；只在 [coverExecutor] 线程调用。
+   *
+   * 两条分支都必须两阶段解码（先量尺寸再按 `inSampleSize` 解码），content:// 也可能是几千万像素的图。
    */
   private fun loadCoverBitmap(path: String): Bitmap? {
     if (path.isBlank()) return null
+    val options = coverDecodeOptions(path) ?: return null
     val source =
       runCatching {
         when {
-          path.startsWith("content://") -> {
-            contentResolver.openInputStream(android.net.Uri.parse(path))?.use { input ->
-              BitmapFactory.decodeStream(input)
-            }
-          }
-          path.startsWith("/") -> {
-            val file = java.io.File(path)
-            if (!file.exists()) return null
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(file.absolutePath, opts)
-            val scale = maxOf(1, maxOf(opts.outWidth, opts.outHeight) / 256)
-            BitmapFactory.decodeFile(
-              file.absolutePath,
-              BitmapFactory.Options().apply { inSampleSize = scale },
-            )
-          }
+          path.startsWith("content://") ->
+            contentResolver
+              .openInputStream(android.net.Uri.parse(path))
+              ?.use { input -> BitmapFactory.decodeStream(input, null, options) }
+          path.startsWith("/") -> BitmapFactory.decodeFile(path, options)
           else -> null
         }
       }.getOrNull() ?: return null
     return scaleIfNeeded(source)
   }
 
+  /**
+   * 量一次封面尺寸并算出 `inSampleSize`，得到可直接用于解码的选项。
+   * 尺寸返回 null，调用方据此跳过。
+   */
+  private fun coverDecodeOptions(path: String): BitmapFactory.Options? {
+    val isContent = path.startsWith("content://")
+    if (!isContent && !path.startsWith("/")) {
+      android.util.Log.w(TAG, "封面路径既非 content:// 也非本地绝对路径，跳过: $path")
+      return null
+    }
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    runCatching {
+      if (isContent) {
+        contentResolver
+          .openInputStream(android.net.Uri.parse(path))
+          ?.use { input -> BitmapFactory.decodeStream(input, null, bounds) }
+      } else {
+        BitmapFactory.decodeFile(path, bounds)
+      }
+    }.onFailure { e -> android.util.Log.w(TAG, "读取封面尺寸失败: ${e.message}") }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+      android.util.Log.w(TAG, "封面尺寸无效(${bounds.outWidth}x${bounds.outHeight})，跳过: $path")
+      return null
+    }
+    val scale = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / COVER_MAX_PX)
+    return BitmapFactory.Options().apply { inSampleSize = scale }
+  }
+
   private fun scaleIfNeeded(bitmap: Bitmap): Bitmap {
     val max = maxOf(bitmap.width, bitmap.height)
-    if (max <= 256) return bitmap
-    val ratio = 256f / max
-    return Bitmap.createScaledBitmap(
-      bitmap,
-      maxOf(1, (bitmap.width * ratio).toInt()),
-      maxOf(1, (bitmap.height * ratio).toInt()),
-      true,
-    )
+    if (max <= COVER_MAX_PX) return bitmap
+    val ratio = COVER_MAX_PX.toFloat() / max
+    val scaled =
+      Bitmap.createScaledBitmap(
+        bitmap,
+        maxOf(1, (bitmap.width * ratio).toInt()),
+        maxOf(1, (bitmap.height * ratio).toInt()),
+        true,
+      )
+    // createScaledBitmap 尺寸不同时返回**新位图**，原图必须显式回收
+    if (scaled !== bitmap) bitmap.recycle()
+    return scaled
   }
 
   /**
@@ -456,19 +507,10 @@ class PlaybackService : Service() {
   private fun requestAudioFocus() {
     // 已持有焦点才直接返回；focusRequest 非空不能当作"已获得"，否则被拒后永远无法重试
     if (focusGranted) return
-    // focusRequest 只缓存请求对象（可复用重试），与是否持有焦点无关
+    // minSdk 26 起 requestAudioFocus(AudioFocusRequest) 恒可用，不再走已废弃的重载
+    val request = focusRequest ?: buildFocusRequest().also { focusRequest = it }
     val granted =
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        val request = focusRequest ?: buildFocusRequest().also { focusRequest = it }
-        audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-      } else {
-        @Suppress("DEPRECATION")
-        audioManager.requestAudioFocus(
-          focusChangeListener,
-          AudioManager.STREAM_MUSIC,
-          AudioManager.AUDIOFOCUS_GAIN,
-        ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-      }
+      audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
     focusGranted = granted
     if (!granted) {
       // 系统拒绝焦点：未获焦点还继续出声属于抢播，立即暂停输出；focusGranted 为 false，
@@ -491,13 +533,9 @@ class PlaybackService : Service() {
 
   private fun abandonAudioFocus() {
     focusGranted = false
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
-      focusRequest = null
-    } else {
-      @Suppress("DEPRECATION")
-      audioManager.abandonAudioFocus(focusChangeListener)
-    }
+    // 同上：只用 AudioFocusRequest 这一条链路
+    focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+    focusRequest = null
   }
 
   private fun registerNoisyReceiver() {
@@ -515,9 +553,15 @@ class PlaybackService : Service() {
    * 因此提交到 [commandExecutor] 串行执行，主线程只负责提交，避免 ANR。
    */
   private fun dispatchToRust(action: String, positionMs: Long) {
-    commandExecutor.execute {
-      runCatching { MainActivity.nativeMediaAction(action, positionMs) }
-        .onFailure { e -> android.util.Log.e(TAG, "nativeMediaAction($action) 失败: ${e.message}") }
-    }
+    // onDestroy 里已经 shutdown，且 running 已置 false。此时仍在途的回调（通知按钮取消、
+    // 焦点回调晚到）若继续提交会抛 RejectedExecutionException；直接丢弃——服务都停了，
+    // 这条命令没有接收方，抛异常只会变成一次无意义的崩溃上报。
+    if (!running || commandExecutor.isShutdown) return
+    runCatching {
+      commandExecutor.execute {
+        runCatching { MainActivity.nativeMediaAction(action, positionMs) }
+          .onFailure { e -> android.util.Log.e(TAG, "nativeMediaAction($action) 失败: ${e.message}") }
+      }
+    }.onFailure { e -> android.util.Log.w(TAG, "命令提交失败($action): ${e.message}") }
   }
 }

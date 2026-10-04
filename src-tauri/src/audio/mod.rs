@@ -3,15 +3,15 @@
 //! 锁序约定（避免死锁）：`AudioOutputState` 各锁按下面的全局顺序获取，需要同时持有多个锁
 //! 的代码必须遵守此顺序，并尽量缩小临界区、避免在持锁期间执行 IPC/文件 IO：
 //!
-//!   sink → output_stream → target_volume → exclusive_mode → wasapi_player
-//!        → current_device_name → current_path
+//!   sink -> output_stream -> target_volume -> exclusive_mode -> wasapi_player
+//!        -> current_device_name -> current_path
 //!
 //! 采样环 `SampleRing`（频谱、AAudio）与 `SpscSampleRing`（WASAPI 独占）是无锁 SPSC，
 //! 不参与锁序：渲染/解码/宿主线程只经原子计数访问，持锁期间操作它们不构成嵌套。
 //! 可视化数据(spectrum_data)与 device_monitor/equalizer 相互独立，不与上述锁同栈嵌套。
 //!
-//! 核心路径（音频线程等）用 `lock_or_log!`：锁中毒自动恢复，不中断播放；
-//! 命令边界用 [`LockOrErr`]：把获取锁失败转成描述性错误返回给前端。
+//! 核心路径（音频线程等）用 `lock_or_log!`：锁中毒自动恢复，不中断播放；命令边界用
+//! [`LockOrErr`]：把获取锁失败转成描述性错误返回给前端。
 
 /// 共享模式播放/恢复时的淡入时长(毫秒)。
 /// 播放起点没有对应的淡出,用稍长淡入掩盖可能的爆音。
@@ -31,6 +31,25 @@ pub enum PlaybackState {
     Stopping,
     /// 带淡出的暂停中:已请求 PauseWithFadeOut,音频线程仍在淡出,完成后转为 Paused
     Pausing,
+}
+
+/// 独占模式解码推送的水位门控（秒）：环内已缓冲量低于该值时才继续推送。
+///
+/// 两个独占后端的环容量都必须严格大于它，否则门控拦不住生产者，`push_samples` 的背压等待会
+/// 退化成主节奏点。
+pub(crate) const EXCLUSIVE_BUFFER_WATERMARK_SECS: usize = 2;
+
+/// 独占后端 `push_samples` 的结果。
+///
+/// 之所以不让"写不完"悄悄返回 `Ok`：解码线程据此判断能否继续推送，误当成写入完成会一路解码到
+/// EOF 并发出 track-ended（表现为停止后自动续播下一首）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushOutcome {
+    /// 本次采样全部写入
+    Complete,
+    /// 未写完（被取消 / 流已停 / 写入世代过期 / 环满且无法继续等待），剩余样本已丢弃
+    /// ——调用方必须停止本线程的推送
+    Partial,
 }
 
 pub mod commands;
@@ -56,13 +75,12 @@ pub mod aaudio;
 #[cfg(windows)]
 pub mod wasapi;
 
-// 重新导出常用类型
 pub use decoder::{LockFreeSymphoniaSource, SymphoniaDecoder};
 pub use device::AudioDeviceInfo;
 pub use device_monitor::{DeviceChangeEvent, DeviceMonitor};
 pub use eq_processor::EqProcessor;
 pub use queue::{PlaybackQueue, RepeatMode};
-pub use sample_ring::SampleRing;
+pub use sample_ring::{SampleRing, exclusive_ring_capacity};
 pub use spectrum::VisualizationSource;
 
 #[cfg(target_os = "android")]
@@ -70,9 +88,10 @@ pub use aaudio::AaudioExclusivePlayer;
 #[cfg(windows)]
 pub use wasapi::WasapiExclusivePlayback;
 
-/// 按当前的系统默认输出设备重建共享模式输出（Android）
-/// cpal 的流不会随默认设备迁移也不自愈，不重建则拔掉 DAC 后共享播放一直没声；创建失败时
-/// 原样保留旧状态。调用方需保证此刻没有正在播的音频：替换 sink 会丢掉当前播放队列。
+/// 按当前的系统默认输出设备重建共享模式输出（Android）。
+///
+/// cpal 的流不会随默认设备迁移也不自愈，不重建则拔掉 DAC 后共享播放一直没声；创建失败时原样
+/// 保留旧状态。调用方需保证此刻没有正在播的音频：替换 sink 会丢掉当前播放队列。
 #[cfg(target_os = "android")]
 pub fn rebuild_shared_sink(state: &crate::AppState) -> Result<(), crate::error::AppError> {
     use rodio::stream::DeviceSinkBuilder;
@@ -93,9 +112,8 @@ pub fn rebuild_shared_sink(state: &crate::AppState) -> Result<(), crate::error::
     let player = rodio::Player::connect_new(mixer_sink.mixer());
     player.set_volume(volume);
 
-    // 按锁序 sink → output_stream 依次替换（两个临界区不嵌套）。
-    // 先换 sink 再换 output_stream：旧 sink 的 drop 关掉旧 cpal 流时，
-    // 旧播放器已经释放掉了。
+    // 按锁序 sink -> output_stream 依次替换（两个临界区不嵌套）。先换 sink 再换 output_stream：
+    // 旧 sink 的 drop 关掉旧 cpal 流时，旧播放器已经释放掉了。
     {
         let mut sink = output
             .sink

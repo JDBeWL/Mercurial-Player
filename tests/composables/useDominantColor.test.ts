@@ -80,7 +80,7 @@ const setPixels = (next: Uint8ClampedArray) => {
   fakeCtx.getImageData.mockImplementation(() => ({ data: pixels }))
 }
 
-/** 取色链路是异步的(decode → pick),冲刷微任务与定时器队列 */
+/** 取色链路是异步的(decode -> pick),冲刷微任务与定时器队列 */
 const settle = async () => {
   await nextTick()
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -281,7 +281,7 @@ describe('useDominantColor > decoding', () => {
     mount('/covers/tall.jpg')
     await settle()
 
-    // scale = max(32/32, 32/64) = 1 → 高 64,垂直居中后顶部偏移 (32-64)/2 = -16
+    // scale = max(32/32, 32/64) = 1 -> 高 64,垂直居中后顶部偏移 (32-64)/2 = -16
     expect(fakeCtx.drawImage).toHaveBeenCalledWith(expect.anything(), 0, -16, 32, 64)
   })
 
@@ -295,7 +295,7 @@ describe('useDominantColor > decoding', () => {
     mount('/covers/wide.jpg')
     await settle()
 
-    // scale = max(32/128, 32/32) = 1 → 宽 128,左对齐且高度正好铺满
+    // scale = max(32/128, 32/32) = 1 -> 宽 128,左对齐且高度正好铺满
     expect(fakeCtx.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 128, 32)
   })
 })
@@ -311,7 +311,7 @@ describe('useDominantColor > fallback colors', () => {
   })
 
   it('ignores pixels below the alpha threshold', async () => {
-    // alpha 127 < 128 → 全部像素被跳过,等效于空图
+    // alpha 127 < 128 -> 全部像素被跳过,等效于空图
     setPixels(makePixels(() => [10, 200, 30, 127]))
     const api = mount('/covers/a.png')
     await settle()
@@ -320,7 +320,7 @@ describe('useDominantColor > fallback colors', () => {
   })
 
   it('uses the averaged color when only a few pixels qualify', async () => {
-    // 仅第 0 行前 10 个像素不透明 → 命中 "pts.length < 20" 分支
+    // 仅第 0 行前 10 个像素不透明 -> 命中 "pts.length < 20" 分支
     setPixels(makePixels((x, y) => (y === 0 && x < 10 ? [200, 40, 40, 255] : [0, 0, 0, 0])))
     const api = mount('/covers/a.png')
     await settle()

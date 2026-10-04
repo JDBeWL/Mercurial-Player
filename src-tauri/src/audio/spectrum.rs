@@ -1,8 +1,8 @@
 //! 频谱：分析器 + 共享模式音源 + 分析线程。
 //!
-//! 共享模式由 [`VisualizationSource`] 在 rodio 拉取采样时驱动，它把采样写进
-//! [`super::sample_ring::SampleRing`]，由 [`spawn_spectrum_thread`] 做 FFT 与事件发送;
-//! 独占模式由 [`super::decode_push`] 解码推送线程在推送采样后驱动 [`SpectrumAnalyzer`]。
+//! 共享模式由 [`VisualizationSource`] 在 rodio 拉取采样时驱动，采样写进
+//! [`super::sample_ring::SampleRing`]，由 [`spawn_spectrum_thread`] 做 FFT 与发送；
+//! 独占模式由 [`super::decode_push`] 在推送采样后直接驱动 [`SpectrumAnalyzer`]。
 //! 两者最终都通过 `spectrum-update` 事件把频谱数据发给前端可视化面板。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -21,13 +21,13 @@ use super::sample_ring::SampleRing;
 use crate::equalizer::EqSettings;
 
 /// 频谱 bin 数量：分析端分箱、平滑与前端可视化的柱数三方必须一致
-/// (`app_state.rs` 的 `spectrum_data`、`VisualizerPanel.vue` 的 `SPECTRUM_SIZE`)
+///
+/// 另两处是 `app_state.rs` 的 `spectrum_data` 与 `VisualizerPanel.vue` 的 `SPECTRUM_SIZE`
 pub(crate) const SPECTRUM_BINS: usize = 128;
 
 /// 频谱更新事件 - 简化结构减少序列化开销
 ///
-/// 借用语义而不是持有 `Vec`：调用方已经有 `prev_spectrum`，再 `to_vec()` 只是每秒
-/// 几十次无谓的堆分配。
+/// 借用语义而不是持有 `Vec`：调用方已经有 `prev_spectrum`，再 `to_vec()` 只是每秒几十次堆分配。
 #[derive(Debug, serde::Serialize, Clone)]
 pub struct SpectrumUpdateEvent<'a> {
     pub data: &'a [f32],
@@ -38,7 +38,6 @@ pub(super) fn emit_spectrum_update(
     app: &AppHandle,
     data: &[f32],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // 直接发送数据数组，减少JSON包装开销
     app.emit("spectrum-update", SpectrumUpdateEvent { data })?;
     Ok(())
 }
@@ -46,9 +45,9 @@ pub(super) fn emit_spectrum_update(
 /// 频谱计算的门控：两个来源都为真才做 FFT 并发送 `spectrum-update`。
 ///
 /// - `panel`：可视化面板是否挂载，由前端在挂载/卸载时写入。面板是该事件唯一的订阅者。
-/// - `foreground`：应用是否可见，由 Kotlin 的 Activity 生命周期写入。这一路必须由 native
-///   来做：横屏看着波形退到后台时组件并不会卸载，而 wry 在 `onPause` 里就调了
-///   `mWebView.onPause()` 把 JS 冻住，前端既来不及关、回到前台也不会主动补一句"我又可见了"。
+/// - `foreground`：应用是否可见，由 Kotlin 的 Activity 生命周期写入。必须由 native 来做：
+///   横屏看着波形退到后台时组件并不会卸载，而 wry 在 `onPause` 里就已冻结 JS，
+///   前端既来不及关、回到前台也不会主动补一句"我又可见了"。
 ///
 /// 缺省 `foreground = true`：进程启动即在前台，Kotlin 随后按实际生命周期纠正。
 pub struct SpectrumGate {
@@ -89,7 +88,7 @@ impl Default for SpectrumGate {
 #[must_use]
 pub(super) const fn calculate_fft_size(sample_rate: u32) -> usize {
     match sample_rate {
-        0..=32000 => 1024,       // ≤32kHz: 1024 样本
+        0..=32000 => 1024,       // <=32kHz: 1024 样本
         32001..=64000 => 2048,   // 44.1k/48k: 2048 样本
         64001..=128_000 => 4096, // 88.2k/96k: 4096 样本
         _ => 8192,               // 176.4k/192k/384k: 8192 样本
@@ -106,8 +105,7 @@ pub(crate) fn now_ms() -> u64 {
 
 /// 频谱分析器:Hann 窗 + FFT + AE 风格分bin/平滑
 ///
-/// 维护一个滚动采样缓冲(交错采样),缓冲满且距上次计算达到目标帧率
-/// 间隔时计算频谱、更新共享 `spectrum_data` 并发送 `spectrum-update` 事件。
+/// 维护滚动采样缓冲(交错采样)，缓冲满且达到目标帧率间隔时计算频谱、更新 `spectrum_data` 并发事件。
 pub(super) struct SpectrumAnalyzer {
     /// 滚动采样缓冲(交错采样)
     buffer: Vec<f32>,
@@ -142,8 +140,9 @@ impl SpectrumAnalyzer {
         self.buffer.extend_from_slice(samples);
     }
 
-    /// 缓冲满且到达目标帧率间隔时计算并发送频谱,否则什么都不做
-    /// (分析线程按固定节奏轮询,未到间隔时保留完整窗口,不提前 retain_half)
+    /// 缓冲满且到达目标帧率间隔时计算并发送频谱
+    ///
+    /// 否则什么都不做：分析线程按固定节奏轮询，未到间隔时保留完整窗口，不提前 retain_half
     pub fn compute_if_ready(
         &mut self,
         now: u64,
@@ -158,12 +157,11 @@ impl SpectrumAnalyzer {
             return;
         }
         self.compute_and_emit(now, spectrum_data, app);
-        // 保留后半部分数据用于重叠分析
+        // 保留后半部分用于重叠分析，见 retain_half
         self.retain_half();
     }
 
-    /// 追加一批交错采样;缓冲满且到达目标帧率间隔时计算并发射频谱
-    /// (独占模式解码线程按块驱动)
+    /// 追加一批交错采样并按需计算发送（独占模式解码线程按块驱动）
     #[cfg(any(windows, target_os = "android"))]
     pub fn push_and_maybe_emit(
         &mut self,
@@ -180,7 +178,6 @@ impl SpectrumAnalyzer {
         if self.should_compute(now, target_fps) {
             self.compute_and_emit(now, spectrum_data, Some(app));
         }
-        // 保留后半部分数据用于重叠分析
         self.retain_half();
     }
 
@@ -199,6 +196,7 @@ impl SpectrumAnalyzer {
     }
 
     /// 计算频谱:更新共享 `spectrum_data` 并发送 `spectrum-update` 事件。
+    ///
     /// 要求缓冲中至少有 `fft_size` 个采样。
     #[inline(never)]
     pub fn compute_and_emit(
@@ -210,7 +208,6 @@ impl SpectrumAnalyzer {
         self.last_fft_time = now;
 
         if let Ok(mut spec) = spectrum_data.try_lock() {
-            // 复用预分配的缓冲区
             self.fft_buffer
                 .copy_from_slice(&self.buffer[..self.fft_size]);
             // 手动应用预计算的 Hann 窗口(避免 hann_window() 每次堆分配 Vec)
@@ -224,7 +221,6 @@ impl SpectrumAnalyzer {
                 FrequencyLimit::Range(20.0, 20000.0),
                 Some(&divide_by_N_sqrt),
             ) {
-                // 重置频谱缓冲区
                 self.spectrum_buffer.fill(0.0);
 
                 // AE风格：线性频率分布
@@ -253,9 +249,9 @@ impl SpectrumAnalyzer {
                     let current = self.prev_spectrum[i];
 
                     self.prev_spectrum[i] = if target > current {
-                        current * 0.3 + target * 0.7 // 快速上升
+                        current * 0.3 + target * 0.7
                     } else {
-                        current * 0.85 + target * 0.15 // 缓慢下降
+                        current * 0.85 + target * 0.15
                     };
                 }
 
@@ -274,8 +270,9 @@ impl SpectrumAnalyzer {
 /// 批量处理块大小（对齐到SIMD友好的边界）
 const BATCH_SIZE: usize = 64;
 /// 共享模式音源:EQ 批量处理 + 把采样交给频谱分析线程
-/// `next` 跑在 rodio 音频回调线程上:只做无锁写入与置标志,
-/// FFT 与 spectrum-update / playback-position / track-ended 的发送见 [`spawn_spectrum_thread`]。
+///
+/// `next` 跑在 rodio 音频回调线程上:只做无锁写入与置标志，FFT 与 spectrum-update /
+/// playback-position / track-ended 的发送见 [`spawn_spectrum_thread`]。
 pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     input: I,
     eq_settings: Arc<RwLock<EqSettings>>,
@@ -288,7 +285,7 @@ pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     // 批量处理缓冲区:直接存 EQ 处理后的采样,避免原始采样的中间拷贝
     pending_processed: Vec<f32>,
     pending_index: usize,
-    /// 音频线程 → 分析线程的无锁采样通道
+    /// 音频线程 -> 分析线程的无锁采样通道
     sample_ring: Arc<SampleRing>,
     /// 源已耗尽(EOF):音频线程置位,分析线程负责发出 track-ended 并清位
     eof_reached: Arc<AtomicBool>,
@@ -343,13 +340,10 @@ fn spawn_spectrum_thread(
         }
 
         while !stop.load(Ordering::SeqCst) {
-            // 曲目结束事件:音频线程只置位,发送在这里做
             emit_ended_once(app.as_ref(), &eof_reached);
 
             let now = now_ms();
-            // 面板不在屏、或应用已经到后台时，整条 FFT + 事件发送都跳过：数据没有订阅者。
-            // 期间采样堆到 ring 容量上限后由 push 侧丢弃（约几百毫秒的量级），重新显示时
-            // 频谱相位略有滞后，但不影响正确性；反过来若这里继续算，就是纯耗电。
+            // 门控见 SpectrumGate；未放行时采样堆到 ring 上限后由 push 侧丢弃
             if gate.allowed() {
                 let drained = ring.drain_into(&mut scratch, SPECTRUM_DRAIN_MAX);
                 if drained > 0 {
@@ -453,7 +447,6 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         self.pending_processed.clear();
         self.pending_index = 0;
 
-        // 批量读取 - 直接写入 pending_processed,避免中间 clone
         for _ in 0..BATCH_SIZE {
             if let Some(sample) = self.input.next() {
                 self.pending_processed.push(sample);
@@ -475,7 +468,6 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             }
         }
 
-        // 批量EQ处理(原地处理,无 clone)
         self.eq_processor.process_batch(&mut self.pending_processed);
 
         true
@@ -486,7 +478,6 @@ impl<I: Source<Item = f32> + Send> Iterator for VisualizationSource<I> {
     type Item = f32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // 从批量处理缓冲区获取采样
         if self.pending_index >= self.pending_processed.len() {
             if !self.refill_batch() {
                 // EOF - 只置标志,由分析线程发送 track-ended(音频线程不做 IPC)
@@ -499,7 +490,7 @@ impl<I: Source<Item = f32> + Send> Iterator for VisualizationSource<I> {
         self.pending_index += 1;
         self.samples_played.fetch_add(1, Ordering::Relaxed);
 
-        // 只做无锁写入;缓冲满时丢弃该采样,音频回调不阻塞
+        // 满则丢弃，理由见 [`SampleRing::push`]
         self.sample_ring.push(processed);
 
         Some(processed)

@@ -4,12 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import i18n from '@/i18n'
 import logger from '@/utils/logger'
 
-/**
- * 自动更新 Composable
- *
- * 检查/安装流程复用 Tauri v2 plugin-updater（自动读取 tauri.conf.json 中的
- * updater.endpoints/pubkey），下载与签名校验见 `downloadAndInstall`。
- */
+/** 自动更新: 检查与安装委托 tauri-plugin-updater, 只有下载换成多线程分片下载并自校 minisign 签名; endpoints 与 pubkey 读 tauri.conf.json */
 
 /** updater_check 命令返回的更新信息 */
 interface UpdateInfo {
@@ -25,10 +20,10 @@ interface DownloadProgressPayload {
   total: number
 }
 
-/** 下载进度事件名（与 src-tauri/src/updater.rs 保持一致） */
+/** 下载进度事件名 (与 src-tauri/src/updater.rs 的事件名一致, 改一边必须改另一边) */
 const PROGRESS_EVENT = 'updater://download-progress'
 
-// 状态（模块级单例）
+// 更新状态 (模块级单例, 各调用方共享同一份)
 const isChecking = ref(false)
 const updateAvailable = ref(false)
 const newVersion = ref('')
@@ -37,7 +32,7 @@ const isDownloading = ref(false)
 const error = ref<string | null>(null)
 const releaseNotes = ref<string | null>(null)
 const downloadFinished = ref(false)
-// 已下载字节数 / 总字节数（未知时为 0）/ 平滑后的下载速度（字节/秒）
+// 已下载字节数 / 总字节数 (未知时为 0) / 平滑后的下载速度 (字节每秒)
 const downloadedBytes = ref(0)
 const totalBytes = ref(0)
 const downloadSpeed = ref(0)
@@ -45,7 +40,7 @@ const downloadSpeed = ref(0)
 const hasError = computed(() => error.value !== null)
 const isUpdateProcessing = computed(() => isChecking.value || isDownloading.value)
 
-/** 尽可能从 Tauri 命令错误中提取可读信息，避免显示 "Unknown error occurred" */
+/** 从 Tauri 命令错误里尽量取出可读文本, 否则界面会显示 "Unknown error occurred" */
 const extractErrorMessage = (err: unknown): string =>
   err instanceof Error
     ? err.message
@@ -53,9 +48,7 @@ const extractErrorMessage = (err: unknown): string =>
       ? err
       : ((err as { message?: string })?.message ?? JSON.stringify(err))
 
-/**
- * 检查更新（后端读取 tauri.conf.json 中的 endpoints 配置）
- */
+/** 检查更新: 版本比较在后端由 plugin-updater 按 tauri.conf.json 的 endpoints 完成, 返回 null 即已是最新 */
 const checkForUpdates = async () => {
   isChecking.value = true
   error.value = null
@@ -80,13 +73,7 @@ const checkForUpdates = async () => {
   }
 }
 
-/**
- * 下载并安装更新
- *
- * updater_download 多线程分片下载并校验 minisign 签名，
- * updater_install 委托 plugin-updater 原生安装
- * （Windows 下拉起安装器并退出进程，由安装器完成替换和重启）。
- */
+/** 下载与安装分两步: updater_download 分片下载并校验 minisign 签名, 校验通过才把临时文件交给 updater_install, 顺序不可颠倒 */
 const downloadAndInstall = async () => {
   if (!updateAvailable.value) {
     error.value = i18n.global.t('config.update.noUpdateAvailable')
@@ -100,9 +87,8 @@ const downloadAndInstall = async () => {
   downloadSpeed.value = 0
   error.value = null
 
-  // 速度估算：记录上次进度事件的时间与字节数，按差值计算瞬时速度并做指数平滑。
-  // lastTime 用 null 表示"尚未取样"而非 0：时间戳 0 是合法值，
-  // 若用 0 做哨兵，首个事件恰好落在 0 时计时器永远不会启动。
+  // 速度取相邻两次进度事件的字节差/时间差, 再按 0.6 旧值 + 0.4 瞬时值指数平滑
+  // lastTime 用 null 而不是 0 表示"未取样": 时间戳 0 合法, 拿 0 当哨兵会让首个事件落在 0 时永不开始计时
   let lastTime: number | null = null
   let lastBytes = 0
 
@@ -136,7 +122,7 @@ const downloadAndInstall = async () => {
       downloadSpeed.value = 0
       logger.info('[auto-update] Download finished, installing')
 
-      // Windows 上安装器拉起后进程退出，invoke 不会返回
+      // Windows 下安装器拉起后本进程退出, 这个 invoke 通常不会返回
       await invoke('updater_install')
     } finally {
       unlisten()
@@ -151,9 +137,7 @@ const downloadAndInstall = async () => {
   }
 }
 
-/**
- * 重启应用以应用更新（安装失败时的兜底入口）
- */
+/** 重启应用以应用更新 (安装失败时的兜底入口) */
 const runInstaller = async () => {
   try {
     const { relaunch } = await import('@tauri-apps/plugin-process')
@@ -164,9 +148,6 @@ const runInstaller = async () => {
   }
 }
 
-/**
- * 重置更新状态
- */
 const resetUpdateState = () => {
   updateAvailable.value = false
   newVersion.value = ''
@@ -180,7 +161,6 @@ const resetUpdateState = () => {
 
 export function useAutoUpdate() {
   return {
-    // 状态
     isChecking,
     updateAvailable,
     newVersion,
@@ -194,7 +174,6 @@ export function useAutoUpdate() {
     downloadSpeed,
     hasError,
     isUpdateProcessing,
-    // 方法
     checkForUpdates,
     downloadAndInstall,
     runInstaller,

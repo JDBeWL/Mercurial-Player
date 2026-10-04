@@ -10,18 +10,16 @@ use std::time::UNIX_EPOCH;
 
 use super::extractor::TrackMetadata;
 
-/// 缓存的元数据条目
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct CachedMetadata {
     #[serde(flatten)]
     metadata: TrackMetadata,
     /// 文件最后修改时间（Unix 时间戳）
     modified_time: u64,
-    /// 缓存创建时间
+    /// 缓存创建时间（Unix 时间戳）
     cached_at: u64,
 }
 
-/// 元数据缓存
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 struct MetadataCache {
     /// 版本号，用于缓存格式升级
@@ -33,19 +31,16 @@ struct MetadataCache {
 const CACHE_VERSION: u32 = 1;
 const METADATA_CACHE_FILENAME: &str = "metadata-cache.json";
 
-/// 获取元数据缓存文件路径
+/// 元数据缓存文件路径（缓存根目录下的 metadata-cache.json）
 fn metadata_cache_path() -> PathBuf {
-    // 优先使用自定义缓存路径
     if let Some(custom_path) = get_cover_cache_path_setting() {
         return PathBuf::from(custom_path).join(METADATA_CACHE_FILENAME);
     }
-    // 默认使用系统临时目录
     std::env::temp_dir()
         .join("mercurial-player")
         .join(METADATA_CACHE_FILENAME)
 }
 
-/// 加载元数据缓存
 fn load_metadata_cache() -> MetadataCache {
     let cache_path = metadata_cache_path();
     if !cache_path.exists() {
@@ -83,11 +78,9 @@ fn load_metadata_cache() -> MetadataCache {
     }
 }
 
-/// 保存元数据缓存
 fn save_metadata_cache(cache: &MetadataCache) -> Result<(), AppError> {
     let cache_path = metadata_cache_path();
 
-    // 确保父目录存在
     if let Some(parent) = cache_path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建缓存目录失败: {e}"))?;
     }
@@ -121,7 +114,6 @@ fn get_file_modified_time(path: &str) -> Option<u64> {
 pub fn get_metadata_from_cache(path: &str) -> Option<TrackMetadata> {
     let cached = get_cached_entry(path)?;
 
-    // 检查文件是否被修改
     let current_modified = get_file_modified_time(path)?;
     if current_modified != cached.modified_time {
         log::debug!("文件已修改，缓存失效: {path}");
@@ -139,7 +131,6 @@ pub fn save_metadata_to_cache(path: &str, metadata: &TrackMetadata) {
     log::debug!("元数据已缓存: {path}");
 }
 
-/// 构造一个空的元数据缓存
 fn empty_metadata_cache() -> MetadataCache {
     MetadataCache {
         version: CACHE_VERSION,
@@ -147,10 +138,8 @@ fn empty_metadata_cache() -> MetadataCache {
     }
 }
 
-/// 清空内存缓存
-///
-/// 内存缓存是写盘的权威来源:只删磁盘文件而不清内存,下一次 flush 会把旧条目写回。
-/// 用 `lock_or_log!` 而非 `if let Ok`,锁中毒时也要真的清掉并留日志。
+/// 清空内存缓存。内存缓存是写盘的权威来源：只删磁盘不清内存，下一次 flush 会把旧条目写回
+/// （锁中毒也要真的清掉，所以用 `lock_or_log!` 而不是 `if let Ok`）
 fn clear_memory_cache() {
     let mut lock = lock_or_log!(MEMORY_CACHE.write());
     *lock = Some(empty_metadata_cache());
@@ -158,7 +147,7 @@ fn clear_memory_cache() {
 
 /// 清理元数据缓存中不存在的文件
 pub fn clean_metadata_cache() -> Result<usize, AppError> {
-    // 以内存缓存为准(它是权威来源);锁内只取 key,exists() 是文件 I/O,不放锁内
+    // 锁内只取 key：exists() 是文件 I/O 不放锁内；以内存为准的理由见 clear_memory_cache
     let cached_keys = {
         let lock = lock_or_log!(MEMORY_CACHE.read());
         lock.as_ref()
@@ -167,7 +156,7 @@ pub fn clean_metadata_cache() -> Result<usize, AppError> {
     let keys =
         cached_keys.unwrap_or_else(|| load_metadata_cache().entries.keys().cloned().collect());
 
-    // 用带 content URI 分支的判断：按本地路径 exists 会把所有 SAF 条目误判为已删除
+    // 必须用带 content URI 分支的判断：按本地路径 exists 会把所有 SAF 条目误判为已删除
     let stale: Vec<String> = keys
         .into_iter()
         .filter(|path| !crate::media::filesystem::check_file_exists_internal(path))
@@ -183,7 +172,7 @@ pub fn clean_metadata_cache() -> Result<usize, AppError> {
     let snapshot = {
         let cached = lock_or_log!(MEMORY_CACHE.read()).clone();
         if let Some(mut cache) = cached {
-            // 内存与磁盘一致地删除,否则下一次 flush 会把旧条目写回
+            // 内存与磁盘一起删，见 clear_memory_cache
             for path in &stale {
                 cache.entries.remove(path);
             }
@@ -212,7 +201,6 @@ pub fn clean_metadata_cache() -> Result<usize, AppError> {
     Ok(removed_count)
 }
 
-/// 清除所有元数据缓存
 pub fn clear_metadata_cache() -> Result<(), AppError> {
     // 先清内存:避免清理期间并发写入的条目在清完磁盘后又把旧数据 flush 回去
     clear_memory_cache();
@@ -225,9 +213,7 @@ pub fn clear_metadata_cache() -> Result<(), AppError> {
     Ok(())
 }
 
-/// 缓存统计 (条目数, 磁盘占用字节数)
-///
-/// 占用取缓存文件字节数：前端按 KB/MB 展示，且清理操作针对的就是这个文件。
+/// 缓存统计 (条目数, 磁盘占用字节数)：占用取缓存文件大小，清理针对的就是这个文件
 pub fn get_metadata_cache_stats() -> (usize, u64) {
     let cache_path = metadata_cache_path();
     let total_size = fs::metadata(&cache_path).map(|m| m.len()).unwrap_or(0);
@@ -236,15 +222,14 @@ pub fn get_metadata_cache_stats() -> (usize, u64) {
     (entry_count, total_size)
 }
 
-// 全局自定义缓存路径
+// 用户自定义的缓存根目录；未设置时各缓存落系统临时目录（取用处见 metadata_cache_path/cover_cache_dir）
 static CUSTOM_CACHE_PATH: RwLock<Option<String>> = RwLock::new(None);
 
-// 全局内存缓存，用于批量保存（读多写少，用 RwLock）
+// 内存缓存，读多写少故用 RwLock；它相对磁盘文件的权威地位见 clear_memory_cache
 static MEMORY_CACHE: RwLock<Option<MetadataCache>> = RwLock::new(None);
 
 /// 从内存缓存中查询单条记录（只克隆单条，不克隆整个 HashMap）
 fn get_cached_entry(path: &str) -> Option<CachedMetadata> {
-    // 快速路径：读锁查询
     if let Ok(lock) = MEMORY_CACHE.read() {
         if let Some(cache) = lock.as_ref() {
             if let Some(entry) = cache.entries.get(path) {
@@ -253,7 +238,7 @@ fn get_cached_entry(path: &str) -> Option<CachedMetadata> {
             return None;
         }
     }
-    // 慢速路径：内存缓存未初始化，从磁盘加载
+    // 只有内存缓存尚未初始化时才回磁盘读，并顺手回填
     let cache = load_metadata_cache();
     let result = cache.entries.get(path).cloned();
     if let Ok(mut lock) = MEMORY_CACHE.write() {
@@ -266,19 +251,16 @@ fn get_cached_entry(path: &str) -> Option<CachedMetadata> {
 
 /// 将内存缓存持久化到磁盘（在锁外执行 I/O，不阻塞其他读者）
 fn flush_memory_cache() -> Result<(), AppError> {
-    // 读锁下克隆缓存快照，然后释放锁
     let snapshot = {
         let lock = lock_or_log!(MEMORY_CACHE.read());
         lock.as_ref().map(|cache| cache.clone())
     };
-    // 在锁外执行磁盘 I/O
     if let Some(cache) = snapshot {
         return save_metadata_cache(&cache);
     }
     Ok(())
 }
 
-/// 保存元数据到内存缓存（不立即写入磁盘）
 pub fn save_metadata_to_memory_cache(path: &str, metadata: &TrackMetadata) {
     if let Some(modified_time) = get_file_modified_time(path) {
         let cached = CachedMetadata {
@@ -301,14 +283,11 @@ pub fn save_metadata_to_memory_cache(path: &str, metadata: &TrackMetadata) {
     }
 }
 
-/// 批量保存内存缓存到磁盘
 pub fn flush_metadata_cache() -> Result<(), AppError> {
     flush_memory_cache()
 }
 
-/// 设置自定义封面缓存路径
-///
-/// 校验路径合法性，防止缓存清理逻辑被引导到敏感目录执行任意删除
+/// 设置自定义封面缓存路径：清理会在该目录批量删文件，路径被引导就是任意删除，故必须挡敏感目录
 pub fn set_cover_cache_path(path: Option<String>) -> Result<(), AppError> {
     if let Some(p) = &path {
         if p.is_empty() {
@@ -327,17 +306,15 @@ pub fn set_cover_cache_path(path: Option<String>) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 获取自定义封面缓存路径
 pub fn get_cover_cache_path_setting() -> Option<String> {
     lock_or_log!(CUSTOM_CACHE_PATH.read()).clone()
 }
 
+/// 封面缓存目录（自定义根目录下的 cover-cache 子目录）
 pub(super) fn cover_cache_dir() -> PathBuf {
-    // 优先使用自定义缓存路径
     if let Some(custom_path) = get_cover_cache_path_setting() {
         return PathBuf::from(custom_path).join("cover-cache");
     }
-    // 默认使用系统临时目录
     std::env::temp_dir()
         .join("mercurial-player")
         .join("cover-cache")
@@ -345,23 +322,20 @@ pub(super) fn cover_cache_dir() -> PathBuf {
 
 // 缓存清理配置
 
-/// 默认缓存最大大小（1GB）
 const DEFAULT_MAX_CACHE_SIZE_MB: u64 = 1024;
 
 /// 缓存过期时间（30天，单位：秒）
 const CACHE_EXPIRE_SECONDS: u64 = 30 * 24 * 60 * 60;
 
-/// 缓存文件信息
 struct CacheFileInfo {
     path: PathBuf,
     size: u64,
     last_accessed: u64,
 }
 
-/// 封面缓存文件的形状：`<十进制哈希>.<封面扩展名>`（见 cover.rs 的写入端）。
+/// 封面缓存文件的形状：`<十进制哈希>.<封面扩展名>`（写入端见 cover.rs）
 ///
-/// 缓存根目录允许用户指到任意非敏感路径，清理逻辑若不加判别就变成了
-/// "该目录里任意文件的批量删除"，因此只认自己写出来的这种文件名。
+/// 缓存根目录可由用户指到任意非敏感路径，清理若不加文件名判别就等于"该目录里任意文件的批量删除"。
 fn is_cover_cache_file(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
@@ -376,7 +350,6 @@ fn is_cover_cache_file(path: &Path) -> bool {
         && stem.bytes().all(|b| b.is_ascii_digit())
 }
 
-/// 清理过期的缓存文件
 fn clean_expired_cache_files() -> Result<usize, AppError> {
     let cache_dir = cover_cache_dir();
 
@@ -454,16 +427,14 @@ fn get_cache_files_sorted() -> Result<Vec<CacheFileInfo>, AppError> {
         }
     }
 
-    // 按最后访问时间排序，最旧的在前
     files.sort_by_key(|a| a.last_accessed);
 
     Ok(files)
 }
 
-/// 清理超出大小限制的缓存文件
 fn clean_cache_by_size(max_cache_size_mb: u64) -> Result<usize, AppError> {
     let max_cache_size_bytes = max_cache_size_mb * 1024 * 1024;
-    // 已按最后访问时间升序,顺序消费即可(remove(0) 每次搬移整个 Vec)
+    // get_cache_files_sorted 已按时间升序，顺序消费即可
     let files = get_cache_files_sorted()?;
     let mut total_size: u64 = files.iter().map(|f| f.size).sum();
     let mut cleaned_count = 0;
@@ -486,24 +457,17 @@ fn clean_cache_by_size(max_cache_size_mb: u64) -> Result<usize, AppError> {
     Ok(cleaned_count)
 }
 
-/// 清理封面缓存（综合清理策略）
+/// 清理封面缓存：先删过期文件，再删超出大小限制的部分
 ///
-/// 执行以下清理操作：
-/// 1. 删除超过 30 天未使用的文件
-/// 2. 删除超出大小限制的文件（默认 1GB，可配置）
-///
-/// # Arguments
-/// * max_cache_size_mb - 最大缓存大小（单位：MB），如果为 None 则使用默认值 1GB
+/// `max_cache_size_mb` 单位 MB，为 None 时取 [`DEFAULT_MAX_CACHE_SIZE_MB`]。
 pub fn clean_cover_cache(max_cache_size_mb: Option<u64>) -> Result<usize, AppError> {
     let max_size = max_cache_size_mb.unwrap_or(DEFAULT_MAX_CACHE_SIZE_MB);
     log::info!("开始清理封面缓存（最大大小: {max_size}MB）...");
 
     let mut total_cleaned = 0;
 
-    // 清理过期文件
     total_cleaned += clean_expired_cache_files().unwrap_or(0);
 
-    // 清理超出大小限制的文件
     total_cleaned += clean_cache_by_size(max_size).unwrap_or(0);
 
     if total_cleaned > 0 {

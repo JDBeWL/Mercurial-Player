@@ -29,13 +29,9 @@ interface TrackMetadata {
   format?: string | null
 }
 
-/**
- * 歌曲标题提取工具类
- */
+/** 标题提取: 优先音频元数据, 缺失时按文件名规则解析(规则见 parseFromFileName) */
 export class TitleExtractor {
-  /**
-   * 批量提取歌曲标题（减少 IPC 调用）
-   */
+  /** 批量提取, 元数据只走一次 IPC, 缺 title 的条目回落文件名解析 */
   static async extractTitlesBatch(
     filePaths: string[],
     config: Partial<TitleExtractionConfig> = {},
@@ -47,14 +43,12 @@ export class TitleExtractor {
       return result
     }
 
-    // 使用批量 API 获取所有元数据
     const metadataMap = new Map<string, TrackMetadata>()
     if (preferMetadata) {
       try {
         const metadataList = await invoke<TrackMetadata[]>('get_tracks_metadata_batch', {
           paths: filePaths,
         })
-        // 将结果转换为 Map 以便快速查找
         for (const metadata of metadataList) {
           if (metadata && metadata.path) {
             metadataMap.set(metadata.path, metadata)
@@ -62,16 +56,14 @@ export class TitleExtractor {
         }
       } catch (error) {
         logger.warn('Failed to get batch metadata:', error)
-        // 批量获取失败，继续使用文件名解析
+        // 批量 IPC 失败不致命: metadataMap 留空, 后面整批都走文件名解析
       }
     }
 
-    // 处理每个文件
     for (const filePath of filePaths) {
       const metadata = metadataMap.get(filePath)
 
       if (metadata && metadata.title) {
-        // 使用元数据
         result.set(filePath, {
           fileName: this.getFileName(filePath, config.hideFileExtension),
           title: this.cleanTitle(metadata.title),
@@ -86,9 +78,8 @@ export class TitleExtractor {
           isFromMetadata: true,
         })
       } else {
-        // 回退到文件名解析
         const parsed = this.parseFromFileName(filePath, config)
-        // 如果有元数据但没有 title，仍然可以获取音频信息
+        // 元数据缺 title 时仍合并其中的音频参数, 只是标题改用文件名解析结果
         result.set(filePath, {
           ...parsed,
           duration: metadata?.duration || 0,
@@ -104,9 +95,7 @@ export class TitleExtractor {
     return result
   }
 
-  /**
-   * 提取歌曲标题（单个文件，保持向后兼容）
-   */
+  /** 单文件提取, 优先级与批量版一致 */
   static async extractTitle(
     filePath: string,
     config: Partial<TitleExtractionConfig> = {},
@@ -114,12 +103,10 @@ export class TitleExtractor {
     try {
       const { preferMetadata = true } = config
 
-      // 优先从元数据获取信息
       if (preferMetadata) {
         try {
           const metadata = await invoke<TrackMetadata>('get_track_metadata', { path: filePath })
           if (metadata && metadata.title) {
-            // 获取到元数据，清理后返回
             return {
               fileName: this.getFileName(filePath, config.hideFileExtension),
               title: this.cleanTitle(metadata.title),
@@ -130,15 +117,14 @@ export class TitleExtractor {
           }
         } catch (error) {
           logger.warn('Failed to get metadata for:', filePath, error)
-          // 获取元数据失败，继续执行，尝试从文件名解析
+          // 失败处理同 extractTitlesBatch: 落回文件名解析
         }
       }
 
-      // 回退到从文件名解析
       return this.parseFromFileName(filePath, config)
     } catch (error) {
       logger.error('Error extracting title:', error)
-      // 出现意外错误时的最终回退方案
+      // 最终兜底: 连文件名解析都抛错时, 用去掉扩展名的文件名当标题
       const fileName = this.getFileName(filePath, config.hideFileExtension)
       return {
         fileName,
@@ -151,7 +137,10 @@ export class TitleExtractor {
   }
 
   /**
-   * 从文件名解析标题信息
+   * 按文件名解析标题与艺术家, 只用用户配置的 separator。
+   *
+   * 优先级: 先试带空格的变体(如 ' - '), 再试原样 separator; 取最后一次出现的位置切分,
+   * 使 "艺术家 - 歌曲 - 专辑" 的末段成为标题; 切点不能在首尾, 且切出的两侧都非空才算命中。
    */
   static parseFromFileName(
     filePath: string,
@@ -165,34 +154,29 @@ export class TitleExtractor {
     let artist = ''
 
     if (parseArtistTitle) {
-      // 只使用用户配置的 separator 进行分割
-      // 优先尝试带空格变体（如 ' - '），再尝试原始分隔符，对所有分隔符一视同仁
       const trimmedSep = separator.trim()
       const withSpaces = trimmedSep ? ` ${trimmedSep} ` : ''
+      // 分隔符优先级与切分规则见方法注释
       const prioritizedSeparators =
         withSpaces && withSpaces !== separator ? [withSpaces, separator] : [separator]
 
       for (const sep of prioritizedSeparators) {
-        // 使用 lastIndexOf 来处理 "艺术家 - 歌曲 - 专辑" 这类情况
         const lastIndex = fileName.lastIndexOf(sep)
 
-        // 确保分隔符不在字符串的开头或结尾
         if (lastIndex > 0 && lastIndex < fileName.length - sep.length) {
           const potentialArtist = fileName.substring(0, lastIndex)
           const potentialTitle = fileName.substring(lastIndex + sep.length)
 
-          // 如果分割后两部分都不为空，则认为解析成功
           if (potentialArtist && potentialTitle) {
             artist = this.cleanTitle(potentialArtist)
             title = this.cleanTitle(potentialTitle)
-            // 解析成功，跳出循环
             break
           }
         }
       }
     }
 
-    // 如果一轮循环后没有解析出艺术家，确保标题是干净的
+    // 没切出艺术家时标题仍要去掉首尾杂字符
     if (artist === '' && title === fileName) {
       title = this.cleanTitle(fileName)
     }
@@ -206,9 +190,7 @@ export class TitleExtractor {
     }
   }
 
-  /**
-   * 获取文件名（可选择是否包含扩展名）
-   */
+  /** 取路径末段, / 与 \ 都算分隔符; 去扩展名时要求 . 不在首位, 因此 .hidden 不会被截掉 */
   static getFileName(filePath: string, hideExtension: boolean = true): string {
     const parts = filePath.split(/[/\\]/)
     let fileName = parts[parts.length - 1] || filePath
@@ -223,21 +205,17 @@ export class TitleExtractor {
     return fileName
   }
 
-  /**
-   * 清理标题中的多余空格和特殊字符
-   */
+  /** 连续空白压成单个空格, 并去掉首尾的空白/连字符/下划线 */
   static cleanTitle(title: string): string {
     if (!title) return ''
 
     return title
       .trim()
-      .replace(/\s+/g, ' ') // 替换多个空格为单个空格
-      .replace(/^[\s\-_]+|[\s\-_]+$/g, '') // 去除开头和结尾的特殊字符
+      .replace(/\s+/g, ' ')
+      .replace(/^[\s\-_]+|[\s\-_]+$/g, '')
   }
 
-  /**
-   * 格式化播放列表名称
-   */
+  /** 用末级目录名替换 format 里的 {folderName} 占位符 */
   static formatPlaylistName(folderPath: string, format: string = '{folderName}'): string {
     const parts = folderPath.split(/[/\\]/)
     const folderName = parts[parts.length - 1] || folderPath
@@ -245,9 +223,7 @@ export class TitleExtractor {
     return format.replace('{folderName}', folderName)
   }
 
-  /**
-   * 测试文件名解析效果
-   */
+  /** 供测试直接喂裸文件名: 拼成假路径后走与真实文件相同的解析分支(含去扩展名) */
   static testParse(fileName: string, config: Partial<TitleExtractionConfig> = {}): TitleInfo {
     const testPath = `/test/${fileName}.mp3`
     return this.parseFromFileName(testPath, config)

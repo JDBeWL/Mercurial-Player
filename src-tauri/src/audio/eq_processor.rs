@@ -1,17 +1,16 @@
 //! EQ 处理器：播放链路里实际跑滤波的那个环节。
 //!
-//! 系数与设置类型在 [`crate::equalizer`]，这里按交错声道布局做批量/逐采样处理，
-//! 软削波用 [`super::dsp`] 的预计算查找表。共享与独占两条链路都复用它。
+//! 系数与设置类型在 [`crate::equalizer`]，软削波用 [`super::dsp`] 的预计算查找表。
 
 use super::dsp::soft_clip_fast;
 use crate::equalizer::{EQ_BAND_COUNT, EqSettings};
 
-/// EQ 处理器(共享模式与独占模式共用):共享走 [`EqProcessor::process_batch`] 批量处理,
-/// 独占走 [`EqProcessor::process_sample_cached`] 逐采样。
-/// states 用扁平布局 `[channel * EQ_BAND_COUNT + band]` 且三阶段合并为单次循环,均为 cache 局部性。
+/// EQ 处理器：共享与独占两条播放链路共用的滤波环节。
+///
+/// 扁平 `states` 布局与三阶段单次循环合并都为 cache 局部性，见 `process_one`。
 pub struct EqProcessor {
     coefficients: Vec<crate::equalizer::BiquadCoefficients>,
-    /// 扁平布局: states[channel * EQ_BAND_COUNT + band]
+    /// 扁平布局 `[channel * EQ_BAND_COUNT + band]`，一次分配到位
     states: Vec<crate::equalizer::BiquadState>,
     sample_rate: f32,
     channels: usize,
@@ -24,7 +23,6 @@ impl EqProcessor {
         let channels = channels as usize;
         Self {
             coefficients: vec![crate::equalizer::BiquadCoefficients::default(); EQ_BAND_COUNT],
-            // 扁平数组: channels × EQ_BAND_COUNT,一次性分配,提升 cache 局部性
             states: vec![crate::equalizer::BiquadState::default(); channels * EQ_BAND_COUNT],
             sample_rate: sample_rate as f32,
             channels,
@@ -33,11 +31,10 @@ impl EqProcessor {
         }
     }
 
-    /// 更新缓存的设置和滤波器系数
+    /// 缓存开关与预置增益；系数仅在 enabled 时重算，关闭时输出直通，陈旧系数无害
     pub fn update_settings(&mut self, settings: &EqSettings) {
         self.cached_enabled = settings.enabled;
-        // 自动增益补偿: preamp 减去最大提升量,保证提升 band 后峰值不超 0dBFS
-        // (preamp 每次设置变更只计算一次,无需查表)
+        // 自动增益补偿: effective_preamp_db 已减去最大提升量，保证提升 band 后峰值不超 0dBFS
         self.cached_preamp_multiplier = 10.0_f32.powf(settings.effective_preamp_db() / 20.0);
 
         if settings.enabled {
@@ -52,7 +49,7 @@ impl EqProcessor {
         }
     }
 
-    /// 批量处理采样 - 合并三阶段循环为单次遍历,提升 cache 局部性
+    /// 批量处理交错采样（共享模式链路）：整批单次遍历，三阶段见 `Self::process_one`
     #[inline]
     pub fn process_batch(&mut self, samples: &mut [f32]) {
         if !self.cached_enabled {
@@ -62,15 +59,14 @@ impl EqProcessor {
         let preamp = self.cached_preamp_multiplier;
         let channels = self.channels;
 
-        // 单次循环完成 preamp + biquad + soft_clip,提升 cache 局部性
-        // 注: i % channels 在 channels=2 时编译器优化为 i & 1,无取模开销
+        // i % channels 在 channels=2 时被编译器折成 i & 1，无取模开销
         for (i, sample) in samples.iter_mut().enumerate() {
             let channel = i % channels;
             *sample = self.process_one(*sample, channel, preamp);
         }
     }
 
-    /// 处理单个采样(preamp + biquad + soft_clip)
+    /// 单采样的三阶段: preamp -> 逐级 biquad -> soft_clip，合并在同一循环内处理
     #[inline(always)]
     fn process_one(&mut self, input: f32, channel: usize, preamp: f32) -> f32 {
         let mut sample = input * preamp;
@@ -82,8 +78,9 @@ impl EqProcessor {
         soft_clip_fast(sample)
     }
 
-    /// 处理单个采样(preamp + biquad + soft_clip),公开供独占模式解码线程与 benchmark 复用。
-    /// 调用方需保证按交错声道依次调用(channel = 采样在帧内声道下标)。
+    /// 公开的逐采样处理（独占模式链路），供解码线程与 benchmark 复用
+    ///
+    /// 调用方必须按交错声道依次调用（`channel` 是采样在帧内的声道下标）。
     /// 独占模式只有 Windows(WASAPI) 与 Android(AAudio)，其它平台无调用方。
     #[inline(always)]
     pub fn process_sample(&mut self, input: f32, channel: usize) -> f32 {
@@ -128,8 +125,7 @@ mod eq_processor_tests {
         settings
     }
 
-    /// 逐采样处理指定声道(EqProcessor 的 process_batch 无单采样 API)。
-    /// 占位声道填入 0.0,不影响目标声道各自的 biquad 状态。
+    /// 借 process_batch 做单采样处理（它没有单采样 API）；占位声道填 0.0，不影响目标声道的 biquad 状态
     fn process_channel(ep: &mut EqProcessor, input: f32, channel: usize) -> f32 {
         let mut buf = [0.0_f32; 2];
         buf[channel] = input;
@@ -237,7 +233,6 @@ mod eq_processor_tests {
     #[test]
     fn test_eq_processor_batch_is_chunk_splitting_invariant() {
         // 交错立体声缓冲:process_batch 单次整批处理与分多次小批处理结果应一致
-        // (biquad 状态跨调用保持,等价于旧的 process_buffer/process_sample 一致性)
         let n_frames: usize = 480;
         let buffer: Vec<f32> = (0..n_frames * 2)
             .map(|i| {

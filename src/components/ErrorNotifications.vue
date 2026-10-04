@@ -1,5 +1,4 @@
 <template>
-  <!-- 错误通知浮层 -->
   <TransitionGroup name="error-notification" tag="div" class="error-notifications">
     <div
       v-for="notification in errorNotifications"
@@ -29,10 +28,7 @@
 <script setup lang="ts">
 import { useErrorNotification } from '@/composables/useErrorNotification'
 
-/**
- * 全局错误通知浮层。从 App.vue 拆出:
- * 通知源为模块级单例(useErrorNotification),组件卸载不影响其他消费者。
- */
+// 全局错误通知浮层；通知源是模块级单例，组件卸载不影响其他消费者
 const { errorNotifications, removeError } = useErrorNotification()
 </script>
 
@@ -129,7 +125,6 @@ const { errorNotifications, removeError } = useErrorNotification()
   font-size: 20px;
 }
 
-/* 错误通知动画 */
 .error-notification-enter-active,
 .error-notification-leave-active {
   transition: all 0.3s ease;

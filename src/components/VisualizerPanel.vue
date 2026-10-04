@@ -1,11 +1,9 @@
 <template>
   <div class="visualizer-panel">
-    <!-- 上方：音频波形可视化 -->
     <div ref="visualizerContainer" class="visualizer-container">
       <canvas ref="canvasRef"></canvas>
     </div>
 
-    <!-- 下方：单行歌词显示 -->
     <div class="single-line-lyrics">
       <div v-if="currentLyric" class="lyric-content">
         <div
@@ -18,7 +16,7 @@
           :lang="originalLang || undefined"
         >
           <template v-if="currentLyric.karaoke">
-            <!-- 复用卡拉OK逻辑 -->
+            <!-- 逐字高亮的渲染沿用主歌词页，样式由 getKaraokeStyle 给 -->
             <span
               v-for="(word, idx) in currentLyric.words"
               :key="idx"
@@ -103,7 +101,7 @@ export default {
       return cachedGradient
     }
 
-    // 把每帧 128 次独立的 beginPath/fill(draw call) 降为 1 次,显著降低 CPU 绘制开销
+    // 每帧 128 次 beginPath/fill 合成一次 draw call，显著降低 CPU 绘制开销
     const renderBars = (
       ctx: CanvasRenderingContext2D,
       width: number,
@@ -151,7 +149,6 @@ export default {
       }
     }
 
-    // 当前歌词
     const currentLyric = computed(() => {
       if (activeIndex.value !== -1 && lyrics.value[activeIndex.value]) {
         return lyrics.value[activeIndex.value]
@@ -159,19 +156,19 @@ export default {
       return null
     })
 
-    // 判断歌词类型（ASS/LRC）
+    // 有逐字时间戳就按 ASS 渲染，否则按 LRC
     const isLyricTypeASS = computed(() => {
       return currentLyric.value && currentLyric.value.words && currentLyric.value.words.length > 0
     })
 
-    // --- 歌词字体（与主歌词页共用同一配置，见 useLyricsTypography） ---
+    // 歌词字体与主歌词页共用同一配置，见 useLyricsTypography
     const { lyricFontStyle, translationStyle } = useLyricsTypography()
 
     // 当前行的语言标注（原文/译文分别检测），供 lang 属性与字体 locl 区域字形使用
     const originalLang = computed(() => detectLyricLanguage(currentLyric.value?.texts[0]))
     const translationLang = computed(() => detectLyricLanguage(currentLyric.value?.texts[1]))
 
-    // --- 视觉时间 (用于卡拉OK) ---
+    // 视觉时间：卡拉OK 用的帧钟，见 useVisualTime
     const { visualTime, advanceVisualTime, resetFrameClock, syncToCurrentTime } = useVisualTime()
 
     watch(
@@ -184,8 +181,7 @@ export default {
 
     const karaokeStyleCache = new Map<string, Record<string, string>>()
     const activeColor = 'var(--md-sys-color-primary)'
-    // 不支持 color-mix() 的老 WebView 会整条丢弃这个内联赋值，而逐字高亮是靠
-    // background-image + background-clip: text 画的，丢了就是空白一片，故按支持情况换用安全色
+    // 未唱色：不支持 color-mix() 时退回 outline，原因见样式里 .karaoke-word 的注释
     const inactiveColor = supportsColorMix()
       ? 'color-mix(in srgb, var(--md-sys-color-primary) 40%, rgba(255, 255, 255, 0.1))'
       : 'var(--md-sys-color-outline)'
@@ -225,7 +221,7 @@ export default {
       return cached
     }
 
-    // 绘制冻结状态（暂停时保留最后一帧）
+    // 暂停时保留最后一帧，不再推进 rAF
     const drawFrozenFrame = () => {
       if (!canvasRef.value || !visualizerContainer.value) return
 
@@ -243,7 +239,6 @@ export default {
       renderBars(ctx, width, height, drawData)
     }
 
-    // --- 可视化绘制 ---
     const drawVisualizer = (timestamp: number): void => {
       if (!canvasRef.value || !visualizerContainer.value) return
 
@@ -288,13 +283,12 @@ export default {
 
       ctx.shadowBlur = 0
 
-      // 更新视觉时间 (P 控制器在 useVisualTime 内)
+      // 推进视觉时间；P 控制器在 useVisualTime 内
       advanceVisualTime(timestamp)
 
       animationId = requestAnimationFrame(drawVisualizer)
     }
 
-    // 启动动画
     const startAnimation = () => {
       if (isAnimating) return
       isAnimating = true
@@ -302,7 +296,6 @@ export default {
       animationId = requestAnimationFrame(drawVisualizer)
     }
 
-    // 停止动画
     const stopAnimation = () => {
       if (animationId) {
         cancelAnimationFrame(animationId)
@@ -312,7 +305,6 @@ export default {
       pendingSpectrumData = null
     }
 
-    // 监听播放状态变化
     watch(
       () => playerStore.isPlaying,
       (playing) => {
@@ -343,8 +335,7 @@ export default {
       window.addEventListener('resize', resizeCanvas)
       resizeCanvas()
 
-      // 监听频谱更新事件（后端以60fps发送）
-      // 数据先缓存，由requestAnimationFrame按屏幕刷新率消费
+      // 后端以 60fps 发 spectrum-update：数据先存一份，由 rAF 按屏幕刷新率消费，不逐事件重绘
       try {
         const unlisten = await listen<{ data: Float32Array }>('spectrum-update', (event) => {
           if (event.payload && event.payload.data) {
@@ -359,7 +350,6 @@ export default {
 
       if (disposed) return
 
-      // 根据当前播放状态决定是否启动动画
       if (playerStore.isPlaying) {
         startAnimation()
       } else {
@@ -442,29 +432,26 @@ canvas {
   color: var(--md-sys-color-primary);
   line-height: 1.3;
   transition: all 0.3s ease;
-  /* 限制最多显示2行 */
+  /* -webkit-line-clamp：最多显示 2 行 */
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
-/* LRC字幕颜色 */
 .lyric-original-lrc {
   color: var(--md-sys-color-primary);
 }
 
-/* ASS字幕颜色 */
 .lyric-original-ass {
   color: var(--md-sys-color-primary);
 }
 
 .lyric-translation {
-  /* 同上：跟随「歌词字号」倍率 */
+  /* 同上：跟随歌词字号倍率 */
   font-size: calc(32px * var(--lyrics-scale, 1));
   color: var(--md-sys-color-primary);
   font-weight: 500;
-  /* 限制最多显示2行 */
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;

@@ -2,21 +2,19 @@
   <div class="audio-device-settings">
     <div class="content-header">
       <h3>{{ $t('config.audioDeviceSettings') }}</h3>
-      <!-- Android 上没有可切换的输出设备，刷新按钮只会刷出一个「系统默认」，意义不大 -->
+      <!-- Android 无可切换输出设备, 刷新只会得到系统默认 -->
       <button v-if="!isAndroidPlatform" class="filled-tonal-button" @click="refreshDevices">
         <span class="material-symbols-rounded">refresh</span>
         {{ $t('config.refreshDevices') }}
       </button>
     </div>
 
-    <!-- Android：输出路由由系统统一管理（扬声器/蓝牙/有线耳机自动切换），后端也只上报默认设备，
-         选择没有意义，直接不展示列表 -->
+    <!-- Android: 输出路由由系统统一管理 (扬声器/蓝牙/有线自动切换), 后端只上报默认设备, 不展示列表 -->
     <div v-if="isAndroidPlatform" class="capability-notice platform-notice">
       <span class="material-symbols-rounded">speaker_phone</span>
       <p>{{ $t('config.audioDeviceManagedBySystem') }}</p>
     </div>
 
-    <!-- Android：输出路由 + USB DAC 独占（对应 Windows 的 WASAPI 独占） -->
     <div v-if="isAndroidPlatform" class="route-panel">
       <div class="route-row">
         <span class="route-label">{{ $t('config.currentOutputRoute') }}</span>
@@ -82,8 +80,7 @@
           </div>
         </div>
         <div class="option-control">
-          <!-- 不绑定 update 事件: 点击冒泡给上方整行,走 toggleExclusiveMode 命令;
-               设备不支持时仅视觉变暗 (class),平台不支持时才真正禁用 -->
+          <!-- 不绑 update: 点击冒泡给整行走 toggleExclusiveMode; 设备不支持仅变暗, 平台不支持才禁用 -->
           <SettingSwitch
             :model-value="useExclusiveMode"
             :disabled="!isWindowsPlatform"
@@ -92,8 +89,7 @@
         </div>
       </div>
 
-      <!-- Android：USB DAC 独占（位完美）。与 Windows 的 WASAPI 独占是同一类
-           诉求，区别在于安卓上设备由系统路由，只在检测到 USB 音频设备时才有意义 -->
+      <!-- Android USB DAC 独占 (位完美) 对应 Windows WASAPI 独占; 安卓设备由系统路由, 只在插入 USB 音频设备时有意义 -->
       <div
         v-if="isAndroidPlatform"
         class="option-item"
@@ -128,7 +124,7 @@
         </div>
       </div>
 
-      <!-- 平台不支持独占模式提示（Android 有自己的 USB DAC 通道，不算不支持） -->
+      <!-- Android 有自己的 USB DAC 通道, 不算不支持独占 -->
       <div
         v-if="!isWindowsPlatform && !isAndroidPlatform"
         class="capability-notice platform-notice"
@@ -137,7 +133,7 @@
         <p>{{ $t('config.exclusiveModePlatformNotSupported') }}</p>
       </div>
 
-      <!-- Android：未插 DAC / 独占没能开成 -->
+      <!-- 三种降级态: 等下一首生效 / 未插 DAC / 独占未生效已回退标准输出 -->
       <div v-if="isAndroidPlatform && pendingNextTrack" class="capability-notice">
         <span class="material-symbols-rounded">playlist_play</span>
         <p>{{ $t('config.usbDacTakesEffectNextTrack') }}</p>
@@ -156,7 +152,6 @@
         <p>{{ $t('config.usbDacFallback') }}</p>
       </div>
 
-      <!-- 设备能力提示 -->
       <div
         v-else-if="currentDevice && !currentDevice.supportsExclusiveMode && useExclusiveMode"
         class="capability-notice"
@@ -165,13 +160,11 @@
         <p>{{ $t('config.exclusiveModeNotSupported') }}</p>
       </div>
 
-      <!-- 低延迟模式说明 -->
       <div v-if="isWindowsPlatform && useExclusiveMode" class="capability-notice">
         <span class="material-symbols-rounded">info</span>
         <p>{{ $t('config.exclusiveModeWarning') }}</p>
       </div>
 
-      <!-- 淡入淡出开关 -->
       <div class="option-item" @click="toggleFadeEnabled()">
         <div class="option-label">
           <span class="material-symbols-rounded">graphic_eq</span>
@@ -245,7 +238,6 @@ const playerStore = usePlayerStore()
 const configStore = useConfigStore()
 const { t } = useI18n()
 
-// 状态管理
 const audioDevices = ref<AudioDevice[]>([])
 const currentDevice = ref<AudioDevice | null>(null)
 const loading = ref(false)
@@ -255,23 +247,22 @@ const useExclusiveMode = ref(false)
 const fadeEnabled = ref(true)
 const currentPlatform = ref<string>('unknown')
 
-/** Android 输出路由快照；非安卓平台保持 null（后端在非安卓上返回错误） */
+/** Android 输出路由快照; 非安卓平台保持 null */
 const audioRoute = ref<AudioRouteInfo | null>(null)
 const usbDacExclusiveEnabled = ref(false)
-// 刚切过开关、但当前曲目还在旧输出上：提示"下一首生效"
+// 切过开关但当前曲目仍在旧输出上: 提示"下一首生效"
 const pendingNextTrack = ref(false)
 
-// 平台检测
 const isWindowsPlatform = computed(() => {
   return currentPlatform.value === 'windows'
 })
 
-// Android 上输出设备由系统接管（见模板说明），不提供设备列表
+// 见模板的平台说明: Android 不展示设备列表
 const isAndroidPlatform = computed(() => {
   return currentPlatform.value === 'android'
 })
 
-/** 把设备类型名映射成一句人话（未接 USB 时按主要类型猜一个） */
+/** 未接 USB 时按主要设备类型给路由起名 */
 const routeLabel = computed(() => {
   const route = audioRoute.value
   if (!route) return '—'
@@ -300,7 +291,7 @@ const routeIcon = computed(() => {
   return 'speaker'
 })
 
-/** 读取输出路由。非安卓平台后端会报错，静默忽略即可 */
+/** 非安卓平台后端会报错, 静默忽略即可 */
 const fetchAudioRoute = async (): Promise<void> => {
   if (!isAndroidPlatform.value) return
   try {
@@ -323,7 +314,7 @@ const toggleUsbDacExclusive = async (): Promise<void> => {
     usbDacExclusiveEnabled.value = next
     configStore.setAudioConfig({ usbDacExclusive: next })
     await fetchAudioRoute()
-    // 移动端下首生效：设置与当前实际输出不一致时提示，等下一首切到新链路后自然消失
+    // 移动端下一首生效: 期望值与实际输出不一致时提示, 切歌后自然消失
     pendingNextTrack.value = audioRoute.value?.exclusiveActive !== next
   } catch (err) {
     logger.error('切换 USB DAC 独占失败:', err)
@@ -331,12 +322,11 @@ const toggleUsbDacExclusive = async (): Promise<void> => {
   }
 }
 
-/** USB DAC 插拔由后端广播；在设置页打开时顺手刷新一次 */
+/** USB DAC 插拔由后端 audio-route-changed 事件广播; 打开设置页时顺手刷新一次 */
 let unlistenRoute: UnlistenFn | null = null
-// onMounted 里有一串 await，listen() 完成时组件可能已卸载，需要事后自查
+// onMounted 里有一串 await, listen() 完成时组件可能已卸载, 需要事后自查
 let mountedCleanupDone = false
 
-// 获取音频设备列表
 const fetchAudioDevices = async (): Promise<void> => {
   loading.value = true
   error.value = null
@@ -345,7 +335,6 @@ const fetchAudioDevices = async (): Promise<void> => {
     const devices = await getAudioDevices()
     audioDevices.value = devices
 
-    // 获取当前设备
     const current = await getCurrentAudioDevice()
     currentDevice.value = current
   } catch (err) {
@@ -356,10 +345,9 @@ const fetchAudioDevices = async (): Promise<void> => {
   }
 }
 
-// 选择并切换音频设备
 const selectDevice = async (device: AudioDevice): Promise<void> => {
   if (currentDevice.value?.name === device.name) {
-    return // 已经是当前设备，无需切换
+    return
   }
 
   loading.value = true
@@ -376,49 +364,43 @@ const selectDevice = async (device: AudioDevice): Promise<void> => {
   }
 }
 
-// 检查是否需要重启以应用独占模式设置
 const checkRestartRequired = async (): Promise<void> => {
-  // 只有 Windows 才存在"当前已生效的独占模式"与"配置意向"两套状态。安卓的 exclusive_mode
-  // 跟着 USB DAC 偏好走、并且按"下一首生效"设计，拿它和配置比较会在切歌之后误报"需要重启"。
+  // 只有 Windows 同时存在"已生效的独占模式"和"配置意向"两套状态;
+  // 安卓的 exclusive_mode 跟随 USB DAC 偏好且按下一首生效, 比较会在切歌后误报需要重启
   if (!isWindowsPlatform.value) {
     restartRequired.value = false
     return
   }
   try {
     const activeExclusiveMode = await getExclusiveMode()
-    // 如果当前活跃状态与 store 中的意向状态不一致，则需要重启
     restartRequired.value = activeExclusiveMode !== useExclusiveMode.value
   } catch (err) {
     logger.error('Failed to check active exclusive mode:', err)
   }
 }
 
-// 切换独占模式
 const toggleExclusiveMode = async (): Promise<void> => {
-  // 在非 Windows 平台上阻止启用独占模式
   if (!isWindowsPlatform.value && !useExclusiveMode.value) {
     logger.warn('Exclusive mode is only supported on Windows')
     return
   }
 
-  // 检查当前设备是否支持独占模式
   if (
     currentDevice.value &&
     !currentDevice.value.supportsExclusiveMode &&
     !useExclusiveMode.value
   ) {
-    // 尝试启用但不支持的设备，显示警告但仍然执行
+    // 设备不支持时只告警, 仍继续切换
     logger.warn('Trying to enable exclusive mode on unsupported device')
   }
 
   try {
     await toggleExclusiveModeCommand(!useExclusiveMode.value, playerStore.currentTime)
 
-    // 如果成功返回（说明切换到了当前已生效的状态），更新状态并清除提示
+    // 后端成功返回即已生效, 清掉重启提示
     useExclusiveMode.value = !useExclusiveMode.value
     restartRequired.value = false
 
-    // 重新获取当前设备信息以更新状态
     try {
       const updatedDevice = await getCurrentAudioDevice()
       currentDevice.value = updatedDevice
@@ -428,11 +410,9 @@ const toggleExclusiveMode = async (): Promise<void> => {
   } catch (err) {
     const errorMessage = getErrorMessage(err, String(err))
 
-    // 检查是否是需要重启的提示
+    // 后端用 RESTART_REQUIRED 标记"意向已存但未生效"
     if (errorMessage.includes('RESTART_REQUIRED')) {
-      // 更新本地状态以反映配置已更改
       useExclusiveMode.value = !useExclusiveMode.value
-      // 显示需要重启的提示
       restartRequired.value = true
     } else {
       logger.error('Failed to toggle exclusive mode:', err)
@@ -441,7 +421,6 @@ const toggleExclusiveMode = async (): Promise<void> => {
   }
 }
 
-// 切换淡入淡出
 const toggleFadeEnabled = async (): Promise<void> => {
   const newValue = !fadeEnabled.value
   try {
@@ -454,15 +433,12 @@ const toggleFadeEnabled = async (): Promise<void> => {
   }
 }
 
-// 刷新设备列表
 const refreshDevices = (): void => {
   void fetchAudioDevices()
   void fetchAudioRoute()
 }
 
-// 组件挂载时获取设备列表
 onMounted(async () => {
-  // 获取平台信息
   try {
     currentPlatform.value = await getPlatform()
     logger.debug('Detected platform:', currentPlatform.value)
@@ -471,7 +447,7 @@ onMounted(async () => {
     currentPlatform.value = 'unknown'
   }
 
-  // 优先从 store 获取独占模式设置
+  // 先用 store 的意向值, 缺省才发 IPC 查询
   if (configStore.audio?.exclusiveMode !== undefined) {
     useExclusiveMode.value = configStore.audio.exclusiveMode
   } else {
@@ -483,7 +459,6 @@ onMounted(async () => {
     }
   }
 
-  // 加载淡入淡出设置
   if (configStore.audio?.fadeEnabled !== undefined) {
     fadeEnabled.value = configStore.audio.fadeEnabled
   } else {
@@ -495,20 +470,17 @@ onMounted(async () => {
     }
   }
 
-  // 检查是否需要重启提示
   await checkRestartRequired()
 
-  // 获取音频设备时不重新加载配置，避免重置主题
+  // 取设备列表时不重新加载配置, 避免重置主题
   await fetchAudioDevices()
 
-  // 获取当前设备信息
   try {
     currentDevice.value = await getCurrentAudioDevice()
   } catch (err) {
     logger.error('Failed to get current audio device:', err)
   }
 
-  // Android：输出路由 + USB DAC 独占状态
   if (configStore.audio?.usbDacExclusive !== undefined) {
     usbDacExclusiveEnabled.value = configStore.audio.usbDacExclusive
   }
@@ -533,14 +505,12 @@ onUnmounted(() => {
   unlistenRoute = null
 })
 
-// 监听当前设备变化
 watch(currentDevice, (newDevice: AudioDevice | null) => {
   if (newDevice) {
     logger.debug('Audio device changed to:', newDevice.name, 'Mode:', newDevice.audioModeStatus)
   }
 })
 
-// 保存配置
 watch(useExclusiveMode, (newValue: boolean) => {
   configStore.setAudioConfig({ exclusiveMode: newValue })
 })
@@ -643,7 +613,6 @@ watch(useExclusiveMode, (newValue: boolean) => {
   color: var(--md-sys-color-primary);
 }
 
-/* Android 输出路由摘要 */
 .route-panel {
   border-radius: 12px;
   padding: 4px 16px;
@@ -676,7 +645,7 @@ watch(useExclusiveMode, (newValue: boolean) => {
   font-size: 14px;
   font-weight: 500;
   color: var(--md-sys-color-on-surface);
-  /* 设备名可能很长（USB 产品名），优先截断而不是撑破面板 */
+  /* USB 产品名可能很长, 优先截断而不是撑破面板 */
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -751,7 +720,7 @@ watch(useExclusiveMode, (newValue: boolean) => {
   color: var(--md-sys-color-on-surface-variant);
 }
 
-/* 开关视觉由 SettingSwitch 组件提供;此处仅保留设备不支持时的变暗态 */
+/* 开关视觉在 SettingSwitch; 这里只有设备不支持时的变暗态 */
 .option-control .switch.disabled {
   opacity: 0.38;
   cursor: not-allowed;

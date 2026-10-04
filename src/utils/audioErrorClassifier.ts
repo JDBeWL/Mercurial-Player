@@ -17,15 +17,14 @@ function toMessage(err: unknown): string {
 }
 
 /**
- * 将后端（Tauri/Rust）返回的错误信息，映射到更精确的前端 ErrorType。
+ * 将后端（Tauri/Rust）返回的错误信息映射到更精确的前端 ErrorType。
  *
- * 目标：把“格式探测/解码失败”与“音频设备/输出流失败”区分开，避免误提示用户检查音频设备。
+ * 区分"格式探测/解码失败"与"音频设备/输出流失败"，避免误提示用户检查音频设备。
  */
 export function classifyAudioInvokeError(err: unknown): ErrorType {
   const msg = toMessage(err)
   const m = msg.toLowerCase()
 
-  // --- 解码/格式探测类（你提到的场景） ---
   const decodePatterns = [
     'unrecognized format',
     'failed to probe format',
@@ -41,10 +40,7 @@ export function classifyAudioInvokeError(err: unknown): ErrorType {
     return ErrorType.AUDIO_DECODE_ERROR
   }
 
-  // --- 设备/输出流类 ---
-  // 注意:不含裸 'wasapi' 与 'not initialized' 等宽泛词,
-  // 否则 "WASAPI player not initialized" / "Decoder not initialized"
-  // 这类内部状态错误会被误报为音频设备故障
+  // 不含裸 'wasapi'/'not initialized' 等宽泛词：否则 "Decoder not initialized" 这类内部状态错误会被误报为音频设备故障
   const devicePatterns = [
     'audio device not found',
     'failed to get output devices',

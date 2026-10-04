@@ -5,7 +5,7 @@ import { reactive, nextTick } from 'vue'
 import PlaylistView from '@/components/PlaylistView.vue'
 import type { Track } from '@/types'
 
-// 使用 vi.hoisted 创建可在 mock 工厂中引用的可变引用
+// vi.hoisted 是唯一能在被提升的 mock 工厂里引用的声明方式, 用它存放可变的 store 引用
 const mocks = vi.hoisted(() => ({
   playerStore: null as unknown,
 }))
@@ -14,7 +14,6 @@ vi.mock('@/stores/player', () => ({
   usePlayerStore: () => mocks.playerStore,
 }))
 
-// mock config store
 vi.mock('@/stores/config', () => ({
   useConfigStore: () => ({
     titleExtraction: { hideFileExtension: true },
@@ -35,8 +34,7 @@ vi.mock('vue-i18n', () => ({
   }),
 }))
 
-// mock pinia 的 storeToRefs，将 store 属性转为 ref
-// 组件使用 storeToRefs 获取 playlist、currentTrack 和 currentTrackIndex，需要返回响应式 ref
+// 组件用 storeToRefs 取 playlist、currentTrack 和 currentTrackIndex, mock 必须返回响应式 ref
 vi.mock('pinia', async () => {
   const { toRef } = await import('vue')
   return {
@@ -54,7 +52,6 @@ vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: vi.fn((path: string) => `mock://cover/${path}`),
 }))
 
-// mock FileUtils
 vi.mock('@/utils/fileUtils', () => ({
   default: {
     getFileName: vi.fn((path: string) => path.split(/[\\/]/).pop() || path),
@@ -80,7 +77,6 @@ vi.mock('@/utils/fileUtils', () => ({
   },
 }))
 
-/** 创建测试用曲目列表 */
 function makeTracks(n: number): Track[] {
   return Array.from({ length: n }, (_, i) => ({
     path: `/music/track${i}.mp3`,
@@ -91,7 +87,6 @@ function makeTracks(n: number): Track[] {
   }))
 }
 
-/** 创建带封面的曲目 */
 function makeTrackWithCover(path: string, title: string): Track {
   return {
     path,
@@ -102,7 +97,6 @@ function makeTrackWithCover(path: string, title: string): Track {
   }
 }
 
-/** 创建 mock player store */
 function createMockStore(overrides: Record<string, unknown> = {}) {
   return reactive({
     playlist: [] as Track[],
@@ -146,8 +140,6 @@ describe('PlaylistView.vue', () => {
     vi.useRealTimers()
     vi.restoreAllMocks()
   })
-
-  // ---------- 播放列表渲染 ----------
 
   describe('播放列表渲染', () => {
     it('空播放列表显示空状态', async () => {
@@ -222,8 +214,6 @@ describe('PlaylistView.vue', () => {
     })
   })
 
-  // ---------- 当前曲目高亮 ----------
-
   describe('当前曲目高亮', () => {
     it('当前播放曲目有 selected 类', async () => {
       const tracks = makeTracks(3)
@@ -249,8 +239,6 @@ describe('PlaylistView.vue', () => {
     })
   })
 
-  // ---------- 播放控制 ----------
-
   describe('播放控制', () => {
     it('点击列表项调用 playTrack', async () => {
       const tracks = makeTracks(2)
@@ -274,7 +262,6 @@ describe('PlaylistView.vue', () => {
       await nextTick()
       const items = wrapper.findAll('.list-item')
       await items[0]!.trigger('click')
-      // 当前曲目且未播放 → resume
       expect(store.resume).toHaveBeenCalledTimes(1)
       expect(store.playTrack).not.toHaveBeenCalled()
     })
@@ -286,7 +273,6 @@ describe('PlaylistView.vue', () => {
       await nextTick()
       const playButtons = wrapper.findAll('[data-action="play"]')
       await playButtons[1]!.trigger('click')
-      // 组件传入的是 ProcessedTrack（含 cachedTitle 等额外字段），用 path 匹配
       expect(store.playTrack).toHaveBeenCalledWith(
         expect.objectContaining({ path: tracks[1]!.path }),
       )
@@ -323,13 +309,10 @@ describe('PlaylistView.vue', () => {
       store.isPlaying = true
       wrapper = mountComponent()
       await nextTick()
-      // 仅当前播放行是暂停态，其余两行仍是播放态
       expect(wrapper.findAll('[data-action="pause"]')).toHaveLength(1)
       expect(wrapper.findAll('[data-action="play"]')).toHaveLength(2)
     })
   })
-
-  // ---------- 删除曲目 ----------
 
   describe('删除曲目', () => {
     it('每项都有删除按钮', async () => {
@@ -357,13 +340,10 @@ describe('PlaylistView.vue', () => {
       await nextTick()
       const removeButton = wrapper.findAll('.remove-button')[0]!
       await removeButton.trigger('click')
-      // removeTrack 被调用，但 playTrack 不应被调用
       expect(store.removeTrack).toHaveBeenCalledTimes(1)
       expect(store.playTrack).not.toHaveBeenCalled()
     })
   })
-
-  // ---------- 关闭按钮 ----------
 
   describe('关闭按钮', () => {
     it('点击关闭按钮触发 close 事件', async () => {
@@ -378,11 +358,9 @@ describe('PlaylistView.vue', () => {
     })
   })
 
-  // ---------- 标题右侧队列信息 ----------
-
   describe('队列信息', () => {
     it('有曲目时标题右侧显示队列信息（含总时长）', async () => {
-      store.playlist = makeTracks(3) // 3 首 × 180s = 9:00
+      store.playlist = makeTracks(3) // 3 首 * 180s = 9:00
       store.currentTrackIndex = 1
       wrapper = mountComponent()
       await nextTick()
@@ -399,8 +377,6 @@ describe('PlaylistView.vue', () => {
       expect(wrapper.find('.playlist-queue-info').exists()).toBe(false)
     })
   })
-
-  // ---------- 滚动状态 ----------
 
   describe('滚动状态', () => {
     it('滚动时添加 is-scrolling 类', async () => {
@@ -430,10 +406,6 @@ describe('PlaylistView.vue', () => {
     })
   })
 
-  // ---------- 注意：未实现的功能 ----------
-  // 任务描述中提到的"双击播放"、"右键菜单"、"搜索过滤"功能在当前组件源码中未实现：
-  // - 组件使用单击播放 (@click="playTrack(track)")，而非双击
-  // - 没有 @contextmenu 事件处理，无右键菜单
-  // - 没有搜索输入框和过滤逻辑
-  // 因此这些测试用例被跳过。
+  // 双击播放、右键菜单、搜索过滤没有对应用例: 组件只有单击播放 (@click="playTrack(track)"),
+  // 无 @contextmenu 处理, 也没有搜索输入框与过滤逻辑
 })

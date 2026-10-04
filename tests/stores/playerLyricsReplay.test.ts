@@ -106,7 +106,7 @@ describe('歌词在「重新播放同一首歌」时不应丢失', () => {
     await vi.waitFor(() => expect(store.lyrics).not.toBeNull())
     expect(lyricsApi.lyrics.value.length).toBeGreaterThan(0)
 
-    // 重新播放同一首(path 不变 → loadLyrics 的 watcher 不会重新触发)
+    // 重新播放同一首(path 不变 -> loadLyrics 的 watcher 不会重新触发)
     await store.playTrack(trackA)
 
     expect(store.lyrics).not.toBeNull()
@@ -119,7 +119,7 @@ describe('歌词在「重新播放同一首歌」时不应丢失', () => {
     await store.playTrack(trackA)
     await vi.waitFor(() => expect(store.lyrics).not.toBeNull())
 
-    // B 没有本地歌词且未开在线获取 → 应清空而不是继续显示 A 的歌词
+    // B 没有本地歌词且未开在线获取 -> 应清空而不是继续显示 A 的歌词
     findLyricsFileMock.mockResolvedValue(null)
     await store.playTrack(trackB)
 

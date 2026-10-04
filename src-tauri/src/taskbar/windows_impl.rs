@@ -1,6 +1,4 @@
-//! Windows任务栏缩略图工具栏
-//!
-//! 使用ITaskbarList3
+//! Windows 任务栏缩略图工具栏（ITaskbarList3）。
 
 #![allow(unsafe_code)] // Windows API交互需要unsafe
 
@@ -72,16 +70,9 @@ impl Drop for TaskbarIcons {
     }
 }
 
-// SAFETY: TaskbarManager 持有裸的 ITaskbarList3 COM 指针与 HICON。
-// 本实现的线程安全依据:
-// 1. 所有对 taskbar_list/图标的方法调用都经外部 Mutex(见 commands 层)串行化,
-//    不存在对同一 COM 对象的并发访问;
-// 2. HICON 句柄是进程全局资源,跨线程使用合法;
-// 3. 已知妥协:ITaskbarList3 按严格 COM 规则属于创建它的 STA,跨线程调用应经
-//    编组(marshaling)。本应用与 Windows 任务栏集成的实际行为是各方法仅向
-//    任务栏窗口投递消息,跨线程调用在实践中是安全的 —— 这也是 windows-rs
-//    生态中 TaskbarList 的通行用法。若未来出现 COM RpcImpersonate 相关报错,
-//    应改为把调用转发回主窗口线程执行。
+// SAFETY: 线程安全依据是外部 Mutex（见 commands 层）串行化了所有调用，HICON 本身是进程
+// 全局资源。已知妥协：ITaskbarList3 严格来说属于创建它的 STA，跨线程调用本应编组，但这里
+// 各方法只向任务栏窗口投递消息，实践中安全；若出现 COM 编组报错就改为转发回主窗口线程。
 #[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl Send for TaskbarManager {}
 unsafe impl Sync for TaskbarManager {}
@@ -109,23 +100,19 @@ impl TaskbarManager {
 
         self.hwnd = HWND(hwnd as *mut std::ffi::c_void);
 
-        // 创建ITaskbarList3实例
         let taskbar_list: ITaskbarList3 = unsafe {
             CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)
                 .map_err(|e| format!("Failed to create TaskbarList: {e}"))?
         };
 
-        // 初始化TaskbarList
         unsafe {
             taskbar_list
                 .HrInit()
                 .map_err(|e| format!("Failed to initialize TaskbarList: {e}"))?;
         }
 
-        // 创建图标
         self.create_icons()?;
 
-        // 添加缩略图按钮
         self.add_thumb_buttons(&taskbar_list)?;
 
         self.taskbar_list = Some(taskbar_list);
@@ -135,9 +122,8 @@ impl TaskbarManager {
         Ok(())
     }
 
-    /// 创建按钮图标
+    /// 用程序化生成的几何形状创建按钮图标，不加载外部图标文件
     fn create_icons(&mut self) -> Result<(), AppError> {
-        // 使用简单的形状创建图标
         self.icons.prev_icon = Some(create_prev_icon()?);
         self.icons.play_icon = Some(create_play_icon()?);
         self.icons.pause_icon = Some(create_pause_icon()?);
@@ -178,12 +164,11 @@ impl TaskbarManager {
             },
         ];
 
-        // 复制tooltip文本
         copy_tooltip(&mut buttons[0].szTip, &prev_tooltip);
         copy_tooltip(&mut buttons[1].szTip, &play_tooltip);
         copy_tooltip(&mut buttons[2].szTip, &next_tooltip);
 
-        // 修改dwMask，使用hIcon而非iBitmap
+        // 覆盖上面字面量里的 THB_BITMAP：按钮按 hIcon 取图，掩码得换成 THB_ICON
         for button in &mut buttons {
             button.dwMask = THUMBBUTTONMASK(0x2) | THB_TOOLTIP | THB_FLAGS; // THB_ICON = 0x2
         }
@@ -265,10 +250,10 @@ fn copy_tooltip(dest: &mut [u16; 260], src: &[u16]) {
 /// 获取系统小图标尺寸
 fn get_icon_size() -> i32 {
     let size = unsafe { GetSystemMetrics(SM_CXSMICON) };
-    if size > 0 { size } else { 16 } // 如果获取失败，返回默认值16
+    if size > 0 { size } else { 16 }
 }
 
-/// 创建上一首图标 (|◀)
+/// 创建上一首图标：左侧竖线 + 左向三角
 fn create_prev_icon() -> Result<HICON, AppError> {
     let size = get_icon_size();
 
@@ -277,13 +262,11 @@ fn create_prev_icon() -> Result<HICON, AppError> {
         let cy = h as f32 / 2.0;
         let dy = (y as f32 - cy).abs();
 
-        // 左边竖线
         let bar_left = 3.0 * scale;
         let bar_right = 4.0 * scale;
         let bar_height = 5.0 * scale;
         let in_bar = x as f32 >= bar_left && x as f32 <= bar_right && dy < bar_height;
 
-        // ◀
         let tri_right = 12.0 * scale;
         let tri_width = 6.0 * scale;
         let dx = tri_right - x as f32;
@@ -293,7 +276,7 @@ fn create_prev_icon() -> Result<HICON, AppError> {
     })
 }
 
-/// 创建播放图标 (▶)
+/// 创建播放图标：右向三角
 fn create_play_icon() -> Result<HICON, AppError> {
     let size = get_icon_size();
 
@@ -303,13 +286,12 @@ fn create_play_icon() -> Result<HICON, AppError> {
         let cy = h as f32 / 2.0;
         let dx = x as f32 - cx;
         let dy = (y as f32 - cy).abs();
-        // ▶
         let tri_width = 8.0 * scale;
         dx >= 0.0 && dx < tri_width && dy < (tri_width - dx) * 0.8
     })
 }
 
-/// 创建暂停图标 (❚❚)
+/// 创建暂停图标：两条竖线
 fn create_pause_icon() -> Result<HICON, AppError> {
     let size = get_icon_size();
 
@@ -318,14 +300,12 @@ fn create_pause_icon() -> Result<HICON, AppError> {
         let cy = h as f32 / 2.0;
         let dy = (y as f32 - cy).abs();
 
-        // 两个竖条
         let bar1_left = 4.0 * scale;
         let bar1_right = 5.0 * scale;
         let bar2_left = 11.0 * scale;
         let bar2_right = 12.0 * scale;
         let bar_height = 5.0 * scale;
 
-        // ❚❚
         let in_bar1 = x as f32 >= bar1_left && x as f32 <= bar1_right && dy < bar_height;
         let in_bar2 = x as f32 >= bar2_left && x as f32 <= bar2_right && dy < bar_height;
 
@@ -333,7 +313,7 @@ fn create_pause_icon() -> Result<HICON, AppError> {
     })
 }
 
-/// 创建下一首图标 (▶|)
+/// 创建下一首图标：右向三角 + 右侧竖线
 fn create_next_icon() -> Result<HICON, AppError> {
     let size = get_icon_size();
 
@@ -342,13 +322,11 @@ fn create_next_icon() -> Result<HICON, AppError> {
         let cy = h as f32 / 2.0;
         let dy = (y as f32 - cy).abs();
 
-        // ▶
         let tri_left = 4.0 * scale;
         let tri_width = 6.0 * scale;
         let dx = x as f32 - tri_left;
         let in_triangle = dx >= 0.0 && dx < tri_width && dy < (tri_width - dx) * 0.9;
 
-        // 右边竖线
         let bar_left = 12.0 * scale;
         let bar_right = 13.0 * scale;
         let bar_height = 5.0 * scale;
@@ -402,29 +380,24 @@ where
             return Err("DIB bits is null".to_string().into());
         }
 
-        // 填充像素数据
         let pixels = std::slice::from_raw_parts_mut(bits.cast::<u32>(), (width * height) as usize);
 
-        // 先绘制内容
         for y in 0..height {
             for x in 0..width {
                 let idx = (y * width + x) as usize;
                 if pixel_fn(x, y, width, height) {
-                    // 白色，完全不透明
                     pixels[idx] = 0xFFFF_FFFF;
                 } else {
-                    // 透明
                     pixels[idx] = 0x0000_0000;
                 }
             }
         }
 
-        // 添加灰色边框
-        let gray_border: u32 = 0xFF80_8080; // 灰色
+        // 第二遍扫描：给形状外缘补一圈 1px 灰边
+        let gray_border: u32 = 0xFF80_8080;
         for y in 0..height {
             for x in 0..width {
                 let idx = (y * width + x) as usize;
-                // 如果当前像素是透明的，检查是否相邻有白色
                 if pixels[idx] == 0x0000_0000 {
                     let mut has_neighbor = false;
                     for dy in -1..=1_i32 {
@@ -453,7 +426,7 @@ where
             }
         }
 
-        // 创建掩码位图
+        // 掩码位图：ICONINFO 的掩码是反的，0 表示显示、非 0 表示透明
         let mask_bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: size_of::<BITMAPINFOHEADER>() as u32,
@@ -488,17 +461,15 @@ where
             for y in 0..height {
                 for x in 0..width {
                     let idx = (y * width + x) as usize;
-                    // 如果主位图有内容（非透明），掩码为0（显示）
                     if pixels[idx] != 0x0000_0000 {
-                        mask_pixels[idx] = 0x0000_0000; // 不透明部分的掩码
+                        mask_pixels[idx] = 0x0000_0000;
                     } else {
-                        mask_pixels[idx] = 0xFFFF_FFFF; // 透明部分的掩码
+                        mask_pixels[idx] = 0xFFFF_FFFF;
                     }
                 }
             }
         }
 
-        // 使用 ICONINFO 创建图标
         let iconinfo = windows::Win32::UI::WindowsAndMessaging::ICONINFO {
             fIcon: true.into(),
             xHotspot: 0,
@@ -511,7 +482,6 @@ where
             windows::Win32::UI::WindowsAndMessaging::CreateIconIndirect(&raw const iconinfo)
                 .map_err(|e| format!("Failed to create icon: {e}"))?;
 
-        // 清理
         let _ = DeleteObject(hbm.into());
         let _ = DeleteObject(mask_hbm.into());
         let _ = DeleteDC(hdc);

@@ -1,9 +1,6 @@
-//! 卡拉OK进度计算。
+//! 卡拉OK进度计算：按字素（grapheme）簇把歌词进度换算为颜色插值相位与剪裁终点 x。
 //!
-//! 纯逻辑部分：按字素（grapheme）簇把歌词进度换算为颜色插值相位与
-//! 剪裁终点 x 坐标，以及从逐字时间轴（`DesktopLyricWord`）推导整体
-//! 卡拉OK进度。除 `hit_test_text_x` / `progress_clip_end_x` 需要
-//! `IDWriteTextLayout` 做命中测试外，其余函数为可单测的纯计算。
+//! 除 `progress_clip_end_x` 要借 `IDWriteTextLayout` 做命中测试外，其余都是可单测的纯计算。
 
 use unicode_segmentation::UnicodeSegmentation;
 use windows::Win32::Graphics::DirectWrite::{DWRITE_HIT_TEST_METRICS, IDWriteTextLayout};
@@ -15,8 +12,7 @@ fn hit_test_text_x(layout: &IDWriteTextLayout, pos: u32, trailing: bool) -> Opti
     let mut x = 0.0f32;
     let mut y = 0.0f32;
     let mut metrics = DWRITE_HIT_TEST_METRICS::default();
-    // SAFETY: layout 是有效 COM 对象；x/y/metrics 均为栈上局部变量，
-    // &raw mut 传给 Win32 写入后在本函数内读取，不存在别名冲突
+    // SAFETY: layout 是有效 COM 对象；x/y/metrics 是出参，仅在调用期间被写入
     unsafe {
         layout
             .HitTestTextPosition(pos, trailing, &raw mut x, &raw mut y, &raw mut metrics)
@@ -175,7 +171,7 @@ mod tests {
 
     #[test]
     fn karaoke_midpoint_is_half() {
-        // 2 个字素、区间 [0, 2]，t=1 时走过 1 个字素 → 0.5
+        // 2 个字素、区间 [0, 2]，t=1 时走过 1 个字素 -> 0.5
         let words = [word("ab", 0.0, 2.0)];
         let p = karaoke_progress_from_words(&words, 1.0, 0.0);
         assert!(close(p, 0.5));

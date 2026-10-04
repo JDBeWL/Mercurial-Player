@@ -4,7 +4,6 @@
       <h3>{{ $t('config.equalizer') }}</h3>
     </div>
 
-    <!-- EQ 开关 -->
     <div class="eq-toggle" @click="toggleEnabled">
       <div class="toggle-info">
         <span class="material-symbols-rounded">equalizer</span>
@@ -13,7 +12,6 @@
       <SettingSwitch :model-value="enabled" />
     </div>
 
-    <!-- 预设选择 -->
     <div class="preset-section">
       <label class="section-label">{{ $t('config.eqPreset') }}</label>
       <div class="preset-chips">
@@ -29,7 +27,6 @@
       </div>
     </div>
 
-    <!-- 前置增益 -->
     <div class="preamp-section">
       <div class="preamp-header">
         <label class="section-label">{{ $t('config.preamp') }}</label>
@@ -48,10 +45,8 @@
       </div>
     </div>
 
-    <!-- 频段滑块 -->
     <div class="bands-section">
-      <!-- 重置放在频段这一行的右侧：它抹平的就是这些滑块，跟着标题走比挂在页头更容易被看到，
-           竖屏下也不会留出一条只漂着一个图标的空行 -->
+      <!-- 重置抹平的就是这些滑块, 跟着标题行比挂页头显眼; 竖屏下不留只漂一个图标的空行 -->
       <div class="bands-header">
         <label class="section-label">{{ $t('config.eqBands') }}</label>
         <button class="text-button" @click="resetEq">
@@ -101,7 +96,6 @@ import {
   type EqPreset,
 } from '../../services/eqService'
 
-// 状态
 const enabled = ref<boolean>(false)
 const preamp = ref<number>(0)
 const gains = ref<number[]>([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -109,19 +103,16 @@ const bands = ref<EqBandInfo[]>([])
 const presets = ref<EqPreset[]>([])
 const currentPreset = ref<string>('Flat')
 
-// 滑块引用
 const preampSlider = ref<HTMLElement | null>(null)
-// 模板中使用函数式 ref 绑定,el 类型为 Element | ComponentPublicInstance | null,
-// 使用 unknown[] 存储以兼容该联合类型,读取时断言为 HTMLElement
+// 函数式 ref 的 el 是 Element | ComponentPublicInstance | null, 存 unknown[]
 const bandSliders = ref<unknown[]>([])
 
-// 拖拽状态由 useDragValue 管理 (preampDragging / bandDragging)
 
-// 增益范围
+// 前置增益与频段增益单位 dB
 const MIN_GAIN = -8
 const MAX_GAIN = 8
 
-// 预设名称走 i18n（key 见语言文件 config.eqPresetNames），缺失时回退到原名
+// 预设名走 i18n (key 见 config.eqPresetNames), 缺失时回退原名
 const { t, te } = useI18n()
 
 const getPresetLabel = (name: string): string => {
@@ -129,17 +120,14 @@ const getPresetLabel = (name: string): string => {
   return te(key) ? t(key) : name
 }
 
-// 计算前置增益百分比 (0-100)
 const preampPercent = computed<number>(() => {
   return ((preamp.value - MIN_GAIN) / (MAX_GAIN - MIN_GAIN)) * 100
 })
 
-// 计算频段增益百分比
 const getBandPercent = (index: number): number => {
   return ((gains.value[index]! - MIN_GAIN) / (MAX_GAIN - MIN_GAIN)) * 100
 }
 
-// 加载 EQ 设置
 const loadSettings = async (): Promise<void> => {
   try {
     const [bandsData, settings, presetsData] = await Promise.all([
@@ -160,7 +148,6 @@ const loadSettings = async (): Promise<void> => {
   }
 }
 
-// 检测当前预设
 const detectCurrentPreset = (): void => {
   for (const preset of presets.value) {
     const match = preset.gains.every((g, i) => Math.abs(g - gains.value[i]!) < 0.1)
@@ -172,7 +159,6 @@ const detectCurrentPreset = (): void => {
   currentPreset.value = ''
 }
 
-// 切换启用状态
 const toggleEnabled = async (): Promise<void> => {
   try {
     await setEqEnabled(!enabled.value)
@@ -182,12 +168,11 @@ const toggleEnabled = async (): Promise<void> => {
   }
 }
 
-// 前置增益滑块处理 (拖拽骨架由 useDragValue 提供)
 const updatePreampFromPercent = (percent: number): void => {
   const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN)
-  const roundedValue = Math.round(newValue * 2) / 2 // 四舍五入到 0.5
+  const roundedValue = Math.round(newValue * 2) / 2 // 步进 0.5 dB
 
-  // 值未跨过 0.5dB 刻度时不做任何事
+  // 值未跨过 0.5 dB 刻度时不做任何事
   if (preamp.value === roundedValue) return
   preamp.value = roundedValue
   void sendPreamp(roundedValue)
@@ -215,9 +200,9 @@ const handlePreampClick = (e: MouseEvent): void => {
   updatePreampFromPercent(preampDrag.getPercent(e))
 }
 
-// ===== IPC 抑制：拖拽中 mousemove 可达 60-125Hz =====
-// UI 状态即时更新保证滑块跟手；后端 invoke 每个滑块同一时刻最多一个在途请求，
-// 在途期间的新值合并为最新值，请求完成后若仍有变化自动补发（收敛到最终值）。
+// IPC 抑制: 拖拽中 mousemove 可达 60-125Hz, UI 立即更新保证滑块跟手;
+// 每个滑块同一时刻最多一个在途 invoke, 在途期间的新值合并为最新值,
+// 请求完成后若仍有变化则补发, 收敛到最终值
 
 let preampSending = false
 let preampPending = 0
@@ -242,12 +227,12 @@ const sendPreamp = async (value: number): Promise<void> => {
   }
 }
 
-// 频段滑块处理 (共享一个拖拽控制器,用 activeBandIndex 标识当前频段)
+// 全部频段共用一个拖拽控制器, activeBandIndex 标识当前频段
 const updateBandFromPercent = (index: number, percent: number): void => {
   const newValue = MIN_GAIN + percent * (MAX_GAIN - MIN_GAIN)
   const roundedValue = Math.round(newValue * 2) / 2
 
-  // 值未跨过 0.5dB 刻度时不做任何事
+  // 同前置增益: 未跨过刻度不动作
   if (gains.value[index] === roundedValue) return
   gains.value[index] = roundedValue
   currentPreset.value = ''
@@ -261,7 +246,7 @@ const bandDrag = useDragValue({
     const slider = bandSliders.value[activeBandIndex.value] as HTMLElement | null
     if (!slider) return 0
     const rect = slider.getBoundingClientRect()
-    // 垂直滑块：从底部计算
+    // 垂直滑块从底部起算
     return Math.max(0, Math.min(1, (rect.bottom - event.clientY) / rect.height))
   },
   onStart: (percent) => {
@@ -299,7 +284,7 @@ const bandInFlight = new Map<number, BandSendState>()
 const sendBandGain = async (index: number, value: number): Promise<void> => {
   const state = bandInFlight.get(index)
   if (state) {
-    // 在途：仅更新目标值，当前请求完成后由循环补发
+    // 在途时只更新目标值, 见上方 IPC 抑制说明
     state.latest = value
     return
   }
@@ -318,7 +303,6 @@ const sendBandGain = async (index: number, value: number): Promise<void> => {
   }
 }
 
-// 应用预设
 const applyPreset = async (preset: EqPreset): Promise<void> => {
   try {
     await applyEqPreset(preset.name)
@@ -329,7 +313,6 @@ const applyPreset = async (preset: EqPreset): Promise<void> => {
   }
 }
 
-// 重置 EQ
 const resetEq = async (): Promise<void> => {
   try {
     await resetEqCommand()
@@ -359,7 +342,6 @@ onMounted(() => {
   color: var(--md-sys-color-on-surface);
 }
 
-/* EQ 开关 */
 .eq-toggle {
   display: flex;
   justify-content: space-between;
@@ -395,7 +377,6 @@ onMounted(() => {
   color: var(--md-sys-color-on-surface);
 }
 
-/* 预设部分 */
 .preset-section {
   margin-bottom: 24px;
 }
@@ -437,7 +418,6 @@ onMounted(() => {
   color: var(--md-sys-color-on-secondary-container);
 }
 
-/* 前置增益 */
 .preamp-section {
   margin-bottom: 32px;
   padding: 16px;
@@ -464,7 +444,6 @@ onMounted(() => {
   text-align: right;
 }
 
-/* MD3 Slider - 水平 */
 .slider.horizontal {
   position: relative;
   width: 100%;
@@ -472,7 +451,7 @@ onMounted(() => {
   cursor: pointer;
   display: flex;
   align-items: center;
-  /* 触摸拖拽：不禁用默认手势会被当成横向滚动，拖到一半就断 */
+  /* 不禁用默认手势会被当成横向滚动, 拖到一半就断 */
   touch-action: none;
 }
 
@@ -506,8 +485,7 @@ onMounted(() => {
     transform 0.1s ease,
     box-shadow 0.1s ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  /* 显式覆盖全局 .slider-thumb 的 opacity: 0，
-     让滑柄默认可见，而不是仅在 hover 时才显示 */
+  /* 覆盖全局 .slider-thumb 的 opacity: 0, 滑柄要默认可见而不是仅 hover 显示 */
   opacity: 1;
 }
 
@@ -529,7 +507,6 @@ onMounted(() => {
   pointer-events: none;
 }
 
-/* 频段部分 */
 .bands-section {
   margin-bottom: 24px;
 }
@@ -541,7 +518,7 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
-/* 行高由这一行统一管，标签自带的下边距会把按钮一起压低 */
+/* 标签自带下边距会把按钮一起压低, 行高交给这一行统一 */
 .bands-header .section-label {
   margin-bottom: 0;
 }
@@ -578,13 +555,12 @@ onMounted(() => {
   text-align: center;
 }
 
-/* MD3 Slider - 垂直 */
 .slider.vertical {
   position: relative;
   width: 20px;
   height: 120px;
   cursor: pointer;
-  /* 竖直方向滑动默认是页面滚动手势，必须显式接管 */
+  /* 竖直滑动默认是页面滚动, 必须显式接管 */
   touch-action: none;
 }
 
@@ -595,9 +571,8 @@ onMounted(() => {
   left: 50%;
   transform: translateX(-50%);
   width: 4px;
-  /* 显式覆盖全局 .slider-track 的 height: 4px，
-     否则 top+bottom+height 会过度约束导致 bottom 被忽略，
-     轨道只剩 4px 高度且位于顶部，看起来不可见 */
+  /* 覆盖全局 .slider-track 的 height: 4px, 否则 top+bottom+height 过度约束使
+     bottom 被忽略, 轨道只剩顶部 4px 不可见 */
   height: auto;
   background-color: var(--md-sys-color-surface-variant);
   border-radius: 2px;
@@ -625,8 +600,7 @@ onMounted(() => {
     transform 0.1s ease,
     box-shadow 0.1s ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  /* 显式覆盖全局 .slider-thumb 的 opacity: 0，
-     让滑柄默认可见，而不是仅在 hover 时才显示 */
+  /* 同水平滑块: 覆盖全局 opacity: 0 */
   opacity: 1;
 }
 
@@ -642,7 +616,6 @@ onMounted(() => {
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
 }
 
-/* 响应式 */
 @media (max-width: 600px) {
   .bands-container {
     gap: 4px;

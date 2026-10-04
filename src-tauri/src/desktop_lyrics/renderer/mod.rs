@@ -2,17 +2,8 @@
 
 //! 桌面歌词渲染入口（模块组织）。
 //!
-//! 本文件只保留渲染主入口 [`render_lyrics`]（读取共享状态、auto 配色、
-//! 平滑进度推进、淡入、GDI 内存位图合成与 UpdateLayeredWindow 提交），
-//! 其余按职责拆分到 `renderer/` 子模块：
-//!
-//! - `d2d_resources`：Direct2D/DirectWrite 资源生命周期（工厂、
-//!   DC 渲染目标、文本格式缓存、外部字体索引与内存加载器）
-//! - `karaoke`：卡拉OK进度计算（字素簇相位/剪裁终点、逐字时间轴）
-//! - `draw_line`：单行歌词绘制（跑马灯、描边、卡拉OK叠加与剪裁）
-//! - `frame`：整帧渲染（悬浮卡片、按钮、单行/双行歌词布局绘制）
-//! - `layout`：布局与文本测量（按钮矩形、文本区域、宽度/高度测量）
-//! - `background`：背景亮度采样（auto 配色）
+//! 本文件只保留 [`render_lyrics`] 主流程（读共享状态、auto 配色、平滑进度、淡入、
+//! GDI 内存位图合成与 UpdateLayeredWindow 提交）；各子模块的职责见其首部注释。
 
 mod background;
 mod d2d_resources;
@@ -42,15 +33,13 @@ use background::sample_background_luma;
 use frame::render_lyrics_d2d_frame;
 use karaoke::karaoke_progress_from_words;
 
+/// 完整的桌面歌词渲染函数。
+///
 /// # Safety
-/// 完整的桌面歌词渲染函数。调用者必须保证：
-/// - `hwnd` 是由本模块消息循环线程创建的有效窗口句柄
-/// - 当前线程已初始化 COM（`CoInitializeEx`）
-/// - 仅在 desktop-lyrics 消息循环线程上调用（D2D/DWrite 单线程访问）
+/// `hwnd` 须为本模块消息循环线程创建的窗口，当前线程已 `CoInitializeEx`；
+/// D2D/DWrite 资源线程独占，只能在 desktop-lyrics 消息循环线程调用。
 pub(super) unsafe fn render_lyrics(hwnd: HWND) {
-    // SAFETY: 见函数级 Safety 文档；内部所有 &raw mut/const 均指向栈上局部变量，
-    // 在对应 Win32/COM 调用返回后才被读取，无别名冲突。GDI 对象（h_bitmap/hdc_mem）
-    // 在使用后通过 DeleteObject/DeleteDC 释放，遵循 GDI 对象生命周期管理契约。
+    // SAFETY: 满足函数级 Safety 文档的线程与句柄约束
     unsafe {
         let mut window_rect = RECT::default();
         let _ = GetWindowRect(hwnd, &raw mut window_rect);

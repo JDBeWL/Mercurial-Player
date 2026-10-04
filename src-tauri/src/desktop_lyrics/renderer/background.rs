@@ -1,7 +1,4 @@
-//! 背景亮度采样（auto 配色）。
-//!
-//! 通过 GDI 抓取窗口身后的屏幕区域（不带 CAPTUREBLT，不会捕获分层
-//! 窗口自身）并计算平均亮度，供 auto 配色在深色/浅色文字间切换。
+//! 背景亮度采样（auto 配色）：GDI 抓取窗口身后的屏幕区域并求平均亮度。
 
 use std::mem::size_of;
 
@@ -11,14 +8,13 @@ use windows::Win32::Graphics::Gdi::{
     DeleteObject, GetDC, HGDIOBJ, RGBQUAD, ReleaseDC, SRCCOPY, SelectObject, StretchBlt,
 };
 
-/// 捕获屏幕区域（不含分层窗口自身）到 out_w×out_h 的 BGRA 缓冲，
-/// alpha 恒为 255。StretchBlt 不带 CAPTUREBLT 标志时不会捕获分层窗口，
-/// 拿到的降采样图就是本窗口身后被遮挡的内容。
-/// 返回 (像素数据, 宽, 高)；区域非法或 GDI 失败返回 None
+/// 捕获屏幕区域（不含分层窗口自身）到 out_w*out_h 的 BGRA 缓冲，alpha 恒为 255
+///
+/// StretchBlt 不带 CAPTUREBLT 标志时不会捕获分层窗口，拿到的降采样图就是本窗口
+/// 身后被遮挡的内容。返回 (像素数据, 宽, 高)；区域非法或 GDI 失败返回 None。
 ///
 /// # Safety
-/// `window_rect` 为屏幕坐标。GDI 对象（DIB/兼容 DC）在函数内成对创建与释放，
-/// 屏幕 DC 配对 ReleaseDC
+/// `window_rect` 为屏幕坐标；GDI 对象（DIB/兼容 DC/屏幕 DC）在函数内成对创建与释放
 unsafe fn capture_region_bgra(
     window_rect: &RECT,
     out_w: i32,
@@ -131,8 +127,7 @@ unsafe fn capture_region_bgra(
     captured
 }
 
-/// 采样窗口背后的屏幕区域平均亮度（0=全黑 1=全白），供 auto 配色
-/// 决定使用深色还是浅色文字
+/// 采样窗口背后的屏幕区域平均亮度（0=全黑 1=全白），供 auto 配色选深/浅文字
 ///
 /// # Safety
 /// `window_rect` 为屏幕坐标

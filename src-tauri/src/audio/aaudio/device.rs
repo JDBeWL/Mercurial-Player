@@ -1,6 +1,7 @@
 //! Android 输出设备能力查询
-//! `AAudioStreamBuilder_setDeviceId` 要的是 `AudioDeviceInfo.getId()` 这个系统设备 id，
-//! cpal 枚举出的名字（多半是同一个手机型号）拿不到它，也拿不到采样率/位深，故一律经 Kotlin 取。
+//!
+//! 一律经 Kotlin 取：cpal 枚举出的名字给不出 `AAudioStreamBuilder_setDeviceId` 要的
+//! `AudioDeviceInfo.getId()`，也没有采样率/位深/编码。
 
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
@@ -40,15 +41,14 @@ pub fn query_output_devices() -> Result<Vec<OutputDeviceInfo>, AppError> {
     serde_json::from_str(&json).map_err(|e| AppError::msg(format!("解析输出设备 JSON 失败: {e}")))
 }
 
-/// 找出 USB 音频输出设备（USB DAC）。
-///
-/// 有多个时取第一个：同一时刻通常只接一个，且 `getDevices` 的顺序稳定。
+/// 找出 USB 音频输出设备（USB DAC）：有多个时取第一个，同一时刻通常只接一个，且 `getDevices` 的顺序稳定。
 pub fn find_usb_output_device() -> Result<Option<OutputDeviceInfo>, AppError> {
     Ok(query_output_devices()?.into_iter().find(|d| d.is_usb))
 }
 
-/// 在设备支持的采样率里挑一个最接近 `preferred` 的：位完美的关键就是别让系统重采样。
-/// 设备没上报采样率列表（UNSPECIFIED）时返回 None，调用方走设备默认值。
+/// 在设备支持的采样率里挑最接近 `preferred` 的，别让系统替我们重采样（位完美的关键）。
+///
+/// 采样率列表为空（设备未上报）时返回 None，调用方走设备默认值。
 pub fn pick_sample_rate(device: &OutputDeviceInfo, preferred: u32) -> Option<u32> {
     if device.sample_rates.is_empty() {
         return None;
@@ -56,7 +56,6 @@ pub fn pick_sample_rate(device: &OutputDeviceInfo, preferred: u32) -> Option<u32
     if device.sample_rates.contains(&preferred) {
         return Some(preferred);
     }
-    // 退而求其次：同样本族里最接近的一个（44.1k 用不到就落 48k，反之亦然）
     device
         .sample_rates
         .iter()
@@ -64,7 +63,7 @@ pub fn pick_sample_rate(device: &OutputDeviceInfo, preferred: u32) -> Option<u32
         .copied()
 }
 
-/// 设备支持的声道数与期望声道数的交集：取不超过期望值的最大支持值
+/// 取不超过期望声道数的最大支持值；设备只支持更宽布局时退到其最小支持值
 pub fn pick_channel_count(device: &OutputDeviceInfo, preferred: u16) -> Option<u16> {
     if device.channel_counts.is_empty() {
         return None;

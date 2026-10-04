@@ -59,13 +59,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
-// MD3Select 选项类型
 interface SelectOption {
   value: string | number
   label: string
 }
 
-/* 选项分组（在下拉列表中渲染为不可选中的小标题） */
+/* 选项分组：在下拉列表里渲染为不可选中的小标题 */
 interface SelectOptionGroup {
   label: string
   options: SelectOption[]
@@ -134,7 +133,6 @@ const close = (): void => {
 }
 
 const handleClickOutside = (event: MouseEvent): void => {
-  // 如果点到了别的下拉菜单/页面任意区域：关闭当前下拉
   if (wrapperRef.value && !wrapperRef.value.contains(event.target as Node)) {
     close()
     triggerRef.value?.blur?.()
@@ -358,7 +356,6 @@ const handleOtherSelectOpen = (event: Event): void => {
     'opsz' 20;
 }
 
-/* 下拉动画 */
 .dropdown-enter-active {
   transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
 }
@@ -377,7 +374,7 @@ const handleOtherSelectOpen = (event: Event): void => {
   transform: translateY(-4px);
 }
 
-/* 滚动条样式 */
+/* Chromium WebView 专属：滚动条只能靠 ::-webkit-scrollbar 系列伪元素定制 */
 .md3-select-dropdown-scroll::-webkit-scrollbar {
   width: 8px;
 }

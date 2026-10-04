@@ -1,15 +1,14 @@
 /**
- * 插件系统类型契约
- * 集中定义插件 API 的纯类型部分(PluginAPI、清单、实例、权限等),
- * pluginManager.ts 对这些类型做 re-export 以保持向后兼容。
+ * 插件系统的类型契约:PluginAPI,清单,实例,权限等纯类型
+ *
+ * pluginManager.ts re-export 这些类型,保持既有 import 路径不变
  */
 
 import type { Track } from '@/types'
 
-// 插件 API 使用的曲目类型(规范定义在 @/types,此处仅作 re-export 保持向后兼容)
+// Track 的规范定义在 @/types,此处仅 re-export 供插件 API 使用
 export type { Track } from '@/types'
 
-// 插件状态
 export const PluginState = {
   UNREGISTERED: 'unregistered',
   REGISTERED: 'registered',
@@ -23,7 +22,7 @@ export const PluginState = {
 
 export type PluginStateType = (typeof PluginState)[keyof typeof PluginState]
 
-// 插件权限
+// manifest 声明的权限取值;动作与权限的对应关系以 apiRegistry.ts 为准
 export const PluginPermission = {
   PLAYER_READ: 'player:read', // 读取播放器状态
   PLAYER_CONTROL: 'player:control', // 控制播放器
@@ -41,14 +40,11 @@ export const PluginPermission = {
 
 export type PluginPermissionType = (typeof PluginPermission)[keyof typeof PluginPermission]
 
-// ---- 事件订阅白名单 ----
-
 /**
- * 插件可订阅的应用事件 → 所需权限。
- * 应用事件载荷含曲目绝对路径等敏感数据 (如 player:trackChanged 的 track 对象),
- * 订阅权限必须与对应的读取 API 权限对齐,否则零权限插件可经事件绕过
- * player:read / library:read。
- * 使用 Map 避免对象的原型链键 (constructor 等) 干扰白名单查找。
+ * 应用事件订阅白名单 -> 所需权限,与对应的读取 API 权限对齐
+ *
+ * 事件载荷含曲目绝对路径等敏感数据,否则零权限插件可经事件绕过 player:read / library:read;
+ * 用 Map 而非对象字面量,避免原型链键(constructor 等)干扰查找
  */
 const SUBSCRIBABLE_EVENT_PERMISSIONS = new Map<string, PluginPermissionType>([
   ['player:trackChanged', PluginPermission.PLAYER_READ],
@@ -59,11 +55,10 @@ const SUBSCRIBABLE_EVENT_PERMISSIONS = new Map<string, PluginPermissionType>([
 const PLUGIN_EVENT_PREFIX = 'plugin:'
 
 /**
- * 校验插件事件订阅的白名单与权限。
+ * 校验插件事件订阅的白名单与权限
  *
- * 权威校验点在可信侧 (pluginAPI.events.on 在主窗口执行);
- * Worker 沙箱内的预检 (workerCore) 仅用于快速失败与一致的错误语义,
- * 不能作为安全边界 —— 插件与沙箱 runtime 共享同一 Worker 全局作用域。
+ * 权威校验在可信侧(pluginAPI.events.on 于主窗口执行),Worker 沙箱内的预检只用于快速失败与一致的错误语义;
+ * 沙箱预检不是安全边界 - 插件与沙箱 runtime 共享同一 Worker 全局作用域
  */
 export function assertPluginEventSubscriptionAllowed(
   event: string,
@@ -86,7 +81,7 @@ export function assertPluginEventSubscriptionAllowed(
   }
 }
 
-// 插件 API 类型
+// 插件 API 契约:第三方插件可用的全部宿主接口,权限要求见 apiRegistry.ts;插件不应依赖此接口之外的宿主内部实现
 export interface PluginAPI {
   pluginId: string
   permissions: readonly string[]
@@ -185,7 +180,6 @@ export interface PluginAPI {
   }
 }
 
-// 辅助类型定义
 export interface PlayerState {
   currentTrack: Track | null
   isPlaying: boolean
@@ -196,11 +190,9 @@ export interface PlayerState {
   isShuffle: boolean
 }
 
-// 注意: LyricLine 与 Playlist 与 @/types 中的同名类型结构不同。
-// @/types 的版本是应用内部的规范定义(由 LRC/ASS 解析器产生);
-// 此处的版本是插件 API 契约,用于插件间歌词提供者交互与翻译支持,
-// 在 pluginAPI.ts 的 convertLyricLine / getPlaylists 中做显式格式转换。
-// 修改任一类型时需同步检查转换逻辑。
+// LyricLine / Playlist 与 @/types 的同名类型结构不同:@/types 是应用内部定义(LRC/ASS 解析器产出),
+// 此处是插件 API 契约(含翻译字段),两者在 pluginAPI.ts 的 convertLyricLine / getPlaylists 里显式转换
+// 改动任一类型都要同步检查转换逻辑
 export interface LyricLine {
   time: number
   texts: { text: string; translation?: string }[]
@@ -302,8 +294,7 @@ export interface SaveAsOptions {
 
 export type EventCallback = (data?: unknown) => void
 
-// 外置插件模块可解构使用的沙箱全局子集
-// (安全 console 代理与带清理追踪的定时器,由 pluginSandbox 在激活时注入)
+// 外置插件模块可解构的沙箱全局子集:安全 console 代理 + 带清理追踪的定时器(限额见 pluginSandbox.ts)
 export interface PluginSandboxGlobals {
   console: {
     log: (...args: unknown[]) => void
@@ -324,14 +315,12 @@ export type PluginMainFunction = (
   globals?: PluginSandboxGlobals,
 ) => Promise<PluginInstance> | PluginInstance
 
-// 插件实例类型
 export interface PluginInstance {
   activate?: () => void | Promise<void>
   deactivate?: () => void | Promise<void>
   [key: string]: unknown
 }
 
-// 插件定义类型
 export interface PluginDefinition {
   id: string
   name: string
@@ -341,14 +330,12 @@ export interface PluginDefinition {
   permissions?: PluginPermissionType[]
   main: PluginMainFunction
   /**
-   * Worker 沙箱宿主 (外置插件由 pluginLoader 创建并注入)。
-   * 存在时 pluginManager 将在 Worker 隔离环境中执行插件,
-   * 其生命周期 (激活/停用/卸载) 由宿主管理。
+   * 外置插件由 pluginLoader 创建并注入;存在即表示插件在 Worker 隔离环境中执行,生命周期(激活/停用/卸载)由宿主管理
    */
   workerHost?: import('./sandbox/workerSandboxHost').PluginWorkerHost
 }
 
-// 内置插件定义类型（main 可以是简化形式）
+// 内置插件定义;main 可省略 globals 第二参数,且不进 Worker 沙箱(无 workerHost)
 export interface BuiltinPluginDefinition {
   id: string
   name: string
@@ -359,7 +346,7 @@ export interface BuiltinPluginDefinition {
   main: PluginMainFunction | ((api: PluginAPI) => PluginInstance)
 }
 
-// 插件类型
+// 插件注册后在管理器中的运行态记录(含状态与最近一次错误)
 export interface Plugin {
   id: string
   name: string
@@ -372,7 +359,7 @@ export interface Plugin {
   main: PluginMainFunction
 }
 
-// 插件清单类型(外置插件的 manifest.json 结构)
+// 外置插件 manifest.json 结构;main 缺省 'index.js',auto_activate 缺省视为 true(仅显式 false 时不自动激活)
 export interface PluginManifest {
   id: string
   name: string

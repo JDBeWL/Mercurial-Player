@@ -1,13 +1,4 @@
-/**
- * Worker 沙箱协议测试
- *
- * 用 FakeWorker (微任务队列模拟跨线程 postMessage) 把真实的
- * SandboxWorkerRuntime (Worker 侧) 与 PluginWorkerHost (主窗口侧)
- * 连成闭环,端到端验证:
- * - 模块加载与主函数执行
- * - 同步镜像 / 异步 RPC / 回调桥
- * - 权限预检语义、错误传播、生命周期 (terminate/重启)
- */
+/** 端到端闭环: FakeWorker 以微任务模拟 postMessage, 串起真实的 SandboxWorkerRuntime 与 PluginWorkerHost */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { PluginWorkerHost } from '@/plugins/sandbox/workerSandboxHost'
@@ -15,9 +6,8 @@ import { SandboxWorkerRuntime, removeNetworkGlobals } from '@/plugins/sandbox/wo
 import type { PluginAPI, PluginInstance } from '@/plugins/pluginTypes'
 
 /**
- * 沙箱实例的自定义方法视图:activate/deactivate 之外的字段
- * 经回调句柄还原后均为 RPC 代理函数 (索引签名受 noUncheckedIndexedAccess
- * 影响,调用点需非空断言 `!`)
+ * 沙箱实例方法视图: activate/deactivate 之外的字段经回调句柄还原后均为 RPC 代理函数
+ * (索引签名受 noUncheckedIndexedAccess 影响, 调用点需非空断言)
  */
 type AsyncInstance = {
   activate?: () => Promise<void>
@@ -29,15 +19,11 @@ const asAsyncInstance = (instance: PluginInstance): AsyncInstance => instance as
 /** FakeWorker 不满足完整 Worker 接口,以最小成员断言注入 host */
 const asWorker = (w: FakeWorker): Worker => w as unknown as Worker
 
-// ---------------------------------------------------------------------------
-// FakeWorker:双向消息通道
-// ---------------------------------------------------------------------------
-
 class FakeWorker {
   onmessage: ((ev: { data: unknown }) => void) | null = null
   onerror: ((ev: unknown) => void) | null = null
   terminated = false
-  /** Worker 侧消息入口 (host → worker) */
+  /** Worker 侧消息入口 (host -> worker) */
   runtimeListener: ((ev: { data: unknown }) => void) | null = null
 
   postMessage = (data: unknown): void => {
@@ -49,7 +35,7 @@ class FakeWorker {
     this.terminated = true
   }
 
-  /** Worker 侧发送 (worker → host) */
+  /** Worker 侧发送 (worker -> host) */
   emitToHost = (msg: unknown): void => {
     if (this.terminated) return
     queueMicrotask(() => this.onmessage?.({ data: msg }))
@@ -61,20 +47,12 @@ const flushAsync = async (): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
-// ---------------------------------------------------------------------------
-// 测试模块加载器:外置插件仅接受 ES 模块格式,直接剥离默认导出求值
-// (node 环境不支持 blob: 动态 import)
-// ---------------------------------------------------------------------------
-
+// 外置插件只接受 ES 模块格式, 这里剥离默认导出求值 (node 环境不支持 blob: 动态 import)
 const testLoader = async (code: string): Promise<(api: unknown, globals: unknown) => unknown> => {
   const body = code.replace(/export\s+default\s*/, 'return ')
   // 一次调用 = 模拟模块求值,返回默认导出的工厂函数 (与 blob import 语义一致)
   return new Function(body)() as (api: unknown, globals: unknown) => unknown
 }
-
-// ---------------------------------------------------------------------------
-// Mock PluginAPI
-// ---------------------------------------------------------------------------
 
 function createMockApi(): PluginAPI {
   return {
@@ -146,7 +124,7 @@ interface SandboxFixture {
   api: PluginAPI
 }
 
-/** 装配完整的 host ↔ runtime 闭环 */
+/** 装配完整的 host <-> runtime 闭环 */
 async function setupSandbox(
   pluginCode: string,
   permissions: string[] = [],
@@ -167,10 +145,6 @@ async function setupSandbox(
 async function runSandboxMain(host: PluginWorkerHost, api: PluginAPI): Promise<AsyncInstance> {
   return asAsyncInstance(await host.runMain(api))
 }
-
-// ---------------------------------------------------------------------------
-// 测试
-// ---------------------------------------------------------------------------
 
 describe('workerSandbox - 模块加载与主函数执行', () => {
   beforeEach(() => {
@@ -262,7 +236,6 @@ describe('workerSandbox - 镜像与 RPC', () => {
     const instance = await runSandboxMain(host, api)
 
     await expect(instance.readState!()).rejects.toThrow('没有 player:read 权限')
-    // 镜像未采集,主窗口 getState 从未被调用
     expect(api.player.getState).not.toHaveBeenCalled()
   })
 
@@ -539,10 +512,8 @@ describe('workerSandbox - 原生网络 API 移除 (removeNetworkGlobals)', () =>
 
     removeNetworkGlobals(scope)
 
-    // 原型定义已删除:经原型链直接取引用不再可行
     expect('postMessage' in proto).toBe(false)
     expect('addEventListener' in proto).toBe(false)
-    // 自身遮蔽仍抛错
     expect(() => scope.postMessage).toThrow('沙箱禁止使用 postMessage')
   })
 
@@ -581,9 +552,8 @@ describe('workerSandbox - 宿主侧权限强制 (api-call 白名单)', () => {
   })
 
   /**
-   * 模拟攻击:插件代码与沙箱 runtime 共享 Worker 全局作用域,
-   * 可绕过 workerCore 的 requirePermission 直接 postMessage 伪造 api-call。
-   * 宿主 (可信侧) 必须独立完成路径白名单与权限校验。
+   * 攻击场景: 插件代码与沙箱 runtime 共享 Worker 全局作用域, 可绕过 workerCore 的
+   * requirePermission 直接伪造 api-call; 宿主 (可信侧) 必须独立做路径白名单与权限校验
    */
   async function setupAttacker(permissions: string[]): Promise<{
     api: PluginAPI
@@ -593,7 +563,7 @@ describe('workerSandbox - 宿主侧权限强制 (api-call 白名单)', () => {
     const api = createMockApi()
     const { host, worker } = await setupSandbox(`export default () => ({})`, permissions, api)
     await runSandboxMain(host, api)
-    // 捕获宿主回执:api-result 经 host→worker 通道 (worker.postMessage) 下发
+    // 捕获宿主回执:api-result 经 host->worker 通道 (worker.postMessage) 下发
     const results: { type: string; ok?: boolean; callId?: number }[] = []
     const originalPost = worker.postMessage.bind(worker)
     worker.postMessage = (data: unknown): void => {
@@ -664,14 +634,8 @@ describe('workerSandbox - 宿主侧权限强制 (api-call 白名单)', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// P1-2 回归:沙箱消息结构校验与反序列化预算
-//
-// 历史问题:handleWorkerMessage 对 Worker 消息不做字段校验,reviveValue
-// 无限递归。畸形 payload (深嵌套对象/非法日志级别/非法 callId) 会造成
-// RangeError 从 onmessage 逃逸,等待中的 Promise 永不 settle。
-// ---------------------------------------------------------------------------
-
+// P1-2 回归: handleWorkerMessage 必须校验字段并给 reviveValue 设反序列化预算,
+// 否则畸形 payload (深嵌套对象/非法日志级别/非法 callId) 会让 RangeError 从 onmessage 逃逸, 等待中的 Promise 永不 settle
 describe('workerSandbox - 消息结构校验与反序列化预算 (P1-2)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -702,7 +666,7 @@ describe('workerSandbox - 消息结构校验与反序列化预算 (P1-2)', () =>
     return root
   }
 
-  /** 伪造 Worker → 宿主的 api-call (绕过 workerCore 权限预检) */
+  /** 伪造 Worker -> 宿主的 api-call (绕过 workerCore 权限预检) */
   const forgeApiCall = (
     worker: FakeWorker,
     callId: unknown,
@@ -755,7 +719,6 @@ describe('workerSandbox - 消息结构校验与反序列化预算 (P1-2)', () =>
     }).not.toThrow()
     await flushAsync()
 
-    // 丢弃畸形消息后宿主仍正常工作
     forgeApiCall(worker, 10, 'player.play')
     await flushAsync()
     expect(results.some((m) => m.type === 'api-result' && m.ok === true && m.callId === 10)).toBe(
@@ -772,7 +735,6 @@ describe('workerSandbox - 消息结构校验与反序列化预算 (P1-2)', () =>
     await flushAsync()
 
     expect(api.player.play).not.toHaveBeenCalled()
-    // 宿主仍正常
     forgeApiCall(worker, 11, 'player.play')
     await flushAsync()
     expect(results.some((m) => m.type === 'api-result' && m.ok === true && m.callId === 11)).toBe(
@@ -810,7 +772,7 @@ describe('workerSandbox - P3-12 回调双向清理与扩展点配额', () => {
 
     await instance.unsubscribe!()
     await flushAsync()
-    // off 后归还引用并删除 stub,回到基准值 → 反复订阅/退订不会泄漏
+    // off 后归还引用并删除 stub,回到基准值 -> 反复订阅/退订不会泄漏
     expect(hostInternals.callbackStubs.size).toBe(baseCount)
   })
 
@@ -832,7 +794,6 @@ describe('workerSandbox - P3-12 回调双向清理与扩展点配额', () => {
     await flushAsync()
     // 配额 200:第 201+ 次注册在宿主侧被拦截,真实 PluginAPI 只收到 200 次
     expect(api.ui.registerMenuItem).toHaveBeenCalledTimes(200)
-    // 拦截后宿主未崩溃,仍可继续处理合法调用
     const hostInternals = host as unknown as { terminated: boolean }
     expect(hostInternals.terminated).toBe(false)
   })

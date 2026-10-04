@@ -5,6 +5,8 @@ import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -26,12 +28,43 @@ object AudioBridge {
   @Volatile
   private var callback: AudioDeviceCallback? = null
 
+  /**
+   * 设备回调专用线程。回调里要同步经 JNI 调 Rust（查设备/拿锁/openStream），
+   * 而 init() 在主线程调用，用注册线程的 Looper 会让插拔外设直接 ANR，故显式指定后台 Looper。
+   * 线程随进程存活，[release] 由 [MainActivity.onDestroy] 在没有播放会话时才调用。
+   */
+  @Volatile
+  private var callbackThread: HandlerThread? = null
+
   fun init(context: Context) {
     val ctx = context.applicationContext
     appContext = ctx
     val manager = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    if (manager == null) {
+      // 拿不到 AudioManager 只可能是系统服务异常，必须输出日志
+      android.util.Log.e(TAG, "AUDIO_SERVICE 不可用，输出设备探测将一直返回空列表")
+    }
     audioManager = manager
     registerCallback(manager)
+  }
+
+  /**
+   * 注销设备回调并停掉专用线程。只应在没有播放会话时调用（见 [MainActivity.onDestroy]）：
+   * 播放中注销会让 USB DAC 插拔失去快速路径，只剩 AAudio error 回调兜底，路由变化后不会
+   * 自动重建流。
+   */
+  fun release() {
+    callback?.let { cb ->
+      audioManager?.let { am -> runCatching { am.unregisterAudioDeviceCallback(cb) } }
+      callback = null
+    }
+    synchronized(this) {
+      callbackThread?.let { thread ->
+        // quitSafely：等在途回调跑完再退，避免刚插上 DAC 就释放时丢掉那次通知
+        thread.quitSafely()
+        callbackThread = null
+      }
+    }
   }
 
   private fun registerCallback(manager: AudioManager?) {
@@ -50,8 +83,20 @@ object AudioBridge {
         }
       }
     callback = cb
-    runCatching { am.registerAudioDeviceCallback(cb, null) }
+    val handler = Handler(callbackHandlerThread().looper)
+    runCatching { am.registerAudioDeviceCallback(cb, handler) }
       .onFailure { e -> android.util.Log.w(TAG, "registerAudioDeviceCallback failed: ${e.message}") }
+  }
+
+  /** 取或按需创建设备回调线程；重复 init 时复用同一个 */
+  private fun callbackHandlerThread(): HandlerThread {
+    callbackThread?.let { return it }
+    return synchronized(this) {
+      callbackThread ?: HandlerThread("audio-device-callback").apply {
+        start()
+        callbackThread = this
+      }
+    }
   }
 
   private fun notifyRouteChanged() {
@@ -65,7 +110,11 @@ object AudioBridge {
   /** 由 Rust 调用（JNI）：返回全部输出设备的 JSON 数组；空串表示拿不到，Rust 侧按空列表处理 */
   @JvmStatic
   fun getOutputDevicesJson(): String {
-    val manager = audioManager ?: return ""
+    val manager = audioManager
+    if (manager == null) {
+      android.util.Log.e(TAG, "getOutputDevicesJson: AudioBridge 未初始化，按空设备列表返回") // 同上抛出异常
+      return ""
+    }
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return ""
 
     val array = JSONArray()

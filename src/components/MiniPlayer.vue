@@ -1,6 +1,5 @@
 <template>
   <div class="mini-player" data-tauri-drag-region>
-    <!-- 背景模糊封面 -->
     <div
       class="background-cover"
       data-tauri-drag-region
@@ -8,9 +7,7 @@
     ></div>
     <div class="background-overlay" data-tauri-drag-region></div>
 
-    <!-- 主要内容 -->
     <div class="content-container" data-tauri-drag-region>
-      <!-- 左侧：封面 -->
       <div class="cover-container" data-tauri-drag-region>
         <div class="cover" data-tauri-drag-region :style="{ backgroundImage: currentTrackCover }">
           <div
@@ -21,7 +18,6 @@
             <span class="material-symbols-rounded">album</span>
           </div>
         </div>
-        <!-- 悬浮遮罩：恢复按钮 -->
         <div
           class="cover-overlay"
           data-tauri-drag-region="false"
@@ -34,7 +30,6 @@
 
       <!-- 中间：信息和控制 -->
       <div class="info-controls" data-tauri-drag-region>
-        <!-- 歌曲信息 -->
         <div class="track-info" data-tauri-drag-region>
           <div
             class="track-title"
@@ -85,7 +80,7 @@
       </div>
     </div>
 
-    <!-- 底部进度条 (拖拽由 useDragValue 的 document 级监听驱动,鼠标移出不会中断) -->
+    <!-- 进度条拖拽靠 useDragValue 的 document 级监听，指针移出元素也不会中断 -->
     <div
       ref="progressContainer"
       class="progress-bar-container"
@@ -94,7 +89,6 @@
       @pointerdown="startSeeking"
     >
       <div class="progress-fill" :style="{ width: progressPercentage + '%' }"></div>
-      <!-- 时间预览提示 -->
       <div v-if="isDragging" class="time-tooltip" :style="{ left: dragPercentage + '%' }">
         {{ formatTime(previewTime) }}
       </div>
@@ -116,18 +110,14 @@ const playerStore = usePlayerStore()
 const configStore = useConfigStore()
 const { currentTrack, currentTime, duration } = storeToRefs(playerStore)
 
-// 使用 composable 处理音轨信息
 const { getTrackTitle, getTrackArtist, watchTrack } = useTrackInfo()
 
-// 监听当前音轨变化
 watchTrack(() => currentTrack.value)
 
-// 拖拽进度条: document 级监听骨架由 useDragValue 提供,
-// 拖拽中只更新预览位置,松手时才应用 seek
+// 拖拽进度条：document 级监听骨架由 useDragValue 提供，拖拽中只更新预览位置，松手才应用 seek
 const progressContainer = ref<HTMLElement | null>(null)
 const dragPercentage = ref<number>(0)
-// seek 目标时间: 松手后先显示落点,等 currentTime 追上再恢复跟随播放,
-// 避免后端尚未推回新位置时进度条闪回旧值
+// seek 目标时间：松手后先显示落点，等 currentTime 追上再恢复跟随，避免后端未推回新位置时进度条闪回旧值
 const pendingSeekTime = ref<number | null>(null)
 let pendingSeekTimeoutId: ReturnType<typeof setTimeout> | null = null
 
@@ -163,22 +153,20 @@ const { isDragging, startDrag: startSeeking } = useDragValue({
     dragPercentage.value = percent * 100
   },
   onEnd: (percent) => {
-    dragPercentage.value = 0 // 重置拖拽位置，避免下次拖拽开始时闪现旧位置
-    // 应用新的播放位置
+    dragPercentage.value = 0 // 清零，否则下次拖拽起始会闪现上一次的位置
     if (duration.value) {
       const target = percent * duration.value
       pendingSeekTime.value = target
-      // 超时保护: seek 被拒/无响应时 1 秒后恢复跟随播放位置
+      // 超时保护：seek 被拒/无响应时 1000ms 后恢复跟随播放位置
       pendingSeekTimeoutId = setTimeout(clearPendingSeek, 1000)
       playerStore.seek(target)
     }
   },
 })
 
-// 计算属性
 const currentTrackCover = computed<string>(() => {
   if (currentTrack.value && currentTrack.value.coverPath) {
-    // 使用 convertFileSrc 将本地文件路径转换为可渲染的 URL
+    // convertFileSrc 转 WebView 可渲染的 asset URL（同 App.vue 的封面计算）
     return `url('${convertFileSrc(currentTrack.value.coverPath)}')`
   }
   return 'none'
@@ -186,7 +174,7 @@ const currentTrackCover = computed<string>(() => {
 
 const progressPercentage = computed<number>(() => {
   if (isDragging.value) return dragPercentage.value
-  // 松手后到 currentTime 追上前,停在落点位置
+  // 松手后到 currentTime 追上前，停在落点位置
   if (pendingSeekTime.value != null && duration.value) {
     return (pendingSeekTime.value / duration.value) * 100
   }
@@ -194,13 +182,11 @@ const progressPercentage = computed<number>(() => {
   return (currentTime.value / duration.value) * 100
 })
 
-// 预览时间（拖拽时显示）
 const previewTime = computed<number>(() => {
   if (!duration.value) return 0
   return (dragPercentage.value / 100) * duration.value
 })
 
-// 方法
 const exitMiniMode = (): void => {
   void configStore.toggleMiniMode()
 }
@@ -221,7 +207,6 @@ const exitMiniMode = (): void => {
   font-family: 'Roboto', 'Roboto Fallback', sans-serif;
 }
 
-/* 背景模糊效果 */
 .background-cover {
   position: absolute;
   top: -20px;
@@ -243,9 +228,8 @@ const exitMiniMode = (): void => {
   height: 100%;
   background: linear-gradient(
     135deg,
-    /* 主题只输出十六进制角色色,没有 *-rgb 三元组变量,原先的
-       rgba(var(--md-sys-color-surface-rgb, 0, 0, 0), .6) 会一直命中黑色兜底值,
-       浅色模式下这里是一层黑影;改用 color-mix 直接对 surface 做透明度混合 */
+    /* 主题只输出十六进制角色色，没有 *-rgb 三元组变量，rgba(var(--md-sys-color-surface-rgb, 0, 0, 0), .6)
+       会一直命中黑色兜底、浅色模式下形成黑影；改用 color-mix 对 surface 做透明度混合 */
     color-mix(in srgb, var(--md-sys-color-surface) 60%, transparent) 0%,
     color-mix(in srgb, var(--md-sys-color-surface) 30%, transparent) 100%
   );
@@ -263,7 +247,6 @@ const exitMiniMode = (): void => {
   min-width: 0;
 }
 
-/* 封面样式 */
 .cover-container {
   position: relative;
   height: calc(100% - 10px);
@@ -320,7 +303,6 @@ const exitMiniMode = (): void => {
   }
 }
 
-/* 信息和控制样式 */
 .info-controls {
   flex: 1;
   display: flex;
@@ -414,7 +396,6 @@ const exitMiniMode = (): void => {
   font-size: 20px;
 }
 
-/* 进度条样式 */
 .progress-bar-container {
   position: absolute;
   bottom: 0;
