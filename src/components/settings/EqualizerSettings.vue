@@ -107,7 +107,6 @@ const preampSlider = ref<HTMLElement | null>(null)
 // 函数式 ref 的 el 是 Element | ComponentPublicInstance | null, 存 unknown[]
 const bandSliders = ref<unknown[]>([])
 
-
 // 前置增益与频段增益单位 dB
 const MIN_GAIN = -8
 const MAX_GAIN = 8
