@@ -15,7 +15,7 @@
           :style="lyricFontStyle"
           :lang="originalLang || undefined"
         >
-          <template v-if="currentLyric.karaoke">
+          <template v-if="currentLyric.words?.length">
             <!-- 逐字高亮的渲染沿用主歌词页，样式由 getKaraokeStyle 给 -->
             <span
               v-for="(word, idx) in currentLyric.words"

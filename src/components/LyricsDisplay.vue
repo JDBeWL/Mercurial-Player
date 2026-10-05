@@ -47,7 +47,8 @@
           :style="lyricLineStyle"
           @click="handleLyricClick(line.time, index)"
         >
-          <template v-if="line.karaoke && isActive(index)">
+          <!-- 判据用 words 而不是 karaoke：KaraokeLine 只吃 words，缺 words 时会渲染成空行 -->
+          <template v-if="line.words?.length && isActive(index)">
             <div class="first-line karaoke-line" :lang="lineLanguages[index]?.[0] || undefined">
               <!-- 卡拉OK进度隔离在 KaraokeLine 内：父组件渲染不依赖每帧更新的 visualTime -->
               <KaraokeLine :words="line.words ?? []" />
@@ -111,6 +112,7 @@
       :visible="showPicker"
       :loading="pickerLoading || fetchingLyrics"
       :candidates="pickerCandidates"
+      :track="pickerTrack"
       @close="showPicker = false"
       @apply="handleApplyCandidate"
       @auto-fetch="handleAutoFetchFromPicker"
@@ -142,6 +144,7 @@ import logger from '@/utils/logger'
 import KaraokeLine from './KaraokeLine.vue'
 import LyricsCandidatePicker from './lyrics/LyricsCandidatePicker.vue'
 import type { LyricCandidate, LyricKind } from '@/services/lyrics'
+import type { Track } from '@/types'
 import { detectLyricLanguage, type LyricLanguage } from '@/utils/languageDetect'
 
 export default {
@@ -210,6 +213,9 @@ export default {
     const showPicker = ref(false)
     const pickerCandidates = ref<LyricCandidate[]>([])
     const pickerLoading = ref(false)
+    // 弹窗打开时锁定的曲目：候选、预览、落盘路径、标题都跟着它，
+    // 不能现读 store —— 用户在弹窗里切歌会把上一首的内容存到下一首
+    const pickerTrack = ref<Track | null>(null)
 
     // 关掉时走手动挑选弹窗而不是自动取最优
     const autoSelectBestLyrics = computed(() => configStore.lyrics?.autoSelectBestLyrics !== false)
@@ -224,13 +230,13 @@ export default {
         }
         return
       }
+      // 打开弹窗即锁定曲目，之后切歌不影响这次挑选
+      pickerTrack.value = playerStore.currentTrack
       showPicker.value = true
       pickerLoading.value = true
       pickerCandidates.value = []
       try {
-        if (typeof lyricsComposable.fetchCandidates === 'function') {
-          pickerCandidates.value = await lyricsComposable.fetchCandidates()
-        }
+        pickerCandidates.value = await lyricsComposable.fetchCandidates(pickerTrack.value)
       } catch (error) {
         logger.error('Failed to collect lyric candidates:', error)
         pickerCandidates.value = []
@@ -245,7 +251,7 @@ export default {
     ): Promise<void> => {
       fetchingLyrics.value = true
       try {
-        const ok = await lyricsComposable.applyCandidate(candidate, kind)
+        const ok = await lyricsComposable.applyCandidate(candidate, kind, pickerTrack.value)
         if (ok) showPicker.value = false
       } finally {
         fetchingLyrics.value = false
@@ -255,7 +261,7 @@ export default {
     const handleAutoFetchFromPicker = async (): Promise<void> => {
       fetchingLyrics.value = true
       try {
-        await lyricsComposable.fetchAndSaveLyrics()
+        await lyricsComposable.fetchAndSaveLyrics(pickerTrack.value)
         showPicker.value = false
       } finally {
         fetchingLyrics.value = false
@@ -516,6 +522,7 @@ export default {
       showPicker,
       pickerCandidates,
       pickerLoading,
+      pickerTrack,
       handleApplyCandidate,
       handleAutoFetchFromPicker,
       adjustOffset,

@@ -168,12 +168,16 @@ Second subtitle`
       expect(result[0]!.texts).toContain('First')
     })
 
-    it('should handle karaoke timestamps', async () => {
+    it('should expand repeated timestamps like parseLRC', async () => {
       const content = '[00:01.00][00:01.50][00:02.00]Word by word'
       const result = await LyricsParser.parseLRCAsync(content)
 
-      expect(result).toHaveLength(1)
-      expect(result[0]!.karaoke).not.toBeNull()
+      // 一行多时间戳是同一句在多个时间点出现；以前只存第一个时间并把其余塞进
+      // 没人消费的 karaoke.timings，结果这种行一到当前行就渲染成空白
+      expect(result).toHaveLength(3)
+      expect(result.map((l) => l.time)).toEqual([1, 1.5, 2])
+      expect(result.every((l) => l.texts[0] === 'Word by word')).toBe(true)
+      expect(result.every((l) => l.karaoke === null || l.karaoke === undefined)).toBe(true)
     })
 
     it('should handle mm:ss:cs format', async () => {

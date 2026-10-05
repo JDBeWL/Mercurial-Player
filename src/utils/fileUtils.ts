@@ -233,7 +233,9 @@ export class FileUtils {
     const baseName = this.getFileNameWithoutExtension(audioPath)
     const directory = this.getDirectoryPath(audioPath)
 
-    const lyricsExtensions = ['lrc', 'ass', 'srt']
+    // ASS 排在 LRC 前：ASS 带逐字时间戳，信息是 LRC 的超集。同目录同时存在两者时
+    // （在线逐字落盘成 .ass，本地原先有 .lrc）若先取 .lrc，逐字效果就永远显示不出来
+    const lyricsExtensions = ['ass', 'lrc', 'srt']
 
     for (const ext of lyricsExtensions) {
       const lyricsPath = this.joinPath(directory, `${baseName}.${ext}`)

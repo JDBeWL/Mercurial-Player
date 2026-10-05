@@ -29,6 +29,10 @@ const sharedOnlineLyricsError = ref<string | null>(null)
 // 过期结果的丢弃统一交给 store 的序号守卫 (player.beginLyricsRequest / isLyricsRequestCurrent,
 // store.loadLyrics 与本模块共享同一计数器)
 
+// 序号守卫用的小于一切的占位 id：歌词请求 id 从 1 起自增，所以它永远不等于当前有效请求。
+// "只落盘、不碰在屏歌词"的分支用它占位，避免为了走同一套代码而作废当前曲目的加载请求
+const NO_LYRICS_REQUEST = -1
+
 // 模块级初始化标记:共享 watcher 只建立一次
 let isInitialized = false
 
@@ -266,24 +270,32 @@ export function useLyrics() {
   const playerStore = usePlayerStore()
   const configStore = useConfigStore()
 
-  const fetchAndSaveLyrics = async (): Promise<boolean> => {
-    const track = playerStore.currentTrack
+  /** 手动"获取歌词"：按配置顺延取最优并落盘。
+   *  target 省略时作用于当前播放曲目；挑选弹窗会传入它打开时锁定的那首歌，
+   *  目标已不是当前曲目时只落盘，不碰在屏歌词与共享加载状态 */
+  const fetchAndSaveLyrics = async (target?: Track | null): Promise<boolean> => {
+    const track = target ?? playerStore.currentTrack
     if (!track) return false
+    const isCurrent = playerStore.currentTrack?.path === track.path
     // 序号守卫:手动刷新也纳入统一计数 (见 loadLyrics)
-    const seq = playerStore.beginLyricsRequest()
-    sharedLoading.value = true
-    sharedOnlineLyricsError.value = null
+    const seq = isCurrent ? playerStore.beginLyricsRequest() : NO_LYRICS_REQUEST
+    if (isCurrent) {
+      sharedLoading.value = true
+      sharedOnlineLyricsError.value = null
+    }
     try {
       const onlineLyrics = await fetchOnlineLyrics(track)
-      if (!playerStore.isLyricsRequestCurrent(seq)) return false
+      if (isCurrent && !playerStore.isLyricsRequestCurrent(seq)) return false
       if (onlineLyrics) {
         // markRaw: 见 loadLyrics
         const parsed = markRaw(
           await LyricsParser.parseAsync(onlineLyrics.content, onlineLyrics.format),
         )
-        if (!playerStore.isLyricsRequestCurrent(seq)) return false
-        playerStore.lyrics = parsed
-        sharedLyricsSource.value = 'online'
+        if (isCurrent && !playerStore.isLyricsRequestCurrent(seq)) return false
+        if (isCurrent) {
+          playerStore.lyrics = parsed
+          sharedLyricsSource.value = 'online'
+        }
 
         onlineLyricsCache.set(track.path, {
           content: onlineLyrics.content,
@@ -298,7 +310,7 @@ export function useLyrics() {
             onlineLyrics.content,
             onlineLyrics.format,
           )
-          if (saved && playerStore.isLyricsRequestCurrent(seq)) {
+          if (saved && isCurrent && playerStore.isLyricsRequestCurrent(seq)) {
             sharedLyricsSource.value = 'local'
             // 落盘后清掉在线缓存,理由见 loadLyrics
             onlineLyricsCache.delete(track.path)
@@ -309,43 +321,44 @@ export function useLyrics() {
       return false
     } catch (e) {
       logger.error('Error fetching lyrics:', e)
-      if (playerStore.isLyricsRequestCurrent(seq)) {
+      if (isCurrent && playerStore.isLyricsRequestCurrent(seq)) {
         sharedOnlineLyricsError.value = (e as Error).message
       }
       return false
     } finally {
-      if (playerStore.isLyricsRequestCurrent(seq)) {
+      if (isCurrent && playerStore.isLyricsRequestCurrent(seq)) {
         sharedLoading.value = false
       }
     }
   }
 
   // 聚合各启用来源的候选歌词（供手动挑选弹窗使用）
-  const fetchCandidates = async (): Promise<LyricCandidate[]> => {
-    const track = playerStore.currentTrack
+  //
+  // 不参与歌词显示序号：候选绑定的是弹窗打开时锁定的那首歌，之后切歌不该让这批结果作废；
+  // 更要避免顺手把当前曲目正在进行的歌词加载判成过期 —— 那会让打开弹窗就歌词空白
+  const fetchCandidates = async (track: Track | null): Promise<LyricCandidate[]> => {
     if (!track) return []
-    const seq = playerStore.beginLyricsRequest()
-    sharedLoading.value = true
-    sharedOnlineLyricsError.value = null
     try {
-      const candidates = await collectCandidates(safeLyricsConfig(), buildQuery(track))
-      if (!playerStore.isLyricsRequestCurrent(seq)) return []
-      return candidates
+      return await collectCandidates(safeLyricsConfig(), buildQuery(track))
     } catch (e) {
       logger.error('Error collecting lyric candidates:', e)
       return []
-    } finally {
-      if (playerStore.isLyricsRequestCurrent(seq)) {
-        sharedLoading.value = false
-      }
     }
   }
 
   // 应用用户挑选的候选歌词：显示 + 可选写入本地文件
-  const applyCandidate = async (candidate: LyricCandidate, kind: LyricKind): Promise<boolean> => {
-    const track = playerStore.currentTrack
+  //
+  // target 是弹窗打开时锁定的曲目：候选内容属于它，落盘路径也必须是它。
+  // 若用户中途切了歌，仍然只写那首歌的歌词文件，不覆盖在屏歌词、不作废新曲目的加载请求
+  const applyCandidate = async (
+    candidate: LyricCandidate,
+    kind: LyricKind,
+    target: Track | null,
+  ): Promise<boolean> => {
+    const track = target ?? playerStore.currentTrack
     if (!track || !configStore) return false
-    const seq = playerStore.beginLyricsRequest()
+    const isCurrent = playerStore.currentTrack?.path === track.path
+    const seq = isCurrent ? playerStore.beginLyricsRequest() : NO_LYRICS_REQUEST
     try {
       const final = buildFinalLyric(
         candidate.bundle,
@@ -354,9 +367,11 @@ export function useLyrics() {
       )
       if (!final.content) return false
       const parsed = markRaw(await LyricsParser.parseAsync(final.content, final.format))
-      if (!playerStore.isLyricsRequestCurrent(seq)) return false
-      playerStore.lyrics = parsed
-      sharedLyricsSource.value = 'online'
+      if (isCurrent && !playerStore.isLyricsRequestCurrent(seq)) return false
+      if (isCurrent) {
+        playerStore.lyrics = parsed
+        sharedLyricsSource.value = 'online'
+      }
 
       onlineLyricsCache.set(track.path, {
         content: final.content,
@@ -367,7 +382,7 @@ export function useLyrics() {
 
       if (configStore.lyrics?.autoSaveOnlineLyrics) {
         const saved = await saveLyricsToLocal(track.path, final.content, final.format)
-        if (saved && playerStore.isLyricsRequestCurrent(seq)) {
+        if (saved && isCurrent && playerStore.isLyricsRequestCurrent(seq)) {
           sharedLyricsSource.value = 'local'
           onlineLyricsCache.delete(track.path)
         }

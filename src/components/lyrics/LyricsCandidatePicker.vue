@@ -1,101 +1,124 @@
 <template>
-  <!-- v-if 放在 Teleport 上：隐藏时不给 body 留占位注释节点，挂载 / 卸载路径更干净，
-       也避开 Teleport + 内部 v-if 的注释锚点复用 -->
-  <Teleport v-if="visible" to="body">
-    <div class="picker-overlay" @click.self="close">
-      <div class="picker-dialog" role="dialog" aria-modal="true">
-        <div class="picker-header">
-          <h4 class="picker-title">{{ $t('lyrics.pickCandidate') }}</h4>
-          <button class="picker-close" title="close" @click="close">
-            <span class="material-symbols-rounded">close</span>
-          </button>
-        </div>
+  <MD3Dialog
+    :open="visible"
+    :title="$t('lyrics.pickCandidate')"
+    max-width="920px"
+    max-height="90dvh"
+    @close="close"
+  >
+    <div class="picker-toolbar">
+      <div class="picker-track">
+        <span v-if="track" class="picker-track-text"
+          >{{ track.title }}<template v-if="track.artist"> - {{ track.artist }}</template></span
+        >
+        <span v-else class="picker-track-text picker-track-empty">{{
+          $t('lyrics.noTrackPlaying')
+        }}</span>
+      </div>
+      <button
+        type="button"
+        class="picker-auto-btn"
+        :disabled="autoFetching || loading || !track"
+        @click="autoFetchBest"
+      >
+        {{ autoFetching ? $t('lyrics.fetching') : $t('lyrics.autoBest') }}
+      </button>
+    </div>
 
-        <div class="picker-toolbar">
-          <div class="picker-track">
-            <span v-if="track" class="picker-track-text"
-              >{{ track.title }}<template v-if="track.artist"> - {{ track.artist }}</template></span
+    <div class="picker-main">
+      <div class="picker-body">
+        <div v-if="loading" class="picker-status">{{ $t('lyrics.loading') }}</div>
+        <div v-else-if="groups.length === 0" class="picker-status">
+          {{ $t('lyrics.noCandidates') }}
+        </div>
+        <div v-else class="picker-groups">
+          <section v-for="group in groups" :key="group.provider" class="candidate-group">
+            <div class="candidate-group-header">
+              <span class="candidate-group-name">{{ t(group.providerNameKey) }}</span>
+              <span class="candidate-group-count">{{ group.items.length }}</span>
+            </div>
+            <div
+              v-for="(cand, idx) in group.items"
+              :key="`${cand.provider}-${cand.id}-${idx}`"
+              class="candidate-row"
+              role="button"
+              tabindex="0"
+              :aria-pressed="preview === cand"
+              @click="preview = cand"
+              @keydown.enter.prevent="preview = cand"
+              @keydown.space.prevent="preview = cand"
             >
-            <span v-else class="picker-track-text picker-track-empty">{{
-              $t('lyrics.noTrackPlaying')
-            }}</span>
-          </div>
-          <button
-            class="picker-auto-btn"
-            :disabled="autoFetching || loading || !track"
-            @click="autoFetchBest"
-          >
-            {{ autoFetching ? $t('lyrics.fetching') : $t('lyrics.autoBest') }}
-          </button>
-        </div>
-
-        <div class="picker-body">
-          <div v-if="loading" class="picker-loading">{{ $t('lyrics.loading') }}</div>
-          <div v-else-if="groups.length === 0" class="picker-empty">
-            {{ $t('lyrics.noCandidates') }}
-          </div>
-          <div v-else class="picker-groups">
-            <section v-for="group in groups" :key="group.provider" class="candidate-group">
-              <div class="candidate-group-header">
-                <span class="candidate-group-name">{{ t(group.providerNameKey) }}</span>
-                <span class="candidate-group-count">{{ group.items.length }}</span>
-              </div>
-              <div
-                v-for="(cand, idx) in group.items"
-                :key="`${cand.provider}-${cand.id}-${idx}`"
-                class="candidate-row"
-                :class="{ 'is-selectable': true }"
-                @click="preview = cand"
-              >
-                <span class="candidate-check" :class="{ active: preview === cand }">
-                  <span class="material-symbols-rounded">radio_button_unchecked</span>
-                </span>
-                <div class="candidate-meta">
-                  <div class="candidate-title">{{ cand.title }}</div>
-                  <div class="candidate-sub">
-                    <span v-if="cand.artist">{{ cand.artist }}</span>
-                    <span v-if="cand.album"> · {{ cand.album }}</span>
-                    <span v-if="cand.duration_ms"> · {{ formatMs(cand.duration_ms) }}</span>
-                  </div>
+              <span class="candidate-check" :class="{ active: preview === cand }">
+                <span class="material-symbols-rounded">{{
+                  preview === cand ? 'radio_button_checked' : 'radio_button_unchecked'
+                }}</span>
+              </span>
+              <div class="candidate-meta">
+                <div class="candidate-title">{{ cand.title }}</div>
+                <div class="candidate-sub">
+                  <span v-if="cand.artist">{{ cand.artist }}</span>
+                  <span v-if="cand.album"> · {{ cand.album }}</span>
+                  <span v-if="cand.duration_ms"> · {{ formatMs(cand.duration_ms) }}</span>
                 </div>
               </div>
-            </section>
-          </div>
+            </div>
+          </section>
         </div>
+      </div>
 
-        <div v-if="preview" class="preview-pane">
-          <div class="preview-header">
-            <div class="preview-title">{{ $t('lyrics.preview') }}</div>
-            <MD3Select v-model="kindModel" :options="kindOptions" @change="handleKindChange" />
+      <div v-if="preview" class="preview-pane">
+        <div class="preview-header">
+          <div class="preview-title">
+            {{ $t('lyrics.preview') }}
+            <span v-if="isWordSynced" class="preview-badge">{{ $t('lyrics.wordSynced') }}</span>
           </div>
-          <pre class="preview-lines">{{ previewLrc }}</pre>
+          <MD3Select v-model="kindModel" :options="kindOptions" @change="handleKindChange" />
         </div>
-
-        <div class="picker-footer">
-          <button class="btn-cancel" @click="close">{{ $t('common.cancel') }}</button>
-          <button class="btn-apply" :disabled="!preview || applying" @click="apply">
-            {{ applying ? $t('lyrics.saving') : $t('lyrics.applyAndSave') }}
-          </button>
+        <div class="preview-lines">
+          <div v-for="(row, idx) in previewRows" :key="idx" class="lyric-row">
+            <span class="row-time">[{{ row.time }}]</span>
+            <span v-if="row.words" class="row-body"
+              ><span v-for="(word, wi) in row.words" :key="wi" class="word-unit">{{
+                word
+              }}</span></span
+            >
+            <span v-else class="row-body">{{ row.body }}</span>
+            <span v-if="row.extra" class="row-extra">{{ row.extra }}</span>
+          </div>
+          <div v-if="previewRows.length === 0" class="row-empty">
+            {{ $t('lyrics.noLyricContent') }}
+          </div>
         </div>
       </div>
     </div>
-  </Teleport>
+
+    <template #footer>
+      <button type="button" @click="close">{{ $t('common.cancel') }}</button>
+      <button type="button" :disabled="!preview || applying" @click="apply">
+        {{ applying ? $t('lyrics.saving') : $t('lyrics.applyAndSave') }}
+      </button>
+    </template>
+  </MD3Dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { usePlayerStore } from '@/stores/player'
 import { useConfigStore } from '@/stores/config'
 import type { LyricCandidate, LyricKind } from '@/services/lyrics'
-import { buildPreviewLyric } from '@/services/lyrics'
+import type { Track } from '@/types'
+import { buildPreviewLyric, filterAssByKind } from '@/services/lyrics'
 import { LYRIC_PROVIDERS } from '@/services/lyrics'
+import { LyricsParser } from '@/utils/lyricsParser'
 import MD3Select from '../MD3Select.vue'
+import MD3Dialog from '../MD3Dialog.vue'
 
 const props = defineProps<{
   visible: boolean
   loading: boolean
   candidates: LyricCandidate[]
+  /** 弹窗打开时锁定的曲目：标题显示它，保存也写它，不跟当前播放走 */
+  track: Track | null
 }>()
 
 const emit = defineEmits<{
@@ -105,10 +128,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const playerStore = usePlayerStore()
 const configStore = useConfigStore()
-
-const track = computed(() => playerStore.currentTrack)
 
 const groups = computed(() => {
   const byProvider = new Map<string, LyricCandidate[]>()
@@ -125,10 +145,13 @@ const groups = computed(() => {
 
 const preview = ref<LyricCandidate | null>(null)
 
-// 候选歌词存在翻译/罗马音时，允许切换最终文本类型
-const previewHasTranslation = computed(
-  () => !!preview.value?.bundle.tlyric || !!preview.value?.bundle.romalrc,
-)
+// 候选歌词存在翻译/罗马音时，允许切换最终文本类型；逐字 bundle 可能只把它们放进 ASS 的 ts/roma 行
+const previewHasTranslation = computed(() => {
+  const bundle = preview.value?.bundle
+  if (!bundle) return false
+  if (bundle.tlyric?.trim() || bundle.romalrc?.trim()) return true
+  return /,ts,|,roma,/.test(bundle.karaoke ?? '')
+})
 const kindModel = ref<LyricKind>('auto')
 const kindOptions = computed(() => [
   { value: 'auto', label: t('lyrics.kindAuto') },
@@ -139,20 +162,78 @@ const kindOptions = computed(() => [
   ...(previewHasTranslation.value ? [{ value: 'roman', label: t('lyrics.kindRoman') }] : []),
 ])
 
-const previewLrc = computed(() => {
-  if (!preview.value) return ''
-  // 预览走 LRC 视图：逐字 bundle 的 ASS 只给播放器渲染用，贴出来是一堆 Dialogue 行
-  return (
-    buildPreviewLyric(
-      preview.value.bundle,
-      kindModel.value,
-      configStore.lyrics?.preferTranslation ?? true,
-    ) || t('lyrics.noLyricContent')
-  )
-})
+/** 预览行：时间戳 + 正文（逐字候选带切好的字）+ 可选的译文/罗马音 */
+interface PreviewRow {
+  time: string
+  /** 切好的字；只有一段或没有时为 null，按整行文本渲染（署名行、非逐字候选都是这种） */
+  words: string[] | null
+  body: string
+  extra: string
+}
+
+const previewRows = ref<PreviewRow[]>([])
+const isWordSynced = computed(() => !!preview.value?.bundle.karaoke?.trim())
+
+/** 秒 -> `mm:ss.xx`，与 LRC 时间戳同形 */
+function formatLineTime(secs: number): string {
+  const total = Math.max(0, secs)
+  const m = Math.floor(total / 60)
+  const s = total - m * 60
+  return `${String(m).padStart(2, '0')}:${s.toFixed(2).padStart(5, '0')}`
+}
+
+/** 非逐字预览文本（`mergeLyricTexts` 的产物）转行：同一时间戳的第二行就是译文/罗马音 */
+function rowsFromLrc(text: string): PreviewRow[] {
+  const rows: PreviewRow[] = []
+  for (const raw of text.split('\n')) {
+    const m = /^\[(\d{2}:\d{2}\.\d{2,3})\]([\s\S]*)$/.exec(raw.trim())
+    if (!m) continue
+    const body = m[2]!.trim()
+    if (!body) continue
+    const last = rows[rows.length - 1]
+    if (last && last.time === m[1] && !last.extra) {
+      last.extra = body
+      continue
+    }
+    rows.push({ time: m[1]!, words: null, body, extra: '' })
+  }
+  return rows
+}
+
+// 预览与渲染走同一条通路：逐字候选先按 kind 裁掉不要的样式再解析 ASS，
+// 所以切「原文/译文/罗马音」在预览里是真有反应的，也不会看到成堆的 Dialogue 行
+let previewParseSeq = 0
+watch(
+  [preview, kindModel, () => configStore.lyrics?.preferTranslation],
+  async ([cand, kind]) => {
+    const seq = ++previewParseSeq
+    previewRows.value = []
+    if (!cand) return
+    const prefer = configStore.lyrics?.preferTranslation ?? true
+    const ass = cand.bundle.karaoke?.trim()
+    if (ass) {
+      const lines = await LyricsParser.parseAsync(filterAssByKind(ass, kind, prefer), 'ass')
+      if (seq !== previewParseSeq) return
+      previewRows.value = lines.map((line) => {
+        const words = (line.words ?? []).map((word) => word.text).filter((text) => text.length > 0)
+        const boxed = words.length > 1
+        return {
+          time: formatLineTime(line.time),
+          words: boxed ? words : null,
+          body: boxed ? words.join('') : (line.texts[0] ?? ''),
+          extra: line.texts[1] ?? '',
+        }
+      })
+      return
+    }
+    if (seq !== previewParseSeq) return
+    previewRows.value = rowsFromLrc(buildPreviewLyric(cand.bundle, kind, prefer))
+  },
+  { immediate: true },
+)
 
 const handleKindChange = (): void => {
-  // 空实现：v-model 已经改了 kindModel，previewLrc 自己重算
+  // 空实现：v-model 已经改了 kindModel，上面的 watch 会重算预览
 }
 
 watch(
@@ -207,83 +288,25 @@ function formatMs(ms: number): string {
 </script>
 
 <style scoped>
-/* 主题只输出 29 个基础角色色，surface-container* 在本应用里不存在：只用真实存在的 token，
-   也不写深浅色兜底值（深色兜底会让浅色模式变成深底深字）。
-   层级：panel=surface（配遮罩+阴影）/ 内嵌块与次级块=surface-variant / 悬停=hover-overlay。 */
-.picker-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 3000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-}
-
-.picker-dialog {
-  width: 560px;
-  max-width: 92vw;
-  max-height: 82vh;
-  display: flex;
-  flex-direction: column;
-  border-radius: var(--md-sys-shape-corner-large, 16px);
-  background: var(--md-sys-color-surface);
-  color: var(--md-sys-color-on-surface);
-  box-shadow: var(--shadow-strong, 0 12px 40px rgba(0, 0, 0, 0.4));
-  overflow: hidden;
-}
-
-.picker-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
-}
-
-.picker-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 500;
-}
-
-.picker-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border: none;
-  border-radius: 20px;
-  background: transparent;
-  color: var(--md-sys-color-on-surface-variant);
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-@media (hover: hover) {
-  .picker-close:hover {
-    background-color: var(--md-sys-color-hover-overlay);
-  }
-}
-
+/* 遮罩、圆角、标题、页脚按钮都由 MD3Dialog 提供，这里只排内容区。
+   层级：次级块与计数胶囊用 surface-variant，主色只用于选中态；不写深浅色兜底值。 */
 .picker-toolbar {
   display: flex;
+  flex: none;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 18px;
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  gap: 16px;
+  padding-bottom: 12px;
 }
 
 .picker-track {
   flex: 1;
   min-width: 0;
   font-size: 14px;
+  line-height: 20px;
 }
 
 .picker-track-text {
+  display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -293,19 +316,22 @@ function formatMs(ms: number): string {
   color: var(--md-sys-color-on-surface-variant);
 }
 
+/* M3 tonal 按钮：secondary-container 实色，40dp 高、全圆角、label-large */
 .picker-auto-btn {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 6px;
   height: 40px;
   padding: 0 16px;
   border: none;
-  border-radius: 20px;
+  border-radius: 999px;
   background-color: var(--md-sys-color-secondary-container);
   color: var(--md-sys-color-on-secondary-container);
   font-family: inherit;
   font-size: 14px;
   font-weight: 500;
+  letter-spacing: 0.1px;
   white-space: nowrap;
   cursor: pointer;
   transition: background-color 0.2s ease;
@@ -313,67 +339,96 @@ function formatMs(ms: number): string {
 
 @media (hover: hover) {
   .picker-auto-btn:hover:not(:disabled) {
-    background-color: color-mix(
-      in srgb,
-      var(--md-sys-color-on-surface) 8%,
-      var(--md-sys-color-secondary-container)
-    );
+    background-color: var(--md-sys-color-hover-overlay);
   }
 }
 
 .picker-auto-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.38;
   cursor: not-allowed;
 }
 
-.picker-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 0;
+/* 列表与预览：窄屏上下叠、宽屏左右分栏，滚动只发生在各自区域内 */
+.picker-main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.picker-loading,
-.picker-empty {
-  padding: 28px;
+/* 滚动只发生在候选列表上：预览区不参与滚动，挑的时候始终看得见正文 */
+.picker-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.picker-status {
+  padding: 32px 16px;
   color: var(--md-sys-color-on-surface-variant);
+  font-size: 14px;
   text-align: center;
 }
 
 .picker-groups {
-  padding: 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
 }
 
-.candidate-group {
-  margin-bottom: 8px;
-}
-
+/* 分区标题用 title-small，M3 不做全大写 */
 .candidate-group-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
+  gap: 8px;
+  padding: 8px 16px 4px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   color: var(--md-sys-color-on-surface-variant);
 }
 
+/* 来源名不换行：CJK 在窄列里会一字一行竖排 */
+.candidate-group-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .candidate-group-count {
+  min-width: 20px;
   padding: 0 6px;
   border-radius: 999px;
   background-color: var(--md-sys-color-surface-variant);
   color: var(--md-sys-color-on-surface-variant);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  text-align: center;
 }
 
+/* 候选行：项目没有全局 border-box，不写 box-sizing 的话 min-height 是内容高，
+   56dp 会胖成 68px（上一版 72dp 实测 96px 就是这么来的） */
 .candidate-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: 56px;
+  padding: 6px 16px;
   border-radius: var(--md-sys-shape-corner-medium, 12px);
   cursor: pointer;
   transition: background-color 0.2s ease;
+}
+
+.candidate-row:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: -2px;
 }
 
 @media (hover: hover) {
@@ -384,13 +439,16 @@ function formatMs(ms: number): string {
 
 .candidate-check {
   display: flex;
+  flex: none;
   color: var(--md-sys-color-on-surface-variant);
-  opacity: 0.5;
+}
+
+.candidate-check .material-symbols-rounded {
+  font-size: 24px;
 }
 
 .candidate-check.active {
   color: var(--md-sys-color-primary);
-  opacity: 1;
 }
 
 .candidate-meta {
@@ -398,14 +456,16 @@ function formatMs(ms: number): string {
 }
 
 .candidate-title {
-  font-size: 14px;
+  font-size: 16px;
+  line-height: 24px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .candidate-sub {
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 20px;
   color: var(--md-sys-color-on-surface-variant);
   white-space: nowrap;
   overflow: hidden;
@@ -413,85 +473,120 @@ function formatMs(ms: number): string {
 }
 
 .preview-pane {
-  border-top: 1px solid var(--md-sys-color-outline-variant);
-  padding: 12px 18px;
+  flex: none;
 }
 
 .preview-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   margin-bottom: 8px;
 }
 
 .preview-title {
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--md-sys-color-on-surface-variant);
 }
 
 .preview-lines {
-  max-height: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 28dvh;
   overflow-y: auto;
+  overscroll-behavior: contain;
   margin: 0;
-  padding: 8px 10px;
-  border-radius: var(--md-sys-shape-corner-small, 8px);
+  padding: 12px 16px;
+  border-radius: var(--md-sys-shape-corner-medium, 12px);
   background-color: var(--md-sys-color-surface-variant);
   color: var(--md-sys-color-on-surface);
-  font-family: inherit;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
+}
+
+.preview-badge {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border: 0;
+  border-radius: 999px;
+  background-color: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  font-size: 12px;
+  font-weight: 500;
+  vertical-align: 2px;
+  white-space: nowrap;
+}
+
+/* 时间戳定宽一列，正文和它下面的译文都对齐到同一条竖线（原来用 margin-left 猜宽度，
+   时间戳一长就错位） */
+.lyric-row {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  column-gap: 8px;
+  align-items: baseline;
+}
+
+.row-time {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.row-body {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 2px;
   white-space: pre-wrap;
 }
 
-.picker-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 18px;
-  border-top: 1px solid var(--md-sys-color-outline-variant);
+/* 逐字候选的字加描边，一眼看出这条候选是真切到字还是只有整行 */
+.word-unit {
+  padding: 0 2px;
+  border-radius: var(--md-sys-shape-corner-extra-small, 4px);
+  /* 不用 color-mix()：Android System WebView 110 不支持，见 MD3Dialog 的遮罩兜底注释 */
+  outline: 1px solid var(--md-sys-color-outline-variant);
+  outline-offset: -1px;
 }
 
-.btn-cancel {
-  height: 40px;
-  padding: 0 16px;
-  border: none;
-  border-radius: 20px;
-  background-color: var(--md-sys-color-surface-variant);
+.row-extra {
+  grid-column: 2;
+  min-width: 0;
   color: var(--md-sys-color-on-surface-variant);
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
+  font-size: 12px;
+  white-space: pre-wrap;
 }
 
-@media (hover: hover) {
-  .btn-cancel:hover {
-    background-color: color-mix(
-      in srgb,
-      var(--md-sys-color-on-surface) 8%,
-      var(--md-sys-color-surface-variant)
-    );
+.row-empty {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* 宽到一定程度才分栏：判据是弹窗自身宽度（视口宽 ≠ 弹窗宽，按视口判会把列表挤成一列字）。
+   分栏后列表只占固定一小段，剩下的都给预览——歌词正文才是这里要看的东西 */
+@container (min-width: 720px) {
+  .picker-main {
+    flex-direction: row;
   }
-}
 
-.btn-apply {
-  height: 40px;
-  padding: 0 16px;
-  border: none;
-  border-radius: 20px;
-  background-color: var(--md-sys-color-primary);
-  color: var(--md-sys-color-on-primary);
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
+  .picker-body {
+    flex: 0 1 340px;
+    min-width: 220px;
+  }
 
-.btn-apply:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  .preview-pane {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    flex-direction: column;
+  }
+
+  .preview-lines {
+    flex: 1;
+    max-height: none;
+  }
 }
 </style>

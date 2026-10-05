@@ -78,8 +78,9 @@
     <div class="settings-section">
       <h4 class="section-title">{{ $t('config.display') }}</h4>
 
-      <!-- 界面字号只有 Android 真正生效 (原生侧接管 WebView textZoom, 原理见 useAppFontScale); 桌面端仍显示该项但后端是 no-op -->
-      <div class="setting-item">
+      <!-- 界面字号只在 Android 显示：它靠原生侧接管 WebView textZoom 才有效（原理见 useAppFontScale），
+           桌面端后端是 no-op，留个不动的滑块只会误导 -->
+      <div v-if="isAndroid" class="setting-item">
         <div class="setting-info">
           <span class="setting-label">{{ $t('config.interfaceFontSize') }}</span>
           <div class="setting-desc">{{ $t('config.interfaceFontSizeDesc') }}</div>
@@ -264,6 +265,7 @@ import logger from '../../utils/logger'
 import { formatKbMb } from '../../utils/format'
 import { saveConfigSafely } from '../../utils/errorMessages'
 import { useSliderFill } from '../../composables/useSliderFill'
+import { usePlatform } from '../../composables/usePlatform'
 import MD3Select from '../MD3Select.vue'
 import SettingSwitch from './SettingSwitch.vue'
 import { useI18n } from 'vue-i18n'
@@ -283,6 +285,7 @@ import type { ImmersiveColorScheme } from '../../types'
 
 const configStore = useConfigStore()
 const { t } = useI18n()
+const { isAndroid } = usePlatform()
 
 const languageOptions = computed(() => [
   { value: 'zh', label: '中文' },

@@ -479,7 +479,7 @@ describe('useLyrics', () => {
   describe('fetchCandidates / applyCandidate', () => {
     it('无当前曲目时 fetchCandidates 返回空数组', async () => {
       mockPlayerState.currentTrack = null
-      const candidates = await result.fetchCandidates()
+      const candidates = await result.fetchCandidates(mockPlayerState.currentTrack)
       expect(candidates).toEqual([])
       // 无曲目时不进入 collectCandidates
       expect(mockLyricProviders.collectCandidates).not.toHaveBeenCalled()
@@ -505,7 +505,7 @@ describe('useLyrics', () => {
         },
       ]
       mockLyricProviders.collectCandidates.mockResolvedValue(cands)
-      const resultList = await result.fetchCandidates()
+      const resultList = await result.fetchCandidates(mockPlayerState.currentTrack)
       expect(resultList).toEqual(cands)
     })
 
@@ -532,13 +532,48 @@ describe('useLyrics', () => {
         provider: 'netease' as const,
         method: 'webapi',
       }
-      const ok = await result.applyCandidate(candidate, 'auto')
+      const ok = await result.applyCandidate(candidate, 'auto', mockPlayerState.currentTrack)
       expect(ok).toBe(true)
       expect(result.lyricsSource.value).toBe('local')
       expect(mockInvoke).toHaveBeenCalledWith('write_lyrics_file', {
         path: '/music/apply.lrc',
         content: '[00:01.00]Applied',
       })
+    })
+
+    // 回归护栏：候选是弹窗打开时那首歌的，中途切歌后不能把旧内容写进新歌，
+    // 也不能把新歌正在进行的歌词加载判成过期（那会让歌词直接空白）
+    it('目标曲目已切走时只写锁定曲目的文件，不碰在屏歌词', async () => {
+      const locked = { path: '/music/locked.mp3', title: 'Locked', name: 'locked.mp3' }
+      mockPlayerState.currentTrack = { path: '/music/next.mp3', title: 'Next', name: 'next.mp3' }
+      await waitForLoadComplete()
+      const seqBefore = mockPlayerState._lyricsRequestId
+      mockLyricsParser.parseAsync.mockResolvedValue([
+        { time: 1, text: 'Locked', texts: ['Locked'] },
+      ])
+      mockFileUtils.getFileNameWithoutExtension.mockReturnValue('locked')
+      const candidate = {
+        id: '1',
+        title: 'Locked',
+        artist: '',
+        album: '',
+        duration_ms: 0,
+        bundle: { lrc: '[00:01.00]Locked' },
+        provider: 'netease' as const,
+        method: 'webapi',
+      }
+
+      const ok = await result.applyCandidate(candidate, 'auto', locked)
+
+      expect(ok).toBe(true)
+      expect(mockInvoke).toHaveBeenCalledWith('write_lyrics_file', {
+        path: '/music/locked.lrc',
+        content: '[00:01.00]Locked',
+      })
+      expect(mockPlayerState.lyrics).toBeNull()
+      expect(result.lyrics.value).toEqual([])
+      expect(result.lyricsSource.value).toBe('local')
+      expect(mockPlayerState._lyricsRequestId).toBe(seqBefore)
     })
 
     it('无当前曲目时 applyCandidate 返回 false', async () => {
@@ -553,7 +588,7 @@ describe('useLyrics', () => {
         provider: 'netease' as const,
         method: 'webapi',
       }
-      const ok = await result.applyCandidate(candidate, 'auto')
+      const ok = await result.applyCandidate(candidate, 'auto', mockPlayerState.currentTrack)
       expect(ok).toBe(false)
     })
   })

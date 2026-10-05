@@ -114,15 +114,13 @@ export class LyricsParser {
       if (timestamps.length < 1) continue
       const text = line.replace(linePattern, '').trim()
       if (!text) continue
-      const startTime = timestamps[0]!.time
-      resultMap[startTime] = resultMap[startTime] || { time: startTime, texts: [], karaoke: null }
-      if (timestamps.length > 1) {
-        resultMap[startTime].karaoke = {
-          fullText: text,
-          timings: timestamps.slice(1).map((s, idx) => ({ time: s.time, position: idx + 1 })),
-        }
+      // 一行多时间戳 = 同一句在多个时间点出现（副歌重复的常见写法），与同步版 parseLRC 保持一致，
+      // 每个时间点各存一条。原来只存第一个时间、其余塞进 karaoke.timings，而没有任何渲染读
+      // timings，结果这种行一到当前行就整行空白
+      for (const stamp of timestamps) {
+        const entry = (resultMap[stamp.time] ??= { time: stamp.time, texts: [], karaoke: null })
+        if (!entry.texts!.includes(text)) entry.texts!.push(text)
       }
-      resultMap[startTime].texts!.push(text)
     }
     return Object.values(resultMap).sort((a, b) => a.time - b.time)
   }

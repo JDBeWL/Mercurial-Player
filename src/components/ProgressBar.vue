@@ -203,14 +203,12 @@ const handlePointerUp = (event: PointerEvent) => {
   border-radius: 1px;
   overflow: visible;
   position: relative;
-  transition: transform 0.2s ease;
-  transform-origin: center center;
+  transition: height 0.2s ease;
 }
 
-/* 悬停时把进度条加粗 - 用 transform 而不是改 height，避免影响布局 */
-.progress-bar-wrapper.is-hovering .progress-bar,
+/* 悬停时把进度条加粗。用 height 而不是 transform: scaleY(2)
 .progress-bar-wrapper.is-dragging .progress-bar {
-  transform: scaleY(2);
+  height: 4px;
 }
 
 .progress-bar-fill {
@@ -234,21 +232,21 @@ const handlePointerUp = (event: PointerEvent) => {
   transition:
     transform 0.2s ease,
     opacity 0.2s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.28);
   pointer-events: none;
   opacity: 0;
 }
 
-/* 显示手柄；scaleY(0.5) 抵消进度条上的 scaleY(2)，保持圆点为圆 */
+/* 显示手柄 */
 .progress-bar-wrapper.is-hovering .progress-bar-handle,
 .progress-bar-wrapper.is-dragging .progress-bar-handle {
   opacity: 1;
-  transform: translate(-50%, -50%) scale(1) scaleY(0.5);
+  transform: translate(-50%, -50%) scale(1);
 }
 
 .progress-bar-wrapper.is-dragging .progress-bar-handle {
-  transform: translate(-50%, -50%) scale(1.2) scaleY(0.5);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%) scale(1.2);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.36);
 }
 
 .progress-bar-wrapper.is-dragging {
@@ -265,8 +263,7 @@ const handlePointerUp = (event: PointerEvent) => {
   top: -28px;
   /* clamp 边界用的半宽：内容约 80px、半宽约 40px，取 45px 留余量 */
   --tooltip-half-width: 45px;
-  transform: translateX(-50%) scaleY(0.5);
-  transform-origin: center bottom;
+  transform: translateX(-50%);
   background-color: var(--md-sys-color-inverse-surface);
   color: var(--md-sys-color-inverse-on-surface);
   font-size: 11px;
@@ -282,11 +279,11 @@ const handlePointerUp = (event: PointerEvent) => {
 @keyframes tooltipFadeIn {
   from {
     opacity: 0;
-    transform: translateX(-50%) scaleY(0.5) translateY(4px);
+    transform: translateX(-50%) translateY(4px);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) scaleY(0.5) translateY(0);
+    transform: translateX(-50%) translateY(0);
   }
 }
 

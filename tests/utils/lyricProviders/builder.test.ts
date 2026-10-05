@@ -30,6 +30,48 @@ describe('mergeLyricTexts', () => {
   })
 })
 
+describe('逐字 ASS 按 kind 裁剪样式', () => {
+  const ass = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    'Dialogue: 0,00:00:01.00,00:00:02.00,orig,,0,0,0,,{\\kf50}原',
+    'Dialogue: 0,00:00:01.00,00:00:02.00,ts,,0,0,0,,翻译',
+    'Dialogue: 0,00:00:01.00,00:00:02.00,roma,,0,0,0,,Romaji',
+  ].join('\n')
+  const bundle = { lrc: '[00:01.00]原', karaoke: ass }
+
+  it('original 只留 orig 行', () => {
+    const r = buildFinalLyric(bundle, 'original', true)
+    expect(r.format).toBe('ass')
+    expect(r.content).toContain(',orig,,0,0,0,,')
+    expect(r.content).not.toContain(',ts,,0,0,0,,')
+    expect(r.content).not.toContain(',roma,,0,0,0,,')
+  })
+
+  it('translation 留原文+译文，roman 留原文+罗马音', () => {
+    const trans = buildFinalLyric(bundle, 'translation', false).content
+    expect(trans).toContain(',ts,,0,0,0,,')
+    expect(trans).not.toContain(',roma,,0,0,0,,')
+    const roman = buildFinalLyric(bundle, 'roman', true).content
+    expect(roman).toContain(',roma,,0,0,0,,')
+    expect(roman).not.toContain(',ts,,0,0,0,,')
+  })
+
+  it('auto 跟随全局优先译文', () => {
+    expect(buildFinalLyric(bundle, 'auto', true).content).toContain(',ts,,0,0,0,,')
+    expect(buildFinalLyric(bundle, 'auto', false).content).not.toContain(',ts,,0,0,0,,')
+  })
+
+  it('头部与 Format 行原样保留', () => {
+    const r = buildFinalLyric(bundle, 'original', false).content
+    expect(r).toContain('ScriptType: v4.00+')
+    expect(r).toContain('Format: Layer, Start, End, Style')
+  })
+})
+
 describe('buildFinalLyric', () => {
   const bundle = {
     lrc: '[00:01.00]Original',

@@ -2,7 +2,7 @@
   <div
     ref="wrapperRef"
     class="md3-select-wrapper"
-    :class="{ 'is-open': isOpen, 'is-focused': isFocused }"
+    :class="{ 'is-open': isOpen, 'is-focused': isFocused, 'is-upward': openUpward }"
   >
     <div
       ref="triggerRef"
@@ -21,7 +21,7 @@
     </div>
     <Transition name="dropdown">
       <div v-if="isOpen" class="md3-select-dropdown" @click.stop>
-        <div class="md3-select-dropdown-scroll">
+        <div class="md3-select-dropdown-scroll" :style="{ maxHeight: `${dropdownMaxHeight}px` }">
           <template v-for="entry in options" :key="isGroup(entry) ? entry.label : entry.value">
             <template v-if="isGroup(entry)">
               <div class="md3-select-group-label">{{ entry.label }}</div>
@@ -92,6 +92,8 @@ const emit = defineEmits<{
 
 const isOpen = ref<boolean>(false)
 const isFocused = ref<boolean>(false)
+const openUpward = ref<boolean>(false)
+const dropdownMaxHeight = ref<number>(240)
 const triggerRef = ref<HTMLElement | null>(null)
 const wrapperRef = ref<HTMLElement | null>(null)
 const instanceId = ref<string>(
@@ -114,7 +116,32 @@ const toggleDropdown = (): void => {
 
   // 打开前先通知其它 MD3Select 关闭（常规交互：一次只展开一个）
   window.dispatchEvent(new CustomEvent('md3-select-open', { detail: { id: instanceId.value } }))
+  placeDropdown()
   isOpen.value = true
+}
+
+/** 下拉是绝对定位的，弹窗卡片 overflow:hidden 会把它裁掉：挑空间大的方向开，
+ *  并把高度压进该方向的可用空间，避免出现"点不到的选项" */
+function placeDropdown(): void {
+  const wrapper = wrapperRef.value
+  if (!wrapper) return
+  const rect = wrapper.getBoundingClientRect()
+  let clipTop = 0
+  let clipBottom = window.innerHeight
+  for (let el = wrapper.parentElement; el; el = el.parentElement) {
+    const style = getComputedStyle(el)
+    if (style.overflow !== 'visible' || style.overflowY !== 'visible') {
+      const box = el.getBoundingClientRect()
+      clipTop = box.top
+      clipBottom = box.bottom
+      break
+    }
+  }
+  const below = clipBottom - rect.bottom
+  const above = rect.top - clipTop
+  openUpward.value = above > below
+  const room = (openUpward.value ? above : below) - 8
+  dropdownMaxHeight.value = Math.max(120, Math.min(240, Math.round(room)))
 }
 
 const selectOption = (value: string | number): void => {
@@ -205,6 +232,23 @@ const handleOtherSelectOpen = (event: Event): void => {
   border-bottom-color: transparent;
   z-index: 1001;
   position: relative;
+}
+
+/* 朝上开：触发器改成上边收口，下拉挂在上方 */
+.md3-select-wrapper.is-upward.is-open .md3-select-trigger {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top-color: transparent;
+}
+
+.md3-select-wrapper.is-upward .md3-select-dropdown {
+  top: auto;
+  bottom: calc(100% - 1px);
+  border-radius: var(--md-sys-shape-corner-small) var(--md-sys-shape-corner-small) 0 0;
+  border-top: 1px solid var(--md-sys-color-outline);
+  border-bottom: none;
+  padding-top: 0;
+  padding-bottom: 1px;
 }
 
 .md3-select-value {

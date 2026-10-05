@@ -1021,6 +1021,7 @@ onMounted(() => {
 
 .provider-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 10px 16px;
@@ -1057,7 +1058,7 @@ onMounted(() => {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
-  flex: 1;
+  flex: 1 1 auto;
 }
 
 .provider-selects :deep(.md3-select-wrapper) {
@@ -1065,9 +1066,24 @@ onMounted(() => {
 }
 
 /* 字体名普遍偏长 (Noto Sans SC、系统字体全名), 单独加宽这一行的下拉框;
-   触发器宽度即下拉列表宽度 (.md3-select-dropdown 用 left/right: 0 对齐),
-   加宽后展开的字体列表也少截断一些 */
+   触发器宽度即下拉列表宽度 (.md3-select-dropdown 用 left/right: 0 对齐) */
 .setting-item.lyrics-font-select :deep(.md3-select-wrapper) {
   min-width: 240px;
+}
+
+/* 手机端 */
+@media (max-width: 600px) {
+  /* 标题和长说明并排时两边都被压成竖排，改成上下两行 */
+  .setting-item.info-item .setting-info:has(.setting-description) {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  /* 下拉框换到第二行后等分整行，不然右侧会留出一段空档 */
+  .provider-selects :deep(.md3-select-wrapper) {
+    flex: 1 1 0;
+    min-width: 0;
+  }
 }
 </style>
