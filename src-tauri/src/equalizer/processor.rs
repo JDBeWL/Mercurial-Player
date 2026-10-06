@@ -281,6 +281,31 @@ impl EqSettings {
     pub fn effective_preamp_db(&self) -> f32 {
         self.preamp - self.gains.iter().copied().fold(0.0_f32, f32::max)
     }
+
+    /// 把外部来源(手改的 eq.json、前端传来的值)拉回合法区间，理由见 [`sanitize_db`]
+    pub fn sanitize(&mut self) {
+        self.preamp = sanitize_db(self.preamp);
+        for gain in &mut self.gains {
+            *gain = sanitize_db(*gain);
+        }
+    }
+}
+
+/// 增益/前级的合法范围(dB)，命令层与滤波系数层共用，避免两处上限漂移
+pub const GAIN_RANGE_DB: f32 = 8.0;
+
+/// 增益消毒：NaN/inf 一律当 0dB。
+///
+/// `f32::clamp` 会原样放行 NaN(比较全为 false)，一个 NaN 进 biquad 就锁死整条滤波链
+/// (状态里存了 NaN 就再也出不来)，而 WASAPI 的 SIMD 量化把 NaN 映射成 0x80000000，
+/// 听感就是满幅负压爆音
+#[must_use]
+pub fn sanitize_db(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(-GAIN_RANGE_DB, GAIN_RANGE_DB)
+    } else {
+        0.0
+    }
 }
 
 // EQ 设置单独落盘到 data/eq.json,不进 config.json:调节是高频低延迟操作,拖拽滑块时
@@ -386,7 +411,12 @@ fn write_eq_settings_file(path: &str, settings: &EqSettings) {
 fn read_eq_settings_file(path: &str) -> Option<EqSettings> {
     let text = std::fs::read_to_string(path).ok()?;
     match serde_json::from_str::<EqSettings>(&text) {
-        Ok(settings) => Some(settings),
+        Ok(mut settings) => {
+            // eq.json 是可以被手改或用旧版本覆盖的，消毒后再进内存，
+            // 免得 NaN/inf 顺着 set_* 之外的路径流进滤波系数
+            settings.sanitize();
+            Some(settings)
+        }
         Err(e) => {
             log::warn!("Failed to parse equalizer settings file {path}: {e}");
             None
@@ -444,7 +474,8 @@ impl GlobalEqualizer {
         lock_or_log!(self.settings.read()).clone()
     }
 
-    pub fn set_settings(&self, settings: EqSettings) {
+    pub fn set_settings(&self, mut settings: EqSettings) {
+        settings.sanitize();
         *lock_or_log!(self.settings.write()) = settings;
         self.persist_now();
     }
@@ -454,20 +485,24 @@ impl GlobalEqualizer {
         self.persist_now();
     }
 
-    pub fn set_gains(&self, gains: [f32; EQ_BAND_COUNT]) {
+    pub fn set_gains(&self, mut gains: [f32; EQ_BAND_COUNT]) {
+        // 整组写入是预设/导入的路径，同样要消毒：NaN 进 biquad 会锁死整条滤波链
+        for gain in &mut gains {
+            *gain = sanitize_db(*gain);
+        }
         lock_or_log!(self.settings.write()).gains = gains;
         self.persist_now();
     }
 
     pub fn set_band_gain(&self, band: usize, gain: f32) {
         if band < EQ_BAND_COUNT {
-            lock_or_log!(self.settings.write()).gains[band] = gain.clamp(-8.0, 8.0);
+            lock_or_log!(self.settings.write()).gains[band] = sanitize_db(gain);
             self.persist_now();
         }
     }
 
     pub fn set_preamp(&self, preamp: f32) {
-        lock_or_log!(self.settings.write()).preamp = preamp.clamp(-8.0, 8.0);
+        lock_or_log!(self.settings.write()).preamp = sanitize_db(preamp);
         self.persist_now();
     }
 
@@ -719,5 +754,49 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(dir.join("eq.json.tmp"));
         let _ = std::fs::remove_dir(&dir);
+    }
+
+    /// NaN 进 biquad 会锁死整条滤波链（状态里存了 NaN 就再也出不来），
+    /// WASAPI 的 SIMD 量化又会把 NaN 映射成 0x80000000，听感是满幅负压爆音
+    #[test]
+    fn test_sanitize_db_rejects_non_finite() {
+        assert_eq!(sanitize_db(f32::NAN), 0.0);
+        assert_eq!(sanitize_db(f32::INFINITY), 0.0);
+        assert_eq!(sanitize_db(f32::NEG_INFINITY), 0.0);
+        assert_eq!(sanitize_db(99.0), GAIN_RANGE_DB);
+        assert_eq!(sanitize_db(-99.0), -GAIN_RANGE_DB);
+        assert_eq!(sanitize_db(3.5), 3.5);
+
+        let mut settings = EqSettings {
+            enabled: true,
+            preamp: f32::INFINITY,
+            ..EqSettings::default()
+        };
+        settings.gains[0] = f32::NAN;
+        settings.gains[5] = 99.0;
+        settings.sanitize();
+        assert_eq!(settings.gains[0], 0.0);
+        assert_eq!(settings.gains[5], GAIN_RANGE_DB);
+        assert!(settings.effective_preamp_db().is_finite());
+
+        // 消毒后的增益必须算出有限系数
+        for (i, &gain) in settings.gains.iter().enumerate() {
+            let c = BiquadCoefficients::for_band(44100.0, i, gain);
+            assert!(
+                c.b0.is_finite()
+                    && c.b1.is_finite()
+                    && c.b2.is_finite()
+                    && c.a1.is_finite()
+                    && c.a2.is_finite(),
+                "band {i} 系数非有限"
+            );
+        }
+
+        // 存储层是唯一的写入口，set_gains 也必须消毒
+        let eq = GlobalEqualizer::new();
+        eq.set_gains([f32::NAN; EQ_BAND_COUNT]);
+        assert!(eq.get_settings().gains.iter().all(|&g| g == 0.0));
+        eq.set_preamp(f32::NAN);
+        assert_eq!(eq.get_settings().preamp, 0.0);
     }
 }

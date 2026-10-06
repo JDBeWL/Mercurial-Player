@@ -221,28 +221,29 @@ impl Iterator for LockFreeSymphoniaSource {
         self.chunk_buffer.clear();
         self.chunk_pos = 0;
 
-        // next() 跑在 cpal 回调线程上，一律不阻塞：取不到数据就吐静音维持输出流，
+        // next() 跑在 cpal 回调线程上，一律不阻塞：取不到数据就补静音维持输出流，
         // 真正的结束仍由 producer_finished + 通道排空判定
-        let first = match receiver.try_recv() {
+        match receiver.try_recv() {
             Ok(s) => {
                 self.stalled = false;
-                Some(s)
+                self.chunk_buffer.push(s);
             }
-            Err(crossbeam_channel::TryRecvError::Disconnected) => None,
+            Err(crossbeam_channel::TryRecvError::Disconnected) => return None,
             Err(crossbeam_channel::TryRecvError::Empty) => {
                 if self.producer_finished.load(Ordering::Acquire) && receiver.is_empty() {
-                    None
-                } else {
-                    if !self.stalled {
-                        log::debug!("解码器供给停滞,以静音维持输出流");
-                    }
-                    self.stalled = true;
-                    Some(0.0)
+                    return None;
                 }
+                if !self.stalled {
+                    log::debug!("解码器供给停滞,以静音维持输出流");
+                }
+                self.stalled = true;
+                // 必须按整帧补：只补一个采样会把交错流永久错开一帧，之后 L/R 互换、
+                // EQ 的声道索引与频谱取窗跟着错，直到这首歌结束才可能碰巧对齐
+                self.chunk_buffer
+                    .resize(self.cached_channels.max(1) as usize, 0.0);
             }
-        }?;
+        }
 
-        self.chunk_buffer.push(first);
         while self.chunk_buffer.len() < 16384 {
             match receiver.try_recv() {
                 Ok(s) => self.chunk_buffer.push(s),
@@ -601,13 +602,26 @@ impl SymphoniaDecoder {
         // 如果需要混音（多声道到立体声）
         let needs_downmix = channel_map.is_some() && src_channels > 2;
         let target_ch = if needs_downmix { 2 } else { channels };
-        samples.reserve(frames * target_ch);
+        // 输出契约恒为每帧 2 采样（见 `SymphoniaDecoder::channels`），按最大者预留
+        samples.reserve(frames * target_ch.max(2));
 
         // 0.6 API: 先复制为交错 f32(自动做样本格式转换);
         // 多声道场景再原地复用 super::dsp::downmix_surround_to_stereo 下混,
         // 与独占模式(decode_push)共用同一实现,避免两套 5.1/7.1 系数漂移。
         audio_buf.copy_to_vec_interleaved(samples);
-        if needs_downmix && channels > 2 {
+        if channels == 1 {
+            // 单声道要就地摊成每帧两采样：`Source::channels()` 报的是 target_channels=2，
+            // 不补的话消费端把相邻两个单声道采样当成一帧立体声，整首 2 倍速、升一个八度，
+            // 独占路径按 `i % src_ch` 分声道也会跟着错
+            let base = samples.len();
+            samples.resize(base * 2, 0.0);
+            // 倒序写：目标位 2*read 恒 >= read，读过的原始区间不会被提前覆盖
+            for read in (0..base).rev() {
+                let s = samples[read];
+                samples[read * 2] = s;
+                samples[read * 2 + 1] = s;
+            }
+        } else if needs_downmix && channels > 2 {
             let mut write = 0usize;
             for f in 0..frames {
                 let (left, right) = super::dsp::downmix_surround_to_stereo(samples, channels, f);
@@ -651,5 +665,36 @@ impl Source for SymphoniaDecoder {
     }
     fn total_duration(&self) -> Option<Duration> {
         self.total_duration
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SymphoniaDecoder;
+    use symphonia::core::audio::{AudioBuffer, AudioSpec, Channels, GenericAudioBufferRef};
+
+    /// 消费端（rodio 混音器与独占路径的 `i % src_ch`）按 `Source::channels() == 2` 解释采样，
+    /// 所以单声道源必须摊成每帧两采样，否则相邻两个单声道采样被当成一帧立体声，整首 2 倍速
+    #[test]
+    fn 单声道摊成每帧两采样() {
+        let mut buf = AudioBuffer::<f32>::new(AudioSpec::new(44100, Channels::Discrete(1)), 3);
+        for v in [0.5f32, -0.5, 0.25] {
+            assert_eq!(buf.render(Some(1), &[v]), 1);
+        }
+
+        let mut out = Vec::new();
+        SymphoniaDecoder::convert_audio_buffer(GenericAudioBufferRef::F32(&buf), &mut out, None, 1);
+        assert_eq!(out, vec![0.5, 0.5, -0.5, -0.5, 0.25, 0.25]);
+    }
+
+    /// 立体声原样透传：上面的摊开不能把它再复制一遍
+    #[test]
+    fn 立体声原样透传() {
+        let mut buf = AudioBuffer::<f32>::new(AudioSpec::new(44100, Channels::Discrete(2)), 1);
+        assert_eq!(buf.render(Some(1), &[0.5, -0.5]), 1);
+
+        let mut out = Vec::new();
+        SymphoniaDecoder::convert_audio_buffer(GenericAudioBufferRef::F32(&buf), &mut out, None, 2);
+        assert_eq!(out, vec![0.5, -0.5]);
     }
 }

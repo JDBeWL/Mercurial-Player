@@ -206,7 +206,7 @@ const handlePointerUp = (event: PointerEvent) => {
   transition: height 0.2s ease;
 }
 
-/* 悬停时把进度条加粗。用 height 而不是 transform: scaleY(2)
+/* 悬停时把进度条加粗。用 height 而不是 transform: scaleY(2) */
 .progress-bar-wrapper.is-dragging .progress-bar {
   height: 4px;
 }

@@ -402,8 +402,10 @@ fn process_audio_output(
                         .write_to_device(frames_available as usize, reusable_bytes, None)
                         .is_ok()
                     {
-                        // 更新已写入硬件的采样数
-                        samples_written.fetch_add(samples_needed as u64, Ordering::SeqCst);
+                        // 只按真正取到的采样推进位置：欠载补的零也算进去，进度条和歌词就会在
+                        // 每次供给不上的时候往前跳且永不回正。AAudio 侧同口径（见 player.rs 的
+                        // written.fetch_add(got)）
+                        samples_written.fetch_add(popped as u64, Ordering::SeqCst);
                         return frames_available as usize;
                     }
                     *is_playing = false;

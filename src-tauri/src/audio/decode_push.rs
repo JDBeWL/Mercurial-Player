@@ -79,17 +79,36 @@ pub(super) fn decode_and_push_to_wasapi(
             .f_cutoff(0.925)
             .interpolation(SincInterpolationType::Linear)
             .oversampling_factor(128);
-        Async::<f32>::new_sinc(
+        match Async::<f32>::new_sinc(
             resample_ratio,
             2.0,
             &params,
             chunk_size,
             src_ch as usize,
             FixedAsync::Input,
-        )
-        .ok()
+        ) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                // 构造失败等于整首都不重采样：44.1k 内容在 48k 设备上会永久慢 9%、音偏低，
+                // 不留痕就只能从"这首歌解码有问题"去猜
+                log::error!(
+                    "重采样器创建失败，本首退化为不重采样输出: src={src_sr}Hz target={target_sr}Hz ratio={resample_ratio} -> {e:?}"
+                );
+                None
+            }
+        }
     } else {
         None
+    };
+    // 循环内的退化只报第一次（每轮最多 47 次，日志本身会成为开销）
+    let mut resample_err_logged = false;
+    let mut log_resample_failure = |err: &dyn std::fmt::Debug| {
+        if !resample_err_logged {
+            resample_err_logged = true;
+            log::error!(
+                "重采样失败，本首退化为不重采样输出: src={src_sr}Hz target={target_sr}Hz -> {err:?}"
+            );
+        }
     };
 
     let mut input_frames: Vec<Vec<f32>> = vec![Vec::with_capacity(chunk_size); src_ch as usize];
@@ -109,7 +128,7 @@ pub(super) fn decode_and_push_to_wasapi(
     let mut last_position_emit_time: u64 = 0;
 
     // 频谱分析器用最终输出采样(重采样/EQ/声道转换之后)驱动，与共享模式发同一个 spectrum-update
-    let mut spectrum_analyzer = SpectrumAnalyzer::new(target_sr);
+    let mut spectrum_analyzer = SpectrumAnalyzer::new(target_sr, target_ch);
 
     let emit_position = |last_time: &mut u64| {
         let now = std::time::SystemTime::now()
@@ -257,7 +276,9 @@ pub(super) fn decode_and_push_to_wasapi(
         use std::borrow::Cow;
         let output_frames: Cow<'_, [Vec<f32>]> = if let Some(ref mut r) = resampler {
             let actual = input_frames[0].len();
-            if actual < chunk_size && !eof {
+            // 不足一块（含 EOF 的零头）都要补齐再过重采样：直接借用原样输出会把这段以源速率
+            // 混进目标速率的流里，听感是曲尾一小段变速；补齐用的淡出填充正是为这种尾巴准备的
+            if actual < chunk_size {
                 for ch in &mut input_frames {
                     let last_sample = ch.last().copied().unwrap_or(0.0);
                     let samples_to_add = chunk_size - ch.len();
@@ -291,17 +312,23 @@ pub(super) fn decode_and_push_to_wasapi(
                                         // 借用即可：output_frames_resampled 本迭代内只读，下一轮才 clear/resize
                                         Cow::Borrowed(&output_frames_resampled)
                                     }
-                                    Err(_) => Cow::Borrowed(&input_frames),
+                                    Err(e) => {
+                                        log_resample_failure(&e);
+                                        Cow::Borrowed(&input_frames)
+                                    }
                                 }
                             }
-                            Err(_) => Cow::Borrowed(&input_frames),
+                            Err(e) => {
+                                log_resample_failure(&e);
+                                Cow::Borrowed(&input_frames)
+                            }
                         }
                     }
-                    Err(_) => Cow::Borrowed(&input_frames),
+                    Err(e) => {
+                        log_resample_failure(&e);
+                        Cow::Borrowed(&input_frames)
+                    }
                 }
-            } else if eof && actual < chunk_size {
-                // EOF 时直接借用 input_frames，避免 clone
-                Cow::Borrowed(&input_frames)
             } else {
                 let frames_in = input_frames[0].len();
                 match SequentialSliceOfVecs::new(&input_frames, src_ch as usize, frames_in) {
@@ -329,13 +356,22 @@ pub(super) fn decode_and_push_to_wasapi(
                                         // 同上：成功路径借用即可
                                         Cow::Borrowed(&output_frames_resampled)
                                     }
-                                    Err(_) => Cow::Borrowed(&input_frames),
+                                    Err(e) => {
+                                        log_resample_failure(&e);
+                                        Cow::Borrowed(&input_frames)
+                                    }
                                 }
                             }
-                            Err(_) => Cow::Borrowed(&input_frames),
+                            Err(e) => {
+                                log_resample_failure(&e);
+                                Cow::Borrowed(&input_frames)
+                            }
                         }
                     }
-                    Err(_) => Cow::Borrowed(&input_frames),
+                    Err(e) => {
+                        log_resample_failure(&e);
+                        Cow::Borrowed(&input_frames)
+                    }
                 }
             }
         } else {

@@ -72,8 +72,33 @@ pub fn words_from_starts(segs: &[(i64, String)], end_ms: i64) -> Vec<Word> {
         .collect()
 }
 
-/// 生成一条 Dialogue：`words` 多于一个单元时按 `lyrics_line2asstext` 输出 `{\kf}` 逐字
-/// （每字时长取 `|end - start|`），单单元或 `None` 时输出 `plain` 普通文本行
+/// [`match_row_span`] 默认的起始时间容差：两侧时间轴同源，但各自取整可能差几毫秒
+pub const MATCH_ROW_TOLERANCE_MS: i64 = 300;
+
+/// 为译文/罗马音行挑一个原文行的起止来复用。
+///
+/// 前端按 `start-end` 精确配对三种样式再合并成一行（见 lyricsParser.ts 的 groupedMap key），
+/// 译文自己算行尾会让每条译文都变成"空原文 + 单独一行"。不同来源的时间轴同源但取整可能差几
+/// 毫秒，所以允许 `tolerance_ms` 内的最近匹配；匹配不上返回 None，由调用方退回自身时间轴。
+/// `spans` 必须按起始时间升序。
+#[must_use]
+pub fn match_row_span(
+    spans: &[(i64, i64)],
+    start_ms: i64,
+    tolerance_ms: i64,
+) -> Option<(i64, i64)> {
+    let at = spans.partition_point(|(s, _)| *s < start_ms);
+    [at.checked_sub(1), Some(at)]
+        .into_iter()
+        .flatten()
+        .filter_map(|i| spans.get(i))
+        .min_by_key(|(s, _)| (s - start_ms).abs())
+        .filter(|(s, _)| start_ms - s <= tolerance_ms && s - start_ms <= tolerance_ms)
+        .copied()
+}
+
+/// 生成一条 Dialogue：`words` 多于一个单元时输出 `{\kf}` 逐字（每字时长 = 到下一字起点的
+/// 区间差，末字到行尾），单单元或 `None` 时输出 `plain` 普通文本行
 pub fn dialogue(
     start_ms: i64,
     end_ms: i64,
@@ -86,8 +111,12 @@ pub fn dialogue(
     let text = match words {
         Some(words) if words.len() > 1 => {
             let mut out = String::new();
-            for word in words {
-                let kf = (word.end_ms - word.start_ms).unsigned_abs() / 10; // 毫秒 -> 厘秒
+            for (i, word) in words.iter().enumerate() {
+                // \kf 必须覆盖「本字起点到下一字起点」（末字到行尾），不能只写字自身时长：
+                // 前端是从行首累加 \kf 反推每字起点，漏掉字间间隙会让高亮越跑越靠前，
+                // 且 sum(\kf) < 行时长。KRC/yrc 给的就是字自身时长，这里换算成区间差
+                let next_start = words.get(i + 1).map_or(end_ms, |w| w.start_ms);
+                let kf = next_start.saturating_sub(word.start_ms).max(10) / 10; // 毫秒 -> 厘秒，至少 1
                 let _ = write!(out, "{{\\kf{kf}}}{}", word.text);
             }
             out
@@ -161,8 +190,9 @@ mod tests {
     }
 
     #[test]
-    fn 逐字时长取字自身区间() {
-        // 来自 KRC 的字时长与「下一字起始」不同时，以字自身区间为准
+    fn 逐字时长覆盖到下一字起点() {
+        // KRC/yrc 给的是字自身时长，字之间有间隙；\kf 必须把间隙算进前一个字，
+        // 否则前端从行首累加出来的时间点会整体靠前
         let words = vec![
             Word {
                 start_ms: 0,
@@ -176,7 +206,55 @@ mod tests {
             },
         ];
         let line = dialogue(0, 2000, "orig", Some(&words), "");
-        assert!(line.contains("{\\kf50}a"));
-        assert!(line.contains("{\\kf40}b"));
+        assert!(line.contains("{\\kf100}a"));
+        assert!(line.contains("{\\kf100}b"));
+
+        // 不变量：sum(\kf) 恰等于行时长（厘秒），字序异常也不能出现负值或 0
+        let sum: u32 = kf_values(&line).iter().sum::<u32>();
+        assert_eq!(sum, 200);
+
+        let backwards = vec![
+            Word {
+                start_ms: 1500,
+                end_ms: 1600,
+                text: "a".to_string(),
+            },
+            Word {
+                start_ms: 1000,
+                end_ms: 1100,
+                text: "b".to_string(),
+            },
+        ];
+        let line = dialogue(0, 2000, "orig", Some(&backwards), "");
+        // 字序倒挂时差值为负，压到下限 1 而不是产出 0 或负数
+        assert_eq!(kf_values(&line), vec![1, 100]);
+    }
+
+    /// 取出一条 Dialogue 里所有 `\kf` 的厘秒值（不用正则，测试里够用）
+    fn kf_values(line: &str) -> Vec<u32> {
+        line.split("{\\kf")
+            .skip(1)
+            .map(|rest| {
+                rest.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse::<u32>()
+                    .unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn 译文按容差匹配原文行起止() {
+        let spans = [(1000i64, 3000i64), (5000, 8000)];
+        assert_eq!(match_row_span(&spans, 1000, 300), Some((1000, 3000)));
+        // 取整差 200ms 仍算同一行
+        assert_eq!(match_row_span(&spans, 5200, 300), Some((5000, 8000)));
+        assert_eq!(match_row_span(&spans, 4900, 300), Some((5000, 8000)));
+        // 超出容差与两端都要返回 None（调用方退回自身时间轴）
+        assert_eq!(match_row_span(&spans, 1400, 300), None);
+        assert_eq!(match_row_span(&spans, 0, 300), None);
+        assert_eq!(match_row_span(&spans, 99000, 300), None);
+        assert_eq!(match_row_span(&[], 1000, 300), None);
     }
 }

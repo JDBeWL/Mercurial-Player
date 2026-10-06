@@ -17,7 +17,8 @@ pub(super) const SPSC_RING_CAPACITY: usize = 384_000 * 2 * 4;
 ///
 /// 线程契约:push/push_slice_checked 仅生产者；pop_slice 仅消费者；clear/len 任意线程；
 /// invalidate 仅命令线程（递增全局世代，不在实时线程做）。
-/// 内存序:head/tail 各自 Release store 配 Acquire load；计数器单调递增，以 `usize` 计不会回绕。
+/// 内存序:head 由生产者独占推进；tail 有两个写者（消费者的读出推进与 clear 的快进），
+/// 故两边都用 `fetch_max` 只抬不降。计数器单调递增，以 `usize` 计不会回绕。
 pub(super) struct SpscSampleRing {
     /// 内部可变性:生产者/消费者访问不相交区间（SAFETY 说明见各方法）
     buf: UnsafeCell<Box<[f32]>>,
@@ -113,8 +114,10 @@ impl SpscSampleRing {
 
     /// 消费者:读出采样到 out，不足部分填 0(欠载)；返回实际读出数，欠载数 = `out.len() - 返回值`。
     pub(super) fn pop_slice(&self, out: &mut [f32]) -> usize {
+        // 必须先 tail 后 head（与 `len` 同一套读序）：tail 会被命令线程的 clear() 抬高，
+        // 若先读 head 再读 tail，中间那次抬升会让 head-tail 在 usize 上回绕成巨大值
+        let tail = self.tail.load(Ordering::Acquire);
         let head = self.head.load(Ordering::Acquire);
-        let tail = self.tail.load(Ordering::Relaxed); // 消费者独占,无需同步
         let n = (head - tail).min(out.len());
         if n > 0 {
             let start = tail % self.capacity;
@@ -126,7 +129,9 @@ impl SpscSampleRing {
             if n > first {
                 out[first..n].copy_from_slice(&buf[..n - first]);
             }
-            self.tail.store(tail + n, Ordering::Release);
+            // fetch_max 而非 store：n<=head-tail 保证 tail+n<=head，但并发 clear() 可能已把
+            // tail 抬到 head，store 会把它退回旧值，清空失效、切歌后重播上一首的采样
+            self.tail.fetch_max(tail + n, Ordering::Release);
         }
         if n < out.len() {
             out[n..].fill(0.0);
@@ -147,7 +152,8 @@ impl SpscSampleRing {
     /// 清空缓冲(tail 快进到 head)
     pub(super) fn clear(&self) {
         let head = self.head.load(Ordering::Acquire);
-        self.tail.store(head, Ordering::Release);
+        // fetch_max：消费者可能刚推进过 tail，快进只允许单向
+        self.tail.fetch_max(head, Ordering::Release);
     }
 }
 
@@ -329,5 +335,67 @@ mod spsc_ring_tests {
         producer.join().expect("producer panicked");
         consumer.join().expect("consumer panicked");
         assert_eq!(ring.len(), 0);
+    }
+
+    /// 消费者推进 tail 与命令线程 clear 并发：tail 只允许单向抬升，store 会把清空回退，
+    /// 于是切歌后上一首未读的采样被重新播出去。样本写成严格递增序列，重播必然破坏它。
+    #[test]
+    fn clear_racing_pop_never_replays() {
+        const CHUNK: usize = 8;
+        const CHUNKS: u32 = 20_000;
+        let ring = Arc::new(SpscSampleRing::new(256));
+        let drain_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let producer = {
+            let ring = Arc::clone(&ring);
+            let drain_done = Arc::clone(&drain_done);
+            thread::spawn(move || {
+                for i in 0..CHUNKS {
+                    let mut chunk = [0.0f32; CHUNK];
+                    for (j, v) in chunk.iter_mut().enumerate() {
+                        *v = (i as usize * CHUNK + j) as f32;
+                    }
+                    let mut written = 0;
+                    while written < CHUNK {
+                        written += ring.push_slice(&chunk[written..]);
+                        std::hint::spin_loop();
+                    }
+                }
+                drain_done.store(true, Ordering::Release);
+            })
+        };
+        let consumer = {
+            let ring = Arc::clone(&ring);
+            thread::spawn(move || {
+                let mut out = [0.0f32; CHUNK];
+                let mut last = -1.0f32;
+                loop {
+                    let n = ring.pop_slice(&mut out);
+                    if n > 0 {
+                        for &v in &out[..n] {
+                            assert!(v > last, "tail 被回退，重播了旧采样: {v} <= {last}");
+                            last = v;
+                        }
+                    }
+                    if drain_done.load(Ordering::Acquire) && ring.len() == 0 {
+                        break;
+                    }
+                    std::hint::spin_loop();
+                }
+            })
+        };
+        let clearer = {
+            let ring = Arc::clone(&ring);
+            thread::spawn(move || {
+                for _ in 0..CHUNKS {
+                    ring.clear();
+                    std::hint::spin_loop();
+                }
+            })
+        };
+
+        producer.join().expect("producer panicked");
+        clearer.join().expect("clearer panicked");
+        consumer.join().expect("consumer panicked");
     }
 }

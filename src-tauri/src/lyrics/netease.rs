@@ -122,7 +122,11 @@ pub async fn search_songs(
     let response_text = read_response_text(response).await?;
 
     if !status.is_success() {
-        return Err(format!("HTTP error: {status} - {response_text}").into());
+        return Err(format!(
+            "HTTP error: {status} - {}",
+            safe_truncate(&response_text, 200)
+        )
+        .into());
     }
 
     let data: CloudSearchResponse = serde_json::from_str(&response_text).map_err(|e| {
@@ -200,39 +204,46 @@ fn timed_lrc_lines(text: &str) -> Vec<(i64, String)> {
     out
 }
 
+/// 找出第一个字标记组 `(起始ms,时长ms[,标志])`；返回 (左括号位置, 右括号后一位, 起始, 时长)。
+///
+/// 正文里的半角括号不是分隔符（`Lemon (Live)`、`(啊)` 这类），必须跳过去找下一个数字组，
+/// 否则从它开始整行后面的字全丢
+fn find_yrc_group(s: &str) -> Option<(usize, usize, i64, i64)> {
+    let mut from = 0usize;
+    while let Some(rel) = s[from..].find('(') {
+        let open = from + rel;
+        let Some(close_rel) = s[open..].find(')') else {
+            break; // 括号没闭合，剩下的整段都是正文
+        };
+        let close = open + close_rel;
+        let mut fields = s[open + 1..close].split(',');
+        if let (Some(a), Some(b)) = (fields.next(), fields.next()) {
+            if let (Ok(start_ms), Ok(dur_ms)) = (a.trim().parse::<i64>(), b.trim().parse::<i64>()) {
+                return Some((open, close + 1, start_ms, dur_ms));
+            }
+        }
+        from = close + 1;
+    }
+    None
+}
+
 /// 解析 yrc 行正文 `(字起始ms,字时长ms,标志)字…` -> 逐字单元
 fn parse_yrc_words(content: &str) -> Vec<super::ass::Word> {
     let mut out: Vec<super::ass::Word> = Vec::new();
-    let mut pos = 0usize;
-    while content[pos..].starts_with('(') {
-        let Some(close_rel) = content[pos..].find(')') else {
-            break;
-        };
-        let close = pos + close_rel;
-        let mut fields = content[pos + 1..close].split(',');
-        let (Some(start_raw), Some(dur_raw)) = (fields.next(), fields.next()) else {
-            break;
-        };
-        let (Ok(start_ms), Ok(dur_ms)) = (
-            start_raw.trim().parse::<i64>(),
-            dur_raw.trim().parse::<i64>(),
-        ) else {
-            break;
-        };
-        // 字文本取到下一个 `(` 之前，中间的空格属于正文
-        let word_end = content[close + 1..]
-            .find('(')
-            .map(|i| close + 1 + i)
-            .unwrap_or(content.len());
-        let text = &content[close + 1..word_end];
+    let mut rest = content;
+    while let Some((_, after, start_ms, dur_ms)) = find_yrc_group(rest) {
+        let tail = &rest[after..];
+        // 字文本取到下一个字标记组之前：中间的空格与非法括号都属于正文
+        let text_end = find_yrc_group(tail).map_or(tail.len(), |(next_open, _, _, _)| next_open);
+        let text = &tail[..text_end];
         if !text.is_empty() {
             out.push(super::ass::Word {
                 start_ms,
-                end_ms: start_ms + dur_ms.max(10),
+                end_ms: start_ms.saturating_add(dur_ms.max(10)),
                 text: text.to_string(),
             });
         }
-        pos = word_end;
+        rest = &tail[text_end..];
     }
     out
 }
@@ -270,7 +281,7 @@ fn yrc_to_karaoke_ass(yrc: &str, trans: &str, roma: &str, title: &str) -> Option
         let last_word_end = words.iter().map(|w| w.end_ms).max().unwrap_or(start_ms);
         rows.push(Row {
             start_ms,
-            end_ms: (start_ms + dur_ms).max(last_word_end),
+            end_ms: start_ms.saturating_add(dur_ms).max(last_word_end),
             text: words.iter().map(|w| w.text.as_str()).collect(),
             words,
         });
@@ -281,14 +292,21 @@ fn yrc_to_karaoke_ass(yrc: &str, trans: &str, roma: &str, title: &str) -> Option
     rows.sort_by_key(|r| r.start_ms);
 
     let mut out = super::ass::ass_header(title);
+    // 译文/罗马音复用原文行的起止，理由见 `ass::match_row_span`
+    let spans: Vec<(i64, i64)> = rows.iter().map(|r| (r.start_ms, r.end_ms)).collect();
     for (text, style) in [(trans, "ts"), (roma, "roma")] {
         let lines = timed_lrc_lines(text);
         for (i, (start_ms, plain)) in lines.iter().enumerate() {
-            let end_ms = lines
-                .get(i + 1)
-                .map_or(start_ms + 5000, |(next, _)| *next)
-                .max(*start_ms + 10);
-            out.push_str(&super::ass::dialogue(*start_ms, end_ms, style, None, plain));
+            let (s, e) =
+                super::ass::match_row_span(&spans, *start_ms, super::ass::MATCH_ROW_TOLERANCE_MS)
+                    .unwrap_or_else(|| {
+                        let end = lines
+                            .get(i + 1)
+                            .map_or_else(|| start_ms.saturating_add(5000), |(next, _)| *next)
+                            .max(start_ms.saturating_add(10));
+                        (*start_ms, end)
+                    });
+            out.push_str(&super::ass::dialogue(s, e, style, None, plain));
         }
     }
     for row in &rows {
@@ -320,7 +338,11 @@ pub async fn get_lyrics(song_id: &str) -> Result<LyricsData, AppError> {
     let response_text = read_response_text(response).await?;
 
     if !status.is_success() {
-        return Err(format!("HTTP error: {status} - {response_text}").into());
+        return Err(format!(
+            "HTTP error: {status} - {}",
+            safe_truncate(&response_text, 200)
+        )
+        .into());
     }
 
     let data: LyricResponse = serde_json::from_str(&response_text).map_err(|e| {
@@ -363,8 +385,10 @@ mod tests {
         let yrc = "[24810,3150](24810,630,0)这(25440,300,0)一(25740,390,0)路\n";
         let ass = yrc_to_karaoke_ass(yrc, "", "", "1").expect("应生成 ASS");
         assert!(ass.contains("Style: orig,Arial,20,"));
+        // 末字的 \kf 要一直铺到行尾（27960-25740=2220ms），否则前端累加出来的时间点
+        // 比实际早，行尾那段拖音没有字在唱
         assert!(ass.contains(
-            "Dialogue: 0,00:00:24.81,00:00:27.96,orig,,0,0,0,,{\\kf63}这{\\kf30}一{\\kf39}路"
+            "Dialogue: 0,00:00:24.81,00:00:27.96,orig,,0,0,0,,{\\kf63}这{\\kf30}一{\\kf222}路"
         ));
     }
 
@@ -386,8 +410,33 @@ mod tests {
     fn 译文与罗马音成普通行() {
         let yrc = "[1000,2000](1000,900,0)あ(1900,1100,0)い\n";
         let ass = yrc_to_karaoke_ass(yrc, "[00:01.00]中文译文", "[00:01.00]romaji", "1").unwrap();
-        assert!(ass.contains(",ts,,0,0,0,,中文译文"));
-        assert!(ass.contains(",roma,,0,0,0,,romaji"));
+        // 起止必须与匹配到的原文行一致：前端按 `start-end` 精确配对样式，
+        // 行尾自己算就会让译文变成单独一行
+        assert!(ass.contains("Dialogue: 0,00:00:01.00,00:00:03.00,ts,,0,0,0,,中文译文"));
+        assert!(ass.contains("Dialogue: 0,00:00:01.00,00:00:03.00,roma,,0,0,0,,romaji"));
+    }
+
+    #[test]
+    fn 译文匹配不到原文行时退回自身时间轴() {
+        let yrc = "[1000,2000](1000,2000,0)あ\n";
+        // 25000ms 处没有原文行(容差 300ms)，行尾取下一行起始
+        let ass = yrc_to_karaoke_ass(yrc, "[00:25.00]独白\n[00:28.00]下一句", "", "1").unwrap();
+        assert!(ass.contains("Dialogue: 0,00:00:25.00,00:00:28.00,ts,,0,0,0,,独白"));
+    }
+
+    #[test]
+    fn yrc_正文含半角括号不截行() {
+        // `(Live)` 不是字标记组：曾经在这里 break，整行后面的字全丢
+        let yrc = "[1000,5000](1000,600,0)Lemon (Live) 现场(1600,3400,0)版\n";
+        let words = parse_yrc_words("(1000,600,0)Lemon (Live) 现场(1600,3400,0)版");
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].text, "Lemon (Live) 现场");
+        assert_eq!(words[0].start_ms, 1000);
+        assert_eq!(words[1].text, "版");
+        assert_eq!(words[1].start_ms, 1600);
+        let ass = yrc_to_karaoke_ass(yrc, "", "", "1").unwrap();
+        assert!(ass.contains("Lemon (Live) 现场"));
+        assert!(ass.ends_with("{\\kf60}Lemon (Live) 现场{\\kf440}版\n"));
     }
 
     #[test]

@@ -273,9 +273,16 @@ fn krc_decrypt(encrypted: &[u8]) -> Option<String> {
         .enumerate()
         .map(|(i, byte)| byte ^ KRC_KEY[i % KRC_KEY.len()])
         .collect();
-    let mut decoder = flate2::read::ZlibDecoder::new(&plain[..]);
-    let mut text = String::new();
-    decoder.read_to_string(&mut text).ok()?;
+    // take 多留 1 字节用于区分"正好到上限"与"超过上限"，理由见 MAX_DECOMPRESSED_BYTES
+    let mut decoder = flate2::read::ZlibDecoder::new(&plain[..])
+        .take(crate::lyrics::MAX_DECOMPRESSED_BYTES as u64 + 1);
+    let mut bytes = Vec::new();
+    decoder.read_to_end(&mut bytes).ok()?;
+    if bytes.len() > crate::lyrics::MAX_DECOMPRESSED_BYTES {
+        log::warn!("KRC 解压结果超过上限，按损坏处理并丢弃");
+        return None;
+    }
+    let text = String::from_utf8(bytes).ok()?;
     Some(text.trim_start_matches('\u{feff}').to_string())
 }
 
@@ -381,8 +388,8 @@ fn parse_krc_words(content: &str, line_start: i64) -> Vec<super::ass::Word> {
         .map(|(i, (_, marker_end, offset, duration))| {
             let text_end = markers.get(i + 1).map_or(content.len(), |next| next.0);
             super::ass::Word {
-                start_ms: line_start + offset,
-                end_ms: line_start + offset + duration,
+                start_ms: line_start.saturating_add(*offset),
+                end_ms: line_start.saturating_add(*offset).saturating_add(*duration),
                 text: content.get(*marker_end..text_end).unwrap_or("").to_string(),
             }
         })
@@ -468,13 +475,13 @@ fn parse_krc(text: &str) -> KrcParse {
             // 无逐字标记的行退化为整行单字
             words.push(super::ass::Word {
                 start_ms,
-                end_ms: start_ms + duration_ms,
+                end_ms: start_ms.saturating_add(duration_ms),
                 text: content.to_string(),
             });
         }
         parsed.lines.push(KrcLine {
             start_ms,
-            end_ms: start_ms + duration_ms,
+            end_ms: start_ms.saturating_add(duration_ms),
             words,
         });
     }
@@ -640,21 +647,21 @@ pub async fn search_candidates(
     limit: u32,
 ) -> Result<Vec<LyricCandidate>, AppError> {
     let items = search_songs(query, limit).await;
-    let mut out: Vec<LyricCandidate> = Vec::new();
-    for item in items {
-        let Some(bundle) = fetch_bundle(&item).await else {
-            continue;
-        };
-        out.push(LyricCandidate {
+    // 每候选两次请求（逐字 + 译文），串行会把整轮拖成 2N 次往返；并行后最坏只是一次超时。
+    // 顺序仍按搜索结果原序
+    let fetched = futures_util::future::join_all(items.into_iter().map(|item| async move {
+        let bundle = fetch_bundle(&item).await?;
+        Some(LyricCandidate {
             id: item.file_hash.clone(),
             title: strip_em(&item.song_name),
             artist: strip_em(&item.singer_name),
             album: strip_em(&item.album_name),
             duration_ms: item.duration * 1000,
             bundle,
-        });
-    }
-    Ok(out)
+        })
+    }))
+    .await;
+    Ok(fetched.into_iter().flatten().collect())
 }
 
 #[cfg(test)]

@@ -48,6 +48,11 @@ pub struct LyricCandidate {
 /// 已知的歌词来源 id
 const KNOWN_PROVIDERS: &[&str] = &["netease", "lrclib", "qq", "kugou"];
 
+/// 第三方载荷解压后的字节数上限。网络侧只限到 `http_client::MAX_RESPONSE_SIZE`(5MB)，
+/// 而 zlib 对构造数据可以膨胀上千倍，不设上限就是"一个坏响应换一次 OOM"；
+/// 真实歌词解压后是几十 KB 量级，4MB 已远超正常范围
+pub(crate) const MAX_DECOMPRESSED_BYTES: usize = 4 * 1024 * 1024;
+
 /// 校验 provider 标识（防注入，仅放行已登记来源）
 pub fn is_valid_provider(provider: &str) -> bool {
     KNOWN_PROVIDERS.contains(&provider)
@@ -84,22 +89,25 @@ async fn netease_candidates(
         format!("{} {}", query.title, query.artist)
     };
     let songs = netease::search_songs(&keyword, limit, 0).await?;
-    let mut out: Vec<LyricCandidate> = Vec::new();
-    for song in songs {
+    // 候选逐字请求并行发出：串行时一个卡住的接口就能把整轮拖到 timeout×N（前端表现为
+    // "加载歌词中"转几十秒）。join_all 保持搜索结果的原顺序
+    let fetched = futures_util::future::join_all(songs.into_iter().map(|song| async move {
         let Ok(bundle) = netease::get_lyrics(&song.id).await else {
-            continue;
+            log::debug!("网易歌词候选 {} 获取失败，跳过", song.id);
+            return None;
         };
         if bundle.lrc.trim().is_empty() {
-            continue;
+            return None;
         }
-        out.push(LyricCandidate {
+        Some(LyricCandidate {
             id: song.id,
             title: song.name,
             artist: song.artist,
             album: song.album,
             duration_ms: song.duration,
             bundle,
-        });
-    }
-    Ok(out)
+        })
+    }))
+    .await;
+    Ok(fetched.into_iter().flatten().collect())
 }

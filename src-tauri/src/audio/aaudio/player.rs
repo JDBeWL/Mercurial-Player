@@ -432,9 +432,9 @@ impl AaudioExclusivePlayer {
             self.sample_rate.load(Ordering::SeqCst),
             self.channels.load(Ordering::SeqCst) as u16,
         );
-        if current == (sample_rate, channels)
-            && self.state.load(Ordering::SeqCst) != ST_UNINITIALIZED
-        {
+        // close_stream 不清 rate/channels，所以任何"格式已经对了"的判断都必须带上流还活着
+        let live = self.state.load(Ordering::SeqCst) != ST_UNINITIALIZED;
+        if live && current == (sample_rate, channels) {
             return Ok(current);
         }
 
@@ -447,6 +447,11 @@ impl AaudioExclusivePlayer {
         // 设备支持曲目原生速率就直接用（位完美），否则退到最接近的一档
         let target_rate = pick_sample_rate(&device, sample_rate).unwrap_or(sample_rate);
         let target_channels = pick_channel_count(&device, channels).unwrap_or(channels);
+        // 协商结果与在用的流一致时不必重开：只比原生速率会让 44.1k 内容在 48k-only 的 DAC 上
+        // 每首都重建一次（关/开流 + 看门狗 stop/join/start），而调用方还占着 wasapi_player 锁
+        if live && current == (target_rate, target_channels) {
+            return Ok(current);
+        }
         self.open_stream(&device, Some(target_rate), Some(target_channels))
     }
 
@@ -648,19 +653,21 @@ impl AaudioExclusivePlayer {
         let Some(inner) = taken else { return };
 
         inner.ctx.shared.running.store(false, Ordering::Release);
-        // 取走句柄而不只是置 null：锁外读指针的调用者可能已经拿到旧句柄（见 `Inner::with_control`）
-        let stream = {
-            let mut handle = lock_or_log!(inner.stream.lock());
-            std::mem::replace(&mut *handle, ptr::null_mut())
-        };
+        // 取走句柄并在控制锁内 close：`AAudioStream_close` 只等数据回调，不等其它线程正在进行的
+        // API 调用，放到锁外就会与看门狗的 with_stream 并发成 use-after-free
+        // （句柄必须在锁内解引用，见 `Inner::with_stream` 的说明）
+        let mut handle = lock_or_log!(inner.stream.lock());
+        let stream = std::mem::replace(&mut *handle, ptr::null_mut());
         if !stream.is_null() {
             // SAFETY: stream 由 openStream 创建且尚未 close；close 不能从回调里调用，
-            // 这里一定在命令线程上
+            // 这里一定在命令线程上。回调只经 userData 触碰 Ctx、不取 stream 锁，故不会自锁
             unsafe {
                 let _ = ffi::AAudioStream_requestStop(stream);
                 let _ = ffi::AAudioStream_close(stream);
             }
         }
+        // 显式 drop：guard 必须活过上面的 close，看门狗才不可能并发持有同一个句柄
+        drop(handle);
         drop(inner); // ctx 也随之释放（close 已保证回调不再运行）
         self.set_state(ST_UNINITIALIZED);
         self.exclusive_confirmed.store(false, Ordering::SeqCst);

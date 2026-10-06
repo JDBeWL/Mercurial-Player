@@ -100,7 +100,9 @@ const pushEntry = (): void => {
 }
 
 const backOneLevel = (): void => {
-  if (mobileView.value === 'detail') {
+  // "详情/列表"这一级只在手机竖屏存在。不带这个条件的话，桌面点过一次侧栏之后
+  // mobileView 就停在 'detail'，关闭键的第一下会被当成"退回列表"吃掉，要按两下才退出
+  if (isMobilePortrait.value && mobileView.value === 'detail') {
     mobileView.value = 'list'
     return
   }
@@ -134,8 +136,10 @@ onUnmounted(() => {
 
 // 用 select 事件而不是 watch(activeTab): 点已选中项时值没变, watch 不触发, 会卡在列表页进不去详情
 const onTabSelect = (): void => {
+  // 桌面/横屏没有两级视图，这里改 mobileView 会让它和实际显示的层级不一致
+  if (!isMobilePortrait.value) return
   mobileView.value = 'detail'
-  if (isMobilePortrait.value) pushEntry()
+  pushEntry()
 }
 
 const baseTabs: SettingsTab[] = [

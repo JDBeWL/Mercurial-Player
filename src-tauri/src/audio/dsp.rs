@@ -35,6 +35,12 @@ pub(crate) fn soft_clip_fast(x: f32) -> f32 {
     let sign = x.signum();
     let abs_x = x.abs();
 
+    // 非有限值不能进表：NaN 的 `as usize` 归 0 会查出 0 再乘 NaN 符号仍是 NaN，
+    // 而 WASAPI 的 SIMD 量化把 NaN 映射成 0x80000000(满幅负压)
+    if !abs_x.is_finite() {
+        return if abs_x.is_nan() { 0.0 } else { sign };
+    }
+
     // 快速路径：大多数采样在[-0.95, 0.95]范围内
     if abs_x <= 0.95 {
         return x;
@@ -149,14 +155,18 @@ pub(crate) fn convert_channels_into(
                 out.push(left);
                 out.push(right);
             }
+            (2, _) if tgt > 2 => {
+                // 立体声上混到 5.1/7.1：只在 L/R 两个位置出声，其余留静音。把 L 原样复制进
+                // C/LFE/环绕会得到 0dB 的全频 LFE（真实 LFE 是 <120Hz 的特效声道）和糊成
+                // 一片的声场；VLC 与 ffmpeg 的默认 pan 也是 L/R only
+                out.push(samples[start]);
+                out.push(samples[start + 1]);
+                out.resize(out.len() + tgt - 2, 0.0);
+            }
             _ => {
-                // 其他情况:简单截取或填充
+                // 其它组合：位置对得上的照抄，对不上的补静音（不再用 L 填满多余声道）
                 for ch in 0..tgt {
-                    out.push(if ch < src {
-                        samples[start + ch]
-                    } else {
-                        samples[start]
-                    });
+                    out.push(if ch < src { samples[start + ch] } else { 0.0 });
                 }
             }
         }
@@ -281,5 +291,21 @@ mod tests {
             assert!(approx_eq(out[f * 2], l), "frame {f} L mismatch");
             assert!(approx_eq(out[f * 2 + 1], r), "frame {f} R mismatch");
         }
+    }
+
+    #[cfg(any(windows, target_os = "android"))]
+    #[test]
+    fn test_convert_channels_into_2_to_6_keeps_extras_silent() {
+        // 立体声上混到 5.1：只有 L/R 有内容。曾经的做法是把 L 复制进 C/LFE/环绕，
+        // 那等于用 0dB 全频信号喂 LFE
+        let input = [0.5, -0.5, 0.25, -0.25];
+        let mut out = Vec::new();
+        convert_channels_into(&input, 2, 6, &mut out);
+        assert_eq!(
+            out,
+            vec![
+                0.5, -0.5, 0.0, 0.0, 0.0, 0.0, 0.25, -0.25, 0.0, 0.0, 0.0, 0.0
+            ]
+        );
     }
 }

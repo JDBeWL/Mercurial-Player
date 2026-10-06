@@ -238,19 +238,28 @@ pub async fn updater_download(
 ///
 /// Windows 下拉起安装器并退出进程，替换与重启由安装器完成。
 #[tauri::command]
-pub async fn updater_install(pending: State<'_, PendingUpdate>) -> Result<(), AppError> {
+pub async fn updater_install(
+    app: AppHandle,
+    pending: State<'_, PendingUpdate>,
+) -> Result<(), AppError> {
     let update = lock_or_log!(pending.update.lock())
         .clone()
         .ok_or("没有待安装的更新，请先检查更新")?;
     let temp_path = lock_or_log!(pending.path.lock())
         .take()
         .ok_or("更新尚未下载完成")?;
+    let pubkey = updater_pubkey(&app)
+        .ok_or_else(|| AppError::Network("无法读取更新公钥配置".to_string()))?;
+    let signature = update.signature.clone();
 
     // 大文件 IO 与拉起安装器，都放阻塞线程池，别占着 async 运行时
     let install_path = temp_path.clone();
     let install_result = tauri::async_runtime::spawn_blocking(move || -> Result<(), AppError> {
         // 插件的 install 接口收字节，这次读取是瞬时峰值
         let data = std::fs::read(&install_path).map_err(|e| format!("读取更新包文件失败: {e}"))?;
+        // 下载后的校验读的是当时的字节，而临时文件在同用户可写的目录里，从下载完成到用户点
+        // 安装之间可以被整包替换；插件的 install 自身不验签，所以执行前对这块字节再验一次
+        verify_signature(&data, &signature, &pubkey)?;
         update
             .install(&data)
             .map_err(|e| AppError::msg(format!("安装更新失败: {e}")))

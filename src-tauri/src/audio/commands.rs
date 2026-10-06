@@ -262,7 +262,9 @@ pub fn is_output_playing(state: &AppState) -> bool {
         .output
         .sink
         .lock()
-        .map(|sink| !sink.is_paused())
+        // 还要看队列空不空：rodio 新建的 sink 暂停位是 false，应用刚启动、以及任何
+        // 只 stop() 没 clear() 之后，只看 is_paused 会把"没在出声"报成"在播"
+        .map(|sink| !sink.is_paused() && !sink.empty())
         .unwrap_or(false)
 }
 
@@ -522,16 +524,17 @@ async fn switch_to_wasapi_exclusive(
         (is_playing, current_path)
     };
 
-    {
-        let mut old_wasapi = state
-            .player
-            .output
-            .wasapi_player
-            .lock()
-            .lock_or_err("WASAPI player")?;
-        // take() 交出所有权，drop 时清理线程与设备资源
-        let _ = old_wasapi.take();
-    }
+    // 先 take 出实例、放掉锁再 drop：独占播放器的 Drop 会 join 渲染线程，而它可能正卡在
+    // 设备探测的重试 sleep 上，持锁 join 会把 pause/resume/volume 这些同步命令一起堵死。
+    // 写法与 release_exclusive_player 一致（临时 guard 在语句末就结束）
+    let old_wasapi = state
+        .player
+        .output
+        .wasapi_player
+        .lock()
+        .lock_or_err("WASAPI player")?
+        .take();
+    drop(old_wasapi);
 
     // WASAPI 初始化含重试 sleep 与 COM 操作，同样放阻塞线程池
     let dev_name = device_name.to_string();
@@ -601,6 +604,16 @@ async fn switch_to_wasapi_exclusive(
             if let Ok(mut exclusive_mode_guard) = state.player.output.exclusive_mode.lock() {
                 *exclusive_mode_guard = false;
             }
+            // 先释放半初始化的独占实例（Drop 会交还设备），否则下面的 cpal 开流可能失败
+            drop(wasapi_playback);
+            // 上面已经把共享 sink stop+clear 了，不回退就是"UI 显示在播、其实没声"，
+            // 而且这首歌结束后自动切歌也不会再触发（没有源在混音器里跑）
+            if is_playing
+                && let Some(path) = &current_path
+                && let Err(restore) = play_track_shared(app, state, path, current_time)
+            {
+                log::error!("独占切换失败后回退共享输出也失败: {restore}");
+            }
             Err(format!(
                 "Failed to initialize WASAPI exclusive mode: {e}. The device may be in use by another application."
             ).into())
@@ -669,7 +682,7 @@ async fn switch_to_shared_mode(
 
     // 必须在打开新的 cpal stream 之前 drop 独占播放器，否则设备仍被占用（见 release_exclusive_player）
     // 解码线程只在取写入端句柄时短暂碰这把锁（背压等待不持锁），这里不会被拖住
-    {
+    let old_wasapi = {
         let mut wasapi_guard = state
             .player
             .output
@@ -680,8 +693,10 @@ async fn switch_to_shared_mode(
             let _ = wasapi.stop();
             let _ = wasapi.clear_buffer();
         }
-        let _ = wasapi_guard.take();
-    }
+        // take 留在锁内、drop 挪到锁外：Drop 要 join 渲染线程，同 switch_to_wasapi_exclusive
+        wasapi_guard.take()
+    };
+    drop(old_wasapi);
 
     // 打开新的 cpal/rodio stream (带重试,等待独占模式释放设备)：枚举与建流是阻塞系统调用，
     // 放阻塞线程池执行；output_devices() 的迭代器只能消费一次，故每次重试都重新获取

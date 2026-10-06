@@ -1,7 +1,9 @@
 //! EQ 均衡器相关的 Tauri 命令
 use crate::error::AppError;
 
-use super::processor::{EQ_BAND_COUNT, EQ_FREQUENCIES, EqPreset, EqSettings, get_all_presets};
+use super::processor::{
+    EQ_BAND_COUNT, EQ_FREQUENCIES, EqPreset, EqSettings, get_all_presets, sanitize_db,
+};
 use crate::AppState;
 use tauri::{State, command};
 
@@ -51,14 +53,14 @@ pub fn set_eq_band_gain(state: State<AppState>, band: usize, gain: f32) -> Resul
         return Err(AppError::msg(format!("Invalid band index: {band}")));
     }
 
-    let clamped_gain = gain.clamp(-8.0, 8.0);
+    let clamped_gain = sanitize_db(gain);
     state.equalizer.set_band_gain(band, clamped_gain);
     Ok(())
 }
 
 #[command]
 pub fn set_eq_preamp(state: State<AppState>, preamp: f32) -> Result<(), AppError> {
-    let clamped_preamp = preamp.clamp(-8.0, 8.0);
+    let clamped_preamp = sanitize_db(preamp);
     state.equalizer.set_preamp(clamped_preamp);
     Ok(())
 }

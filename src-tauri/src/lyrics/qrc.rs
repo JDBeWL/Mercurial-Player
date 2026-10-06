@@ -371,9 +371,14 @@ fn hex_decode(text: &str) -> Option<Vec<u8>> {
 }
 
 fn inflate(data: &[u8]) -> Option<Vec<u8>> {
-    let mut decoder = ZlibDecoder::new(data);
+    // take 多留 1 字节用于识别"正好到上限"与"超过上限"，理由见 MAX_DECOMPRESSED_BYTES
+    let mut decoder = ZlibDecoder::new(data).take(crate::lyrics::MAX_DECOMPRESSED_BYTES as u64 + 1);
     let mut out = Vec::new();
     decoder.read_to_end(&mut out).ok()?;
+    if out.len() > crate::lyrics::MAX_DECOMPRESSED_BYTES {
+        log::warn!("QRC 解压结果超过上限，按损坏处理并丢弃");
+        return None;
+    }
     Some(out)
 }
 

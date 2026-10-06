@@ -136,31 +136,39 @@ fn strip_qq_word_times(line: &str) -> String {
     out
 }
 
+/// 找出第一个时间标记 `<mm:ss.xx>`，返回 (左尖括号位置, 右尖括号后一位, 起始毫秒)。
+///
+/// 正文里的其它 `<...>`（`<b>` 之类）不是分隔符，必须跳过去找下一个，否则从它开始整行后面
+/// 的字全丢
+fn find_qq_mark(s: &str) -> Option<(usize, usize, i64)> {
+    let mut from = 0usize;
+    while let Some(rel) = s[from..].find('<') {
+        let lt = from + rel;
+        let Some(gt_rel) = s[lt..].find('>') else {
+            break; // 没闭合，剩下的整段都是正文
+        };
+        let gt = lt + gt_rel;
+        if let Some(t) = qq_time_ms(s[lt + 1..gt].trim()) {
+            return Some((lt, gt + 1, t));
+        }
+        from = gt + 1;
+    }
+    None
+}
+
 /// 解析逐字内容：`<mm:ss.xx>词<mm:ss.xx>词` -> [(字开始毫秒, 字文本)]
 fn parse_qq_word_timings(content: &str) -> Vec<(i64, String)> {
     let mut out: Vec<(i64, String)> = Vec::new();
-    let mut pos = 0usize;
-    while pos < content.len() {
-        let Some(lt_rel) = content[pos..].find('<') else {
-            break;
-        };
-        let lt = pos + lt_rel;
-        let Some(gt_rel) = content[lt..].find('>') else {
-            break;
-        };
-        let gt = lt + gt_rel;
-        let Some(t) = qq_time_ms(content[lt + 1..gt].trim()) else {
-            break;
-        };
-        let word_end = content[gt + 1..]
-            .find('<')
-            .map(|i| gt + 1 + i)
-            .unwrap_or(content.len());
-        let word = content[gt + 1..word_end].to_string();
+    let mut rest = content;
+    while let Some((_, after, t)) = find_qq_mark(rest) {
+        let tail = &rest[after..];
+        // 字文本取到下一个时间标记之前，中间的非时间尖括号属于正文
+        let text_end = find_qq_mark(tail).map_or(tail.len(), |(next_lt, _, _)| next_lt);
+        let word = &tail[..text_end];
         if !word.is_empty() {
-            out.push((t, word));
+            out.push((t, word.to_string()));
         }
-        pos = word_end;
+        rest = &tail[text_end..];
     }
     out
 }
@@ -169,22 +177,30 @@ fn parse_qq_word_timings(content: &str) -> Vec<(i64, String)> {
 fn parse_plain_lines(text: &str) -> Vec<(i64, String)> {
     let mut out: Vec<(i64, String)> = Vec::new();
     for raw in text.lines() {
-        let line = raw.trim();
-        if line.is_empty() {
+        let mut rest = raw.trim();
+        if rest.is_empty() {
             continue;
         }
-        let Some(rest) = line.strip_prefix('[') else {
+        // 行首可以有连续多个时间戳（`[00:10.00][00:20.50]副歌`），要逐个登记；只取第一个
+        // 会把后面的时间戳当成正文显示出来，后面的那次出现也整个丢掉
+        let mut stamps: Vec<i64> = Vec::new();
+        while let Some(close) = rest.strip_prefix('[').and_then(|r| r.find(']')) {
+            match qq_time_ms(rest[1..=close].trim()) {
+                Some(ms) => {
+                    stamps.push(ms);
+                    rest = &rest[close + 2..];
+                }
+                None => break,
+            }
+        }
+        if stamps.is_empty() {
             continue;
-        };
-        let Some(idx) = rest.find(']') else { continue };
-        let Some(start_ms) = qq_time_ms(&rest[..idx]) else {
-            continue;
-        };
-        let plain = rest[idx + 1..].trim().to_string();
+        }
+        let plain = rest.trim().to_string();
         if plain.is_empty() {
             continue;
         }
-        out.push((start_ms, plain));
+        out.extend(stamps.into_iter().map(|ms| (ms, plain.clone())));
     }
     out.sort_by_key(|(t, _)| *t);
     out
@@ -220,39 +236,62 @@ fn qq_to_karaoke_ass(lyric: &str, trans: &str, roma: &str, title: &str) -> Optio
     }
     rows.sort_by_key(|r| r.start_ms);
 
+    // 每行的结束 = 下一行的起始；末行按最后一个字的时间 + 5s。注意 `segs.0` 已经是绝对
+    // 毫秒（`qq_time_ms` 的口径），再叠一次行起始会让末行残留约两倍曲长
+    let ends: Vec<i64> = rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            rows.get(i + 1).map_or_else(
+                || {
+                    let last_start = row.segs.last().map_or(row.start_ms, |seg| seg.0);
+                    last_start.max(row.start_ms).saturating_add(5000)
+                },
+                |next| next.start_ms,
+            )
+        })
+        .collect();
+
     let mut out = super::ass::ass_header(title);
 
-    // 译文/罗马音普通行（非逐字）
+    // 译文/罗马音普通行（非逐字）：起止复用匹配到的原文行，理由见 `ass::match_row_span`
+    let spans: Vec<(i64, i64)> = rows
+        .iter()
+        .zip(&ends)
+        .map(|(row, &end)| (row.start_ms, end))
+        .collect();
     for (text, style) in [(trans, "ts"), (roma, "roma")] {
         if text.trim().is_empty() {
             continue;
         }
         let lines = parse_plain_lines(text);
         for (i, (start_ms, plain)) in lines.iter().enumerate() {
-            let end_ms = if i + 1 < lines.len() {
-                lines[i + 1].0
-            } else {
-                start_ms + 5000
-            };
-            out.push_str(&super::ass::dialogue(*start_ms, end_ms, style, None, plain));
+            let (s, e) =
+                super::ass::match_row_span(&spans, *start_ms, super::ass::MATCH_ROW_TOLERANCE_MS)
+                    .unwrap_or_else(|| {
+                        let end = if i + 1 < lines.len() {
+                            lines[i + 1].0
+                        } else {
+                            start_ms.saturating_add(5000)
+                        };
+                        (*start_ms, end.max(start_ms.saturating_add(10)))
+                    });
+            out.push_str(&super::ass::dialogue(s, e, style, None, plain));
         }
     }
 
     // 原文逐字行
-    for (i, row) in rows.iter().enumerate() {
-        let end_ms = if i + 1 < rows.len() {
-            rows[i + 1].start_ms
-        } else {
-            row.start_ms + row.segs.last()?.0 + 5000
-        };
+    for (row, &end_ms) in rows.iter().zip(&ends) {
         // 字结束时间由相邻字补出
         let words = super::ass::words_from_starts(&row.segs, end_ms);
+        // 单字标记的行会被 `dialogue` 退化成普通文本行，plain 必须给出正文而不是空串
+        let plain: String = row.segs.iter().map(|(_, text)| text.as_str()).collect();
         out.push_str(&super::ass::dialogue(
             row.start_ms,
             end_ms,
             "orig",
             Some(&words),
-            "",
+            &plain,
         ));
     }
     Some(out)
@@ -360,48 +399,49 @@ pub async fn search_candidates(
     limit: u32,
 ) -> Result<Vec<LyricCandidate>, AppError> {
     let songs = search_songs(query, limit).await?;
-    let mut out: Vec<LyricCandidate> = Vec::new();
-    for song in songs {
-        if song.songmid.is_empty() {
-            continue;
-        }
-        // 优先取逐字；取不到再退回纯文本歌词接口
-        let bundle = match get_qrc_bundle(&song.songmid, song.songid).await {
-            Some(bundle) => bundle,
-            None => match get_lyrics(&song.songmid).await {
-                Some(bundle) => bundle,
-                None => continue,
-            },
-        };
-        let mut artist = song
-            .singer
-            .iter()
-            .map(|s| s.name.as_str())
-            .filter(|name| !name.is_empty())
-            .collect::<Vec<_>>()
-            .join("/");
-        let mut title = song.songname.clone();
-        let mut album = song.albumname.clone();
-        // 搜索结果缺字段时用歌词头部兜底：否则候选卡片只剩一行
-        if title.is_empty() {
-            title = lrc_meta(&bundle.lrc, "ti");
-        }
-        if artist.is_empty() {
-            artist = lrc_meta(&bundle.lrc, "ar");
-        }
-        if album.is_empty() {
-            album = lrc_meta(&bundle.lrc, "al");
-        }
-        out.push(LyricCandidate {
-            id: song.songmid,
-            title,
-            artist,
-            album,
-            duration_ms: song.interval * 1000,
-            bundle,
-        });
-    }
-    Ok(out)
+    // 逐字接口对多数歌会失败、紧接着还要再请求一次纯文本歌词，串行就是 2N 次往返；
+    // 并行后最坏只是一次超时。顺序仍按搜索结果原序
+    let fetched = futures_util::future::join_all(
+        songs
+            .into_iter()
+            .filter(|song| !song.songmid.is_empty())
+            .map(|song| async move {
+                // 优先取逐字；取不到再退回纯文本歌词接口
+                let bundle = match get_qrc_bundle(&song.songmid, song.songid).await {
+                    Some(bundle) => bundle,
+                    None => get_lyrics(&song.songmid).await?,
+                };
+                let mut artist = song
+                    .singer
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .filter(|name| !name.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let mut title = song.songname.clone();
+                let mut album = song.albumname.clone();
+                // 搜索结果缺字段时用歌词头部兜底：否则候选卡片只剩一行
+                if title.is_empty() {
+                    title = lrc_meta(&bundle.lrc, "ti");
+                }
+                if artist.is_empty() {
+                    artist = lrc_meta(&bundle.lrc, "ar");
+                }
+                if album.is_empty() {
+                    album = lrc_meta(&bundle.lrc, "al");
+                }
+                Some(LyricCandidate {
+                    id: song.songmid,
+                    title,
+                    artist,
+                    album,
+                    duration_ms: song.interval * 1000,
+                    bundle,
+                })
+            }),
+    )
+    .await;
+    Ok(fetched.into_iter().flatten().collect())
 }
 
 #[cfg(test)]
@@ -449,5 +489,33 @@ mod tests {
         assert_eq!(qq_time_ms("01:02.50"), Some(62500));
         assert_eq!(qq_time_ms("1:02:03.000"), Some(3_723_000));
         assert_eq!(qq_time_ms("abc"), None);
+    }
+
+    #[test]
+    fn 逐字标记里的非时间尖括号不截行() {
+        // `<b>` 不是时间标记：曾经在这里 break，整行后面的字全丢
+        assert_eq!(
+            parse_qq_word_timings("<00:01.00>La<b>La<00:02.00>Ba"),
+            vec![(1000, "La<b>La".to_string()), (2000, "Ba".to_string())]
+        );
+    }
+
+    #[test]
+    fn 译文一行多时间戳要全部展开() {
+        assert_eq!(
+            parse_plain_lines("[00:10.00][00:20.50]副歌\n[by:tester]\n[00:05.00]前一句\n"),
+            vec![
+                (5000, "前一句".to_string()),
+                (10000, "副歌".to_string()),
+                (20500, "副歌".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn 末行行尾按最后一个字() {
+        // segs 的时间是绝对毫秒：末行行尾 = 最后一个字 + 5s，不能再叠一次行起始
+        let ass = qq_to_karaoke_ass("[00:60.00]<01:00.00>词", "", "", "x").expect("应生成 ASS");
+        assert!(ass.contains("Dialogue: 0,00:01:00.00,00:01:05.00,orig,,0,0,0,,词"));
     }
 }

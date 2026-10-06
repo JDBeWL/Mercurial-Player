@@ -105,9 +105,11 @@ pub(crate) fn now_ms() -> u64 {
 
 /// 频谱分析器:Hann 窗 + FFT + AE 风格分bin/平滑
 ///
-/// 维护滚动采样缓冲(交错采样)，缓冲满且达到目标帧率间隔时计算频谱、更新 `spectrum_data` 并发事件。
+/// 内部缓冲是**单声道**的：交错的多声道采样在入口处按帧平均下来，这样 `fft_size` 就是窗口
+/// 帧数、`sample_rate` 就是真实的每帧速率。直接把 L,R,L,R 当单声道流做 FFT 会让频率轴整体
+/// 偏一倍、窗口只有一半时长，L/R 梳状叠加还会让条闪烁。
 pub(super) struct SpectrumAnalyzer {
-    /// 滚动采样缓冲(交错采样)
+    /// 滚动采样缓冲(已下混为单声道)
     buffer: Vec<f32>,
     fft_buffer: Vec<f32>,
     /// 预计算的 Hann 窗口(按 fft_size 一次预计算,避免每次 FFT 堆分配)
@@ -116,12 +118,16 @@ pub(super) struct SpectrumAnalyzer {
     prev_spectrum: Vec<f32>,
     fft_size: usize,
     sample_rate: u32,
+    /// 入口采样的声道数(1 表示已是单声道,直接透传)
+    channels: usize,
     last_fft_time: u64,
+    /// FFT 失败只报一次:低频源/NaN 会每帧都失败,高频日志本身也是开销
+    fft_error_logged: bool,
 }
 
 impl SpectrumAnalyzer {
     #[must_use]
-    pub fn new(sample_rate: u32) -> Self {
+    pub fn new(sample_rate: u32, channels: u16) -> Self {
         let fft_size = calculate_fft_size(sample_rate);
         Self {
             buffer: Vec::with_capacity(fft_size),
@@ -131,13 +137,29 @@ impl SpectrumAnalyzer {
             prev_spectrum: vec![0.0; SPECTRUM_BINS],
             fft_size,
             sample_rate,
+            channels: usize::from(channels).max(1),
             last_fft_time: 0,
+            fft_error_logged: false,
         }
     }
 
-    /// 追加一批交错采样(分析线程按块驱动)
+    /// 追加一批交错采样(分析线程按块驱动)，按帧平均下混为单声道后入缓冲
     pub fn extend_buffer(&mut self, samples: &[f32]) {
-        self.buffer.extend_from_slice(samples);
+        self.push_interleaved(samples);
+    }
+
+    /// 交错多声道 -> 单声道：逐帧求平均。声道数为 1 时就是原样追加
+    fn push_interleaved(&mut self, samples: &[f32]) {
+        let ch = self.channels;
+        if ch == 1 {
+            self.buffer.extend_from_slice(samples);
+            return;
+        }
+        self.buffer.reserve(samples.len() / ch);
+        for frame in samples.chunks_exact(ch) {
+            self.buffer.push(frame.iter().sum::<f32>() / ch as f32);
+        }
+        // 尾部的零头(不足一帧)直接丢掉：调用方按块投递，长期看不会积累
     }
 
     /// 缓冲满且到达目标帧率间隔时计算并发送频谱
@@ -170,7 +192,7 @@ impl SpectrumAnalyzer {
         target_fps: &AtomicU64,
         app: &AppHandle,
     ) {
-        self.buffer.extend_from_slice(samples);
+        self.push_interleaved(samples);
         if self.buffer.len() < self.fft_size {
             return;
         }
@@ -215,12 +237,17 @@ impl SpectrumAnalyzer {
                 self.fft_buffer[i] *= self.hann_window[i];
             }
 
-            if let Ok(spectrum) = samples_fft_to_spectrum(
+            // 上限必须留在 Nyquist 内：spectrum-analyzer 会校验 Range 并直接返回 Err，
+            // 写死 20kHz 会让 22.05k/32k 这类低频源每帧都算不出频谱且没有任何提示
+            let nyquist = self.sample_rate as f32 / 2.0;
+            let freq_hi = 20000.0f32.min(nyquist - 1.0).max(21.0);
+            let fft = samples_fft_to_spectrum(
                 &self.fft_buffer,
                 self.sample_rate,
-                FrequencyLimit::Range(20.0, 20000.0),
+                FrequencyLimit::Range(20.0, freq_hi),
                 Some(&divide_by_N_sqrt),
-            ) {
+            );
+            if let Ok(spectrum) = &fft {
                 self.spectrum_buffer.fill(0.0);
 
                 // AE风格：线性频率分布
@@ -257,6 +284,15 @@ impl SpectrumAnalyzer {
 
                 spec.clear();
                 spec.extend_from_slice(&self.prev_spectrum);
+            } else if !self.fft_error_logged {
+                // 只报一次：出错的源会每帧都失败，日志本身比 FFT 更贵
+                self.fft_error_logged = true;
+                log::warn!(
+                    "频谱计算失败(sr={}, channels={}, limit=20..{freq_hi}): {:?}",
+                    self.sample_rate,
+                    self.channels,
+                    fft.as_ref().err()
+                );
             }
         }
 
@@ -321,7 +357,7 @@ fn spawn_spectrum_thread(
     stop: Arc<AtomicBool>,
 ) {
     std::thread::spawn(move || {
-        let mut analyzer = SpectrumAnalyzer::new(sample_rate);
+        let mut analyzer = SpectrumAnalyzer::new(sample_rate, channels);
         let mut scratch: Vec<f32> = Vec::with_capacity(SPECTRUM_DRAIN_MAX);
         // 初值取当前时间:调用方的 with_start_position 晚于此,避免先发一次 position=0
         let mut last_position_emit: u64 = now_ms();

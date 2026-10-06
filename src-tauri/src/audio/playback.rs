@@ -136,6 +136,10 @@ pub async fn play_track_exclusive(
     // 递增代际计数器取消旧解码推送线程（布尔标志会有约 70ms 的状态不一致窗口）
     player.decode.generation.fetch_add(1, Ordering::SeqCst);
     let new_thread_id = player.decode.id.fetch_add(1, Ordering::SeqCst) + 1;
+    // 本函数有多个 await 点，两次重叠的起播会互相踩：先跑那次的兜底 clear_buffer 可能把新解码
+    // 线程刚捕获的环世代抬走，新线程第一次推送就被判成 Partial 而退出，结果是最新那首静音且
+    // 不再有 track-ended。没有 tokio::sync 可用，就用现成的 thread_id 自查"仍是最新那次"
+    let am_current = || player.decode.id.load(Ordering::SeqCst) == new_thread_id;
     // 独占输出接管前必须停掉共享 sink：在播放中把输出切到独占（设置页开关）时共享链路
     // 还在播同一首，两条解码同时出声，听感就是两遍重叠
     lock_or_log!(player.output.sink.lock()).stop();
@@ -166,6 +170,11 @@ pub async fn play_track_exclusive(
         50
     };
     tokio::time::sleep(Duration::from_millis(wait_ms)).await;
+    // 淡出等待期间已有更新的起播接管：再往下就会清掉对方的缓冲，直接收手
+    if !am_current() {
+        log::debug!("起播已被更新的一次取代，中止本次: {path}");
+        return Ok(());
+    }
     // 兜底:确保缓冲区被清空(防止淡出未完成的极端情况)
     {
         if let Some(ref wasapi) = *lock_or_log!(player.output.wasapi_player.lock()) {
@@ -279,6 +288,17 @@ pub async fn play_track_exclusive(
         tokio::time::sleep(Duration::from_millis(20)).await;
         // 保持暂停时(start_playback=false)不启动，解码线程持续预缓冲，resume 随时可用
         if start_playback {
+            // 预缓冲等待期间被接管的话，本次 start 会落在别人的流上：对方的解码线程已因
+            // generation 变化自行退出，这里补一次 clear_buffer 再接管，避免留下半截缓冲
+            if !am_current() {
+                log::debug!("起播已被更新的一次取代，重置缓冲后接管: {path}");
+                let g = lock_or_log!(player.output.wasapi_player.lock());
+                if let Some(ref wasapi) = *g {
+                    let _ = wasapi.clear_buffer();
+                }
+                drop(g);
+                return Ok(());
+            }
             let g = lock_or_log!(player.output.wasapi_player.lock());
             if let Some(ref wasapi) = *g {
                 wasapi
