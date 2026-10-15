@@ -534,7 +534,7 @@ async fn switch_to_wasapi_exclusive(
         .lock()
         .lock_or_err("WASAPI player")?
         .take();
-    drop(old_wasapi);
+    let _ = old_wasapi;
 
     // WASAPI 初始化含重试 sleep 与 COM 操作，同样放阻塞线程池
     let dev_name = device_name.to_string();
@@ -696,7 +696,9 @@ async fn switch_to_shared_mode(
         // take 留在锁内、drop 挪到锁外：Drop 要 join 渲染线程，同 switch_to_wasapi_exclusive
         wasapi_guard.take()
     };
-    drop(old_wasapi);
+    // `let _ =` 而非 drop()：非 Windows/Android 平台上占位类型不实现 Drop，drop() 会被
+    // clippy::drop_non_drop 拦下
+    let _ = old_wasapi;
 
     // 打开新的 cpal/rodio stream (带重试,等待独占模式释放设备)：枚举与建流是阻塞系统调用，
     // 放阻塞线程池执行；output_devices() 的迭代器只能消费一次，故每次重试都重新获取
