@@ -255,9 +255,7 @@ const beatCacheDesc = computed(() => {
   if (!beatBackendName.value) return base + size
   // 后端标签统一小写；未分析过时回退成探测结果，所以不是 directml 就当 CPU
   const backend =
-    beatBackendName.value === 'directml'
-      ? t('config.beatBackendGpu')
-      : t('config.beatBackendCpu')
+    beatBackendName.value === 'directml' ? t('config.beatBackendGpu') : t('config.beatBackendCpu')
   return `${base}${size} · ${backend}`
 })
 
@@ -774,7 +772,8 @@ onUnmounted(() => {
 }
 
 .icon-button.danger {
-  color: var(--md-sys-color-error);}
+  color: var(--md-sys-color-error);
+}
 
 @media (hover: hover) {
   .icon-button.danger:hover {

@@ -5,11 +5,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use beat_this::{beat_counts, calculate_bpm, BeatAnalysis, BeatThis, RtenRuntime, Runtime};
+use beat_this::{BeatAnalysis, BeatThis, RtenRuntime, Runtime, beat_counts, calculate_bpm};
 use serde::Serialize;
 use symphonia::core::audio::{Channels, GenericAudioBufferRef};
-use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::codecs::CodecParameters;
+use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
@@ -301,7 +301,11 @@ fn meter_histogram(counts: &[i32]) -> Vec<MeterCount> {
         })
         .collect();
     // 最多者排前，调用方读第一条即主导拍号
-    rows.sort_by(|a, b| b.count.cmp(&a.count).then(a.beats_per_bar.cmp(&b.beats_per_bar)));
+    rows.sort_by(|a, b| {
+        b.count
+            .cmp(&a.count)
+            .then(a.beats_per_bar.cmp(&b.beats_per_bar))
+    });
     rows
 }
 

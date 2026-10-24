@@ -56,6 +56,11 @@ pub struct ResumeResult {
     pub track_index_in_playlist: Option<usize>,
     /// 播放队列快照：前端直接构造 Track[] 恢复 `player.playlist`，不依赖 musicLibrary 缓存
     pub playlist_tracks: Vec<TrackSnapshot>,
+    /// 上次会话的循环模式（前端 RepeatMode：none / track / list）。
+    /// None = 没有可用的会话记录，前端保持当前默认值，不要覆盖
+    pub repeat_mode: Option<String>,
+    /// 上次会话是否随机播放；None 的语义同 `repeat_mode`
+    pub is_shuffle: Option<bool>,
     pub status: String,
 }
 
@@ -80,6 +85,8 @@ pub async fn try_resume_last_session(
                 playlist_name: None,
                 track_index_in_playlist: None,
                 playlist_tracks: Vec::new(),
+                repeat_mode: None,
+                is_shuffle: None,
                 status: "no_session".to_string(),
             });
         }
@@ -103,6 +110,8 @@ pub async fn try_resume_last_session(
             playlist_name: None,
             track_index_in_playlist: None,
             playlist_tracks: Vec::new(),
+            repeat_mode: None,
+            is_shuffle: None,
             status: "expired".to_string(),
         });
     }
@@ -127,6 +136,9 @@ pub async fn try_resume_last_session(
             track_index_in_playlist: session.track_index_in_playlist,
             // 仍返回 playlist_tracks，让前端在曲目缺失时也能重建播放列表
             playlist_tracks: session.playlist_tracks,
+            // 曲目没了但会话是完整的：播放模式照样还给前端，别让用户重启一次就要重设
+            repeat_mode: Some(session.repeat_mode),
+            is_shuffle: Some(session.is_shuffle),
             status: "not_found".to_string(),
         });
     }
@@ -149,6 +161,8 @@ pub async fn try_resume_last_session(
             playlist_name: session.playlist_name,
             track_index_in_playlist: session.track_index_in_playlist,
             playlist_tracks: session.playlist_tracks,
+            repeat_mode: Some(session.repeat_mode),
+            is_shuffle: Some(session.is_shuffle),
             status: "metadata_unreadable".to_string(),
         });
     };
@@ -218,6 +232,8 @@ pub async fn try_resume_last_session(
                 playlist_name: updated_session.playlist_name,
                 track_index_in_playlist: updated_session.track_index_in_playlist,
                 playlist_tracks: updated_session.playlist_tracks,
+                repeat_mode: Some(updated_session.repeat_mode),
+                is_shuffle: Some(updated_session.is_shuffle),
                 status,
             })
         }
@@ -239,9 +255,20 @@ pub async fn try_resume_last_session(
                 playlist_name: None,
                 track_index_in_playlist: None,
                 playlist_tracks: Vec::new(),
+                repeat_mode: None,
+                is_shuffle: None,
                 status: format!("playback_failed: {e}"),
             })
         }
+    }
+}
+
+/// 前端 `RepeatMode` 的合法取值；不在白名单内的一律落成 none，避免脏值写进配置文件
+fn normalize_repeat_mode(mode: Option<&str>) -> String {
+    match mode {
+        Some("list") => "list".to_string(),
+        Some("track") => "track".to_string(),
+        _ => "none".to_string(),
     }
 }
 
@@ -257,6 +284,8 @@ pub fn save_last_session(
     playlist_name: Option<String>,
     track_index_in_playlist: Option<usize>,
     playlist_tracks: Vec<TrackSnapshot>,
+    repeat_mode: Option<String>,
+    is_shuffle: Option<bool>,
 ) -> Result<(), AppError> {
     // 节流窗口见 SAVE_THROTTLE_DURATION；检查与更新时间在同一把锁内完成，保证原子性
     {
@@ -296,6 +325,8 @@ pub fn save_last_session(
         file_mtime,
         saved_at: now,
         playlist_tracks,
+        repeat_mode: normalize_repeat_mode(repeat_mode.as_deref()),
+        is_shuffle: is_shuffle.unwrap_or(false),
     };
 
     state

@@ -76,7 +76,11 @@ impl Default for Args {
             inputs: Vec::new(),
             truth: None,
             // 生产只用到第一个偏移；另外两个用于量"换一个起点会不会换个答案"
-            offsets: vec![ANALYSIS_SKIP_SECS, ANALYSIS_SKIP_SECS + 20.0, ANALYSIS_SKIP_SECS + 40.0],
+            offsets: vec![
+                ANALYSIS_SKIP_SECS,
+                ANALYSIS_SKIP_SECS + 20.0,
+                ANALYSIS_SKIP_SECS + 40.0,
+            ],
             window: ANALYSIS_WINDOW_SECS,
             tightness: DP_TIGHTNESS,
             tolerance: 0.02,
@@ -265,7 +269,10 @@ fn run(args: &Args) -> Result<(), String> {
             let value = analyze_production(path).map(|estimate| estimate.bpm);
             println!(
                 "{:<60}{}",
-                file.file_name().map_or_else(|| file.display().to_string(), |n| n.to_string_lossy().into_owned()),
+                file.file_name().map_or_else(
+                    || file.display().to_string(),
+                    |n| n.to_string_lossy().into_owned()
+                ),
                 value.map_or_else(|| "—".to_string(), |bpm| format!("{bpm:.1}"))
             );
         }
@@ -335,10 +342,14 @@ fn run_meter(args: &Args, files: &[PathBuf]) -> Result<(), String> {
         println!(
             "
 === {} ===",
-            file.file_name().map_or_else(|| file.display().to_string(), |n| n.to_string_lossy().into_owned())
+            file.file_name().map_or_else(
+                || file.display().to_string(),
+                |n| n.to_string_lossy().into_owned()
+            )
         );
         for &offset in &args.offsets {
-            let Some(diagnostics) = diagnose_tuned(path, offset, args.window, args.tightness) else {
+            let Some(diagnostics) = diagnose_tuned(path, offset, args.window, args.tightness)
+            else {
                 continue;
             };
             let (Some(bpm), strengths) = (diagnostics.bpm, &diagnostics.beat_strengths) else {
@@ -388,8 +399,12 @@ fn run_suspects(args: &Args, files: &[PathBuf]) -> Result<(), String> {
         .num_threads(args.jobs)
         .build()
         .map_err(|error| format!("线程池创建失败：{error}"))?;
-    let mut rows: Vec<SuspectRow> = pool
-        .install(|| files.par_iter().filter_map(|file| analyze_suspect(file)).collect());
+    let mut rows: Vec<SuspectRow> = pool.install(|| {
+        files
+            .par_iter()
+            .filter_map(|file| analyze_suspect(file))
+            .collect()
+    });
 
     rows.sort_by(|a, b| {
         hint_rank(&a.hint)
@@ -432,10 +447,7 @@ fn run_suspects(args: &Args, files: &[PathBuf]) -> Result<(), String> {
         .map_err(|error| format!("写 {} 失败：{error}", args.runs_out.display()))?;
 
     // 最该复核的一类：生产路径已经靠 3/2 提升改过值的。改对了是收益，改错了就是新引入的错误
-    let promoted: Vec<&SuspectRow> = rows
-        .iter()
-        .filter(|row| row.promoted)
-        .collect();
+    let promoted: Vec<&SuspectRow> = rows.iter().filter(|row| row.promoted).collect();
     println!(
         "\n生产路径靠 3/2 提升改过值的：{} 首（这些最该复核）\n",
         promoted.len()
@@ -465,11 +477,19 @@ fn run_suspects(args: &Args, files: &[PathBuf]) -> Result<(), String> {
         flagged.len()
     );
     for row in flagged.iter().take(30) {
-        let name: String = row.file.rsplit(['/', '\\']).next().unwrap_or("").chars().take(44).collect();
+        let name: String = row
+            .file
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(44)
+            .collect();
         println!(
             "{:<46}{:>7}  {}",
             name,
-            row.bpm.map_or_else(|| "—".to_string(), |bpm| format!("{bpm:.0}")),
+            row.bpm
+                .map_or_else(|| "—".to_string(), |bpm| format!("{bpm:.0}")),
             row.hint
         );
     }
@@ -516,17 +536,21 @@ fn hint_rank(hint: &str) -> u8 {
 fn analyze_suspect(file: &Path) -> Option<SuspectRow> {
     let path = file.to_str()?;
     let diagnostics = diagnose_tuned(path, ANALYSIS_SKIP_SECS, ANALYSIS_WINDOW_SECS, DP_TIGHTNESS)?;
-    let bpm = analyze_production(path).map(|estimate| estimate.bpm).or(diagnostics.bpm)?;
+    let bpm = analyze_production(path)
+        .map(|estimate| estimate.bpm)
+        .or(diagnostics.bpm)?;
 
     // 与生产口径保持一致：强度/召回都相对"当前报的那个层级"，不是相对得分最高者
     let current = closest_level(&diagnostics.evaluated, bpm)?;
     let mut alts: Vec<Option<AltLevel>> = Vec::new();
     for ratio in [1.5_f64, 2.0, 2.0 / 3.0] {
-        alts.push(closest_level(&diagnostics.evaluated, bpm * ratio).map(|candidate| AltLevel {
-            bpm: candidate.bpm,
-            strength_ratio: candidate.strength / current.strength.max(f64::EPSILON),
-            recall_ratio: candidate.recall / current.recall.max(f64::EPSILON),
-        }));
+        alts.push(
+            closest_level(&diagnostics.evaluated, bpm * ratio).map(|candidate| AltLevel {
+                bpm: candidate.bpm,
+                strength_ratio: candidate.strength / current.strength.max(f64::EPSILON),
+                recall_ratio: candidate.recall / current.recall.max(f64::EPSILON),
+            }),
+        );
     }
 
     let top = diagnostics
@@ -550,10 +574,7 @@ fn analyze_suspect(file: &Path) -> Option<SuspectRow> {
 }
 
 /// 取离 `target` 最近的候选（对数域 6% 以内），没有就返回 None
-fn closest_level<'a>(
-    evaluated: &'a [CandidateScore],
-    target: f64,
-) -> Option<&'a CandidateScore> {
+fn closest_level<'a>(evaluated: &'a [CandidateScore], target: f64) -> Option<&'a CandidateScore> {
     if target <= 0.0 {
         return None;
     }
@@ -609,9 +630,10 @@ fn run_vote(files: &[PathBuf]) -> Result<(), String> {
         let single = diagnose_tuned(path, ANALYSIS_SKIP_SECS, ANALYSIS_WINDOW_SECS, DP_TIGHTNESS)
             .and_then(|diagnostics| diagnostics.bpm);
         let voted = analyze_consensus(path).map(|estimate| estimate.bpm);
-        let name = file
-            .file_name()
-            .map_or_else(|| file.display().to_string(), |n| n.to_string_lossy().into_owned());
+        let name = file.file_name().map_or_else(
+            || file.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
 
         let delta = match (single, voted) {
             (Some(a), Some(b)) => format!("{:+.1}%", (b - a) / a * 100.0),
@@ -645,7 +667,10 @@ fn run_curve(args: &Args, files: &[PathBuf]) -> Result<(), String> {
         let Some(path) = file.to_str() else { continue };
         println!(
             "\n=== {} ===",
-            file.file_name().map_or_else(|| file.display().to_string(), |n| n.to_string_lossy().into_owned())
+            file.file_name().map_or_else(
+                || file.display().to_string(),
+                |n| n.to_string_lossy().into_owned()
+            )
         );
 
         let mut samples: Vec<(f64, Option<f64>, f64)> = Vec::new();
@@ -656,11 +681,7 @@ fn run_curve(args: &Args, files: &[PathBuf]) -> Result<(), String> {
             match diagnose_tuned(path, offset, args.curve_window, args.tightness) {
                 Some(diagnostics) => {
                     misses = 0;
-                    samples.push((
-                        offset,
-                        diagnostics.bpm,
-                        diagnostics.strength.unwrap_or(0.0),
-                    ));
+                    samples.push((offset, diagnostics.bpm, diagnostics.strength.unwrap_or(0.0)));
                 }
                 None => misses += 1,
             }
@@ -683,7 +704,10 @@ fn run_curve(args: &Args, files: &[PathBuf]) -> Result<(), String> {
         );
 
         let segments = merge_segments(&samples);
-        println!("\n{:<9}{:<9}{:<7}{:>8}{:>10}", "起", "止", "时长", "BPM", "窗口数");
+        println!(
+            "\n{:<9}{:<9}{:<7}{:>8}{:>10}",
+            "起", "止", "时长", "BPM", "窗口数"
+        );
         for segment in &segments {
             println!(
                 "{:<9}{:<9}{:<7}{:>8.1}{:>10}",
@@ -748,7 +772,8 @@ fn merge_segments(samples: &[(f64, Option<f64>, f64)]) -> Vec<Segment> {
         .iter()
         .enumerate()
         .map(|(index, &(offset, bpm, _))| {
-            let mut window: Vec<f64> = (index.saturating_sub(1)..=(index + 1).min(samples.len() - 1))
+            let mut window: Vec<f64> = (index.saturating_sub(1)
+                ..=(index + 1).min(samples.len() - 1))
                 .filter_map(|i| samples[i].1)
                 .collect();
             if bpm.is_none() || window.is_empty() {
@@ -767,8 +792,9 @@ fn merge_segments(samples: &[(f64, Option<f64>, f64)]) -> Vec<Segment> {
             flush(&mut segments, &mut current);
             continue;
         };
-        let joinable =
-            current.last().is_some_and(|&(_, previous)| (bpm / previous).log2().abs() < 0.10);
+        let joinable = current
+            .last()
+            .is_some_and(|&(_, previous)| (bpm / previous).log2().abs() < 0.10);
         if !joinable {
             flush(&mut segments, &mut current);
         }
@@ -1010,7 +1036,10 @@ fn load_truth(path: &Path) -> Result<HashMap<String, TruthEntry>, String> {
         let entry = TruthEntry { bpm, level_free };
         let key = normalize_path(&fields[0]);
         truth.insert(key, entry);
-        if let Some(name) = Path::new(fields[0].trim()).file_name().and_then(|n| n.to_str()) {
+        if let Some(name) = Path::new(fields[0].trim())
+            .file_name()
+            .and_then(|n| n.to_str())
+        {
             truth.entry(normalize_path(name)).or_insert(entry);
         }
     }
@@ -1239,11 +1268,9 @@ fn write_candidates_csv(path: &Path, runs: &[Run]) -> Result<(), String> {
         ranked.sort_by(|a, b| b.score.total_cmp(&a.score));
         for (rank, candidate) in ranked.iter().enumerate() {
             // 胜出者不一定排在得分第一：3/2 层级提升会把排在后面的候选选出来
-            let chosen = u8::from(
-                run.bpm.is_some_and(|reported| {
-                    reported > 0.0 && (candidate.bpm - reported).abs() / reported < 0.03
-                }),
-            );
+            let chosen = u8::from(run.bpm.is_some_and(|reported| {
+                reported > 0.0 && (candidate.bpm - reported).abs() / reported < 0.03
+            }));
             out.push_str(&csv_row(&[
                 run.file.to_string_lossy().to_string(),
                 format!("{:.1}", run.offset),
@@ -1475,8 +1502,7 @@ fn print_invariants(runs: &[Run], truth: &HashMap<String, TruthEntry>, args: &Ar
         .filter_map(|run| {
             let bpm = run.bpm?;
             let reference = truth_for(truth, &run.file)?;
-            is_octave(bpm, reference, args.tolerance)
-                .then(|| octave_residual(bpm, reference))
+            is_octave(bpm, reference, args.tolerance).then(|| octave_residual(bpm, reference))
         })
         .collect();
 

@@ -105,6 +105,18 @@ pub struct LastSession {
     /// 播放队列快照：恢复 `player.playlist` 用，存全量元数据以直接构造 `Track[]`，不依赖 `musicLibrary` 缓存
     #[serde(default)]
     pub playlist_tracks: Vec<TrackSnapshot>,
+    /// 循环模式（前端 `RepeatMode`：none / track / list）。
+    /// 老配置里没有这个字段，`default` 兜底为 none，避免升级后反序列化失败丢整份配置
+    #[serde(default = "default_repeat_mode")]
+    pub repeat_mode: String,
+    /// 是否随机播放。与 `repeat_mode` 同属「上次会话的播放模式」，重启后原样恢复
+    #[serde(default)]
+    pub is_shuffle: bool,
+}
+
+/// 循环模式缺省值：与前端 `repeatMode` 的初始状态一致
+fn default_repeat_mode() -> String {
+    "none".to_string()
 }
 
 /// 曲目元数据快照：只存 UI 显示和导航需要的字段，不存 coverPath (按需加载)
@@ -819,6 +831,8 @@ mod tests {
             file_mtime: 1_000_000,
             saved_at: 2_000_000,
             playlist_tracks: vec![],
+            repeat_mode: "list".to_string(),
+            is_shuffle: false,
         });
 
         let json = serde_json::to_string(&config).expect("serialize failed");
@@ -830,6 +844,30 @@ mod tests {
         assert!(approx_eq(deserialized.audio.volume, 0.7));
         assert_eq!(deserialized.general.language, "en");
         assert!(deserialized.last_session.is_some());
+        let session = deserialized.last_session.expect("session dropped");
+        assert_eq!(session.repeat_mode, "list");
+        assert!(!session.is_shuffle);
+    }
+
+    #[test]
+    fn test_last_session_defaults_play_mode_for_legacy_config() {
+        // 升级前写下的 last_session 没有播放模式字段，必须能读出来并落到默认值
+        let json = r#"{
+            "trackPath": "/old/track.mp3",
+            "trackTitle": "Old",
+            "trackArtist": "Artist",
+            "durationSecs": 100.0,
+            "positionSecs": 30.0,
+            "playlistName": null,
+            "trackIndexInPlaylist": null,
+            "fileSize": 1024,
+            "fileMtime": 1,
+            "savedAt": 2
+        }"#;
+        let session: LastSession = serde_json::from_str(json).expect("legacy session must parse");
+        assert_eq!(session.repeat_mode, "none");
+        assert!(!session.is_shuffle);
+        assert!(session.playlist_tracks.is_empty());
     }
 
     #[test]
@@ -994,6 +1032,8 @@ mod tests {
                 format: Some("mp3".to_string()),
                 bpm: None,
             }],
+            repeat_mode: "track".to_string(),
+            is_shuffle: false,
         };
 
         let json = serde_json::to_string(&session).expect("serialize failed");

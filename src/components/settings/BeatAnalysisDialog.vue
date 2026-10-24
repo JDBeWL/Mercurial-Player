@@ -1,9 +1,5 @@
 <template>
-  <MD3Dialog
-    :open="open"
-    :title="dialogTitle"
-    @close="onRequestClose"
-  >
+  <MD3Dialog :open="open" :title="dialogTitle" @close="onRequestClose">
     <div class="beat-dialog">
       <!-- 阶段一：确认。批量任务要跑十几分钟，不能因为误触开关就悄悄占用后台。 -->
       <template v-if="phase === 'confirm'">
@@ -194,9 +190,7 @@ const isEmpty = computed(() => props.paths.length === 0)
 /** 推理后端。打开弹窗时探测一次：决定预估耗时用 1.2 秒/首还是 7.5 秒/首 */
 const backend = ref<'directml' | 'rten'>('rten')
 
-const estimatedSeconds = computed(() =>
-  estimateBatchSeconds(props.paths.length, backend.value),
-)
+const estimatedSeconds = computed(() => estimateBatchSeconds(props.paths.length, backend.value))
 
 /** mm:ss —— 不随语言变化，省得为"2 分 10 秒"再造一批文案 */
 function formatDuration(totalSeconds: number): string {

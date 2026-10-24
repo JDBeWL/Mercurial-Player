@@ -36,12 +36,7 @@
           <div
             v-for="(track, index) in processedPlaylist"
             :key="track.path"
-            v-memo="[
-              track.path,
-              track.path === currentPath,
-              isTrackPlaying(track),
-              track.coverUrl,
-            ]"
+            v-memo="[track.path, track.path === currentPath, isTrackPlaying(track), track.coverUrl]"
             class="list-item"
             :class="{ selected: track.path === currentPath }"
             :data-path="track.path"

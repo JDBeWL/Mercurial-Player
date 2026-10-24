@@ -20,13 +20,7 @@ export interface BeatTrack {
 }
 
 export type BeatsProgressStatus =
-  | 'started'
-  | 'analyzed'
-  | 'skipped'
-  | 'missing'
-  | 'failed'
-  | 'finished'
-  | 'cancelled'
+  'started' | 'analyzed' | 'skipped' | 'missing' | 'failed' | 'finished' | 'cancelled'
 
 /** 批量分析的进度 */
 export interface BeatsProgress {

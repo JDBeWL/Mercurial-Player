@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
+import { watch, type WatchStopHandle } from 'vue'
 import logger from '@/utils/logger'
-import type { Track, ResumeResult, TrackSnapshot } from '@/types'
+import type { Track, ResumeResult, TrackSnapshot, RepeatMode } from '@/types'
 import type { usePlayerStore } from './index'
 import { useMusicLibraryStore } from '../musicLibrary'
 import { maybeStartBpmAnalysis } from './loadTrack'
@@ -8,8 +9,28 @@ import { maybeStartBpmAnalysis } from './loadTrack'
 /** Player store 的会话持久化与启动恢复。 */
 type PlayerStore = ReturnType<typeof usePlayerStore>
 
+/** 恢复上次会话的播放模式。
+ *  前端里 `isShuffle` 与 `repeatMode` 互斥（随机时 repeatMode 恒为 none），所以随机优先判断。
+ *  后端 `repeatMode` 为 null/非法值表示「没有可用记录」，此时整体不动，避免把默认值当记录写回去。 */
+function restorePlayMode(
+  store: PlayerStore,
+  repeatMode: RepeatMode | null | undefined,
+  isShuffle: boolean | null | undefined,
+): void {
+  if (isShuffle === true) {
+    store.isShuffle = true
+    store.repeatMode = 'none'
+    // 洗牌序列不落库，按恢复后的播放列表与当前曲目重新起一条
+    store._regenerateShuffleOrder()
+    return
+  }
+  if (repeatMode !== 'none' && repeatMode !== 'list' && repeatMode !== 'track') return
+  store.isShuffle = false
+  store.repeatMode = repeatMode
+}
+
 /**
- * 立即保存 last_session(无节流)：仅在 pause、切曲前、cleanup 关闭前这几个关键节点触发，
+ * 立即保存 last_session(无节流)：仅在 pause、切曲前、播放模式变化、cleanup 关闭前这几个关键节点触发，
  * 不在 playback-position 中写入，代价是崩溃/断电时丢失自上次关键节点以来的进度。
  */
 export async function saveLastSessionNow(store: PlayerStore): Promise<void> {
@@ -51,6 +72,9 @@ export async function saveLastSessionNow(store: PlayerStore): Promise<void> {
       playlistName,
       trackIndexInPlaylist,
       playlistTracks,
+      // 播放模式随会话一起落库：否则重启后 UI 回到「顺序」，循环/随机设置白丢
+      repeatMode: store.repeatMode ?? 'none',
+      isShuffle: store.isShuffle === true,
     })
   } catch (err) {
     logger.debug('Failed to save last session:', err)
@@ -144,6 +168,9 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
       }
       // 保持暂停:只有用户主动点播放才开始
       store.isPlaying = false
+      // 7. 恢复循环/随机模式：必须在 playlist 与 currentTrack 就位之后，
+      //    随机的洗牌序列要从「当前曲目在列表中的位置」起算
+      restorePlayMode(store, result.repeatMode, result.isShuffle)
       store._updateTaskbarState()
 
       // 恢复后处于暂停态，走不到 startPlayback 里的 BPM 触发点。
@@ -156,7 +183,7 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
         `Resumed last session (paused): ${trackPath} @ ${result.positionSecs}s (${result.status}), playlist=${playlist.length} tracks`,
       )
 
-      // 7. 异步加载当前曲目封面,不阻塞恢复
+      // 8. 异步加载当前曲目封面,不阻塞恢复
       invoke<string | null>('get_track_cover_path', { path: trackPath })
         .then((coverPath) => {
           // 守卫:应用关闭后不再修改已销毁的 store state
@@ -186,4 +213,26 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
     logger.error('Failed to resume last session:', err)
     return null
   }
+}
+
+let playModeWatchStop: WatchStopHandle | null = null
+
+/** 播放模式（循环/随机）一变就落库。
+ *  它不属于「关键节点」（不暂停、不切曲、一直播着就没人保存），不加这个 watch 的话，
+ *  用户改完模式后直接杀进程，下次启动又会退回顺序播放。
+ *  真正写盘仍由后端的 5s 节流兜住，连点几次最多落一次盘。 */
+export function watchPlayMode(store: PlayerStore): void {
+  if (playModeWatchStop) return
+  playModeWatchStop = watch(
+    () => [store.repeatMode, store.isShuffle] as const,
+    () => {
+      if (store._isDestroyed || !store.currentTrack) return
+      void store._saveLastSessionNow()
+    },
+  )
+}
+
+export function stopPlayModeWatch(): void {
+  playModeWatchStop?.()
+  playModeWatchStop = null
 }

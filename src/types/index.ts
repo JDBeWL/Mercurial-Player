@@ -227,6 +227,9 @@ export interface ResumeResult {
   trackIndexInPlaylist?: number | null
   /* 播放队列快照 (用于恢复 player.playlist) */
   playlistTracks: TrackSnapshot[]
+  /* 上次会话的播放模式；null/undefined 表示后端没有可用的会话记录，前端保持当前值 */
+  repeatMode?: RepeatMode | null
+  isShuffle?: boolean | null
   status: string
 }
 

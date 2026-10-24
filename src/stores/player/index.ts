@@ -25,7 +25,7 @@ import {
   getPreviousShuffleIndex,
 } from './shuffle'
 import { PlayerCacheManager } from './cache'
-import { saveLastSessionNow, resumeLastSession } from './session'
+import { saveLastSessionNow, resumeLastSession, watchPlayMode, stopPlayModeWatch } from './session'
 import {
   isAndroid,
   setupQueueListener,
@@ -292,6 +292,8 @@ export const usePlayerStore = defineStore('player', {
 
       // 把播放队列同步给 Rust,Android 自动推进的来由见 queue.ts 文件头
       watchPlayQueue(this)
+      // 播放模式变化即落库(它不是暂停/切曲这类关键节点,没有别的保存点会触发)
+      watchPlayMode(this)
       void startBackgroundHeartbeat()
 
       const taskbarListeners = await setupTaskbarListeners(this)
@@ -905,6 +907,7 @@ export const usePlayerStore = defineStore('player', {
 
       this._stopCleanupTask()
       stopPlayQueueWatch()
+      stopPlayModeWatch()
       stopBackgroundHeartbeat()
       this._cacheManager?.destroy()
       this._cacheManager = null

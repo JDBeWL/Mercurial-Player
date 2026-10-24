@@ -79,7 +79,9 @@ describe('analyzeTrackBpm', () => {
   it('does nothing when the signal is already aborted', async () => {
     const controller = new AbortController()
     controller.abort()
-    await expect(analyzeTrackBpm(track('/a.mp3'), { signal: controller.signal })).resolves.toBeNull()
+    await expect(
+      analyzeTrackBpm(track('/a.mp3'), { signal: controller.signal }),
+    ).resolves.toBeNull()
     expect(invokeMock).not.toHaveBeenCalled()
   })
 
@@ -89,6 +91,8 @@ describe('analyzeTrackBpm', () => {
       controller.abort()
       return Promise.resolve([{ path: '/a.mp3', bpm: 120 }])
     })
-    await expect(analyzeTrackBpm(track('/a.mp3'), { signal: controller.signal })).resolves.toBeNull()
+    await expect(
+      analyzeTrackBpm(track('/a.mp3'), { signal: controller.signal }),
+    ).resolves.toBeNull()
   })
 })

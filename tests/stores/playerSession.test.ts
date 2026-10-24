@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick, reactive } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { Track, ResumeResult, TrackSnapshot } from '@/types'
 
@@ -29,7 +30,8 @@ vi.mock('@/stores/musicLibrary', () => ({
 }))
 
 // mock 必须在导入被测模块之前声明
-const { saveLastSessionNow, resumeLastSession } = await import('@/stores/player/session')
+const { saveLastSessionNow, resumeLastSession, watchPlayMode, stopPlayModeWatch } =
+  await import('@/stores/player/session')
 
 const invokeMock = vi.mocked(invoke)
 
@@ -63,18 +65,31 @@ function makeStore(
     duration: 0,
     currentTime: 0,
     isPlaying: true,
+    repeatMode: 'none',
+    isShuffle: false,
     audioInfo: null,
     _isDestroyed: false,
     _cacheAbortController: null as AbortController | null,
     _cachePlaylistMetadata: vi.fn(),
     _loadPlaylistCovers: vi.fn(),
     _updateTaskbarState: vi.fn(),
+    _regenerateShuffleOrder: vi.fn(),
+    _saveLastSessionNow: vi.fn(),
     /** player.playlist 已 markRaw,替换统一走 _setPlaylist */
     _setPlaylist(this: { playlist: Track[] }, newTracks: Track[]): void {
       this.playlist = newTracks
     },
     ...overrides,
   } as unknown as FakeStore & Record<string, unknown>
+}
+
+/** watchPlayMode 的 getter 必须建在真正的响应式对象上；reactive 后的类型与 Pinia store 对不上，断言回来 */
+function makeReactiveStore(
+  overrides: Partial<Record<string, unknown>> = {},
+  playlist: Track[] = [],
+  currentTrack: Track | null = null,
+): FakeStore {
+  return reactive(makeStore(overrides, playlist, currentTrack)) as unknown as FakeStore
 }
 
 beforeEach(() => {
@@ -120,7 +135,39 @@ describe('saveLastSessionNow', () => {
         expect.objectContaining({ path: '/a.mp3' }),
         expect.objectContaining({ path: '/b.mp3' }),
       ],
+      repeatMode: 'none',
+      isShuffle: false,
     })
+  })
+
+  it('persists the loop mode and shuffle flag', async () => {
+    const store = makeStore(
+      { duration: 180, currentTime: 42.5, repeatMode: 'track', isShuffle: false },
+      [track('/a.mp3')],
+      track('/a.mp3'),
+    )
+
+    await saveLastSessionNow(store)
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      'save_last_session',
+      expect.objectContaining({ repeatMode: 'track', isShuffle: false }),
+    )
+  })
+
+  it('persists shuffle mode', async () => {
+    const store = makeStore(
+      { duration: 180, currentTime: 42.5, repeatMode: 'none', isShuffle: true },
+      [track('/a.mp3')],
+      track('/a.mp3'),
+    )
+
+    await saveLastSessionNow(store)
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      'save_last_session',
+      expect.objectContaining({ repeatMode: 'none', isShuffle: true }),
+    )
   })
 
   it('falls back to display fields when title/artist are missing', async () => {
@@ -237,6 +284,81 @@ describe('resumeLastSession', () => {
       bpm: null,
     })
     expect(store._updateTaskbarState).toHaveBeenCalled()
+  })
+
+  it('restores the loop mode from the last session', async () => {
+    invokeMock.mockResolvedValueOnce({
+      resumed: true,
+      status: 'resumed',
+      trackPath: '/a.mp3',
+      durationSecs: 100,
+      positionSecs: 5,
+      playlistTracks: [snapshot('/a.mp3')],
+      repeatMode: 'list',
+      isShuffle: false,
+    } as ResumeResult)
+    const store = makeStore()
+
+    await resumeLastSession(store)
+
+    expect(store.repeatMode).toBe('list')
+    expect(store.isShuffle).toBe(false)
+  })
+
+  it('restores shuffle mode and regenerates the shuffle order', async () => {
+    invokeMock.mockResolvedValueOnce({
+      resumed: true,
+      status: 'resumed',
+      trackPath: '/a.mp3',
+      durationSecs: 100,
+      positionSecs: 5,
+      playlistTracks: [snapshot('/a.mp3'), snapshot('/b.mp3')],
+      repeatMode: 'none',
+      isShuffle: true,
+    } as ResumeResult)
+    const store = makeStore()
+
+    await resumeLastSession(store)
+
+    expect(store.isShuffle).toBe(true)
+    expect(store.repeatMode).toBe('none')
+    // 洗牌序列不落库，恢复后必须重新生成，否则第一首播完就失去随机序
+    expect(store._regenerateShuffleOrder).toHaveBeenCalled()
+  })
+
+  it('keeps the current play mode when the backend has no record', async () => {
+    invokeMock.mockResolvedValueOnce({
+      resumed: true,
+      status: 'ok',
+      trackPath: '/a.mp3',
+      durationSecs: 10,
+      positionSecs: 1,
+      playlistTracks: [snapshot('/a.mp3')],
+    } as ResumeResult)
+    const store = makeStore({ repeatMode: 'track', isShuffle: false })
+
+    await resumeLastSession(store)
+
+    expect(store.repeatMode).toBe('track')
+    expect(store.isShuffle).toBe(false)
+    expect(store._regenerateShuffleOrder).not.toHaveBeenCalled()
+  })
+
+  it('ignores an unknown loop mode coming from the backend', async () => {
+    invokeMock.mockResolvedValueOnce({
+      resumed: true,
+      status: 'ok',
+      trackPath: '/a.mp3',
+      durationSecs: 10,
+      positionSecs: 1,
+      playlistTracks: [snapshot('/a.mp3')],
+      repeatMode: 'bogus',
+    } as unknown as ResumeResult)
+    const store = makeStore({ repeatMode: 'list' })
+
+    await resumeLastSession(store)
+
+    expect(store.repeatMode).toBe('list')
   })
 
   it('appends a minimal track when it is absent from playlistTracks', async () => {
@@ -497,5 +619,52 @@ describe('resumeLastSession', () => {
     await expect(resumeLastSession(store)).resolves.toMatchObject({ resumed: true })
     await Promise.resolve()
     expect(store.currentTrack!.coverPath).toBeUndefined()
+  })
+})
+
+describe('watchPlayMode', () => {
+  afterEach(() => {
+    stopPlayModeWatch()
+  })
+
+  it('saves the session as soon as the loop mode changes', async () => {
+    const store = makeReactiveStore({}, [track('/a.mp3')], track('/a.mp3'))
+    watchPlayMode(store)
+
+    store.repeatMode = 'list'
+    await nextTick()
+
+    expect(store._saveLastSessionNow).toHaveBeenCalledTimes(1)
+  })
+
+  it('saves the session when shuffle is toggled', async () => {
+    const store = makeReactiveStore({}, [track('/a.mp3')], track('/a.mp3'))
+    watchPlayMode(store)
+
+    store.isShuffle = true
+    await nextTick()
+
+    expect(store._saveLastSessionNow).toHaveBeenCalledTimes(1)
+  })
+
+  it('does nothing without a current track', async () => {
+    const store = makeReactiveStore()
+    watchPlayMode(store)
+
+    store.repeatMode = 'track'
+    await nextTick()
+
+    expect(store._saveLastSessionNow).not.toHaveBeenCalled()
+  })
+
+  it('stops reacting once unregistered', async () => {
+    const store = makeReactiveStore({}, [track('/a.mp3')], track('/a.mp3'))
+    watchPlayMode(store)
+    stopPlayModeWatch()
+
+    store.repeatMode = 'list'
+    await nextTick()
+
+    expect(store._saveLastSessionNow).not.toHaveBeenCalled()
   })
 })

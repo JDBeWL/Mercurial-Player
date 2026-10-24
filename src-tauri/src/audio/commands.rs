@@ -995,6 +995,10 @@ pub fn save_last_session(
     playlist_name: Option<String>,
     track_index_in_playlist: Option<usize>,
     playlist_tracks: Vec<TrackSnapshot>,
+    // 循环模式（前端 RepeatMode：none / track / list），缺省按 none 存
+    repeat_mode: Option<String>,
+    // 是否随机播放，缺省按 false 存
+    is_shuffle: Option<bool>,
 ) -> Result<(), AppError> {
     super::session::save_last_session(
         &state,
@@ -1006,6 +1010,8 @@ pub fn save_last_session(
         playlist_name,
         track_index_in_playlist,
         playlist_tracks,
+        repeat_mode,
+        is_shuffle,
     )
 }
 

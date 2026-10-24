@@ -342,7 +342,10 @@ fn consensus(readings: &[BeatEstimate]) -> BeatEstimate {
         if folded.is_empty() {
             continue;
         }
-        let confidence = folded.iter().map(|&(_, confidence)| confidence).fold(0.0, f64::max);
+        let confidence = folded
+            .iter()
+            .map(|&(_, confidence)| confidence)
+            .fold(0.0, f64::max);
         let distance = (candidate.bpm / TEMPO_PRIOR_CENTER).log2().abs();
 
         let better = folded.len() > best_votes
@@ -1061,10 +1064,7 @@ const LEVEL_UP_TOLERANCE: f64 = 0.05;
 
 /// 允许提升的层级与证据门槛：(倍数, 强度下限, 召回下限)，均为相对胜出候选的比值。
 /// 阈值余量很薄（3/2 只留约 2%），改动前先补标注样本重标。
-const LEVEL_UP_RATIOS: [(f64, f64, f64); 2] = [
-    (1.5, 0.80, 1.25),
-    (2.0, 0.85, 1.75),
-];
+const LEVEL_UP_RATIOS: [(f64, f64, f64); 2] = [(1.5, 0.80, 1.25), (2.0, 0.85, 1.75)];
 
 /// 召回项在 F 度量里的相对权重（β²）。0.35 略偏精度，避免整库被推向高速端。
 const RECALL_WEIGHT: f64 = 0.35;
@@ -1646,7 +1646,11 @@ mod tests {
             candidate(120.0, 0.2000, 0.3000),
             candidate(168.0, 0.1900, 0.5000),
         ];
-        assert_eq!(promote_to_quarter_level(&scores, 0), 0, "非 3/2 比值不应提升");
+        assert_eq!(
+            promote_to_quarter_level(&scores, 0),
+            0,
+            "非 3/2 比值不应提升"
+        );
     }
 
     #[test]

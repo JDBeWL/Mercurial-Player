@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
 use beat_this::{Model, Tensor};
-use ort::ep::{DirectML, CPU};
+use ort::ep::{CPU, DirectML};
 use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Value;

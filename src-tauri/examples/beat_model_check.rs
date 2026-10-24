@@ -7,7 +7,10 @@ fn main() {
         eprintln!("用法: beat_model_check <音频路径> [更多...]");
         std::process::exit(2);
     }
-    println!("模型可用: {}", mercurial_player_lib::media::beat_model::is_available());
+    println!(
+        "模型可用: {}",
+        mercurial_player_lib::media::beat_model::is_available()
+    );
     for file in files {
         let started = std::time::Instant::now();
         match mercurial_player_lib::media::beat_model::analyze(&file) {
@@ -25,7 +28,9 @@ fn main() {
                 println!(
                     "{:<38} BPM {:>6}  {} 拍 / {} 小节线  [{meter}]  {:.1}ms",
                     name.chars().take(36).collect::<String>(),
-                    track.bpm.map_or_else(|| "—".to_string(), |v| format!("{v:.1}")),
+                    track
+                        .bpm
+                        .map_or_else(|| "—".to_string(), |v| format!("{v:.1}")),
                     track.beats.len(),
                     track.downbeats.len(),
                     started.elapsed().as_millis()
