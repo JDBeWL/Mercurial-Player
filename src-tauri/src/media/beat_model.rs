@@ -122,7 +122,7 @@ const COMPONENT_FILES: &[(&str, bool)] = &[
 #[must_use]
 pub fn component_status() -> ComponentStatus {
     let dir = component_dir();
-    let base = dir.clone().unwrap_or_default();
+    let base = dir.unwrap_or_default();
     let ready = is_available();
     let missing = COMPONENT_FILES
         .iter()
@@ -168,7 +168,8 @@ enum Tracker {
         inner: BeatThis<super::ort_model::OrtModel>,
         device: super::ort_model::Device,
     },
-    Rten(RtenTracker),
+    /// 最大的一支（约 900 字节）：装箱避免把整个 enum 撑到它的大小
+    Rten(Box<RtenTracker>),
 }
 
 impl Tracker {
@@ -225,7 +226,7 @@ fn build_tracker(dir: &Path) -> Option<Tracker> {
     match built {
         Ok(inner) => {
             log::info!("节拍分析后端: rten-cpu");
-            Some(Tracker::Rten(inner))
+            Some(Tracker::Rten(Box::new(inner)))
         }
         Err(e) => {
             log::error!("节拍模型加载失败: {e}");
@@ -251,10 +252,15 @@ pub fn analyze(path: &str) -> Result<BeatTrack, AppError> {
     if guard.is_none() {
         *guard = build_tracker(&dir);
     }
-    let tracker = guard
-        .as_mut()
-        .ok_or_else(|| AppError::Audio("节拍模型加载失败".to_string()))?;
-    let analysis = tracker.analyze(&pcm)?;
+    // 推理本身要在锁内（复用同一个 session），推完就放锁：
+    // 后面的 BPM/小节线统计是纯计算，没必要占着模型槽位挡住其他曲目
+    let analysis = {
+        let tracker = guard
+            .as_mut()
+            .ok_or_else(|| AppError::Audio("节拍模型加载失败".to_string()))?;
+        tracker.analyze(&pcm)?
+    };
+    drop(guard);
 
     let bpm = calculate_bpm(&analysis).map(f64::from);
     let beats: Vec<f64> = analysis.beats.iter().map(|&t| f64::from(t)).collect();

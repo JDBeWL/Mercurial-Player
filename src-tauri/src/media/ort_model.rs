@@ -50,7 +50,7 @@ impl Model for OrtModel {
         let outputs = self.session.run(ort::inputs![name => value])?;
 
         let mut result = HashMap::new();
-        for (out_name, out) in outputs.iter() {
+        for (out_name, out) in &outputs {
             let (shape, data) = out.try_extract_tensor::<f32>()?;
             result.insert(
                 out_name.to_string(),

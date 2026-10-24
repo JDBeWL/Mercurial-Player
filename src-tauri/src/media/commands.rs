@@ -446,7 +446,9 @@ pub async fn analyze_beats_batch(
             log::warn!("批量分析结束后元数据缓存落盘失败: {e}");
         }
         // 多者排前：UI 只展示前几条
-        summary.issues.sort_by(|a, b| b.count.cmp(&a.count));
+        summary
+            .issues
+            .sort_by_key(|issue| std::cmp::Reverse(issue.count));
         let _ = app.emit(
             BEATS_PROGRESS_EVENT,
             BeatsProgress {

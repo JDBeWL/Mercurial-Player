@@ -738,12 +738,13 @@ mod tests {
 
     #[test]
     fn test_sanitize_db_rejects_non_finite() {
-        assert_eq!(sanitize_db(f32::NAN), 0.0);
-        assert_eq!(sanitize_db(f32::INFINITY), 0.0);
-        assert_eq!(sanitize_db(f32::NEG_INFINITY), 0.0);
-        assert_eq!(sanitize_db(99.0), GAIN_RANGE_DB);
-        assert_eq!(sanitize_db(-99.0), -GAIN_RANGE_DB);
-        assert_eq!(sanitize_db(3.5), 3.5);
+        // 浮点不能用 assert_eq! 比，这里都是可精确表示的值，走同一个 approx_eq
+        assert!(approx_eq(sanitize_db(f32::NAN), 0.0));
+        assert!(approx_eq(sanitize_db(f32::INFINITY), 0.0));
+        assert!(approx_eq(sanitize_db(f32::NEG_INFINITY), 0.0));
+        assert!(approx_eq(sanitize_db(99.0), GAIN_RANGE_DB));
+        assert!(approx_eq(sanitize_db(-99.0), -GAIN_RANGE_DB));
+        assert!(approx_eq(sanitize_db(3.5), 3.5));
 
         let mut settings = EqSettings {
             enabled: true,
@@ -753,8 +754,8 @@ mod tests {
         settings.gains[0] = f32::NAN;
         settings.gains[5] = 99.0;
         settings.sanitize();
-        assert_eq!(settings.gains[0], 0.0);
-        assert_eq!(settings.gains[5], GAIN_RANGE_DB);
+        assert!(approx_eq(settings.gains[0], 0.0));
+        assert!(approx_eq(settings.gains[5], GAIN_RANGE_DB));
         assert!(settings.effective_preamp_db().is_finite());
 
         for (i, &gain) in settings.gains.iter().enumerate() {
@@ -774,6 +775,6 @@ mod tests {
         eq.set_gains([f32::NAN; EQ_BAND_COUNT]);
         assert!(eq.get_settings().gains.iter().all(|&g| g == 0.0));
         eq.set_preamp(f32::NAN);
-        assert_eq!(eq.get_settings().preamp, 0.0);
+        assert!(approx_eq(eq.get_settings().preamp, 0.0));
     }
 }

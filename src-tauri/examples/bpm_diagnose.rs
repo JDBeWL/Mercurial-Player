@@ -9,6 +9,7 @@ use mercurial_player_lib::media::bpm::{
 use mercurial_player_lib::media::filesystem::AUDIO_EXTENSIONS;
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -255,13 +256,15 @@ fn run(args: &Args) -> Result<(), String> {
         return run_curve(args, &files);
     }
     if args.vote {
-        return run_vote(&files);
+        run_vote(&files);
+        return Ok(());
     }
     if args.suspects {
         return run_suspects(args, &files);
     }
     if args.meter {
-        return run_meter(args, &files);
+        run_meter(args, &files);
+        return Ok(());
     }
     if args.production {
         for file in &files {
@@ -308,7 +311,7 @@ fn run(args: &Args) -> Result<(), String> {
             .flat_map_iter(|file| {
                 let produced = analyze_file(file, args);
                 let count = done.fetch_add(1, Ordering::Relaxed) + 1;
-                if count % 10 == 0 || count == total {
+                if count.is_multiple_of(10) || count == total {
                     eprintln!("  {count}/{total}");
                 }
                 produced.into_iter()
@@ -336,7 +339,7 @@ fn run(args: &Args) -> Result<(), String> {
 
 /// 拍号可行性探针：若每小节 N 拍，第 0、N、2N… 个拍点的起音应显著更强。
 /// 连已知拍号的曲子都对不上，就不该做拍号分割。
-fn run_meter(args: &Args, files: &[PathBuf]) -> Result<(), String> {
+fn run_meter(args: &Args, files: &[PathBuf]) {
     for file in files {
         let Some(path) = file.to_str() else { continue };
         println!(
@@ -376,7 +379,7 @@ fn run_meter(args: &Args, files: &[PathBuf]) -> Result<(), String> {
                     .map(|i| (strengths[i] - mean) * (strengths[i + lag] - mean))
                     .sum();
                 let r = numerator / variance * (count as f64 / (count - lag) as f64);
-                profile.push_str(&format!("{lag}:{r:+.2} "));
+                let _ = write!(profile, "{lag}:{r:+.2} ");
                 if r > best.1 {
                     best = (lag, r);
                 }
@@ -387,7 +390,6 @@ fn run_meter(args: &Args, files: &[PathBuf]) -> Result<(), String> {
             );
         }
     }
-    Ok(())
 }
 
 /// 可疑清单：按证据强度列出"可能报错层级"的曲目，交人工核对。
@@ -426,18 +428,15 @@ fn run_suspects(args: &Args, files: &[PathBuf]) -> Result<(), String> {
             format!("{:.4}", row.current_strength),
         ];
         for index in 0..3 {
-            match row.alts.get(index).and_then(Option::as_ref) {
-                Some(alt) => {
-                    fields.push(format!("{:.1}", alt.bpm));
-                    fields.push(format!("{:.3}", alt.strength_ratio));
-                    fields.push(format!("{:.3}", alt.recall_ratio));
-                }
-                None => {
-                    fields.push(String::new());
-                    fields.push(String::new());
-                    fields.push(String::new());
-                }
-            }
+            let Some(alt) = row.alts.get(index).and_then(Option::as_ref) else {
+                fields.push(String::new());
+                fields.push(String::new());
+                fields.push(String::new());
+                continue;
+            };
+            fields.push(format!("{:.1}", alt.bpm));
+            fields.push(format!("{:.3}", alt.strength_ratio));
+            fields.push(format!("{:.3}", alt.recall_ratio));
         }
         fields.push(row.hint.clone());
         out.push_str(&csv_row(&fields));
@@ -574,7 +573,7 @@ fn analyze_suspect(file: &Path) -> Option<SuspectRow> {
 }
 
 /// 取离 `target` 最近的候选（对数域 6% 以内），没有就返回 None
-fn closest_level<'a>(evaluated: &'a [CandidateScore], target: f64) -> Option<&'a CandidateScore> {
+fn closest_level(evaluated: &[CandidateScore], target: f64) -> Option<&CandidateScore> {
     if target <= 0.0 {
         return None;
     }
@@ -621,7 +620,7 @@ fn suspect_hint(alts: &[Option<AltLevel>], confidence: f64) -> String {
 }
 
 /// 对比模式：同一文件跑单窗（生产口径）与三窗共识，看投票改了什么。
-fn run_vote(files: &[PathBuf]) -> Result<(), String> {
+fn run_vote(files: &[PathBuf]) {
     println!("{:<38}{:>9}{:>9}{:>9}", "曲目", "单窗", "共识", "差");
     let mut changed = 0;
     let mut total = 0;
@@ -654,7 +653,6 @@ fn run_vote(files: &[PathBuf]) -> Result<(), String> {
         );
     }
     println!("\n{changed}/{total} 首的共识结果与单窗不同（>0.5%）");
-    Ok(())
 }
 
 /// 曲线模式：滑动扫描整曲，把相邻同速窗口合并成速度段。`--offsets` 只能给单点，
@@ -1538,8 +1536,8 @@ fn median(values: &[f64]) -> f64 {
     let mut sorted = values.to_vec();
     sorted.sort_by(f64::total_cmp);
     let mid = sorted.len() / 2;
-    if sorted.len() % 2 == 0 {
-        (sorted[mid - 1] + sorted[mid]) / 2.0
+    if sorted.len().is_multiple_of(2) {
+        sorted[mid - 1].midpoint(sorted[mid])
     } else {
         sorted[mid]
     }

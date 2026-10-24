@@ -89,7 +89,7 @@ pub fn cached(path: &str) -> Option<BeatTrack> {
         cache.entries.remove(path);
         return None;
     }
-    Some(BeatTrack {
+    let track = BeatTrack {
         bpm: entry.bpm,
         beats: entry.beats.iter().map(|&v| f64::from(v)).collect(),
         downbeats: entry.downbeats.iter().map(|&v| f64::from(v)).collect(),
@@ -102,7 +102,10 @@ pub fn cached(path: &str) -> Option<BeatTrack> {
             })
             .collect(),
         span_secs: f64::from(entry.span_secs),
-    })
+    };
+    // 拍点数组可能有数 MB，拷贝期间没必要一直占着全局写锁
+    drop(guard);
+    Some(track)
 }
 
 /// 最近一次分析时间（用于 UI 判断"是否分析过整库"）
@@ -112,7 +115,9 @@ pub fn cached_at(path: &str) -> Option<u64> {
     let guard = BEAT_CACHE.read().ok()?;
     let cache = guard.as_ref()?;
     let entry = cache.entries.get(path)?;
-    (entry.modified_time == current).then_some(entry.analyzed_at)
+    let analyzed_at = (entry.modified_time == current).then_some(entry.analyzed_at);
+    drop(guard);
+    analyzed_at
 }
 
 /// 已缓存且仍然有效的曲目数
@@ -126,14 +131,16 @@ pub fn valid_count() -> usize {
     if guard.is_none() {
         *guard = Some(load_from_disk());
     }
-    let Some(cache) = guard.as_ref() else {
-        return 0;
-    };
-    cache
-        .entries
-        .iter()
-        .filter(|(path, entry)| get_file_modified_time(path) == Some(entry.modified_time))
-        .count()
+    // 逐首 stat 一遍可能很慢（整库），统计完立刻放锁，别把写锁按住那么久
+    let count = guard.as_ref().map_or(0, |cache| {
+        cache
+            .entries
+            .iter()
+            .filter(|(path, entry)| get_file_modified_time(path) == Some(entry.modified_time))
+            .count()
+    });
+    drop(guard);
+    count
 }
 
 /// 写入一条结果，不落盘；批量结束后由调用方 `flush`
