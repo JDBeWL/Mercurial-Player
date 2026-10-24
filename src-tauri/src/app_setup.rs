@@ -119,7 +119,7 @@ pub fn init(app: &tauri::App) {
             crate::media::commands::sync_cache_dir_fs_scope(
                 app.handle(),
                 None,
-                Some(&media_cache.to_string_lossy().to_string()),
+                Some(media_cache.to_string_lossy().as_ref()),
             );
         }
     }

@@ -489,13 +489,17 @@ mod tests {
         assert!(!check_file_exists_internal("C:\\Users\\a\\.ssh\\id_rsa"));
     }
 
-    /// 建一个带纳秒标签的独立临时目录，避免并行测试互相踩
+    /// 建一个带纳秒标签的独立临时目录，避免并行测试互相踩。
+    /// 放 target/ 而非系统临时目录：macOS 的 $TMPDIR 在 /var 下，会被
+    /// is_sensitive_path 的 /var 前缀判为敏感目录，歌词读写校验直接拒绝
     fn make_lyrics_test_dir(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("mp_lyrics_{tag}_{nanos}"));
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("mp_lyrics_{tag}_{nanos}"));
         fs::create_dir_all(&dir).expect("create test dir");
         dir
     }
@@ -506,7 +510,8 @@ mod tests {
         let dirs = vec![base.to_string_lossy().to_string()];
         let inside = base.join("song.lrc");
         fs::write(&inside, "[00:00.00] test").expect("write inside");
-        let outside = std::env::temp_dir().join(format!(
+        // 未登记但非敏感的兄弟路径：确保被拒是因为目录未授权，而不是命中敏感黑名单
+        let outside = base.parent().unwrap().join(format!(
             "mp_lyrics_outside_{}.lrc",
             base.file_name().unwrap().to_string_lossy()
         ));
