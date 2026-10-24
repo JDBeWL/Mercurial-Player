@@ -20,14 +20,11 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
-// Roboto 字体自托管，只导入用到的权重
 import '@fontsource/roboto/300.css'
 import '@fontsource/roboto/400.css'
 import '@fontsource/roboto/500.css'
 import '@fontsource/roboto/700.css'
-// 歌词可选字体：霞鹜文楷屏幕版（unicode-range 分片按需加载）
 import 'lxgw-wenkai-screen-webfont/lxgwwenkaiscreen.css'
-// 注册 assets/fonts/lyrics/ 下手动引入的打包字体
 import './utils/bundledFonts'
 import { loadExternalFonts } from './utils/bundledFonts'
 import './style.css'
@@ -41,13 +38,11 @@ logger.info('应用程序启动中...')
 const app = createApp(App)
 const pinia = createPinia()
 
-// 全局错误兜底：生产构建会 drop console，未捕获异常不落盘就完全无法诊断；
-// 渲染 / watcher / 生命周期钩子里的同步异常都汇到这里
+// 生产构建会 drop console，未捕获异常只能靠这里落盘；渲染/watcher/生命周期钩子的同步错误都汇到这里
 app.config.errorHandler = (err, _instance, info) => {
   logger.error(`[全局错误] ${info}:`, err)
 }
 
-// 未处理的 Promise 拒绝 (fire-and-forget 的 async 调用等)
 window.addEventListener('unhandledrejection', (event) => {
   logger.error('[未处理的 Promise 拒绝]:', event.reason)
 })
@@ -56,7 +51,6 @@ app.use(pinia)
 app.use(i18n)
 app.mount('#app')
 
-// 扫描软件同级 fonts/ 目录，注册外部字体（运行中新放入的字体在打开设置页时还会重扫）
 void loadExternalFonts()
 
 logger.info('应用程序已启动')
@@ -71,8 +65,7 @@ if (import.meta.env.PROD) {
   logger.info('生产环境：已禁用右键菜单')
 }
 
-// 按用户配置 (modern/classic) 只加载一种歌词样式（两套样式互斥的说明见 LyricsDisplay 的 loadLyricsStyleCss）
-// 需要 pinia 已初始化，故必须在 app.mount 之后
+// 需要 pinia 已初始化，必须在 app.mount 之后执行
 import { useConfigStore } from './stores/config'
 async function loadLyricsStyleCss(): Promise<void> {
   try {
@@ -89,14 +82,12 @@ async function loadLyricsStyleCss(): Promise<void> {
 }
 void loadLyricsStyleCss()
 
-// 加载内置插件
 import { pluginManager } from './plugins'
 import builtinPlugins from './plugins/builtins'
 import { loadAllPlugins } from './plugins/pluginLoader'
 import { shortcutManager } from './plugins/shortcutManager'
 
 const loadBuiltinPlugins = async (): Promise<void> => {
-  // 先初始化插件管理器（设置播放器状态监听）
   try {
     await pluginManager.init()
   } catch (error) {

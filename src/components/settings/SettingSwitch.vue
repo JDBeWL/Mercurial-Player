@@ -1,10 +1,5 @@
 <script setup lang="ts">
-/**
- * MD3 风格设置开关。
- * 取代各设置页复制粘贴的 .switch 结构:
- * - 使用 <button role="switch"> 提供键盘与读屏支持 (Space 切换、aria-checked)
- * - v-model 双向绑定;未监听 update 事件时点击仍会冒泡给父级(如 AudioDeviceSettings 的整行点击)
- */
+/** MD3 风格设置开关 / `button[role=switch]` + `v-model`；未监听 `update` 时点击仍冒泡 */
 const props = defineProps<{
   modelValue: boolean
   /** 禁用态: 降透明度且不响应自身点击 */

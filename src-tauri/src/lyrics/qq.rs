@@ -1,4 +1,6 @@
 //! QQ 音乐歌词来源
+//!
+//! 搜索、纯文本歌词与 QRC 逐字歌词，统一产出 ASS 逐字 + 干净 LRC。
 
 use crate::error::AppError;
 use crate::http_client::{get, read_response_text, send_with_retry};
@@ -30,12 +32,12 @@ struct SearchSongWrap {
 struct SearchSong {
     #[serde(default)]
     songmid: String,
-    /// 搜索结果里的曲名是平铺字段 `songname`（不是 `name`）
+    /// 平铺字段 `songname`（不是 `name`），读错会恒为空
     #[serde(default)]
     songname: String,
     #[serde(default)]
     singer: Vec<Singer>,
-    /// 专辑名同样是平铺字段 `albumname`（不是嵌套的 `album.name`）
+    /// 平铺字段 `albumname`（不是嵌套的 `album.name`）
     #[serde(default)]
     albumname: String,
     /// 时长(秒)
@@ -71,7 +73,6 @@ fn build_headers() -> tauri_plugin_http::reqwest::header::HeaderMap {
     h
 }
 
-/// 搜索歌曲，返回前 limit 个（含 songmid）
 async fn search_songs(query: &LyricQuery, limit: u32) -> Result<Vec<SearchSong>, AppError> {
     let keyword = if query.artist.is_empty() {
         query.title.clone()

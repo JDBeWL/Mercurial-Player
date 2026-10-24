@@ -17,7 +17,7 @@
           <h2 class="md3-dialog-title">{{ title }}</h2>
           <button
             type="button"
-            class="md3-dialog-close"
+            class="icon-button md3-dialog-close"
             :aria-label="$t('common.close')"
             :title="$t('common.close')"
             @click="emit('close')"
@@ -82,9 +82,7 @@ const emit = defineEmits<{ close: [] }>()
 .md3-dialog {
   display: flex;
   flex-direction: column;
-  /* 别把 var 写进 min()：CSS 压缩会把 `min(var(--x, 560px), 100%)` 折成回退值，
-     自定义属性直接失效（实测弹窗宽度永远停在 560px）。宽度上限交给 max-width，
-     视口留白由 overlay 的 padding 负责 */
+  /* 别把 var 写进 min()：CSS 压缩会折成回退值，自定义属性失效；宽度上限交给 max-width。 */
   width: 100%;
   max-width: var(--md3-dialog-max-width, 560px);
   max-height: var(--md3-dialog-max-height, 80dvh);
@@ -154,30 +152,12 @@ const emit = defineEmits<{ close: [] }>()
   overflow-wrap: anywhere;
 }
 
-/* 48dp 触控目标：图标本身按 M3 保持 24dp */
+/* 关闭按钮复用全站 .icon-button：40×40、16px 圆角的矩形，与标题栏、播放器的图标按钮一致。
+   这里只保留 flex: none —— 标题很长时按钮不能被挤压变形。
+   之前单独写成 48×48 的圆形，是照 MD3 规范来的，但本应用整体走的是圆角矩形，
+   歌词候选框和 BPM 分析弹窗因此看起来像"另一个组件库的东西"。 */
 .md3-dialog-close {
-  display: flex;
   flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--md-sys-color-on-surface-variant);
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-.md3-dialog-close .material-symbols-rounded {
-  font-size: 24px;
-}
-
-@media (hover: hover) {
-  .md3-dialog-close:hover {
-    background-color: var(--md-sys-color-hover-overlay);
-  }
 }
 
 .md3-dialog-supporting {

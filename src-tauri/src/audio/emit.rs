@@ -15,8 +15,7 @@ pub(super) fn emit_track_ended(
     app: &AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     app.emit("track-ended", TrackEndedEvent {})?;
-    // Android 进入后台后 WebView 的 JS 会被节流/冻结，`track-ended` 可能无人处理，
-    // 交由 Rust 侧队列接管推进（桌面端内部直接返回）。
+    // Android 后台 WebView 的 JS 会被冻结，`track-ended` 可能无人处理，改由 Rust 侧队列接管推进（桌面端内部直接返回）。
     queue::handle_track_ended(app, &app.state::<AppState>());
     Ok(())
 }

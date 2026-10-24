@@ -1,7 +1,4 @@
-/**
- * Shuffle 辅助模块:Knuth 洗牌序列的生成、校验与导航计算,全部为无副作用的纯函数。
- * 状态(_shuffleOrder / _shufflePosition / _shuffleHistory)仍由 player store 持有,这里只算不存。
- */
+/** Shuffle 辅助模块 / Knuth 洗牌序列的生成、校验与导航，全部为无副作用纯函数；状态仍由 store 持有。 */
 
 /**
  * Knuth 洗牌：从后往前遍历 [n-1..1]，与 [0..i] 随机位交换，O(n) 且 n! 排列等概率。
@@ -46,15 +43,7 @@ export function isShuffleOrderValid(
   return order.length === playlistLength && order.length > 0 && position >= 0
 }
 
-/**
- * 计算 nextTrack 在 shuffle 模式下的下一首索引
- *
- * @param order 当前洗牌序列
- * @param position 当前在序列中的位置
- * @param playlistLength 播放列表长度
- * @param currentIndex 当前曲目索引 (用于在序列失效时重新生成)
- * @returns `{ index, position, order }` - order 可能在重新洗牌后变化
- */
+/** 计算 shuffle 模式下的下一首索引；`order` 失效时重新生成。 */
 export function getNextShuffleIndex(
   order: number[],
   position: number,
@@ -136,15 +125,7 @@ export function getPreviousShuffleIndex(
   }
 }
 
-/**
- * 在播放列表移除条目后,校正洗牌序列和历史栈
- *
- * @param order 当前洗牌序列
- * @param position 当前位置
- * @param history 历史栈
- * @param removedIndex 被移除的条目索引
- * @returns 校正后的 `{ order, position, history }`
- */
+/** 播放列表移除条目后校正洗牌序列与历史栈。 */
 export function adjustShuffleAfterRemove(
   order: number[],
   position: number,

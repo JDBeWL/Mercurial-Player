@@ -12,7 +12,6 @@ env:
   CARGO_TERM_COLOR: always
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-# 同一分支/PR 的新推送取消旧的 CI 运行，节省资源（Tauri 三平台构建很慢）
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -54,10 +53,6 @@ jobs:
       - name: Build frontend
         run: pnpm run build
 
-  # Rust 检查（lint / 格式 / 测试）
-  # 三平台矩阵运行:条件编译分支(#[cfg(windows)] / #[cfg(not(windows))] /
-  # #[cfg(target_os = "macos")])只有在对应平台上编译才会被检查,
-  # 单一 Linux 环境会漏掉其他平台的死代码、类型错误、未使用导入等问题。
   rust-checks:
     strategy:
       fail-fast: false
@@ -77,7 +72,6 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
-          # 矩阵各腿共用 job id,必须用平台区分缓存,否则互相覆盖
           key: ${{ matrix.platform }}
 
       - name: Install system dependencies (Ubuntu)
@@ -98,7 +92,6 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      # tauri-build 的构建脚本需要前端产物目录存在
       - name: Build frontend
         run: pnpm run build
 
@@ -114,18 +107,13 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
-      # release profile 的编译验证只在单平台做,避免三平台重复耗时
       - name: Cargo check (release)
         if: matrix.platform == 'ubuntu-latest'
         working-directory: src-tauri
         run: cargo check --release
 
-  # Android target 的 lint:三个桌面平台腿都编译不到 cfg(target_os = "android")
-  # 代码(AAudio / SAF / java_bridge / MediaSession),这些模块只有交叉到
-  # android target 才会被类型检查和 clippy 覆盖。
   android-checks:
     runs-on: ubuntu-latest
-    # 交叉编译只需要 NDK 里的 clang,runner 自带 Android SDK + NDK
     env:
       ANDROID_TARGET: aarch64-linux-android
       API_LEVEL: '24'
@@ -157,14 +145,12 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      # tauri-build 的构建脚本需要前端产物目录存在
       - name: Build frontend
         run: pnpm run build
 
       - name: Export NDK toolchain for cc-rs
         run: |
           set -euo pipefail
-          # runner 上可能装了多个 NDK,取版本号最高的那个
           NDK="$(ls -d "$ANDROID_HOME"/ndk/*/ | sort -V | tail -1)"
           TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
           {
@@ -180,8 +166,6 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --target "$ANDROID_TARGET" --lib -- -D warnings
 
-  # Tauri 应用构建和发布
-  # 仅 tag 推送时构建;非 tag 推送的平台编译验证由 rust-checks 三平台矩阵完成
   build-tauri:
     needs: [build-frontend, rust-checks]
     if: startsWith(github.ref, 'refs/tags/')
@@ -234,7 +218,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # updater 签名密钥：没有此密钥不会生成 .sig 文件和 latest.json
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           tauriScript: pnpm run tauri
@@ -258,8 +241,6 @@ jobs:
             > 首次使用？查看 [README](https://github.com/${{ github.repository }}#readme) 了解更多。
           releaseDraft: false
           prerelease: false
-          # 生成 latest.json 供 Tauri updater 使用
-          # Windows 优先使用 NSIS（.nsis.zip + .nsis.zip.sig）
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
 

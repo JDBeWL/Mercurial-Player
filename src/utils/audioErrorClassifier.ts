@@ -16,11 +16,7 @@ function toMessage(err: unknown): string {
   }
 }
 
-/**
- * 将后端（Tauri/Rust）返回的错误信息映射到更精确的前端 ErrorType。
- *
- * 区分"格式探测/解码失败"与"音频设备/输出流失败"，避免误提示用户检查音频设备。
- */
+/** 把后端错误映射到更精确的 `ErrorType`：区分格式/解码失败与设备/输出流失败。 */
 export function classifyAudioInvokeError(err: unknown): ErrorType {
   const msg = toMessage(err)
   const m = msg.toLowerCase()

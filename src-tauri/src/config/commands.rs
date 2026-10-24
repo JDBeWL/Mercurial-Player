@@ -8,10 +8,8 @@ use crate::security::is_sensitive_path;
 use std::path::Path;
 use tauri::{State, command};
 
-/// 验证音乐目录路径是否安全（不在敏感目录中）
-///
-/// 词法 + canonicalize 复查的完整规则见 [`crate::media::filesystem::validate_media_path`]；
-/// Android SAF 的 `content://` URI 无需本地校验，直接放行。
+/// 验证音乐目录路径是否安全：完整规则见 `crate::media::filesystem::validate_media_path`。
+/// SAF 的 `content://` URI 跳过本地校验直接放行。
 fn is_path_safe(path: &str) -> Result<(), AppError> {
     if saf::is_content_uri(path) {
         return Ok(());
@@ -63,13 +61,10 @@ pub fn load_config(state: State<AppState>) -> Result<AppConfig, AppError> {
     state.config_manager.load_config()
 }
 
-/// 保存前端提交的整包配置
-///
-/// `last_session` 与 `audio.preferred_device_id` 由后端独立写、前端负载不含，
+/// 保存前端提交的整包配置：`last_session` 与 `audio.preferred_device_id` 由后端独立写、前端负载不含，
 /// 为空时沿用现值，否则整包落盘会抹掉它们。
 #[command]
 pub fn save_config(state: State<AppState>, mut config: AppConfig) -> Result<(), AppError> {
-    // 读-改-写必须在同一把写锁内，见 ConfigManager::write_lock
     state.config_manager.update_config(|current| {
         if config.last_session.is_none() {
             config.last_session.clone_from(&current.last_session);
@@ -104,7 +99,6 @@ pub fn import_config(state: State<AppState>, file_path: String) -> Result<AppCon
 pub fn add_music_directory(state: State<AppState>, path: String) -> Result<Vec<String>, AppError> {
     is_path_safe(&path)?;
 
-    // 走 update_config 而不是分步读写，理由见 ConfigManager::write_lock
     state.config_manager.update_config(|config| {
         if !config.music_directories.contains(&path) {
             config.music_directories.push(path);

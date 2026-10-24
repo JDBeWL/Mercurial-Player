@@ -134,7 +134,7 @@ impl WasapiProducer {
         Some(self.ring.write_epoch())
     }
 
-    /// 写入一批采样，被作废（`cancelled` 命中或 `epoch` 过期）时返回 [`PushOutcome::Partial`]。
+    /// 写入一批采样，被作废（`cancelled` 命中或 `epoch` 过期）时返回 `PushOutcome::Partial`。
     ///
     /// 恒为 `Ok`：`Result` 只为与 AAudio 侧对齐（那边流未打开会返回 `Err`）。
     #[allow(clippy::unnecessary_wraps)]
@@ -337,7 +337,7 @@ impl WasapiExclusivePlayback {
             .map_err(|e| format!("Failed to send volume command: {e}").into())
     }
 
-    /// 取无锁写入端，见 [`WasapiProducer`]。
+    /// 取无锁写入端，见 `WasapiProducer`。
     #[must_use]
     pub fn producer(&self) -> WasapiProducer {
         WasapiProducer {

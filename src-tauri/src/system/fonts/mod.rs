@@ -1,7 +1,6 @@
 //! 系统字体查询模块
 //!
-//! - [`scan`]: 外部字体扫描(fonts/ 目录)与系统字体枚举
-//! - [`parse`]: TTC/OTC 集合二进制解析与前端命名约定解析
+//! `scan` 扫描 `fonts/` 与系统字体，`parse` 解析 TTC/OTC 集合与前端命名约定。
 
 mod parse;
 pub mod scan;

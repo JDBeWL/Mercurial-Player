@@ -107,7 +107,6 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-/** 初始化 store(注册监听器),返回已初始化的实例 */
 async function initStore(): Promise<Store> {
   const store = usePlayerStore()
   await store.initAudio()
@@ -153,7 +152,6 @@ describe('player.management > initAudio', () => {
     expect(loggerMock.warn).toHaveBeenCalledWith(
       'Player store already initialized, skipping duplicate initAudio call',
     )
-    // 不重复设置音量/监听器
     expect(invokeMock.mock.calls.filter(([cmd]) => cmd === 'set_volume')).toHaveLength(volumeCalls)
   })
 
@@ -166,7 +164,6 @@ describe('player.management > initAudio', () => {
 
     expect(invokeMock.mock.calls.filter(([cmd]) => cmd === 'set_volume')).toHaveLength(1)
     expect(listenMock.mock.calls.length).toBeGreaterThan(0)
-    // 重复的注册数量应与单次一致
     const listenCount = listenMock.mock.calls.length
     await store.initAudio()
     expect(listenMock.mock.calls.length).toBe(listenCount)
@@ -189,7 +186,6 @@ describe('player.management > initAudio', () => {
       'Failed to load volume from config:',
       expect.any(Error),
     )
-    // 监听器仍被注册
     expect(store._trackEndedUnlisten).not.toBeNull()
   })
 })
@@ -503,7 +499,7 @@ describe('player.management > resetPlayerState', () => {
 
   it('destroys the cache manager and aborts pending work', async () => {
     const store = usePlayerStore()
-    store._getCacheManager() // 触发缓存管理器创建
+    store._getCacheManager()
     const controller = new AbortController()
     store._cacheAbortController = controller
 
@@ -586,7 +582,6 @@ describe('player.management > lyrics loading', () => {
     await first
 
     expect(store.lyrics).toBe(lyricsAfterSecond)
-    // 解析只应为有效的那个请求执行一次
     expect((FileUtils.readFile as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1)
   })
 

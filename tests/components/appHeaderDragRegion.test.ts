@@ -1,6 +1,5 @@
 // 顶栏拖拽区护栏: 窗口无边框, 顶栏是移动窗口的唯一手段; Tauri 2 从事件目标向上遍历时, 遇到第一个带
 // data-tauri-drag-region 属性的元素就 return, 空值/"true" 会短路外层 header 的 "deep"
-// (headless 实测可拖宽度占比: 全空值 11.1% -> 全 "deep" 74%, 且 0 个按钮被误判)
 import { describe, expect, it } from 'vitest'
 
 const modules = import.meta.glob('@/components/AppHeader.vue', {

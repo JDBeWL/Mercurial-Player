@@ -100,7 +100,6 @@ describe('getPreviousShuffleIndex', () => {
     const result = getPreviousShuffleIndex([0, 1, 2], 2, history, 3, 2)
     expect(result.index).toBe(8)
     expect(result.position).toBe(1)
-    // 原数组未被修改
     expect(history).toEqual([5, 8])
     expect(result.history).toEqual([5])
   })
@@ -115,7 +114,6 @@ describe('getPreviousShuffleIndex', () => {
     const result = getPreviousShuffleIndex([], 0, [], 5, 4)
     expect(result.order).toHaveLength(5)
     expect(result.order[0]).toBe(4)
-    // 位置 0 之前 => 回绕到序列末尾
     expect(result.position).toBe(4)
     expect(result.index).toBe(result.order[4])
   })
@@ -147,7 +145,6 @@ describe('adjustShuffleAfterRemove', () => {
   })
 
   it('shifts the position when the removed entry precedes the current one', () => {
-    // 3 位于序列下标 1,当前位置 3 => 前移一位
     const result = adjustShuffleAfterRemove([0, 3, 1, 4], 3, [], 3)
     expect(result.position).toBe(2)
   })

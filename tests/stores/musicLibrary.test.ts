@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, beforeEach, expect, vi, afterEach } from 'vitest'
 
-// Mock logger
 vi.mock('@/utils/logger', () => ({
   default: {
     debug: vi.fn(),
@@ -11,7 +10,6 @@ vi.mock('@/utils/logger', () => ({
   },
 }))
 
-// Mock config store - 返回可写的 mock 对象
 const mockConfigStore = {
   musicDirectories: [] as string[],
   playlist: { sortOrder: 'asc' as 'asc' | 'desc' },
@@ -20,7 +18,6 @@ vi.mock('@/stores/config', () => ({
   useConfigStore: vi.fn(() => mockConfigStore),
 }))
 
-// Mock player store
 const mockPlayerStore = {
   playlist: [] as Array<{ path: string; coverPath?: string }>,
   _loadPlaylistCovers: vi.fn(),
@@ -41,12 +38,10 @@ import type { Track, Playlist } from '@/types'
 
 const invokeMock = vi.mocked(invoke)
 
-/** 创建测试用 Track */
 function makeTrack(path: string, title?: string): Track {
   return { path, name: path, title: title ?? path, duration: 100 }
 }
 
-/** 创建测试用 Playlist */
 function makePlaylist(name: string, files: Track[]): Playlist {
   return { name, files, totalFiles: files.length }
 }
@@ -56,12 +51,10 @@ describe('useMusicLibraryStore', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     resetTauriMocks()
-    // 重置 mock store 状态
     mockConfigStore.musicDirectories = []
     mockConfigStore.playlist.sortOrder = 'asc'
     mockPlayerStore.playlist = []
-    // 默认 invoke 和 store 方法返回值
-    // resolve_data_file 需返回数据文件完整路径,musicLibrary 用它定位 store 文件
+    // `resolve_data_file` 需返回数据文件完整路径,store 用它定位缓存文件
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'resolve_data_file') {
         return Promise.resolve('C:\\mock\\data\\store.json')
@@ -77,8 +70,6 @@ describe('useMusicLibraryStore', () => {
     vi.clearAllMocks()
   })
 
-  // ---------- 状态初始化 ----------
-
   describe('default state', () => {
     it('初始状态正确', () => {
       const store = useMusicLibraryStore()
@@ -92,8 +83,6 @@ describe('useMusicLibraryStore', () => {
       expect(store._loadedFromCache).toBe(false)
     })
   })
-
-  // ---------- loadMusicFolders ----------
 
   describe('loadMusicFolders', () => {
     it('成功加载音乐文件夹列表', async () => {
@@ -116,8 +105,6 @@ describe('useMusicLibraryStore', () => {
     })
   })
 
-  // ---------- addMusicFolder ----------
-
   describe('addMusicFolder', () => {
     it('成功添加文件夹并同步到 configStore', async () => {
       const updated = ['/music/folder1', '/music/new']
@@ -139,8 +126,6 @@ describe('useMusicLibraryStore', () => {
     })
   })
 
-  // ---------- removeMusicFolder ----------
-
   describe('removeMusicFolder', () => {
     it('成功移除文件夹并同步到 configStore', async () => {
       const updated = ['/music/folder1']
@@ -151,7 +136,6 @@ describe('useMusicLibraryStore', () => {
       expect(result.success).toBe(true)
       expect(store.musicFolders).toEqual(updated)
       expect(mockConfigStore.musicDirectories).toEqual(updated)
-      // folder2 不匹配任何文件，currentPlaylist 不受影响
       expect(store.currentPlaylist).not.toBeNull()
     })
 
@@ -169,7 +153,6 @@ describe('useMusicLibraryStore', () => {
     it('normalizePath: 反斜杠文件夹路径与正斜杠文件路径匹配', async () => {
       invokeMock.mockResolvedValue([])
       const store = useMusicLibraryStore()
-      // 文件路径用正斜杠，文件夹路径用反斜杠
       store.currentPlaylist = makePlaylist('test', [makeTrack('C:/Music/album/song.mp3')])
       await store.removeMusicFolder('C:\\Music\\album')
       expect(store.currentPlaylist).toBeNull()
@@ -207,8 +190,6 @@ describe('useMusicLibraryStore', () => {
       expect(result.message).toContain('remove failed')
     })
   })
-
-  // ---------- selectPlaylist (惰性排序) ----------
 
   describe('selectPlaylist', () => {
     it('选择播放列表并设置为 currentPlaylist', () => {
@@ -253,10 +234,8 @@ describe('useMusicLibraryStore', () => {
       const playlist = makePlaylist('test', [makeTrack('/c.mp3', 'C'), makeTrack('/a.mp3', 'A')])
       store.selectPlaylist(playlist)
       expect(playlist.files[0]!.title).toBe('A')
-      // 手动打乱顺序后再次选择
       playlist.files.reverse()
       store.selectPlaylist(playlist)
-      // 不会重新排序，顺序保持打乱后的状态
       expect(playlist.files[0]!.title).toBe('C')
     })
 
@@ -270,7 +249,6 @@ describe('useMusicLibraryStore', () => {
     it('使用 title 回退到 name 进行排序', () => {
       const store = useMusicLibraryStore()
       mockConfigStore.playlist.sortOrder = 'asc'
-      // title 为 undefined，回退到 name
       const playlist = makePlaylist('test', [
         { path: '/c.mp3', name: 'Charlie' },
         { path: '/a.mp3', name: 'Alice' },
@@ -301,8 +279,6 @@ describe('useMusicLibraryStore', () => {
       expect(playlist.files).toHaveLength(2)
     })
   })
-
-  // ---------- removeFileFromPlaylist ----------
 
   describe('removeFileFromPlaylist', () => {
     it('从 currentPlaylist 中移除指定文件', () => {
@@ -344,8 +320,6 @@ describe('useMusicLibraryStore', () => {
       expect(store.currentPlaylist.totalFiles).toBeUndefined()
     })
   })
-
-  // ---------- 缓存逻辑 ----------
 
   describe('loadPlaylistsFromCache', () => {
     it('成功从缓存加载播放列表', async () => {
@@ -389,7 +363,7 @@ describe('useMusicLibraryStore', () => {
     it('缓存过期(超过7天)时返回 false', async () => {
       mockStoreGet.mockResolvedValue({
         playlists: [{ name: 'old', files: [] }],
-        timestamp: Date.now() - 8 * 24 * 60 * 60 * 1000, // 8天前
+        timestamp: Date.now() - 8 * 24 * 60 * 60 * 1000,
       })
       const store = useMusicLibraryStore()
       const result = await store.loadPlaylistsFromCache()
@@ -451,7 +425,6 @@ describe('useMusicLibraryStore', () => {
           timestamp: expect.any(Number),
         }),
       )
-      // 验证 coverPath 被去除
       const savedArg = mockStoreSet.mock.calls[0]![1] as {
         playlists: Array<{ files: Array<Record<string, unknown>> }>
       }
@@ -483,8 +456,6 @@ describe('useMusicLibraryStore', () => {
     })
   })
 
-  // ---------- setMusicFolders ----------
-
   describe('setMusicFolders', () => {
     it('成功设置文件夹并同步到 configStore', async () => {
       const folders = ['/music/a', '/music/b']
@@ -510,10 +481,7 @@ describe('useMusicLibraryStore', () => {
     })
   })
 
-  // ---------- refreshMusicFolders ----------
-
   describe('refreshMusicFolders', () => {
-    /** 让 get_all_audio_files 返回指定扫描结果，resolve_data_file 仍返回数据文件路径 */
     function mockScanResult(scanned: Playlist[]): void {
       invokeMock.mockImplementation((cmd: string) => {
         if (cmd === 'get_all_audio_files') return Promise.resolve(scanned)
@@ -566,7 +534,7 @@ describe('useMusicLibraryStore', () => {
 
     it('保留 player.playlist 中已加载的 coverPath', async () => {
       const store = useMusicLibraryStore()
-      // player.playlist 持有旧对象：a 已有封面、c 无封面、gone 已从扫描结果中消失
+      // 旧对象:a 有封面、c 无封面、gone 已从扫描结果消失
       mockPlayerStore.playlist = [
         { path: '/a.mp3', coverPath: '/cover/a.jpg' },
         { path: '/c.mp3' },
@@ -581,9 +549,7 @@ describe('useMusicLibraryStore', () => {
         path: '/a.mp3',
         coverPath: '/cover/a.jpg',
       })
-      // 旧对象本来就没有封面时不应凭空造出
       expect(mockPlayerStore.playlist[1]).not.toHaveProperty('coverPath')
-      // 扫描结果中已不存在的曲目按原样保留
       expect(mockPlayerStore.playlist[2]).toMatchObject({
         path: '/gone.mp3',
         coverPath: '/cover/g.jpg',
@@ -597,7 +563,6 @@ describe('useMusicLibraryStore', () => {
 
       await store.refreshMusicFolders()
 
-      // 只补缺封面的那首，已有封面的不重复请求
       expect(mockPlayerStore._loadPlaylistCovers).toHaveBeenCalledTimes(1)
       const passed = mockPlayerStore._loadPlaylistCovers.mock.calls[0]![0] as Track[]
       expect(passed.map((t) => t.path)).toEqual(['/a.mp3'])
@@ -634,8 +599,6 @@ describe('useMusicLibraryStore', () => {
       expect(result.message).toContain('scan failed')
     })
   })
-
-  // ---------- reset ----------
 
   describe('reset', () => {
     it('重置所有状态到初始值', () => {

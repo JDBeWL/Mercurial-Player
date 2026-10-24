@@ -1,7 +1,6 @@
 //! WASAPI 音频模块
 //!
-//! 提供 Windows Audio Session API (WASAPI) 独占模式支持。
-//! 独占模式仍走 Windows 音频栈，项目未实现更纯净的 ASIO 后端。
+//! Windows 独占模式支持；仍走 Windows 音频栈，未实现 ASIO。
 
 mod exclusive;
 mod player;

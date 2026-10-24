@@ -286,6 +286,7 @@ import { useImmersiveCover } from './composables/useImmersiveCover'
 import { usePlatform } from './composables/usePlatform'
 import { useOrientation } from './composables/useOrientation'
 import { setSystemUiHidden } from './services/appService'
+import { formatBpm } from './utils/format'
 import { useGlobalKeyboard } from './composables/useGlobalKeyboard'
 import { useAppLifecycle } from './composables/useAppLifecycle'
 import type { ImmersiveColorScheme } from './types'
@@ -584,9 +585,9 @@ const { coverDisplayUrl } = useImmersiveCover(
   immersiveCover,
 )
 
-// 音频信息文案（格式 | 比特率 | 采样率 | 位深度 | 声道）
+// 音频信息文案（格式 | 比特率 | 采样率 | 位深度 | 声道 | BPM）
 const formattedAudioInfo = computed(() => {
-  const { bitrate, sampleRate, channels, bitDepth, format } = audioInfo.value
+  const { bitrate, sampleRate, channels, bitDepth, format, bpm } = audioInfo.value
 
   const parts = []
 
@@ -616,6 +617,11 @@ const formattedAudioInfo = computed(() => {
     } else {
       parts.push(`${channels}ch`)
     }
+  }
+
+  // BPM 放在末尾：它是唯一"可缺省且可能后补"的字段，中途出现时行尾变化最小
+  if (bpm) {
+    parts.push(`${formatBpm(bpm)} BPM`)
   }
 
   return parts.join(' | ')

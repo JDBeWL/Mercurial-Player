@@ -1,10 +1,6 @@
 import type { CacheItem } from '@/types'
 
-/**
- * 基于 Map 插入顺序的 LRU 缓存, 支持 TTL 过期。
- *
- * 队首即最久未用, 淘汰只发生在队首; delete + set 是把条目移到队尾的 O(1) 手法。
- */
+/** 基于 Map 插入顺序的 LRU 缓存，支持 TTL；`delete` + `set` 把条目移到队尾。 */
 export class LRUCache<T> {
   private maxSize: number
   private ttl: number

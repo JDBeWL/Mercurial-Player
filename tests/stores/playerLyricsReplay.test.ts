@@ -90,7 +90,7 @@ describe('歌词在「重新播放同一首歌」时不应丢失', () => {
     vi.clearAllMocks()
     invokeMock.mockResolvedValue(undefined as never)
     findLyricsFileMock.mockResolvedValue('/music/a.lrc')
-    // 初始化共享 watcher(与真实组件一致:唯一加载入口是 currentTrack.path 的 watcher)
+    // 初始化共享 watcher:唯一加载入口是 `currentTrack.path` 的 watcher
     lyricsApi = useLyrics() as unknown as LyricsApi
   })
 
@@ -119,7 +119,6 @@ describe('歌词在「重新播放同一首歌」时不应丢失', () => {
     await store.playTrack(trackA)
     await vi.waitFor(() => expect(store.lyrics).not.toBeNull())
 
-    // B 没有本地歌词且未开在线获取 -> 应清空而不是继续显示 A 的歌词
     findLyricsFileMock.mockResolvedValue(null)
     await store.playTrack(trackB)
 

@@ -40,7 +40,7 @@ vi.mock('@/utils/lyricsParser', () => ({
   },
 }))
 
-// Mock config store to avoid pulling plugin-store / theme dependencies into player tests.
+// Mock config store,避免把 plugin-store / theme 依赖拉进 player 测试。
 vi.mock('@/stores/config', () => ({
   useConfigStore: vi.fn(() => ({
     audio: { volume: 0.5, exclusiveMode: false, fadeEnabled: true },
@@ -73,7 +73,6 @@ function makePlaylist(n: number): Track[] {
   return Array.from({ length: n }, (_, i) => makeTrack(`/music/track${i}.mp3`, `Track${i}`))
 }
 
-/** Configure invoke to allow play_track / pause_track / cover lookup to succeed. */
 function setupPlayInvokeMock() {
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === 'pause_track') return Promise.resolve(undefined)
@@ -98,8 +97,6 @@ describe('usePlayerStore navigation & state', () => {
     vi.clearAllMocks()
   })
 
-  // ---------- repeat mode ----------
-
   describe('toggleRepeat', () => {
     it('cycles none -> list -> track -> none', () => {
       const store = usePlayerStore()
@@ -115,22 +112,20 @@ describe('usePlayerStore navigation & state', () => {
     it('disables shuffle when entering list mode', () => {
       const store = usePlayerStore()
       store.isShuffle = true
-      store.toggleRepeat() // none -> list
+      store.toggleRepeat()
       expect(store.isShuffle).toBe(false)
     })
 
     it('does not change shuffle when entering track mode', () => {
       const store = usePlayerStore()
       store.isShuffle = true
-      store.toggleRepeat() // none -> list (clears shuffle)
+      store.toggleRepeat()
       store.isShuffle = true
-      store.toggleRepeat() // list -> track (should keep shuffle)
+      store.toggleRepeat()
       expect(store.repeatMode).toBe('track')
       expect(store.isShuffle).toBe(true)
     })
   })
-
-  // ---------- 播放模式（底部一颗按钮循环四种状态） ----------
 
   describe('cyclePlayMode', () => {
     it('依次走 顺序 -> 列表循环 -> 单曲循环 -> 随机 -> 顺序', () => {
@@ -152,17 +147,15 @@ describe('usePlayerStore navigation & state', () => {
 
     it('从随机态退出时不会残留 repeatMode', () => {
       const store = usePlayerStore()
-      store.cyclePlayMode() // list
-      store.cyclePlayMode() // track
-      store.cyclePlayMode() // shuffle
+      store.cyclePlayMode()
+      store.cyclePlayMode()
+      store.cyclePlayMode()
       expect(store.isShuffle).toBe(true)
-      store.cyclePlayMode() // 回到顺序
+      store.cyclePlayMode()
       expect(store.isShuffle).toBe(false)
       expect(store.repeatMode).toBe('none')
     })
   })
-
-  // ---------- nextTrack / previousTrack ----------
 
   describe('nextTrack / previousTrack (non-shuffle)', () => {
     it('nextTrack advances to next index', async () => {
@@ -251,8 +244,6 @@ describe('usePlayerStore navigation & state', () => {
     })
   })
 
-  // ---------- _onEnded branches by repeatMode ----------
-
   describe('_onEnded branches by repeatMode', () => {
     it('track repeat replays the current track', async () => {
       setupPlayInvokeMock()
@@ -305,8 +296,6 @@ describe('usePlayerStore navigation & state', () => {
     })
   })
 
-  // ---------- shuffle ----------
-
   describe('toggleShuffle', () => {
     it('toggles isShuffle and resets repeatMode to none when enabling', () => {
       const store = usePlayerStore()
@@ -324,7 +313,6 @@ describe('usePlayerStore navigation & state', () => {
       store.toggleShuffle()
       expect(store._shuffleOrder).toHaveLength(3)
       expect(store._shufflePosition).toBe(0)
-      // 当前曲目应被放在洗牌序列起点
       expect(store._shuffleOrder[0]).toBe(1)
     })
 
@@ -332,8 +320,8 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       store.playlist = makePlaylist(3)
       store.currentTrack = store.playlist[1]!
-      store.toggleShuffle() // on
-      store.toggleShuffle() // off
+      store.toggleShuffle()
+      store.toggleShuffle()
       expect(store.isShuffle).toBe(false)
       expect(store._shuffleOrder).toEqual([])
       expect(store._shufflePosition).toBe(-1)
@@ -360,12 +348,10 @@ describe('usePlayerStore navigation & state', () => {
       const store = usePlayerStore()
       store._shuffleHistory = [1, 2]
       store.isShuffle = true
-      store.toggleShuffle() // off
+      store.toggleShuffle()
       expect(store._shuffleHistory).toEqual([1, 2])
     })
   })
-
-  // ---------- volume ----------
 
   describe('setVolume', () => {
     it('clamps values above 1 to 1', () => {
@@ -441,8 +427,6 @@ describe('usePlayerStore navigation & state', () => {
     })
   })
 
-  // ---------- mute ----------
-
   describe('toggleMute', () => {
     it('mutes: saves current volume to previousVolume and sets isMuted', () => {
       const store = usePlayerStore()
@@ -483,8 +467,6 @@ describe('usePlayerStore navigation & state', () => {
       expect(invokeMock).toHaveBeenCalledWith('set_volume', { volume: 0.5 })
     })
   })
-
-  // ---------- loadPlaylist ----------
 
   describe('loadPlaylist', () => {
     it('sets playlist and currentTrack to first track', () => {
@@ -546,8 +528,6 @@ describe('usePlayerStore navigation & state', () => {
     })
   })
 
-  // ---------- LRU cache (via _checkFileExists) ----------
-
   describe('LRU cache (via _checkFileExists)', () => {
     it('caches file existence results so subsequent calls skip FileUtils', async () => {
       const store = usePlayerStore()
@@ -591,8 +571,6 @@ describe('usePlayerStore navigation & state', () => {
     })
   })
 
-  // ---------- lyrics offset ----------
-
   describe('lyrics offset', () => {
     it('setLyricsOffset sets the offset', () => {
       const store = usePlayerStore()
@@ -614,8 +592,6 @@ describe('usePlayerStore navigation & state', () => {
       expect(store.lyricsOffset).toBe(0)
     })
   })
-
-  // ---------- addTrackNext ----------
 
   describe('addTrackNext', () => {
     it('inserts a new track right after the current track', () => {
@@ -654,8 +630,6 @@ describe('usePlayerStore navigation & state', () => {
       expect(store.playlist).toHaveLength(2)
     })
   })
-
-  // ---------- getters ----------
 
   describe('getters', () => {
     it('currentTrackIndex returns -1 when no current track', () => {

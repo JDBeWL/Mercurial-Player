@@ -1,7 +1,5 @@
-/**
- * PluginAPI 的可信侧实现:每个插件一份实例,权限在动作执行前校验(动作与权限的映射见 apiRegistry)
- *
- * 这里列出的方法就是对第三方插件承诺的接口面,插件不应依赖它们之外的宿主能力
+/** `PluginAPI` 可信侧实现:每插件一份实例,动作执行前按 `apiRegistry` 校验权限
+ * 方法集合即对第三方插件承诺的全部宿主接口
  */
 
 import { readonly } from 'vue'
@@ -40,11 +38,7 @@ import FileUtils from '../utils/fileUtils'
 import { formatTime } from '../utils/format'
 import { findLyricIndex } from '../utils/lyricsParser'
 
-/**
- * 插件存储快照:只保留可结构化克隆的纯数据
- *
- * reactive 代理经 postMessage 行为不稳定,且插件拿到代理可直接改宿主状态,故一律转纯值;函数等不可克隆的值顺带过滤
- */
+/** 存储快照只保留可结构化克隆的纯数据:reactive 代理跨 postMessage 不稳定,且代理可反向改宿主状态 */
 function toCloneableSnapshot(source: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(source)) {
@@ -59,9 +53,7 @@ function toCloneableSnapshot(source: Record<string, unknown>): Record<string, un
   return out
 }
 
-/** Canvas 转 Blob 的 Promise 包装
- * @param errorMessage 转换失败时抛出的错误文案(保持各调用方原有文案)
- */
+/** Canvas 转 Blob;失败时抛调用方给定的文案 */
 function canvasToBlob(
   canvas: HTMLCanvasElement,
   type = 'image/png',
@@ -80,11 +72,7 @@ function canvasToBlob(
   })
 }
 
-/**
- * Blob -> base64(去掉 data URL 前缀)
- *
- * 数字数组每字节膨胀成约 4 个 JSON 字符(2MB 图片变约 8MB),base64 约 1.33 倍;且 Tauri 在 Android 上不支持 raw IPC body
- */
+/** Blob -> base64(去 data URL 前缀):数字数组膨胀约 4 倍,且 Android 上 Tauri 不支持 raw IPC body */
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -97,11 +85,7 @@ function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
-/**
- * 解析 data URL 并解码为 Blob
- * @param options.mimeType 显式指定 MIME 类型(跳过 dataURL 头部解析,如 saveImage 的格式参数)
- * @param options.fallbackMime dataURL 头部解析失败时使用的默认 MIME 类型
- */
+/** data URL 解码为 Blob;`mimeType` 跳过头部解析,`fallbackMime` 用于头部无 MIME 时 */
 function dataURLToBlob(
   dataURL: string,
   options: { mimeType?: string; fallbackMime?: string } = {},
@@ -138,7 +122,7 @@ export function createPluginAPI(
     }
   }
 
-  /** 按动作名查 apiRegistry 校验权限 */
+  /** 按动作名查 `apiRegistry` 校验权限 */
   const requireAction = (action: string): void => {
     const permission = permissionForAction(action)
     if (permission !== null) {
@@ -168,7 +152,6 @@ export function createPluginAPI(
     } as LyricLine
   }
 
-  // store 按需初始化:插件可能只用到其中一个域
   let playerStore: ReturnType<typeof usePlayerStore> | null = null
   let musicLibraryStore: ReturnType<typeof useMusicLibraryStore> | null = null
   let themeStore: ReturnType<typeof useThemeStore> | null = null
@@ -204,7 +187,7 @@ export function createPluginAPI(
         requireAction('player.getState')
         const store = getPlayerStore()
         return {
-          // Track 全是标量字段,浅拷贝即完整快照;JSON 往返每次都要重新序列化整个对象
+          // `Track` 全为标量,浅拷贝即完整快照;JSON 往返会重序列化整个对象
           currentTrack: store.currentTrack ? { ...store.currentTrack } : null,
           isPlaying: store.isPlaying,
           currentTime: store.currentTime,
@@ -262,7 +245,7 @@ export function createPluginAPI(
           return -1
         }
 
-        // 应用歌词偏移(额外 +0.05s 提前量,保持既有插件行为)
+        // 应用歌词偏移,额外 +0.05s 提前量让高亮提前切换
         const offset = store.lyricsOffset || 0
         const adjustedTime = store.currentTime + 0.05 - offset
 
@@ -306,7 +289,7 @@ export function createPluginAPI(
 
       setLyrics(lyrics: LyricLine[]): void {
         requireAction('player.setLyrics')
-        // LyricLine 双契约:插件侧 texts 是 {text,translation?}[],store 侧是 string[](见 pluginTypes)
+        // `LyricLine` 双契约:插件侧 `texts` 是 {text,translation?}[],store 侧是 string[]
         const store = getPlayerStore()
         const storeLyrics = lyrics.map((line) => ({
           time: line.time,
@@ -324,7 +307,7 @@ export function createPluginAPI(
           return store.currentTrack.coverPath
         }
 
-        // 不经 store 的异步加载时序,直接问后端取封面路径
+        // 绕过 store 的异步封面加载,直接向后端取路径
         const trackPath = store.currentTrack?.path
         if (!trackPath) return null
 
@@ -387,7 +370,7 @@ export function createPluginAPI(
       },
 
       getCSSVariable(name: string): string {
-        // 读取仅开放 MD3 设计令牌,避免插件枚举任意 CSS 自定义属性(如 --plugin-* 注入面)
+        // 仅开放 MD3 设计令牌,避免插件枚举任意 CSS 自定义属性(如 `--plugin-*` 注入面)
         requireAction('theme.getCSSVariable')
         const normalized = name.startsWith('--') ? name : `--${name}`
         if (!normalized.startsWith('--md-sys-')) {
@@ -548,7 +531,7 @@ export function createPluginAPI(
           throw new Error('快捷键必须包含 id, name, key 和 action')
         }
 
-        // 按键串规范化:小写 + 按 ctrl/alt/shift/meta 排序,与 shortcutManager 的匹配串同一约定
+        // 按键串规范化:小写 + 按 ctrl/alt/shift/meta 排序,与 `shortcutManager` 的匹配串同一约定
         const normalizedKey = shortcut.key
           .toLowerCase()
           .split('+')
@@ -559,7 +542,7 @@ export function createPluginAPI(
           })
           .join('+')
 
-        // 冲突检测:同一按键组合被占用即拒绝注册,防止后注册者遮蔽既有快捷键(shortcutManager 取首个匹配)
+        // 冲突即拒绝注册,防止后注册者遮蔽既有快捷键(`shortcutManager` 取首个匹配)
         const conflicting = manager.extensions.shortcuts.find(
           (s: Shortcut & { pluginId: string }) => s.key === normalizedKey && s.id !== shortcut.id,
         )
@@ -623,7 +606,6 @@ export function createPluginAPI(
 
     events: {
       on(event: string, callback: EventCallback): void {
-        // 白名单 + 权限校验(player:* 载荷含曲目路径等敏感数据),规则见 pluginTypes
         assertPluginEventSubscriptionAllowed(event, hasPermission, pluginId)
         manager.on(event, pluginId, callback)
       },
@@ -698,8 +680,7 @@ export function createPluginAPI(
           })
         }
 
-        // 本地路径走 readFile + Blob:convertFileSrc + crossOrigin 会撞 CORS(asset 协议不返回 CORS 头)
-        // Blob URL 同源,不会 taint Canvas
+        // 本地路径经 readFile + Blob URL:asset 协议无 CORS 头,`convertFileSrc` + crossOrigin 会 taint Canvas
         try {
           const data = await readFile(src)
           const blob = new Blob([data])

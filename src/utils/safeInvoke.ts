@@ -1,8 +1,5 @@
-/**
- * Tauri invoke 统一封装: 失败经 errorHandler 分类/落日志/通知监听器后默认吞掉, 避免 fire-and-forget 调用产生 unhandled rejection。
- *
- * args 的键是 camelCase, 由 Tauri 映射到 Rust 命令的 snake_case 参数名; cmd 需与 Rust 侧命令名逐字一致。
- */
+/** Tauri `invoke` 统一封装：失败经 errorHandler 分类/落日志/通知后默认吞掉。
+ * `args` 用 camelCase，由 Tauri 映射到 Rust 的 snake_case；`cmd` 须与命令名逐字一致。 */
 import { invoke } from '@tauri-apps/api/core'
 import errorHandler, { ErrorSeverity } from './errorHandler'
 

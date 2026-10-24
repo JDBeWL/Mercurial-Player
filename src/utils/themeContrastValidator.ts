@@ -207,11 +207,7 @@ export function setupThemeContrastValidation(): void {
   setTimeout(initialValidate, INIT_POLL_INTERVAL_MS)
 }
 
-/**
- * 强制执行 WCAG 2.1 AA: 未达标的 required 颜色对交由 adjustColorForContrast 修前景色, 再回写 CSS 变量。
- *
- * @returns 修复的颜色对数量
- */
+/** 强制执行 WCAG 2.1 AA：未达标的 required 颜色对修正前景色并回写 CSS 变量。 */
 export function enforceThemeContrast(): number {
   const root = document.documentElement
   let fixedCount = 0

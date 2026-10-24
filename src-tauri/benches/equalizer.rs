@@ -1,10 +1,6 @@
 //! 均衡器处理吞吐 benchmark
 //!
-//! 测量生产 EQ 处理器 [`EqProcessor`] 的单样本/批量处理开销
-//! (共享模式批量处理与独占模式逐采样处理共用此实现)。
-//!
-//! 运行: cargo bench --bench equalizer
-//! 输出: target/criterion/equalizer/report/index.html
+//! 运行 `cargo bench --bench equalizer`，报告在 `target/criterion/equalizer/`。
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use mercurial_player_lib::audio::EqProcessor;

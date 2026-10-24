@@ -5,11 +5,8 @@ import createPica from 'pica'
 import CoverUpscaleWorker from '../workers/coverUpscale.worker?worker'
 import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
 
-/**
- * 沉浸层封面高清化:浏览器默认双线性插值,封面拉满窗高会发糊,故用 pica Lanczos3 放大到"窗高 * DPR"做 1:1 映射
- *
- * 优先交给专用 worker(免与歌词首帧争主线程),失败逐级回退主线程同步执行、再回退原图
- */
+/** 沉浸层封面高清化：pica Lanczos3 放大到"窗高 × DPR"做 1:1 映射。
+ * 优先用专用 worker，失败回退主线程，再回退原图。 */
 
 // 主线程回退路径的 pica 单例。features 显式不含 'ww'(web worker):CSP 的 script-src 不允许 blob: worker,
 // 而 pica 的 worker 通道加载失败时不 reject 而是永久挂起,必须从源头禁用。
@@ -79,11 +76,7 @@ const decodeImage = async (path: string): Promise<DecodedImage> => {
 const displaySide = (): number =>
   Math.min(MAX_OUTPUT_SIDE, Math.round(window.innerHeight * (window.devicePixelRatio || 1)))
 
-/**
- * 裁剪 + Lanczos3 放大 (主线程回退路径)
- *
- * 返回 objectURL;源图足够大无需放大时返回 null,调用方沿用原始 URL
- */
+/** 裁剪 + Lanczos3 放大（主线程回退）；源图足够大时返回 `null`，调用方沿用原图。 */
 const upscaleCoverOnMainThread = async (
   path: string,
   targetSide: number,

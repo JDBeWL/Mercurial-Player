@@ -64,10 +64,7 @@ fn screenshots_dir_size(dir: &Path) -> u64 {
 }
 
 /// 解码插件传来的截图字节。
-///
-/// 用 base64 而不是 raw IPC body：Tauri 在 Android 上不支持 `InvokeBody::Raw`
-/// （`tauri::ipc::InvokeBody` 文档明写，枚举永远是 Json），而 base64 仍远好于数字数组
-/// ——后者每个字节要 ~4 个 JSON 字符，2MB 图片会被放大到 ~8MB，base64 是 ~2.7MB。
+/// Android 不支持 raw IPC body，故用 base64；它比数字数组小约 3 倍（2MB 图片约 2.7MB）。
 fn decode_screenshot_data(data_b64: &str) -> Result<Vec<u8>, AppError> {
     // 先按编码长度拦一道，免得为超大输入白跑一次解码
     if data_b64.len() > MAX_ENCODED_SCREENSHOT_BYTES {

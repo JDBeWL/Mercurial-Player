@@ -1,7 +1,5 @@
-/* App.vue 的 scoped 样式（由 `<style scoped src>` 引入，只作用于根组件的模板），
-   全局令牌与共享类都在 style.css，不要往这里加全局规则。 */
+/* App.vue 的 scoped 样式；全局令牌与共享类在 style.css，不要在此加全局规则 */
 
-/* 过渡动画 */
 .slide-left-enter-active,
 .slide-left-leave-active {
   transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
@@ -32,7 +30,6 @@
   opacity: 0;
 }
 
-/* 专辑封面过渡动画 */
 .album-art-slide-next-enter-active,
 .album-art-slide-next-leave-active,
 .album-art-slide-prev-enter-active,
@@ -62,7 +59,6 @@
   opacity: 0;
 }
 
-/* 过渡结束 */
 .album-art-slide-next-enter-to,
 .album-art-slide-next-leave-from,
 .album-art-slide-prev-enter-to,
@@ -72,8 +68,7 @@
 }
 
 .app-container {
-  /* 不再写死 100vh：父级 #app 已经扣掉安全区（见 style.css），
-     这里用 flex 撑满即可，否则安卓上手势条区域会把底部控制条挤出屏幕 */
+  /* 父级 #app 已扣掉安全区，用 flex 撑满；写死 100vh 会让安卓手势条把底栏挤出屏幕 */
   flex: 1;
   min-height: 0;
   display: flex;
@@ -106,30 +101,26 @@
   width: 100%;
 }
 
-/* 上方区域：左侧专辑封面和歌曲信息，右侧歌词 */
 .player-upper {
   flex: 1;
   display: flex;
   gap: max(10px, min((41vw - 600px), 2vw));
   min-height: 0;
-  /* .view-controls-container 是绝对定位的，需要这一层做定位基准
-     （原来它挂在 .player-right 上，那个元素自带 position: relative） */
+  /* 作为绝对定位的 .view-controls-container 的定位基准 */
   position: relative;
 }
 
-/* 下方区域：控制按钮 */
 .player-lower {
   display: flex;
   flex-direction: column;
   gap: 0px;
 }
 
-/* 三列布局：左侧音频信息 / 中间控制组 / 右侧桌面歌词+音量 */
 .controls-area {
   margin-top: 8px;
   display: flex;
   align-items: center;
-  /* 两侧区域隐藏或内容为空时仍保持控制组居中 */
+  /* 两侧留空时控制组仍居中 */
   justify-content: center;
 }
 
@@ -137,7 +128,6 @@
   width: auto;
 }
 
-/* 左下角：音频信息容器 */
 .audio-info-corner {
   flex: 1;
   min-width: 0;
@@ -146,7 +136,7 @@
   overflow: hidden;
 }
 
-/* 与 .player-left 相同的几何结构,空间不足时收窄避免与控制按钮重叠 */
+/* 与 .player-left 同几何结构，空间不足时收窄以免压到控制按钮 */
 .audio-info-text {
   flex: 0 0 auto;
   width: min(600px, 34vw);
@@ -160,11 +150,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--md-sys-color-on-surface-variant);
-  /* 细微投影增加与背景的分离度，深浅主题下均适用 */
   text-shadow: 0 0px 1px rgba(0, 0, 0, 0.1);
 }
 
-/* 右下角：播放列表、桌面歌词与音量 */
 .side-controls {
   flex: 1;
   display: flex;
@@ -174,9 +162,7 @@
   padding-right: 8px;
 }
 
-/* 窄屏（<=640px，含手机竖屏）：保留"上/下一首 + 播放/暂停"的中枢，收侧栏。不要把
-   .audio-info-corner / .side-controls 整个 display:none，两侧同时塌掉会让控制按钮整组左偏，
-   而且等于把播放列表入口一起藏了。做法是两侧都保留 flex:1 的占位，只把里面的内容收起来。 */
+/* ≤640px：两侧保留 flex:1 占位，只收起内容；整块 display:none 会让控制组左偏并藏掉播放列表入口 */
 @media (max-width: 640px) {
   .audio-info-text {
     display: none;
@@ -187,7 +173,7 @@
     padding-right: 0;
   }
 
-  /* 音量滑块靠 hover 展开，窄窗里没有空间也没有 hover。Android 根本不渲染它（见 App.vue） */
+  /* 窄窗无 hover 且无空间；Android 上该组件不渲染（见 App.vue） */
   .side-controls :deep(.volume-control-container) {
     display: none;
   }
@@ -199,7 +185,6 @@
   margin-right: -16px;
 }
 
-/* 左侧：专辑封面 */
 .player-left {
   flex: 0 0 min(600px, 36vw);
   margin-left: 5vw;
@@ -210,7 +195,6 @@
   justify-content: center;
 }
 
-/* 右侧：歌词 */
 .player-right {
   flex: 1;
   min-width: 0;
@@ -218,9 +202,7 @@
   margin-right: 4vw;
 }
 
-/* 挂在 .player-upper 上（而不是原来的 .player-right 里），竖屏切到封面时 .player-right 会整体
-   隐藏，按钮跟着消失就再也切不回去了。横屏下 .player-right 自带 4vw 右外边距，这里用 right: 4vw
-   复刻它原来的落点；竖屏没有那层外边距，在下面的竖屏块里改回 0。 */
+/* 挂在 .player-upper：竖屏封面态 .player-right 会隐藏，按钮必须留在可见层；right 对齐其 4vw 外边距 */
 .view-controls-container {
   position: absolute;
   top: 0;
@@ -245,7 +227,6 @@
   font-size: 24px;
 }
 
-/* 响应式设计 */
 @media (max-width: 768px) {
   .player-upper {
     flex-direction: column;
@@ -266,7 +247,7 @@
     width: 100%;
   }
 
-  /* 窄屏下封面改为全宽居中，音频信息无法与其对齐，退化为左对齐 */
+  /* 窄屏封面全宽居中，音频信息无法对齐，改为左对齐 */
   .audio-info-text {
     width: auto;
     max-width: 100%;
@@ -276,9 +257,7 @@
 }
 
 .album-art-container {
-  /* 宽高必须同时受左列宽 (36vw) 约束：只按 54vh 取值时封面会比 .player-left 更宽，flex 项默认
-     min-width:auto 会把左列撑开，沉浸模式隐藏封面后左列缩回 36vw，而 .visualizer-container 的
-     margin-top: 4% 按宽度解析，进出沉浸模式时频谱会竖直跳动。取三值最小后两种模式几何一致。 */
+  /* 宽高须同时受 36vw 约束：只按 54vh 会撑开左列，进出沉浸模式时频谱竖直跳动 */
   width: min(600px, 36vw, 54vh);
   height: min(600px, 36vw, 54vh);
   flex-shrink: 0;
@@ -294,7 +273,7 @@
   border-radius: var(--md-sys-shape-corner-medium);
   overflow: hidden;
   box-shadow: var(--shadow-medium);
-  /* 长按封面会弹菜单（手机端），不许系统顺手把占位图标当文字选中 */
+  /* 长按封面会弹菜单，禁止系统把占位图标当文字选中 */
   user-select: none;
 }
 
@@ -317,7 +296,6 @@
   }
 }
 
-/* 提取封面按钮 */
 .extract-cover-btn {
   position: absolute;
   bottom: 12px;
@@ -326,7 +304,7 @@
   height: 40px;
   border: none;
   border-radius: 50%;
-  /* 下一条 color-mix 在 WebView 110 上不被支持，整条被丢弃时由这句兜底 */
+  /* 下一条 color-mix 在 WebView 110 上不支持会被丢弃，由此处纯色兜底 */
   background-color: var(--md-sys-color-primary);
   background-color: color-mix(in srgb, var(--md-sys-color-primary) 75%, transparent);
   color: var(--md-sys-color-on-primary);
@@ -340,7 +318,6 @@
   pointer-events: none;
 }
 
-/* 当鼠标在右下角区域时显示按钮 */
 .extract-cover-btn.show {
   opacity: 1;
   pointer-events: auto;
@@ -354,9 +331,7 @@
   }
 }
 
-/* 手机端：长按封面弹出的动作菜单。
-   触摸屏没有 hover，右下角那个"提取封面"按钮永远点不出来，所以换成显式手势。
-   遮罩铺满整个封面区域 —— 点菜单以外的任何位置都能关闭，不需要挂全局监听。 */
+/* 触摸屏无 hover，提取按钮点不出来，改用长按菜单；遮罩铺满封面，点空白处即关闭，无需全局监听 */
 .cover-menu-backdrop {
   position: absolute;
   inset: 0;
@@ -374,8 +349,7 @@
   min-width: 176px;
   padding: 8px;
   border-radius: 16px;
-  /* 只能用 surface：本项目主题没有输出 surface-container-* 系列，
-     引用它们声明会静默失效（浮层变全透明），见 tests/utils/themeTokens.test.ts */
+  /* 主题未输出 surface-container-* 系列，引用会静默失效使浮层全透明，只能用 surface（themeTokens.test.ts 有校验） */
   background-color: var(--md-sys-color-surface);
   box-shadow: var(--md-sys-elevation-level3);
 }
@@ -385,7 +359,7 @@
   align-items: center;
   gap: 12px;
   width: 100%;
-  /* 48px：MD3 的最小触控目标，手指点按远不如鼠标精准 */
+  /* 48px 为 MD3 最小触控目标 */
   height: 48px;
   padding: 0 12px;
   border: none;
@@ -399,7 +373,6 @@
 
 @media (hover: hover) {
   .cover-menu-item:hover {
-    /* 下一条 color-mix 在 WebView 110 上不被支持，整条被丢弃时由这句兜底 */
     background-color: rgba(128, 128, 128, 0.16);
     background-color: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
   }
@@ -442,15 +415,12 @@
   opacity: 0;
 }
 
-/* 全屏和最大化状态下移除圆角 */
 .app-container[data-fullscreen='true'],
 .app-container[data-maximized='true'] {
   border-radius: 0;
 }
 
-/* ===== 沉浸式封面模式 ===== */
-
-/* 沉浸层：铺满整个窗口，位于内容之下（nav-bar z-index 100 在其上） */
+/* 沉浸层铺满窗口、位于内容之下，nav-bar 的 z-index: 100 在其上 */
 .immersive-layer {
   position: absolute;
   inset: 0;
@@ -459,16 +429,13 @@
   overflow: hidden;
 }
 
-/* 底层：封面主色背景（颜色由脚本提取后经 CSS 变量注入，失败时回退主题色） */
+/* 背景色由脚本提取后经 --immersive-bg 注入，缺失时回退主题色 */
 .background-layer {
   position: absolute;
   inset: 0;
   background-color: var(--immersive-bg);
 }
 
-/* 纯色铺满整屏会显得"死板"：叠一层极轻的斜向明暗给出空气感。
-   幅度控制在 6% 以内——既能去掉平涂感，又不会破坏歌词/图标的对比度，
-   深浅两种主题下都成立（左上角微提亮、右下角微压暗）。 */
 .background-layer::after {
   content: '';
   position: absolute;
@@ -482,18 +449,16 @@
   );
 }
 
-/* 中层：靠左放大、裁剪的封面。融合走双通道：::after 先把封面向背景色"染色"，mask 再缓慢淡出
-   alpha，观感是封面渐渐沉入背景，而非像素被直接擦除 */
+/* 左半放大封面：::after 染色 + mask 渐隐 alpha，使封面沉入背景而非被硬擦除 */
 .cover-mask-layer {
   position: absolute;
   left: 0;
   top: 0;
   height: 100%;
-  aspect-ratio: 1 / 1; /* 宽度跟随窗口高度，封面区域始终为正方形，不被裁切成矩形 */
+  aspect-ratio: 1 / 1;
 
-  /* alpha 通道：封面自身的淡出。色标按 smoothstep 采样，两端导数为 0，所以 74% 处没有可见折点。
-     `-webkit-` 版必须写在**后面**：CSS 压缩器会把同一属性的前缀版与标准版去重、只留最后一条，
-     而无前缀 `mask-image` 到 Chromium 120 才支持，老 Android WebView 只认带前缀的那条。 */
+  /* 色标按 smoothstep 采样，两端导数为 0，74% 处无折点；-webkit- 版必须写在标准版之后，
+     压缩器去重只留最后一条，而 Chromium 120 前只认前缀版 */
   mask-image: linear-gradient(
     to right,
     black 0%,
@@ -522,17 +487,13 @@
   );
 }
 
-/* 染色层：封面右侧先向背景色降亮度沉入，纹理渐隐而非被擦除。写成「纯色底 + alpha 遮罩」而不是
-   多段 color-mix 渐变：Android WebView 110 尚未支持 color-mix()（Chrome 111 才引入），混进同一个
-   gradient() 里会让整条声明失效、染色层整片消失，封面表现为直接硬切。纯色 + mask 向下兼容。 */
+/* 用「纯色 + mask」而非 color-mix 渐变：WebView 110 不支持 color-mix()，混入会让整条声明失效、染色层消失 */
 .cover-mask-layer::after {
   content: '';
   position: absolute;
   inset: 0;
   background-color: var(--immersive-bg);
-  /* 染色通道同样用 smoothstep 采样，起点（62%）比封面淡出（74%）略早：
-     先让封面"沉"向背景色，再真正淡出，观感是连续融进去而不是被擦掉。
-     `-webkit-` 版写在后面，原因同上（老 WebView 只认前缀版）。 */
+  /* 起点 62% 早于封面淡出 74%，先染色再淡出；-webkit- 版写在后面，原因同上 */
   mask-image: linear-gradient(
     to right,
     transparent 0%,
@@ -564,44 +525,35 @@
 .full-cover {
   width: 100%;
   height: 100%;
-  object-fit: cover; /* 保证封面拉伸铺满不变形 */
-  object-position: left center; /* 保持人物/主体居左显示 */
+  object-fit: cover;
+  object-position: left center;
 }
 
-/* 沉浸模式底部控制区：通栏磨砂玻璃条，铺满窗口宽度和底边 */
 .app-container.immersive-cover .player-lower {
-  /* 负边距抵消 .player-container 的 12px 16px 内边距，玻璃条贴住窗口左右和底部；
-     底部多抵 1px 是为了把 border-top 自身的高度也算进去——
-     否则玻璃条在布局上比普通模式的控制区高 1px，上方歌词/频谱会被顶起零点几px */
+  /* 负边距抵消 .player-container 的 16px 内边距；底部多 1px 抵掉 border-top，否则比普通模式高 1px 会顶起上方内容 */
   margin-left: -16px;
   margin-right: -16px;
   margin-bottom: -17px;
   padding: 12px 16px 16px;
-  /* 底色与模糊强度都跟随主题的玻璃效果开关:
-     开启 = 透明底 + 磨砂;关闭 = 不透明底 + 无模糊 */
+  /* 底色与模糊跟随主题玻璃开关：开启为透明底 + 磨砂，关闭为不透明底 + 无模糊 */
   background: var(--immersive-bar-bg, rgba(255, 255, 255, 0));
-  /* -webkit- 前缀必须在前：CSS 压缩器会把前缀版与标准版视为同一属性去重、仅保留最后一条，
-     若标准版在前产物就只剩 -webkit- 版，而 WebView2(Chromium) 只认不带前缀的 backdrop-filter */
+  /* -webkit- 前缀必须在前：压缩器只保留最后一条，而 WebView2 只认无前缀的 backdrop-filter */
   -webkit-backdrop-filter: blur(var(--glass-blur, 10px)) saturate(0.5);
   backdrop-filter: blur(var(--glass-blur, 10px)) saturate(0.5);
   border-top: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.1);
 }
 
-/* 全屏/最大化时窗口无圆角，玻璃条圆角同步归零 */
 .app-container[data-fullscreen='true'].immersive-cover .player-lower,
 .app-container[data-maximized='true'].immersive-cover .player-lower {
   border-radius: 0;
 }
 
-/* 沉浸模式下音频信息固定白色 + 阴影，只能保证大多数情况合适 */
 .app-container.immersive-cover .audio-info-text {
   color: #ffffff;
   text-shadow: 0 0px 2px rgba(0, 0, 0, 0.8);
 }
 
-/* 进度条沿用默认的 -16px 通栏负边距，正好从窗口左边缘贯穿到右边缘 */
-/* 顶/底控制栏及右上角歌词切换按钮的滑出/滑入过渡（仅沉浸模式启用） */
 .app-container.immersive-cover .nav-bar,
 .app-container.immersive-cover .player-lower,
 .app-container.immersive-cover .view-controls-container {
@@ -614,7 +566,7 @@
   padding-top: 0;
 }
 
-/* 隐藏状态：顶栏向上滑出、底栏向下滑出，且不再拦截点击 */
+/* 隐藏时滑出并置 pointer-events: none，透明栏不再拦截点击 */
 .app-container.immersive-cover.immersive-controls-hidden .nav-bar {
   transform: translateY(-100%);
   opacity: 0;
@@ -627,14 +579,12 @@
   pointer-events: none;
 }
 
-/* 右上角歌词/波形切换按钮跟随顶栏一起隐藏 */
 .app-container.immersive-cover.immersive-controls-hidden .view-controls-container {
   transform: translateY(-40px);
   opacity: 0;
   pointer-events: none;
 }
 
-/* 沉浸模式下内容浮于沉浸层之上，背景让位给封面 */
 .app-container.immersive-cover .main-content {
   position: relative;
   z-index: 1;
@@ -645,17 +595,14 @@
   background-color: transparent;
 }
 
-/* 顶栏背景完全透明，图标直接浮于封面之上 */
 .app-container.immersive-cover .nav-bar {
   background-color: transparent;
 }
 
-/* 小封面由左半沉浸封面替代 */
 .app-container.immersive-cover .album-art-container {
   display: none;
 }
 
-/* 沉浸模式下点击左半区域退出 */
 .app-container.immersive-cover .player-left {
   cursor: pointer;
 }
@@ -675,9 +622,7 @@
   width: auto;
 }
 
-/* 手机竖屏的沉浸模式：上面那组规则会把左栏还原成 min(600px, 36vw)，而沉浸模式下小封面是隐藏的，
-   那 36vw 纯粹是一块空白，等于从歌词里挖走一大半。这里清零让歌词/频谱独占整宽。
-   必须写在上面那组之后才能覆盖。 */
+/* 竖屏沉浸态左栏 36vw 是空白，清零让歌词独占整宽；必须写在上组规则之后才能覆盖 */
 @media (max-width: 768px) {
   .app-container.immersive-cover .player-upper {
     flex-direction: column;
@@ -697,8 +642,7 @@
   }
 }
 
-/* 竖屏下"高度 = 窗口高"的正方形封面层远宽于屏幕，屏幕上只看得到左侧一半，过渡区（62%~100%）整个落
-   在屏幕外，于是封面糊满整屏、看不到"沉入背景"的过程。窄屏改按可见宽度铺开，过渡才发生在用户眼前。 */
+/* 竖屏下按窗口高定宽会让过渡区落在屏幕外，改为按可见宽度铺开 */
 @media (max-width: 768px) {
   .cover-mask-layer {
     aspect-ratio: auto;
@@ -761,7 +705,7 @@
     display: none;
   }
 
-  /* 封面态下封面列**不要**参与拉伸：让它按封面本身的高度收住，
+  /* 封面态下封面列不要参与拉伸：让它按封面本身的高度收住，
      这样它才能和下面的曲目信息一起被 justify-content: center 居中。
      歌词/波形态则保持 flex: 1（由上面那条规则给出）把高度吃满。 */
   .player-main[data-mobile='true'][data-upper-view='cover'] .player-left {

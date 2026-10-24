@@ -13,11 +13,8 @@ pub(super) fn be_u32(data: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
 }
 
-/// 从 TTC/OTC 集合中提取指定成员为独立字体文件。
-///
-/// 定位成员的 sfnt 表目录，逐表原样拷贝数据、重建目录偏移。
-/// 表数据未被修改，各表自身的校验和依然有效；浏览器不校验
-/// head.checkSumAdjustment，因此无需重算整体校验和。
+/// 从 TTC/OTC 集合中提取指定成员为独立字体文件：逐表原样拷贝并重建目录偏移。
+/// 表数据未修改，校验和仍有效；浏览器不校验 `head.checkSumAdjustment`，无需重算整体校验和。
 pub(super) fn extract_collection_member(data: &[u8], index: usize) -> Option<Vec<u8>> {
     if data.len() < 12 || &data[0..4] != b"ttcf" {
         return None;

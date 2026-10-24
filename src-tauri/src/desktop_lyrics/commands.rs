@@ -9,9 +9,8 @@ use super::{DesktopLyricWord, SHARED_STATE};
 
 static DESKTOP_LYRICS_MANAGER: OnceLock<Arc<Mutex<DesktopLyricsManager>>> = OnceLock::new();
 
-/// 使桌面歌词的字体内存缓存全部失效：渲染线程在下一帧重建外部字体
-/// 名字索引、丢弃已按需加载的字体集合与文本格式缓存。
-/// fonts/ 目录文件变化或用户主动清理字体缓存后调用
+/// 使字体内存缓存失效：递增 `font_generation` 后渲染线程下一帧重建外部字体索引，
+/// 并丢弃已按需加载的字体集合与文本格式缓存。
 pub fn invalidate_font_caches() -> Result<(), AppError> {
     let state = SHARED_STATE.get().ok_or("Desktop lyrics not initialized")?;
     {

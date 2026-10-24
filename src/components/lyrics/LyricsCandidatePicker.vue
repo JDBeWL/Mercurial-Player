@@ -412,8 +412,7 @@ function formatMs(ms: number): string {
   text-align: center;
 }
 
-/* 候选行：项目没有全局 border-box，不写 box-sizing 的话 min-height 是内容高，
-   56dp 会胖成 68px（上一版 72dp 实测 96px 就是这么来的） */
+/* 候选行：项目没有全局 border-box，必须写 box-sizing，否则 min-height 是内容高。 */
 .candidate-row {
   display: flex;
   align-items: center;

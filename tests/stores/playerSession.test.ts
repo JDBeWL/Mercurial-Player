@@ -185,6 +185,7 @@ describe('saveLastSessionNow', () => {
             channels: null,
             bitDepth: null,
             format: null,
+            bpm: null,
           },
         ],
       }),
@@ -233,6 +234,7 @@ describe('resumeLastSession', () => {
       channels: 2,
       bitDepth: 16,
       format: 'mp3',
+      bpm: null,
     })
     expect(store._updateTaskbarState).toHaveBeenCalled()
   })
@@ -297,6 +299,8 @@ describe('resumeLastSession', () => {
     expect(abort).toHaveBeenCalled()
     expect(store._cachePlaylistMetadata).toHaveBeenCalledWith(store.playlist)
     expect(store._loadPlaylistCovers).toHaveBeenCalledWith(store.playlist)
+    // 恢复会话不做整列表 BPM 分析,识别只按当前曲目按需进行
+    expect(store).not.toHaveProperty('_loadPlaylistBpm')
   })
 
   it('syncs the music library playlist and prefers its richer metadata', async () => {

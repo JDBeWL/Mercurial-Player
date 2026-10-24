@@ -82,7 +82,6 @@ function makePlaylist(n: number): Track[] {
 
 type Store = ReturnType<typeof usePlayerStore>
 
-/** 让 play_track 等命令成功,并记录每次调用 */
 function setupPlayInvokeMock() {
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === 'get_track_cover_path') return Promise.resolve(null)
@@ -90,7 +89,7 @@ function setupPlayInvokeMock() {
   })
 }
 
-/** 把 store 摆成"正在播放"状态(不经过 playTrack) */
+/** 直接构造"正在播放"状态,不经过 `playTrack` */
 function setPlaying(store: Store, tracks: Track[], index: number) {
   store.playlist = tracks
   store.currentTrack = tracks[index]!
@@ -333,17 +332,15 @@ describe('player.playback > playTrack extras', () => {
 
     await store.playTrack(tracks[0]!)
 
-    // 找不到文件 -> 自动播放下一首
     expect(invokeMock).toHaveBeenCalledWith('play_track', { path: '/music/track1.mp3' })
   })
 
   it('skips past consecutive missing tracks without looping', async () => {
-    // 缺失曲目紧跟当前曲目:此前会走 nextTrack 并回到同一首,无限递归
+    // 缺失曲目紧跟当前曲目时,若走 `nextTrack` 会回到同一首并无限递归
     const store = usePlayerStore()
     const tracks = makePlaylist(3)
     store.playlist = tracks
     store.currentTrack = tracks[0]!
-    // 只有 track2 存在
     fileExistsMock.mockImplementation(async (path: string) => path.includes('track2'))
 
     await store.playTrack(tracks[1]!)
@@ -383,7 +380,6 @@ describe('player.playback > playTrack extras', () => {
     const tracks = makePlaylist(2)
     store.playlist = tracks
     store.currentTrack = tracks[0]!
-    // 只有 track1 存在,track0 被跳过
     fileExistsMock.mockImplementation(async (path: string) => !path.includes('track0'))
 
     await store.playTrack(tracks[0]!)
@@ -499,7 +495,6 @@ describe('player.playback > playTrack extras', () => {
 
     resolvers[0]!(true)
     await first
-    // 第一个请求已被作废,不应触碰 play_track
     expect(invokeMock).not.toHaveBeenCalledWith('play_track', { path: '/music/track0.mp3' })
 
     resolvers[1]!(true)
@@ -598,7 +593,6 @@ describe('player.playback > playTrack extras', () => {
     await play
     await vi.advanceTimersByTimeAsync(AUTO_NEXT_TRACK_DELAY_MS * 3)
 
-    // 无后续曲目 -> 只尝试过一次 play
     const playCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === 'play_track')
     expect(playCalls).toHaveLength(1)
     expect(store.isPlaying).toBe(false)
@@ -625,7 +619,6 @@ describe('player.playback > _onEnded', () => {
 
     await store._onEnded()
 
-    // 列表循环:播完最后一首回到第一首
     expect(invokeMock).toHaveBeenCalledWith('play_track', { path: '/music/track0.mp3' })
   })
 
@@ -919,7 +912,6 @@ describe('player.playback > shuffle helpers & file check', () => {
     await expect(store._checkFileExists('/music/a.mp3')).resolves.toBe(false)
     expect(loggerMock.error).toHaveBeenCalledWith('Error checking file:', expect.any(Error))
 
-    // 第二次走缓存,不再访问文件系统
     fileExistsMock.mockClear()
     await expect(store._checkFileExists('/music/a.mp3')).resolves.toBe(false)
     expect(fileExistsMock).not.toHaveBeenCalled()

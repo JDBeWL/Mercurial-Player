@@ -10,11 +10,7 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;')
 }
 
-/**
- * 校验 URL 协议: 只放行 http/https/mailto 与无协议的相对路径, 其余返回 null。
- *
- * 目的是挡掉 javascript:/data: 之类可注入协议, 调用方拿到 null 时降级为纯文本。
- */
+/** 校验 URL 协议：只放行 http/https/mailto 与相对路径，挡掉 `javascript:`/`data:` 等注入。 */
 function sanitizeUrl(url: string): string | null {
   // 控制字符会拆坏前缀(如 jav[TAB]ascript:), 含控制字符直接拒绝
   // eslint-disable-next-line no-control-regex -- 安全检查需要匹配控制字符

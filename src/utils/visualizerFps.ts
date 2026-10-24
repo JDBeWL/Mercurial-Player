@@ -9,11 +9,8 @@ interface AppliedFpsResult {
   screenRate: number | null
 }
 
-/**
- * 按可视化配置把目标帧率下发后端(设置页与启动序列共用); 配置缺失时不动后端并返回 null。
- *
- * enableVerticalSync 是历史字段名, 实义为 "限制到屏幕刷新率": 开启时取 min(targetFps, 实时刷新率), 查询失败则按 targetFps 原样下发。
- */
+/** 按配置把目标帧率下发后端；配置缺失时不动后端并返回 `null`。
+ * `enableVerticalSync` 是历史字段名，实义为限制到屏幕刷新率（取 min(targetFps, 刷新率)）。 */
 export async function applyVisualizerFps(
   visualizer: VisualizerConfig | undefined | null,
 ): Promise<AppliedFpsResult | null> {

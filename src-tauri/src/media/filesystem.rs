@@ -1,7 +1,6 @@
 //! 文件系统操作：目录读取、媒体/歌词文件读写。
 //!
-//! 路径双形态：桌面端为本地绝对路径；Android 为 SAF `content://` URI（分区存储下绝对路径不可用），
-//! 打开文件经 [`crate::android::saf`] 的 fd 桥完成。
+//! 桌面端是绝对路径，Android 是 SAF `content://` URI；打开文件经 `crate::android::saf` 的 fd 桥。
 
 use super::metadata::{Playlist, TrackMetadata, flush_metadata_cache, get_track_metadata_internal};
 use crate::android::saf;
@@ -14,12 +13,8 @@ use std::fs;
 use std::path::Path;
 use walkdir::{DirEntry, WalkDir};
 
-/// 支持的音频文件扩展名：只收 symphonia（`features = "all"`）真能解开的容器。
-///
-/// 可解的编码有 mp3/flac/vorbis/aac/alac/pcm/adpcm，容器有 riff/ogg/isomp4/caf/mkv；没有
-/// opus/ape/wma，收进来只会在库里留下播不了的条目。同一份白名单还写了 Kotlin
-/// （SafBridge.AUDIO_EXTS）与前端（FileUtils.isAudioFile）两份，跨语言无法共享，
-/// 由 tests/utils/audioExtensionsMirror.test.ts 守住三者一致。
+/// 支持的音频扩展名：只收 symphonia 能解开的容器（没有 opus/ape/wma）。
+/// 同一白名单在 Kotlin `SafBridge` 与前端 `FileUtils` 各有一份，由镜像测试守住一致。
 pub const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "wav", "ogg", "m4a", "aac", "aiff", "aif", "caf",
 ];
@@ -88,7 +83,7 @@ pub fn read_dir(path: &str) -> Result<Vec<String>, AppError> {
         .ok_or_else(|| "Failed to convert paths".to_string().into())
 }
 
-/// 获取指定目录中的所有音频文件，并创建播放列表；SAF content URI 走 [`scan_content_tree`]
+/// 获取指定目录中的所有音频文件，并创建播放列表；SAF content URI 走 `scan_content_tree`
 pub fn get_audio_files_from_dir(path: &str) -> Result<Playlist, AppError> {
     if saf::is_content_uri(path) {
         let playlists = scan_content_tree(path, true)?;

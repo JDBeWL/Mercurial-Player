@@ -1,9 +1,6 @@
-//! 单行歌词绘制。
+//! 单行歌词绘制
 //!
-//! [`draw_d2d_lyric_line`] 负责把一行歌词（含可选译文行）绘制到
-//! Direct2D 渲染目标：计算跑马灯滚动偏移、单字素时的颜色插值过渡、
-//! 多字素时的描边 + 基础层 + 卡拉OK叠加层与按进度剪裁的绘制。
-//! 仅做绘制编排，颜色/画刷由调用方（整帧渲染）传入。
+//! `draw_d2d_lyric_line` 计算跑马灯偏移；单字素颜色插值，多字素走描边 + 基础层 + 卡拉 OK 剪裁层。
 
 use unicode_segmentation::UnicodeSegmentation;
 use windows::Win32::Foundation::RECT;
@@ -31,8 +28,7 @@ fn lerp_d2d_color(from: D2D1_COLOR_F, to: D2D1_COLOR_F, t: f32) -> D2D1_COLOR_F 
     }
 }
 
-/// 描边绘制的 8 方向偏移（像素，随 DPI 缩放）。
-/// 返回相对文本原点的 (dx, dy) 偏移，用于把描边层铺在文字下方
+/// 描边层的 8 方向偏移（随 DPI 缩放），相对文本原点。
 fn outline_offsets(scale: i32) -> [(f32, f32); 8] {
     let r = ((scale as f32 / 96.0).round() as i32).max(1) as f32;
     [
@@ -119,7 +115,7 @@ pub(super) fn draw_d2d_lyric_line(
     let max_scroll = (text_w - avail_w).max(0);
     let (hold_ms, speed) = if max_scroll > 0 {
         if let Some(duration) = line_duration_ms {
-            // 动态计算：确保在行结束前滚完
+            // 动态计算滚动速度，确保在行结束前滚完
             let hold = if duration <= 1200 {
                 100i64
             } else if duration <= 2500 {
@@ -279,8 +275,7 @@ pub(super) fn draw_d2d_lyric_line(
             right: (draw_rect.left as f32 + clip_x).min(draw_rect.right as f32),
             bottom: draw_rect.bottom as f32,
         };
-        // SAFETY: clip 是栈上局部变量；PushAxisAlignedClip 与 PopAxisAlignedClip
-        // 必须配对，此处成对调用符合 Direct2D 剪裁栈契约
+        // SAFETY: clip 是栈上局部变量；PushAxisAlignedClip 与 PopAxisAlignedClip 必须配对
         unsafe {
             state
                 .dc_render_target

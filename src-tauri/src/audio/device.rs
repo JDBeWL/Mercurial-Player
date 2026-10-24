@@ -4,7 +4,6 @@ use crate::error::AppError;
 use cpal::traits::{DeviceTrait, HostTrait};
 use serde::Serialize;
 
-/// 表示音频设备信息
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioDeviceInfo {
@@ -15,11 +14,8 @@ pub struct AudioDeviceInfo {
     pub audio_mode_status: String,
 }
 
-/// 从 cpal 设备获取友好名称。
-///
-/// cpal 0.17 的 WASAPI 后端把 `DEVPKEY_Device_FriendlyName` 放进 `extended()[0]`，
-/// `description().name()` 只给 `DEVPKEY_Device_DeviceDesc`（如 "Speakers" 而非 "Speakers (Realtek...)"）。
-/// wasapi crate 按 FriendlyName 匹配设备，这里必须与它一致，同时给用户显示完整名称。
+/// 从 cpal 设备取友好名称。WASAPI 后端把 `DEVPKEY_Device_FriendlyName` 放在 `extended()[0]`，
+/// `description().name()` 只给 `DeviceDesc`（如 "Speakers"）；wasapi crate 按 FriendlyName 匹配设备，必须一致。
 pub fn get_device_friendly_name(device: &cpal::Device) -> Option<String> {
     let desc = device.description().ok()?;
     if let Some(friendly) = desc.extended().first() {
@@ -30,10 +26,8 @@ pub fn get_device_friendly_name(device: &cpal::Device) -> Option<String> {
     }
 }
 
-/// 获取所有可用的音频输出设备
-///
-/// Android 特例：cpal 的 AAudio 后端会枚举出所有 OUTPUT 条目（扬声器、听筒、蓝牙、HDMI……），
-/// 而它们的 `productName` 常常是同一个手机型号：既无法区分，音频路由也本就由系统统一管理，故只上报默认设备。
+/// 获取所有可用的音频输出设备。Android 特例：AAudio 后端枚举出的 OUTPUT 条目 `productName`
+/// 常是同一手机型号无法区分，且音频路由本就由系统统一管理，故只上报默认设备。
 pub fn get_all_audio_devices() -> Result<Vec<AudioDeviceInfo>, AppError> {
     let host = cpal::default_host();
 
@@ -51,8 +45,7 @@ pub fn get_all_audio_devices() -> Result<Vec<AudioDeviceInfo>, AppError> {
 
     for device in devices {
         if let Some(name) = get_device_friendly_name(&device) {
-            // 同名设备去重：切换按 name 匹配（见 name_to_device_id），同名只有第一个能被选中，
-            // 而前端拿 name 当 v-for 的 key，重复会触发 key 冲突
+            // 同名设备去重：切换按 name 匹配（见 `name_to_device_id`），前端拿 name 当 v-for key，重复会 key 冲突。
             if device_infos
                 .iter()
                 .any(|d: &AudioDeviceInfo| d.name == name)
@@ -94,17 +87,11 @@ fn check_wasapi_exclusive_support(device_name: &str) -> bool {
     }
 }
 
-// 跨平台设备标识：友好名会随驱动更新、系统语言变化，不能当持久化标识。落盘用 cpal `DeviceId`
-// 的字符串形式("host:id", config.audio.preferredDeviceId)，启动时再解析回具体设备。
-// `DeviceTrait::id()` 各平台返回的都是原生稳定标识：Windows 是 WASAPI endpoint ID、
-// macOS 是 CoreAudio DeviceUID、Linux 是 ALSA PCM 名(如 hw:CARD=PCH,DEV=0)；
-// Android 走 AAudio，输出设备由系统接管，不参与这里的设备选择。
-// 标识是机器绑定的，换机器或重装驱动后可能失效，此时静默回退到系统默认设备。
-// 同芯片的公版方案（如 CX31993 未要求 PID 唯一）可能让不同设备得到相同标识，属已知问题。
+// 设备标识：友好名随驱动/语言变化不可持久化，落盘用 cpal `DeviceId` 字符串（"host:id"，config.audio.preferredDeviceId）；
+// 各平台原生稳定（Windows WASAPI endpoint ID、macOS CoreAudio DeviceUID、Linux ALSA PCM 名），Android 由系统接管不参与。
+// 标识机器绑定，换机/重装驱动后失效则静默回退默认设备；同芯片公版方案可能撞 ID（已知问题）。
 
-/// 枚举全部输出设备,返回 (device_id, friendly_name) 列表。
-///
-/// 统一走 cpal 枚举,保证 ID 与名称来自同一次枚举,避免跨枚举的 ID 与名称不匹配。
+/// 统一走 cpal 枚举，保证 ID 与名称来自同一次枚举，避免跨枚举不匹配。
 fn enumerate_output_devices() -> Vec<(String, String)> {
     let host = cpal::default_host();
     let Ok(devices) = host.output_devices() else {
@@ -121,10 +108,7 @@ fn enumerate_output_devices() -> Vec<(String, String)> {
         .collect()
 }
 
-/// 判断枚举到的 ID 是否就是落盘的标识。
-///
-/// `candidate` 形如 `host:id`;早期版本在 Windows 上只落盘了裸 endpoint ID
-/// (没有 host 前缀),这里额外剥掉前缀再比一次以兼容旧配置。
+/// `candidate` 形如 `host:id`；早期版本在 Windows 只落盘裸 endpoint ID（无 host 前缀），这里多剥一次前缀兼容旧配置。
 fn device_id_matches(candidate: &str, stored: &str) -> bool {
     candidate == stored
         || candidate
@@ -148,10 +132,8 @@ pub fn name_to_device_id(device_name: &str) -> Option<String> {
         .map(|(id, _)| id)
 }
 
-/// 启动时把落盘标识解析回 cpal 设备。
-///
-/// 优先让 cpal 用 `device_by_id` 自己匹配,避免在重名设备上按名称选错;
-/// 标识过期或设备已拔出时返回 None,调用方回退到系统默认设备。
+/// 启动时把落盘标识解析回 cpal 设备：优先让 `device_by_id` 匹配，避免在重名设备上按名称选错；
+/// 标识过期或设备已拔出时返回 None，调用方回退系统默认设备。
 pub fn resolve_preferred_device(preferred_id: &str) -> Option<cpal::Device> {
     let host = cpal::default_host();
 
@@ -161,7 +143,7 @@ pub fn resolve_preferred_device(preferred_id: &str) -> Option<cpal::Device> {
         }
     }
 
-    // 兼容早期无 host 前缀的落盘格式，判据见 device_id_matches
+    // 兼容早期无 host 前缀的落盘格式
     host.output_devices().ok()?.find(|device| {
         device
             .id()
@@ -175,7 +157,6 @@ mod tests {
 
     #[test]
     fn test_device_id_matches_current_format() {
-        // 当前落盘格式 host:id,WASAPI / CoreAudio / ALSA 三种形态都要能命中
         assert!(device_id_matches(
             "wasapi:{0.0.0.00000000}.{abc-def}",
             "wasapi:{0.0.0.00000000}.{abc-def}"
@@ -192,12 +173,10 @@ mod tests {
 
     #[test]
     fn test_device_id_matches_legacy_bare_id() {
-        // 早期版本在 Windows 上只落盘裸 endpoint ID(无 host 前缀),需兼容
         assert!(device_id_matches(
             "wasapi:{0.0.0.00000000}.{abc-def}",
             "{0.0.0.00000000}.{abc-def}"
         ));
-        // ID 里含冒号时只剥掉第一个冒号前的 host 段
         assert!(device_id_matches(
             "alsa:hw:CARD=PCH,DEV=0",
             "hw:CARD=PCH,DEV=0"
@@ -208,7 +187,6 @@ mod tests {
     fn test_device_id_matches_rejects_mismatch() {
         assert!(!device_id_matches("wasapi:{a}", "wasapi:{b}"));
         assert!(!device_id_matches("wasapi:{a}", "coreaudio:{a}"));
-        // 前缀剥离后仍不同
         assert!(!device_id_matches(
             "alsa:hw:CARD=PCH,DEV=0",
             "hw:CARD=PCH,DEV=1"

@@ -229,11 +229,7 @@ class ErrorHandler {
 
 const errorHandler = new ErrorHandler()
 
-/**
- * Promise 错误处理包装器。
- *
- * options.throw 为 true 时记录并通知后重新抛出 AppError；默认返回 { success: false }。
- */
+/** Promise 错误包装器：`options.throw` 为 true 时记录并通知后重抛 `AppError`，默认返回 `{ success: false }`。 */
 export async function handlePromise<T>(
   promise: Promise<T>,
   options: ErrorHandlerOptions = {},

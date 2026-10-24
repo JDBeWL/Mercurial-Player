@@ -1,7 +1,6 @@
-//! 应用更新：检查/安装复用 tauri-plugin-updater（配置、签名、安装器行为一致）。
+//! 应用更新
 //!
-//! 只把下载阶段换成多线程分片下载（HTTP Range 并发请求），下载完按插件相同逻辑做 minisign
-//! 签名校验，再交回插件原生安装。
+//! 下载阶段换成多线程分片（HTTP Range），完成后做 minisign 校验再交回 tauri-plugin-updater 安装。
 use crate::error::AppError;
 
 use std::path::{Path, PathBuf};

@@ -14,10 +14,8 @@ vi.mock('@/stores/player/shuffle', () => ({
 
 const track = (path: string): Track => ({ path, name: path }) as unknown as Track
 
-/** 被测函数接收的 store 参数类型(完整 Pinia PlayerStore,测试只需结构子集) */
 type PlaylistStoreParam = Parameters<typeof removeTrackFromPlaylist>[0]
 
-/** 构造满足被测函数需求的最小 store 形状 */
 function makeStore(tracks: Track[], currentIndex = 0): PlaylistStoreParam {
   return {
     playlist: tracks,
@@ -65,11 +63,10 @@ describe('removeTrackFromPlaylist', () => {
   it('plays the next track when removing the current track', async () => {
     store.isPlaying = true
     removeTrackFromPlaylist(store, 'a')
-    expect(store.playTrack).toHaveBeenCalledWith(store.playlist[0]) // 原 'b' 前移
+    expect(store.playTrack).toHaveBeenCalledWith(store.playlist[0])
   })
 
   it('adjusts shuffle order when removing a track before current', () => {
-    // current 是 'b'(索引 1),删除其前面的 'a' 走 shuffle 同步分支
     store = makeStore([track('a'), track('b'), track('c')], 1)
     store._shuffleOrder = [0, 1, 2]
     removeTrackFromPlaylist(store, 'a')

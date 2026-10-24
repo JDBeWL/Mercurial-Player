@@ -1,7 +1,6 @@
-//! 音频播放模块：共享模式（rodio sink）的播放与 seek，独占模式的解码线程派发与预缓冲等待。
+//! 音频播放：共享模式（rodio sink）播放/seek，独占模式的解码线程派发与预缓冲。
 //!
-//! 采样级的 EQ/频谱处理不在这里：音源适配器见 [`super::spectrum::VisualizationSource`]，
-//! EQ 见 [`super::eq_processor`]，事件发送见 [`super::emit`]。
+//! 采样级 EQ/频谱不在这里：见 `super::spectrum::VisualizationSource`、`super::eq_processor`、`super::emit`。
 
 #[cfg(any(windows, target_os = "android"))]
 use super::decode_push::decode_and_push_to_wasapi;

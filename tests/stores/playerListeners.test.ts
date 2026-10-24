@@ -11,15 +11,12 @@ const {
   mockIsRegistered,
   mockErrorHandlerHandle,
 } = vi.hoisted(() => {
-  // 捕获 listen 回调，按事件名存储
   const listenCallbacks = new Map<string, (event: { payload: unknown }) => void>()
   const mockListen = vi.fn(async (event: string, callback: (e: { payload: unknown }) => void) => {
     listenCallbacks.set(event, callback)
-    // 返回 unlisten 函数
     return vi.fn()
   })
 
-  // 捕获 register 回调，按快捷键存储
   const registerCallbacks = new Map<string, () => void>()
   const mockRegister = vi.fn(async (key: string, callback: () => void) => {
     registerCallbacks.set(key, callback)
@@ -27,7 +24,6 @@ const {
   const mockUnregisterAll = vi.fn()
   const mockIsRegistered = vi.fn(async () => false)
 
-  // Mock errorHandler
   const mockErrorHandlerHandle = vi.fn()
 
   return {
@@ -92,10 +88,8 @@ import {
   setupDeviceListeners,
 } from '@/stores/player/listeners'
 
-/** 从 setup 函数签名推导 PlayerStore 类型 */
 type PlayerStore = Parameters<typeof setupTrackEndedListener>[0]
 
-/** 创建 mock player store */
 function createMockStore(): PlayerStore {
   return {
     _isDestroyed: false,
@@ -110,7 +104,6 @@ function createMockStore(): PlayerStore {
   } as unknown as PlayerStore
 }
 
-/** 触发指定事件的 listen 回调 */
 function emitEvent(eventName: string, payload: unknown) {
   const callback = listenCallbacks.get(eventName)
   if (callback) {
@@ -131,8 +124,6 @@ describe('playerListeners', () => {
   afterEach(() => {
     vi.clearAllMocks()
   })
-
-  // ---------- setupTrackEndedListener ----------
 
   describe('setupTrackEndedListener', () => {
     it('监听 track-ended 事件并调用 store._onEnded()', async () => {
@@ -158,8 +149,6 @@ describe('playerListeners', () => {
       expect(result).toBeNull()
     })
   })
-
-  // ---------- setupPositionListener ----------
 
   describe('setupPositionListener', () => {
     it('监听 playback-position 事件并更新 store.currentTime', async () => {
@@ -226,8 +215,6 @@ describe('playerListeners', () => {
     })
   })
 
-  // ---------- setupTaskbarListeners ----------
-
   describe('setupTaskbarListeners', () => {
     it('注册三个 taskbar 事件监听', async () => {
       const result = await setupTaskbarListeners(store)
@@ -271,8 +258,6 @@ describe('playerListeners', () => {
       expect(store.nextTrack).not.toHaveBeenCalled()
     })
   })
-
-  // ---------- setupGlobalShortcuts ----------
 
   describe('setupGlobalShortcuts', () => {
     it('注册三个全局媒体键快捷方式', async () => {
@@ -341,8 +326,6 @@ describe('playerListeners', () => {
     })
   })
 
-  // ---------- unregisterGlobalShortcuts ----------
-
   describe('unregisterGlobalShortcuts', () => {
     it('调用 unregisterAll 注销所有快捷键', async () => {
       await unregisterGlobalShortcuts()
@@ -354,8 +337,6 @@ describe('playerListeners', () => {
       await expect(unregisterGlobalShortcuts()).resolves.not.toThrow()
     })
   })
-
-  // ---------- setupDeviceListeners ----------
 
   describe('setupDeviceListeners', () => {
     it('注册四个设备事件监听', async () => {
@@ -374,7 +355,6 @@ describe('playerListeners', () => {
     it('device-removed 事件触发日志记录', async () => {
       await setupDeviceListeners(store)
       emitEvent('device-removed', { eventType: 'removed', deviceName: 'Speaker' })
-      // 验证 store 未被销毁时不影响其他操作
       expect(store._isDestroyed).toBe(false)
     })
 

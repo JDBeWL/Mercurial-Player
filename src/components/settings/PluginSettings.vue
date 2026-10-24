@@ -3,8 +3,7 @@
     <div class="content-header">
       <h3>{{ $t('config.plugins') }}</h3>
       <div class="header-actions">
-        <!-- 外置插件沙箱与来源安全提示。放在动作区而不是标题里：竖屏的面板头部行会整条隐藏
-             面板自己的 h3，问号跟着 h3 就一起没了 -->
+        <!-- 提示放动作区：竖屏时面板头部的 h3 会整条隐藏，问号跟着 h3 会一起没了 -->
         <span class="help-tooltip">
           <button
             class="help-tooltip__trigger"
@@ -29,13 +28,91 @@
       </div>
     </div>
 
-    <div v-if="plugins.length === 0" class="empty-state">
+    <div v-if="plugins.length === 0 && !beatComponent" class="empty-state">
       <span class="material-symbols-rounded">extension</span>
       <p>{{ $t('config.noPlugins') }}</p>
       <p class="hint">{{ $t('config.pluginHint') }}</p>
     </div>
 
     <div v-else class="plugin-list">
+      <!-- 原生组件跑在 Rust 侧，但复用 JS 插件的卡片形态，避免分两处管理 -->
+      <div
+        v-if="beatComponent"
+        class="plugin-item"
+        :class="{
+          'plugin-item--active': beatComponent.ready,
+          'plugin-item--missing': !beatComponent.ready,
+        }"
+      >
+        <div class="plugin-info">
+          <div class="plugin-header">
+            <span class="plugin-name">{{ $t('plugin.beatComponentName') }}</span>
+            <span class="plugin-builtin">{{ $t('plugin.nativeComponent') }}</span>
+            <span
+              class="plugin-state"
+              :class="beatComponent.ready ? 'state-active' : 'state-inactive'"
+            >
+              {{ beatStateText }}
+            </span>
+          </div>
+          <p class="plugin-description">{{ $t('plugin.beatComponentDesc') }}</p>
+          <!-- 安装说明只在真缺东西时出现：装好了还念叨"不随安装包分发"是噪音 -->
+          <p v-if="!beatComponent.ready" class="plugin-description">
+            {{ $t('plugin.beatComponentInstallHint') }}
+          </p>
+          <!-- 模型在、运行时不在：功能可用只是慢，别让下面的 missing 看成装坏了 -->
+          <p v-else-if="!beatComponent.gpu" class="plugin-description">
+            {{ $t('plugin.beatComponentNoGpu') }}
+          </p>
+          <div class="plugin-meta">
+            <span class="plugin-author">
+              <span class="material-symbols-rounded">memory</span>
+              {{ $t('plugin.beatComponentFootprint') }}
+            </span>
+          </div>
+          <!-- 缺什么就列什么，用户照着往目录里放。功能已可用时这里只剩运行时 -->
+          <ul v-if="beatComponent.missing.length" class="plugin-files">
+            <li v-for="file in beatComponent.missing" :key="file">{{ file }}</li>
+          </ul>
+
+          <!-- 功能入口只在装好后出现：没装模型时按钮点下去只会报错 -->
+          <div v-if="beatComponent.ready" class="beat-toolbar">
+            <button type="button" class="beat-run-button" @click="openBeatAnalysis">
+              <span class="material-symbols-rounded">graphic_eq</span>
+              {{ $t('plugin.beatRunAnalysis') }}
+            </button>
+            <span v-if="beatCacheDesc" class="beat-cache-hint">{{ beatCacheDesc }}</span>
+          </div>
+        </div>
+        <div class="plugin-actions">
+          <!-- 和其他插件保持同一套动作语义：play 表示启用、pause 表示停用 -->
+          <button
+            v-if="!configStore.general.enableBpmAnalysis"
+            class="icon-button"
+            :title="$t('config.activate')"
+            :disabled="!beatComponent.ready"
+            @click="toggleBpmAnalysis(true)"
+          >
+            <span class="material-symbols-rounded">play_arrow</span>
+          </button>
+          <button
+            v-else
+            class="icon-button"
+            :title="$t('config.deactivate')"
+            @click="toggleBpmAnalysis(false)"
+          >
+            <span class="material-symbols-rounded">pause</span>
+          </button>
+          <button
+            class="icon-button"
+            :title="$t('plugin.beatOpenFolder')"
+            @click="openBeatComponentFolder"
+          >
+            <span class="material-symbols-rounded">folder_open</span>
+          </button>
+        </div>
+      </div>
+
       <div
         v-for="plugin in plugins"
         :key="plugin.id"
@@ -97,22 +174,149 @@
         </div>
       </div>
     </div>
+
+    <BeatAnalysisDialog
+      :open="beatDialogOpen"
+      :paths="beatDialogPaths"
+      @close="beatDialogOpen = false"
+      @settled="onBeatAnalysisSettled"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { pluginManager, PluginState, loadAllPlugins } from '../../plugins'
 import type { Plugin, PluginStateType } from '../../plugins/pluginManager'
+import {
+  beatBackendActual,
+  beatCacheStats,
+  beatComponentStatus,
+  openBeatComponentDir,
+  type BeatComponentStatus,
+} from '../../services/beatService'
+import { useConfigStore } from '../../stores/config'
+import { useMusicLibraryStore } from '../../stores/musicLibrary'
+import { saveConfigSafely } from '../../utils/errorMessages'
+import BeatAnalysisDialog from './BeatAnalysisDialog.vue'
 import logger from '../../utils/logger'
 import { useErrorNotification } from '../../composables/useErrorNotification'
 
 const { t } = useI18n()
 const { showError } = useErrorNotification()
+const configStore = useConfigStore()
+const libraryStore = useMusicLibraryStore()
 
 const plugins = computed<Plugin[]>(() => pluginManager.getAllPlugins())
+
+/** 节拍分析组件状态。`null` 表示还没查出来，此时不渲染卡片免得闪一下空壳 */
+const beatComponent = ref<BeatComponentStatus | null>(null)
+
+/** 装齐了显示"运行中"，只有模型显示"CPU 推理"，都没有显示"未安装" */
+const beatStateText = computed(() => {
+  if (!beatComponent.value?.ready) return t('plugin.beatComponentMissing')
+  return beatComponent.value.gpu
+    ? t('plugin.beatComponentReadyGpu')
+    : t('plugin.beatComponentReadyCpu')
+})
+
+/** 批量分析弹窗 */
+const beatDialogOpen = ref(false)
+const beatDialogPaths = ref<string[]>([])
+const beatAnalyzedCount = ref(0)
+const beatCacheKb = ref(0)
+/** 上一次实际用上的推理后端，空串表示还没分析过 */
+const beatBackendName = ref('')
+
+/** 全库曲目路径（去重）。
+ * 必须用 `musicLibrary` 而不是 `playerStore.playlist`：后者可能为空或只含子集。 */
+const allTrackPaths = computed(() => {
+  const seen = new Set<string>()
+  for (const playlist of libraryStore.playlists) {
+    for (const track of playlist.files) {
+      if (track.path) seen.add(track.path)
+    }
+  }
+  return [...seen]
+})
+
+const beatCacheDesc = computed(() => {
+  if (!beatComponent.value?.ready) return ''
+  if (beatAnalyzedCount.value <= 0) return ''
+  const total = allTrackPaths.value.length
+  const size = beatCacheKb.value > 0 ? `（${beatCacheKb.value} KB）` : ''
+  // 曲库懒加载，插件页可能先就绪；total 为 0 时只报已分析数量
+  const base =
+    total > 0
+      ? t('config.beatAnalysisCached', { count: beatAnalyzedCount.value, total })
+      : t('plugin.beatAnalyzedOnly', { count: beatAnalyzedCount.value })
+  if (!beatBackendName.value) return base + size
+  // 后端标签统一小写；未分析过时回退成探测结果，所以不是 directml 就当 CPU
+  const backend =
+    beatBackendName.value === 'directml'
+      ? t('config.beatBackendGpu')
+      : t('config.beatBackendCpu')
+  return `${base}${size} · ${backend}`
+})
+
+const loadBeatComponent = async (): Promise<void> => {
+  try {
+    beatComponent.value = await beatComponentStatus()
+  } catch (error) {
+    logger.error('读取节拍分析组件状态失败:', error)
+  }
+}
+
+const loadBeatCacheStats = async (): Promise<void> => {
+  try {
+    const [count, kb] = await beatCacheStats()
+    beatAnalyzedCount.value = count
+    beatCacheKb.value = kb
+  } catch (error) {
+    logger.error('读取节拍缓存统计失败:', error)
+  }
+  try {
+    beatBackendName.value = await beatBackendActual()
+  } catch (error) {
+    logger.error('读取节拍推理后端失败:', error)
+  }
+}
+
+/** 开关只改配置：它管的是"切歌时顺带识别"，不是"立刻分析整库" */
+const toggleBpmAnalysis = async (next: boolean): Promise<void> => {
+  configStore.general.enableBpmAnalysis = next
+  await saveConfigSafely(configStore)
+}
+
+/** 打开批量分析弹窗。曲库是懒加载的，用户可能直接进插件页，这时 playlists 还是空的 */
+const openBeatAnalysis = async (): Promise<void> => {
+  if (libraryStore.playlists.length === 0) {
+    try {
+      await libraryStore.loadPlaylistsFromCache()
+    } catch (error) {
+      logger.error('加载曲库缓存失败:', error)
+    }
+  }
+  // 即使为空也打开弹窗：静默 return 会让用户以为按钮坏了
+  beatDialogPaths.value = allTrackPaths.value
+  beatDialogOpen.value = true
+}
+
+/** 一轮分析结束：刷新缓存统计，并重新读一次实际后端 */
+const onBeatAnalysisSettled = () => {
+  void loadBeatCacheStats()
+}
+
+const openBeatComponentFolder = async (): Promise<void> => {
+  try {
+    await openBeatComponentDir()
+  } catch (error) {
+    logger.error('打开节拍分析组件目录失败:', error)
+    showError(t('plugin.openFolderFailed'), 'error')
+  }
+}
 
 const getStateText = (state: PluginStateType): string => {
   const texts: Partial<Record<PluginStateType, string>> = {
@@ -184,6 +388,8 @@ const refreshPlugins = async (): Promise<void> => {
 
     // 重新加载所有插件
     await loadAllPlugins()
+    // 组件状态也一起刷：用户刚往目录里放完文件，点刷新就该看到"已安装"
+    await loadBeatComponent()
     showError(t('plugin.refreshed'), 'info')
   } catch (error) {
     logger.error('刷新插件失败:', error)
@@ -194,6 +400,22 @@ const refreshPlugins = async (): Promise<void> => {
 
 onMounted(async () => {
   // 内置插件已在 main.js 中加载
+  await loadBeatComponent()
+  // 曲库是懒加载的：不先拉一次，"已分析 N / total"里的 total 会是 0
+  if (libraryStore.playlists.length === 0) {
+    try {
+      await libraryStore.loadPlaylistsFromCache()
+    } catch (error) {
+      logger.error('加载曲库缓存失败:', error)
+    }
+  }
+  void loadBeatCacheStats()
+  // 用户按引导去放文件，切回来时自动重测，否则要重启应用
+  window.addEventListener('focus', loadBeatComponent)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('focus', loadBeatComponent)
 })
 </script>
 
@@ -242,8 +464,7 @@ onMounted(async () => {
 
 .help-tooltip__bubble {
   position: absolute;
-  /* 气泡挂在按钮下方并右对齐到按钮：问号现在处于动作区的最左/靠右边缘，
-     原来"向右展开"会顶出窗口 */
+  /* 挂在按钮下方并右对齐：原来的"向右展开"会顶出窗口 */
   top: calc(100% + 6px);
   right: 0;
   width: max-content;
@@ -280,14 +501,12 @@ onMounted(async () => {
   margin-bottom: 4px;
 }
 
-/* 竖屏：问号在靠右的动作区里，320px 宽的气泡无论向左还是向右展开都会溢出屏幕。
-   改成贴着视口左右 16px 的横条；top 必须退回 auto —— 固定定位下 100% 是视口高度，
-   继承过来的 calc(100% + 6px) 会把气泡甩到屏幕外，auto 才让它落在按钮下方的静态位置。 */
+/* 竖屏：320px 气泡左右都会溢出，改成贴视口 16px 的横条。
+   top 不能沿用 100%——固定定位下那是视口高度，会甩到屏外 */
 @media (orientation: portrait) {
   .help-tooltip__bubble {
     position: fixed;
-    /* 用视口坐标而不是静态位置：固定定位的静态位置只到动作行的顶部，靠 margin 往下挪
-       在实测里对不上。128 = 头部行 64 + 内容上内边距 16 + 按钮 40 + 余量 8 */
+    /* 128 = 头部 64 + 上内边距 16 + 按钮 40 + 余量 8 */
     top: calc(env(safe-area-inset-top, 0px) + 128px);
     right: 16px;
     left: 16px;
@@ -325,6 +544,15 @@ onMounted(async () => {
 
 .plugin-item--error {
   border-left-color: var(--md-sys-color-error);
+}
+
+/* 未安装时信息区压暗，但动作区不动：「打开目录」是唯一的安装途径 */
+.plugin-item--missing .plugin-info {
+  opacity: 0.55;
+}
+
+.plugin-item--missing {
+  border-left-color: var(--md-sys-color-outline-variant);
 }
 
 .plugin-info {
@@ -411,6 +639,52 @@ onMounted(async () => {
   margin-top: 8px;
 }
 
+/* 缺失文件清单：等宽字体表明"这是路径"，用户照着往目录里放就行 */
+.plugin-files {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* 功能入口：装了才出现，和下面的缺失清单不会同时在场 */
+.beat-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.beat-run-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 20px;
+  background-color: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.beat-run-button:hover {
+  background-color: var(--md-sys-color-hover-overlay);
+}
+
+.beat-run-button .material-symbols-rounded {
+  font-size: 18px;
+}
+
+.beat-cache-hint {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
 .plugin-actions {
   display: flex;
   gap: 4px;
@@ -489,9 +763,18 @@ onMounted(async () => {
   }
 }
 
-.icon-button.danger {
-  color: var(--md-sys-color-error);
+/* 组件没装时「启用」按钮不可点：置灰且不给悬停反馈 */
+.icon-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
+
+.icon-button:disabled:hover {
+  background: none;
+}
+
+.icon-button.danger {
+  color: var(--md-sys-color-error);}
 
 @media (hover: hover) {
   .icon-button.danger:hover {

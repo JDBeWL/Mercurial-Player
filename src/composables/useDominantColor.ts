@@ -3,12 +3,7 @@ import { readFile } from '@tauri-apps/plugin-fs'
 import type { ImmersiveColorScheme } from '@/types'
 import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
 
-/**
- * 从封面提取主色,用于沉浸式背景填充;取样区域由 decodePixels 按 .full-cover 规则裁出
- *
- * - 'album': 整张均匀取样 + K-Means 选代表性色 (偏中亮度高彩度,抑制过暗/过亮与灰)
- * - 'fusion': 只取最右 5% 羽化条带求平均,与封面右缘一致,过渡最无痕
- */
+/** 从封面提取主色：`album` 整张 K-Means，`fusion` 取右缘 5% 羽化条带平均 */
 export function useDominantColor(
   coverPath: Ref<string | undefined | null>,
   mode: Ref<ImmersiveColorScheme> = ref('album'),

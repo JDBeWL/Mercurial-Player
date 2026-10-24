@@ -37,7 +37,6 @@
     "targets": ["nsis", "appimage", "deb", "dmg", "app"],
     "createUpdaterArtifacts": true,
     "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"],
-    "resources": [],
     "copyright": "© 2025-2026 JDBeWL",
     "publisher": "JDBeWL",
     "category": "Music",

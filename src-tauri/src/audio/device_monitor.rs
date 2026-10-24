@@ -1,9 +1,6 @@
-//! 音频设备监听：设备插拔、断开后自动切到其他可用设备，以及系统默认输出变化
-//! （无插拔、用户在系统设置里主动切换）时跟随切换。
+//! 音频设备监听：插拔与系统默认输出变化时自动跟随切换；Android 为 no-op。
 //!
-//! Android 上 AAudio 的设备枚举语义与桌面不同，插拔/切换事件不适用，监听整体降级为 no-op。
-//! 桌面各平台默认用 cpal 轮询；Windows 的 IMMNotificationClient 事件驱动实现在 `windows_impl`，
-//! 由 `imm-notification` feature 启用（COM 回调触发与 previous_default 同步有可靠性问题，故默认关闭）。
+//! Windows 事件驱动实现由 `imm-notification` 启用，默认走 cpal 轮询。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

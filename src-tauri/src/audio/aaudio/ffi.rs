@@ -1,7 +1,6 @@
-//! libaaudio 的原始 FFI 声明：只声明本项目用到的那部分 AAudio C API。
+//! libaaudio 的原始 FFI 声明
 //!
-//! cpal 的 AAudio 后端不暴露共享模式与设备选择，要 USB DAC 直连必须自己调 AAudio。
-//! 符号来自 NDK 的 `libaaudio.so`（API 26 起），由文件末尾的 `#[link]` 引入，无需运行时 dlopen。
+//! cpal 的 AAudio 后端不暴露共享模式与设备选择；符号由 `#[link(name = "aaudio")]` 静态链接，无需 dlopen。
 
 #![allow(
     non_camel_case_types,
@@ -29,7 +28,6 @@ pub enum AAudioStreamBuilderStruct {}
 pub type AAudioStream = *mut AAudioStreamStruct;
 pub type AAudioStreamBuilder = *mut AAudioStreamBuilderStruct;
 
-/// 数据回调：`(stream, userData, audioData, numFrames) -> 继续/停止`
 pub type AAudioStream_dataCallback = Option<
     unsafe extern "C" fn(
         stream: *mut AAudioStreamStruct,
@@ -39,7 +37,6 @@ pub type AAudioStream_dataCallback = Option<
     ) -> aaudio_data_callback_result_t,
 >;
 
-/// 错误回调：`(stream, userData, error)`
 pub type AAudioStream_errorCallback = Option<
     unsafe extern "C" fn(stream: *mut AAudioStreamStruct, userData: *mut c_void, error: i32),
 >;
@@ -80,7 +77,6 @@ pub const AAUDIO_OK: aaudio_result_t = 0;
 
 #[link(name = "aaudio")]
 unsafe extern "C" {
-    // StreamBuilder
     pub fn AAudio_createStreamBuilder(builder: *mut AAudioStreamBuilder) -> aaudio_result_t;
     pub fn AAudioStreamBuilder_delete(builder: AAudioStreamBuilder) -> aaudio_result_t;
     pub fn AAudioStreamBuilder_setDeviceId(builder: AAudioStreamBuilder, deviceId: c_int);
@@ -118,7 +114,6 @@ unsafe extern "C" {
         stream: *mut AAudioStream,
     ) -> aaudio_result_t;
 
-    // Stream
     pub fn AAudioStream_close(stream: AAudioStream) -> aaudio_result_t;
     pub fn AAudioStream_requestStart(stream: AAudioStream) -> aaudio_result_t;
     pub fn AAudioStream_requestPause(stream: AAudioStream) -> aaudio_result_t;
@@ -143,14 +138,13 @@ unsafe extern "C" {
 /// 把 AAudio 返回码转成可读文本（用于日志）。
 ///
 /// # Safety
-/// 只在成功返回且指针非空时读取 C 字符串；AAudio 返回的是静态字符串。
+/// 仅在成功返回且指针非空时读取，AAudio 返回的是静态字符串，不可 free。
 pub unsafe fn result_to_text(code: aaudio_result_t) -> String {
     // SAFETY: 该 C API 只把 returnCode 映射到静态字符串表, 任意 i32 输入都合法, 不触碰其它状态。
     let ptr = unsafe { AAudio_convertResultToText(code) };
     if ptr.is_null() {
         return format!("AAudio error {code}");
     }
-    // SAFETY: AAudio_convertResultToText 返回的指针指向静态常量字符串
     let cstr = unsafe { std::ffi::CStr::from_ptr(ptr) };
     cstr.to_string_lossy().into_owned()
 }
@@ -161,7 +155,6 @@ mod tests {
 
     #[test]
     fn sharing_mode_constants_match_ndk() {
-        // SHARED 必须是 0、EXCLUSIVE 必须是 1（aaudio.h 的枚举顺序）
         assert_eq!(AAUDIO_SHARING_MODE_SHARED, 0);
         assert_eq!(AAUDIO_SHARING_MODE_EXCLUSIVE, 1);
     }

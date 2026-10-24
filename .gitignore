@@ -1,4 +1,3 @@
-# Logs
 logs
 *.log
 npm-debug.log*
@@ -10,14 +9,14 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.build-*
 coverage
 *.local
+sample/*
 GEMINI.md
 
-# 锁文件 - 项目使用 pnpm，忽略 npm 生成的 package-lock.json
 package-lock.json
 
-# Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -28,39 +27,33 @@ package-lock.json
 *.sln
 *.sw?
 
-# Tauri updater 签名私钥（绝对不能提交）
 *.key
 
-# tauri build 生成的中间目录
 .tauri/
 
-# 脚本把 "~" 当字面量路径创建出来的目录
 ~/
 
-# Scripts - 忽略本地工具脚本，但保留构建相关的 sync-version.mjs
-# (package.json 的 version:sync 脚本依赖它)
 scripts/*
 !scripts/sync-version.mjs
+!scripts/fetch-beat-components.mjs
 
-# ============================================================================
-# Android / Tauri 移动端
-# ============================================================================
 
-# 打包时拷贝到 assets 的前端产物
 src-tauri/gen/android/app/src/main/assets/
 src-tauri/gen/android/app/src/main/res/mipmap-*/ic_launcher.png
 src-tauri/gen/android/app/src/main/res/mipmap-*/ic_launcher_round.png
 src-tauri/gen/android/app/src/main/res/mipmap-*/ic_launcher_foreground.png
 src-tauri/gen/android/app/src/main/res/mipmap-*/ic_launcher_monochrome.png
 
-# 图标生成脚本的预览产物
 icon-preview.png
 __pycache__/
 
-# 签名与发布产物
 *.keystore
 *.jks
 key.properties
 keystore.properties
 *.apk
 *.aab
+src-tauri/resources/runtime/
+
+plugins/beat-analysis/models/
+plugins/beat-analysis/runtime/

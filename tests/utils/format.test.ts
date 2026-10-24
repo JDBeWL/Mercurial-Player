@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatBytes, formatKbMb, formatTime } from '@/utils/format'
+import { formatBpm, formatBytes, formatKbMb, formatTime } from '@/utils/format'
 
 describe('formatTime', () => {
   it('formats minutes and seconds', () => {
@@ -55,5 +55,24 @@ describe('formatKbMb', () => {
 
   it('formats MB above 1MB', () => {
     expect(formatKbMb(2.5 * 1024 * 1024)).toBe('2.50 MB')
+  })
+})
+
+describe('formatBpm', () => {
+  it('drops the decimal part for whole numbers', () => {
+    expect(formatBpm(120)).toBe('120')
+    expect(formatBpm(128.0)).toBe('128')
+  })
+
+  it('keeps one decimal for fractional BPM', () => {
+    expect(formatBpm(128.5)).toBe('128.5')
+    expect(formatBpm(97.25)).toBe('97.3')
+  })
+
+  it('returns an empty string for invalid input', () => {
+    expect(formatBpm(0)).toBe('')
+    expect(formatBpm(-120)).toBe('')
+    expect(formatBpm(NaN)).toBe('')
+    expect(formatBpm(Infinity)).toBe('')
   })
 })

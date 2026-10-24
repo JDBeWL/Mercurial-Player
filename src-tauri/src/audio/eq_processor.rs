@@ -1,13 +1,11 @@
 //! EQ 处理器：播放链路里实际跑滤波的那个环节。
 //!
-//! 系数与设置类型在 [`crate::equalizer`]，软削波用 [`super::dsp`] 的预计算查找表。
+//! 系数与设置类型在 `crate::equalizer`，软削波用 `super::dsp` 的预计算查找表。
 
 use super::dsp::soft_clip_fast;
 use crate::equalizer::{EQ_BAND_COUNT, EqSettings};
 
-/// EQ 处理器：共享与独占两条播放链路共用的滤波环节。
-///
-/// 扁平 `states` 布局与三阶段单次循环合并都为 cache 局部性，见 `process_one`。
+/// 共享与独占两条播放链路共用的滤波环节；扁平 `states` 布局与三阶段单次循环合并都为 cache 局部性（见 `process_one`）。
 pub struct EqProcessor {
     coefficients: Vec<crate::equalizer::BiquadCoefficients>,
     /// 扁平布局 `[channel * EQ_BAND_COUNT + band]`，一次分配到位
@@ -59,14 +57,12 @@ impl EqProcessor {
         let preamp = self.cached_preamp_multiplier;
         let channels = self.channels;
 
-        // i % channels 在 channels=2 时被编译器折成 i & 1，无取模开销
         for (i, sample) in samples.iter_mut().enumerate() {
             let channel = i % channels;
             *sample = self.process_one(*sample, channel, preamp);
         }
     }
 
-    /// 单采样的三阶段: preamp -> 逐级 biquad -> soft_clip，合并在同一循环内处理
     #[inline(always)]
     fn process_one(&mut self, input: f32, channel: usize, preamp: f32) -> f32 {
         let mut sample = input * preamp;
@@ -78,10 +74,7 @@ impl EqProcessor {
         soft_clip_fast(sample)
     }
 
-    /// 公开的逐采样处理（独占模式链路），供解码线程与 benchmark 复用
-    ///
-    /// 调用方必须按交错声道依次调用（`channel` 是采样在帧内的声道下标）。
-    /// 独占模式只有 Windows(WASAPI) 与 Android(AAudio)，其它平台无调用方。
+    /// 逐采样处理（独占模式链路）：调用方必须按交错声道依次调用，`channel` 是采样在帧内的声道下标。
     #[inline(always)]
     pub fn process_sample(&mut self, input: f32, channel: usize) -> f32 {
         if !self.cached_enabled {
@@ -133,7 +126,6 @@ mod eq_processor_tests {
         buf[channel]
     }
 
-    /// 稳态正弦峰值(丢弃前 warmup 个采样,取峰值)
     fn steady_state_amplitude(ep: &mut EqProcessor, freq: f32, amplitude: f32) -> f32 {
         let sample_rate = 48000.0_f32;
         let warmup = 4800;
@@ -153,7 +145,6 @@ mod eq_processor_tests {
     #[test]
     fn test_eq_processor_disabled_passthrough() {
         let mut ep = EqProcessor::new(48000, 2);
-        // 未 update_settings: cached_enabled = false
         for &x in &[0.5_f32, -0.3, 0.8, 0.0] {
             let y = process_channel(&mut ep, x, 0);
             assert!(approx_eq(y, x), "disabled EQ output {y} != input {x}");
@@ -184,7 +175,6 @@ mod eq_processor_tests {
     #[test]
     fn test_low_shelf_boosts_bass_region() {
         let mut ep = EqProcessor::new(48000, 2);
-        // 31Hz low shelf +6dB;preamp 补偿最大提升量以便单独验证滤波器响应
         ep.update_settings(&enabled_settings(0, 6.0, 6.0));
         let boosted = steady_state_amplitude(&mut ep, 8.0, 0.25);
         assert!(
@@ -220,7 +210,6 @@ mod eq_processor_tests {
 
     #[test]
     fn test_auto_preamp_prevents_clipping_on_boost() {
-        // +8dB boost + 满幅正弦:自动补偿后输出峰值不应超过 soft clip 阈值附近
         let mut ep = EqProcessor::new(48000, 2);
         ep.update_settings(&enabled_settings(5, 8.0, 0.0));
         let peak = steady_state_amplitude(&mut ep, 1000.0, 0.95);
@@ -232,7 +221,6 @@ mod eq_processor_tests {
 
     #[test]
     fn test_eq_processor_batch_is_chunk_splitting_invariant() {
-        // 交错立体声缓冲:process_batch 单次整批处理与分多次小批处理结果应一致
         let n_frames: usize = 480;
         let buffer: Vec<f32> = (0..n_frames * 2)
             .map(|i| {
@@ -247,11 +235,11 @@ mod eq_processor_tests {
         let mut expected = buffer.clone();
         whole.process_batch(&mut expected);
 
-        // 分块(每块 13 帧 = 26 采样,保持交错声道对齐)处理,结果应与整批一致
+        // 每块 13 帧，保持交错声道对齐
         let mut chunked = EqProcessor::new(48000, 2);
         chunked.update_settings(&enabled_settings(5, 4.0, 0.0));
         let mut got = buffer.clone();
-        const FRAME: usize = 2; // 声道数
+        const FRAME: usize = 2;
         let chunk = 13 * FRAME;
         for start in (0..got.len()).step_by(chunk) {
             let end = (start + chunk).min(got.len());

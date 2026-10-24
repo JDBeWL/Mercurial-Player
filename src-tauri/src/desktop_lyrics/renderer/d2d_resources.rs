@@ -1,9 +1,6 @@
-//! Direct2D / DirectWrite 资源生命周期管理：D2D 工厂、DC 渲染目标、文本格式缓存、
-//! 外部字体名字索引与内存字体加载器的创建、缓存与按代数重建。
+//! Direct2D / DirectWrite 资源管理
 //!
-//! 本模块是线程契约的持有者：所有 unsafe 方法（含 [`Direct2DState`] 的每一个）都必须
-//! 在已初始化 COM（`CoInitializeEx`）的 desktop-lyrics 渲染线程上调用，因为工厂与
-//! 渲染目标都是单线程的，thread_local [`D2D_STATE`] 也只在该线程存在。
+//! 所有方法必须在已 `CoInitializeEx` 的 desktop-lyrics 渲染线程调用；单线程工厂与 `thread_local` 状态线程独占。
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -50,10 +47,8 @@ pub(super) struct Direct2DState {
 
 impl Direct2DState {
     /// 创建 Direct2D / DirectWrite 工厂与 DC 渲染目标。
-    ///
     /// # Safety
-    /// 必须在已初始化 COM（`CoInitializeEx`）的 desktop-lyrics 渲染线程上调用；
-    /// 工厂是 `D2D1_FACTORY_TYPE_SINGLE_THREADED`，句柄不可跨线程传递。
+    /// 必须在已初始化 COM 的 desktop-lyrics 渲染线程调用；`SINGLE_THREADED` 工厂不可跨线程传递。
     pub(super) unsafe fn new() -> windows::core::Result<Self> {
         // SAFETY: 调用者保证当前线程已执行 CoInitializeEx
         let d2d_factory: ID2D1Factory =
@@ -72,7 +67,7 @@ impl Direct2DState {
             usage: D2D1_RENDER_TARGET_USAGE_NONE,
             minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
         };
-        // SAFETY: target_props 是栈上局部变量，&raw const 取其地址传给 Win32 后不再使用
+        // SAFETY: target_props 是栈上局部变量，仅在调用期间被读取
         let dc_render_target =
             unsafe { d2d_factory.CreateDCRenderTarget(&raw const target_props)? };
         // SAFETY: dc_render_target 刚创建，调用设置方法符合 COM 契约
@@ -107,8 +102,8 @@ impl Direct2DState {
         }
     }
 
-    /// 懒创建内存字体加载器：需 IDWriteFactory5（Windows 10 1709+），不可用时外部字体
-    /// 功能整体禁用、回落系统字体。注册到 factory 的要求见 [`build_memory_loader`]。
+    /// 懒创建内存字体加载器；需 `IDWriteFactory5`（Windows 10 1709+），不可用时
+    /// 外部字体整体禁用、回落系统字体。
     fn ensure_memory_loader(&mut self) -> Option<&IDWriteInMemoryFontFileLoader> {
         if self.memory_loader.is_none() {
             // SAFETY: 满足模块级线程契约（已初始化 COM 的渲染线程）
@@ -117,8 +112,8 @@ impl Direct2DState {
         self.memory_loader.as_ref()
     }
 
-    /// 解析 family 实际用的字体集合与族名：系统已安装优先（对齐前端 @font-face 的
-    /// local() 语义），否则按需加载 fonts/ 下同名族的外部字体，都不存在则交给系统回退
+    /// 解析实际字体来源：系统已安装优先（对齐前端 `@font-face` 的 `local()` 语义），
+    /// 否则按需加载 `fonts/` 下同名外部字体，都不存在则交给系统回退。
     fn resolve_font_source(&mut self, family: &str) -> (Option<IDWriteFontCollection>, String) {
         if family_has_system_face(&self.dwrite_factory, family) {
             return (None, family.to_string());

@@ -149,8 +149,6 @@ describe('useLyrics', () => {
     vi.clearAllMocks()
   })
 
-  // ---------- 共享状态 ----------
-
   describe('共享状态', () => {
     it('多次调用返回相同的共享 ref', () => {
       const result2 = useLyrics()
@@ -169,8 +167,6 @@ describe('useLyrics', () => {
       expect(result.onlineLyricsError.value).toBeNull()
     })
   })
-
-  // ---------- loadLyrics ----------
 
   describe('loadLyrics', () => {
     it('无路径时清空歌词状态', async () => {
@@ -370,8 +366,6 @@ describe('useLyrics', () => {
     })
   })
 
-  // ---------- fetchAndSaveLyrics ----------
-
   describe('fetchAndSaveLyrics', () => {
     it('无当前曲目时返回 false', async () => {
       mockPlayerState.currentTrack = null
@@ -473,8 +467,6 @@ describe('useLyrics', () => {
       expect(result.onlineLyricsError.value).toContain('API error')
     })
   })
-
-  // ---------- fetchCandidates / applyCandidate ----------
 
   describe('fetchCandidates / applyCandidate', () => {
     it('无当前曲目时 fetchCandidates 返回空数组', async () => {
@@ -592,8 +584,6 @@ describe('useLyrics', () => {
       expect(ok).toBe(false)
     })
   })
-
-  // ---------- cleanup ----------
 
   describe('cleanup', () => {
     it('重置所有共享状态', () => {

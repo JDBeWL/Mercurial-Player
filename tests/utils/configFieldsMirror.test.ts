@@ -1,8 +1,4 @@
-// 配置字段前后端镜像护栏
-//
-// 前端 `save_config` 把整个 AppConfig 交给后端，后端用强类型结构体反序列化；serde 会静默
-// 忽略未知字段，所以结构体漏字段就会在保存时丢弃、下次启动回默认值（`lyricProviderOrder` /
-// `lyricProviderSettings` / `autoSelectBestLyrics` 就这样丢过）。这里逐字段比对两边定义。
+// 配置字段前后端镜像护栏：serde 静默忽略后端结构体缺失的字段，漏字段时保存即丢值、下次启动回默认。
 import { describe, expect, it } from 'vitest'
 
 // 两个 glob：前端类型在 src/ 下，后端结构体在 src-tauri/ 下（后者不在 src 内，需单独匹配）

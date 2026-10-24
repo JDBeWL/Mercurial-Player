@@ -1,7 +1,4 @@
-/**
- * 插件沙箱 Worker 入口:本文件只做接线 (原生网络 API 移除 + 消息桥 + 未捕获拒绝转发),
- * 协议实现见 workerCore.ts;blob 内联 Worker 继承主文档 CSP 的安全考量见 workerSandboxHost 的 defaultWorkerFactory。
- */
+/** 插件沙箱 Worker 入口 / 只做原生网络 API 移除、消息桥与未捕获拒绝转发。 */
 
 import { SandboxWorkerRuntime, removeNetworkGlobals } from './workerCore'
 import type { WorkerToHostMessage } from './sandboxProtocol'

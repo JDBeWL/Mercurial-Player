@@ -31,14 +31,17 @@ struct MetadataCache {
 const CACHE_VERSION: u32 = 1;
 const METADATA_CACHE_FILENAME: &str = "metadata-cache.json";
 
+/// 缓存根目录（用户自定义优先，否则系统临时目录）：元数据、封面、BPM 共用，改一处管全部。
+pub(crate) fn cache_dir() -> PathBuf {
+    if let Some(custom_path) = get_cover_cache_path_setting() {
+        return PathBuf::from(custom_path);
+    }
+    std::env::temp_dir().join("mercurial-player")
+}
+
 /// 元数据缓存文件路径（缓存根目录下的 metadata-cache.json）
 fn metadata_cache_path() -> PathBuf {
-    if let Some(custom_path) = get_cover_cache_path_setting() {
-        return PathBuf::from(custom_path).join(METADATA_CACHE_FILENAME);
-    }
-    std::env::temp_dir()
-        .join("mercurial-player")
-        .join(METADATA_CACHE_FILENAME)
+    cache_dir().join(METADATA_CACHE_FILENAME)
 }
 
 fn load_metadata_cache() -> MetadataCache {
@@ -94,7 +97,7 @@ fn save_metadata_cache(cache: &MetadataCache) -> Result<(), AppError> {
 }
 
 /// 获取文件的修改时间（content URI 没有可 stat 的路径，从 SAF fd 上取）
-fn get_file_modified_time(path: &str) -> Option<u64> {
+pub(crate) fn get_file_modified_time(path: &str) -> Option<u64> {
     let metadata = if crate::android::saf::is_content_uri(path) {
         crate::android::saf::open_media_file(path)
             .ok()?
@@ -129,6 +132,20 @@ pub fn get_metadata_from_cache(path: &str) -> Option<TrackMetadata> {
 pub fn save_metadata_to_cache(path: &str, metadata: &TrackMetadata) {
     save_metadata_to_memory_cache(path, metadata);
     log::debug!("元数据已缓存: {path}");
+}
+
+/// 把 BPM 分析结论回填进已有的元数据缓存条目。
+///
+/// 只改已有条目、不新建：分析任务手上只有路径与 BPM；未扫描过的文件等下次扫描
+/// 由 `bpm::cached_value` 带出来。
+pub fn patch_cached_bpm(path: &str, bpm: Option<f64>) {
+    let mut guard = lock_or_log!(MEMORY_CACHE.write());
+    if guard.is_none() {
+        *guard = Some(load_metadata_cache());
+    }
+    if let Some(entry) = guard.as_mut().and_then(|cache| cache.entries.get_mut(path)) {
+        entry.metadata.bpm = bpm;
+    }
 }
 
 fn empty_metadata_cache() -> MetadataCache {
@@ -209,14 +226,22 @@ pub fn clear_metadata_cache() -> Result<(), AppError> {
     if cache_path.exists() {
         fs::remove_file(&cache_path).map_err(|e| format!("删除缓存文件失败: {e}"))?;
     }
+    // BPM 缓存的语义属于元数据缓存：留着会与已清空的扫描结果矛盾
+    if let Err(e) = crate::media::bpm::clear_bpm_cache() {
+        log::warn!("清除 BPM 分析缓存失败: {e}");
+    }
     log::info!("元数据缓存已清除");
     Ok(())
 }
 
 /// 缓存统计 (条目数, 磁盘占用字节数)：占用取缓存文件大小，清理针对的就是这个文件
+///
+/// BPM 分析缓存（`bpm-cache.json`）同样计入：它由元数据缓存派生，分开统计只会让用户困惑。
 pub fn get_metadata_cache_stats() -> (usize, u64) {
     let cache_path = metadata_cache_path();
-    let total_size = fs::metadata(&cache_path).map(|m| m.len()).unwrap_or(0);
+    let bpm_path = cache_dir().join("bpm-cache.json");
+    let total_size = fs::metadata(&cache_path).map(|m| m.len()).unwrap_or(0)
+        + fs::metadata(&bpm_path).map(|m| m.len()).unwrap_or(0);
     let entry_count = load_metadata_cache().entries.len();
 
     (entry_count, total_size)
@@ -459,7 +484,7 @@ fn clean_cache_by_size(max_cache_size_mb: u64) -> Result<usize, AppError> {
 
 /// 清理封面缓存：先删过期文件，再删超出大小限制的部分
 ///
-/// `max_cache_size_mb` 单位 MB，为 None 时取 [`DEFAULT_MAX_CACHE_SIZE_MB`]。
+/// `max_cache_size_mb` 单位 MB，为 None 时取 `DEFAULT_MAX_CACHE_SIZE_MB`。
 pub fn clean_cover_cache(max_cache_size_mb: Option<u64>) -> Result<usize, AppError> {
     let max_size = max_cache_size_mb.unwrap_or(DEFAULT_MAX_CACHE_SIZE_MB);
     log::info!("开始清理封面缓存（最大大小: {max_size}MB）...");

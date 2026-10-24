@@ -3,6 +3,7 @@ import logger from '@/utils/logger'
 import type { Track, ResumeResult, TrackSnapshot } from '@/types'
 import type { usePlayerStore } from './index'
 import { useMusicLibraryStore } from '../musicLibrary'
+import { maybeStartBpmAnalysis } from './loadTrack'
 
 /** Player store 的会话持久化与启动恢复。 */
 type PlayerStore = ReturnType<typeof usePlayerStore>
@@ -38,6 +39,7 @@ export async function saveLastSessionNow(store: PlayerStore): Promise<void> {
     channels: t.channels ?? null,
     bitDepth: t.bitDepth ?? null,
     format: t.format ?? null,
+    bpm: t.bpm ?? null,
   }))
   try {
     await invoke('save_last_session', {
@@ -80,6 +82,7 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
         channels: s.channels ?? null,
         bitDepth: s.bitDepth ?? null,
         format: s.format ?? null,
+        bpm: s.bpm ?? null,
       }))
       store._setPlaylist(playlist)
 
@@ -137,10 +140,18 @@ export async function resumeLastSession(store: PlayerStore): Promise<ResumeResul
         channels: matchedTrack.channels || null,
         bitDepth: matchedTrack.bitDepth || null,
         format: matchedTrack.format || null,
+        bpm: matchedTrack.bpm || null,
       }
       // 保持暂停:只有用户主动点播放才开始
       store.isPlaying = false
       store._updateTaskbarState()
+
+      // 恢复后处于暂停态，走不到 startPlayback 里的 BPM 触发点。
+      // 补这一次让信息栏在点播放之前就显示已知的 BPM——后端有缓存时几乎零成本，
+      // 没缓存也只是后台算一次，不影响界面。
+      if (matchedTrack.path) {
+        maybeStartBpmAnalysis(store, matchedTrack.path)
+      }
       logger.info(
         `Resumed last session (paused): ${trackPath} @ ${result.positionSecs}s (${result.status}), playlist=${playlist.length} tracks`,
       )

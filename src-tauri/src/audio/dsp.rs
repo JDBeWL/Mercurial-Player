@@ -1,23 +1,20 @@
-//! 音频 DSP 辅助
+//! 音频 DSP 辅助：软削波查找表、Hann 窗、多通道转换。
 //!
-//! 软削波与 preamp 预计算查找表、Hann 窗、多通道转换。
-//! 共享模式(VisualizationSource)与独占模式(解码推送线程)共用。
+//! 共享模式(`VisualizationSource`)与独占模式(解码推送线程)共用。
 
 /// 软削波查找表大小（覆盖 0.0 到 2.0，精度 0.001）
 const SOFT_CLIP_TABLE_SIZE: usize = 2001;
 
-/// 预计算的软削波查找表
 static SOFT_CLIP_TABLE: std::sync::LazyLock<[f32; SOFT_CLIP_TABLE_SIZE]> =
     std::sync::LazyLock::new(|| {
         let mut table = [0.0f32; SOFT_CLIP_TABLE_SIZE];
         for (i, item) in table.iter_mut().enumerate() {
-            let x = i as f32 / 1000.0; // 0.0到2.0
+            let x = i as f32 / 1000.0;
             *item = compute_soft_clip(x);
         }
         table
     });
 
-/// 计算软削波值（用于生成查找表）
 #[inline]
 fn compute_soft_clip(x: f32) -> f32 {
     let threshold = 0.95;
@@ -29,30 +26,26 @@ fn compute_soft_clip(x: f32) -> f32 {
     }
 }
 
-/// 快速软削波 - 使用查找表
 #[inline(always)]
 pub(crate) fn soft_clip_fast(x: f32) -> f32 {
     let sign = x.signum();
     let abs_x = x.abs();
 
-    // 非有限值不能进表：NaN 的 `as usize` 归 0 会查出 0 再乘 NaN 符号仍是 NaN，
+    // 非有限值不能进表：NaN 的 `as usize` 归 0 会查表得 0，再乘 NaN 符号仍是 NaN，
     // 而 WASAPI 的 SIMD 量化把 NaN 映射成 0x80000000(满幅负压)
     if !abs_x.is_finite() {
         return if abs_x.is_nan() { 0.0 } else { sign };
     }
 
-    // 快速路径：大多数采样在[-0.95, 0.95]范围内
     if abs_x <= 0.95 {
         return x;
     }
 
-    // 查表路径
     let index = ((abs_x * 1000.0) as usize).min(SOFT_CLIP_TABLE_SIZE - 1);
     sign * SOFT_CLIP_TABLE[index]
 }
 
-/// 预计算 Hann 窗口(避免每次 FFT 都堆分配)
-/// 公式: hann[i] = 0.5 - 0.5 * cos(2π * i / N)
+/// 预计算 Hann 窗，避免每次 FFT 都堆分配。
 pub(crate) fn precompute_hann_window(size: usize) -> Vec<f32> {
     let n = size as f32;
     (0..size)
@@ -63,12 +56,8 @@ pub(crate) fn precompute_hann_window(size: usize) -> Vec<f32> {
         .collect()
 }
 
-/// 5.1/7.1环绕声到立体声的专业混音
-/// 使用ITU-R BS.775-1标准的下混系数。
-///
-/// 共享模式(decoder::convert_audio_buffer)与独占模式(decode_push::convert_channels_into)
-/// 共用此实现,避免两套系数漂移。非 6/8 声道的其它多声道布局退化为
-/// FL/FR * 0.8 输出。
+/// 5.1/7.1 环绕声下混立体声，系数取自 ITU-R BS.775-1；非 6/8 声道退化为 FL/FR * 0.8。
+/// 共享模式(`decoder::convert_audio_buffer`)与独占模式(`decode_push::convert_channels_into`)共用，避免两套系数漂移。
 pub(crate) fn downmix_surround_to_stereo(
     samples: &[f32],
     src_ch: usize,
@@ -120,8 +109,7 @@ pub(crate) fn downmix_surround_to_stereo(
     )
 }
 
-/// 通道转换(in-place 版本):写入预分配缓冲区,避免每帧堆分配。
-/// out 会被 clear 并填充结果。
+/// 通道转换(in-place)：写入预分配缓冲区，避免每帧堆分配；`out` 会被 clear 并填充结果。
 #[cfg(any(windows, target_os = "android"))]
 pub(crate) fn convert_channels_into(
     samples: &[f32],
@@ -150,21 +138,19 @@ pub(crate) fn convert_channels_into(
                 out.push(f32::midpoint(samples[start], samples[start + 1]));
             }
             (6 | 8, 2) => {
-                // 5.1/7.1到立体声的专业混音
                 let (left, right) = downmix_surround_to_stereo(samples, src, f);
                 out.push(left);
                 out.push(right);
             }
             (2, _) if tgt > 2 => {
-                // 立体声上混到 5.1/7.1：只在 L/R 两个位置出声，其余留静音。把 L 原样复制进
-                // C/LFE/环绕会得到 0dB 的全频 LFE（真实 LFE 是 <120Hz 的特效声道）和糊成
-                // 一片的声场；VLC 与 ffmpeg 的默认 pan 也是 L/R only
+                // 立体声上混到 5.1/7.1：只填 L/R，其余静音。把 L 复制进 C/LFE/环绕会得到 0dB 全频 LFE
+                // 和糊成一片的声场；VLC 与 ffmpeg 的默认 pan 也是 L/R only。
                 out.push(samples[start]);
                 out.push(samples[start + 1]);
                 out.resize(out.len() + tgt - 2, 0.0);
             }
             _ => {
-                // 其它组合：位置对得上的照抄，对不上的补静音（不再用 L 填满多余声道）
+                // 其它组合：位置对得上的照抄，对不上的补静音；不要用 L 填满多余声道（会得到 0dB 全频）。
                 for ch in 0..tgt {
                     out.push(if ch < src { samples[start + ch] } else { 0.0 });
                 }
@@ -183,7 +169,6 @@ mod tests {
 
     #[test]
     fn test_soft_clip_fast_passthrough_below_threshold() {
-        // |x| <= 0.95 直通(快速路径,位精确)
         for &x in &[0.0_f32, 0.1, 0.5, 0.9, 0.95, -0.5, -0.9, -0.95] {
             let y = soft_clip_fast(x);
             assert!(
@@ -196,7 +181,6 @@ mod tests {
 
     #[test]
     fn test_soft_clip_fast_compresses_above_threshold() {
-        // |x| > 0.95 压缩:输出幅度减小、符号保持、永不越过 1.0(f32 下大输入饱和到 1.0)
         for &x in &[
             0.951_f32, 1.0, 1.5, 2.0, 10.0, -0.951, -1.0, -1.5, -2.0, -10.0,
         ] {
@@ -218,7 +202,6 @@ mod tests {
 
     #[test]
     fn test_soft_clip_fast_ceiling_monotonic() {
-        // 查表路径单调逼近 1.0(f32 下 tanh 在极大输入处饱和为 1.0)
         let mut prev = soft_clip_fast(0.95);
         for &x in &[0.96_f32, 0.98, 1.0, 1.2, 1.5, 2.0, 100.0] {
             let y = soft_clip_fast(x);
@@ -273,10 +256,9 @@ mod tests {
         );
     }
 
-    #[cfg(any(windows, target_os = "android"))] // convert_channels_into 仅独占模式（Windows/AAudio）使用
+    #[cfg(any(windows, target_os = "android"))]
     #[test]
     fn test_convert_channels_into_6_to_2_matches_downmix() {
-        // (6|8,2) 分支必须与 downmix_surround_to_stereo 逐帧一致
         let src: u16 = 6;
         let mut input = Vec::with_capacity(6 * 4);
         for f in 0..4 {
@@ -296,8 +278,6 @@ mod tests {
     #[cfg(any(windows, target_os = "android"))]
     #[test]
     fn test_convert_channels_into_2_to_6_keeps_extras_silent() {
-        // 立体声上混到 5.1：只有 L/R 有内容。曾经的做法是把 L 复制进 C/LFE/环绕，
-        // 那等于用 0dB 全频信号喂 LFE
         let input = [0.5, -0.5, 0.25, -0.25];
         let mut out = Vec::new();
         convert_channels_into(&input, 2, 6, &mut out);

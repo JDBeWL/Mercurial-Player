@@ -1,9 +1,6 @@
 Unicode true
 ManifestDPIAware true
-; Add in `dpiAwareness` `PerMonitorV2` to manifest for Windows 10 1607+ (note this should not affect lower versions since they should be able to ignore this and pick up `dpiAware` `true` set by `ManifestDPIAware true`)
-; Currently undocumented on NSIS's website but is in the Docs folder of source tree, see
-; https://github.com/kichik/nsis/blob/5fc0b87b819a9eec006df4967d08e522ddd651c9/Docs/src/attributes.but#L286-L300
-; https://github.com/tauri-apps/tauri/pull/10106
+; PerMonitorV2 DPI awareness for Windows 10 1607+; lower versions ignore it.
 ManifestDPIAwareness PerMonitorV2
 
 !if "{{compression}}" == "none"
@@ -164,30 +161,11 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
   !define MUI_UNICON "${UNINSTALLERICON}"
 !endif
 
-; Registry key to store installer language -- DISABLED on purpose.
-;
-; Upstream Tauri defines these three, which makes MUI2:
-;   * read  HKCU\<manufacturer>\<product>\Installer Language in MUI_LANGDLL_DISPLAY
-;     and skip the language dialog when a value is present
-;   * write it from MUI_LANGDLL_SAVELANGUAGE, which MUI2 inserts unconditionally into
-;     the MUI_PAGE_INSTFILES page function (Contrib/Modern UI 2/Pages/InstallFiles.nsh),
-;     so the value is written on every install even when no selector was shown.
-;
-; Leaving them undefined means: no read, no write, and the language selector is shown
-; every time the installer runs.
-;
-; !define MUI_LANGDLL_REGISTRY_ROOT "HKCU"
-; !define MUI_LANGDLL_REGISTRY_KEY "${MANUPRODUCTKEY}"
-; !define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
+; Upstream defines MUI_LANGDLL_REGISTRY_* to remember the language; leaving them undefined
+; means no registry read/write and the selector is shown on every install.
 
-; Installer pages, must be ordered as they appear
-; 1. Welcome Page
-;
-; Use our own welcome text instead of MUI's stock one. MUI's bundled
-; SimpChinese/English copy claims the installer "updates system files" and
-; asks the user to "close all other applications", both of which are false
-; for this app - it is a self-contained local music player, it writes nothing
-; outside its own install directory and never requires a reboot.
+; Installer pages, must be ordered as they appear.
+; Custom welcome text: MUI stock copy falsely claims system-file updates and asks to close apps.
 !define MUI_WELCOMEPAGE_TEXT "$(welcomeText)"
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
 !insertmacro MUI_PAGE_WELCOME
@@ -209,17 +187,8 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 Var ReinstallPageCheck
 Page custom PageReinstall PageLeaveReinstall
 Function PageReinstall
-  ; Uninstall previous WiX installation if exists.
-  ;
-  ; A WiX installer stores the installation info in registry
-  ; using a UUID and so we have to loop through all keys under
-  ; `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`
-  ; and check if `DisplayName` and `Publisher` keys match ${PRODUCTNAME} and ${MANUFACTURER}
-  ;
-  ; This has a potential issue that there maybe another installation that matches
-  ; our ${PRODUCTNAME} and ${MANUFACTURER} but wasn't installed by our WiX installer,
-  ; however, this should be fine since the user will have to confirm the uninstallation
-  ; and they can chose to abort it if doesn't make sense.
+  ; Uninstall previous WiX installation if present: WiX stores its entry under a UUID, so match
+  ; DisplayName/Publisher under HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall.
   StrCpy $0 0
   wix_loop:
     EnumRegKey $1 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" $0
@@ -281,12 +250,7 @@ Function PageReinstall
     Abort
   ${EndIf}
 
-  ; Skip showing the page if passive
-  ;
-  ; Note that we don't call this earlier at the begining
-  ; of this function because we need to populate some variables
-  ; related to current installed version if detected and whether
-  ; we are downgrading or not.
+  ; Skip page in passive mode; call after installed-version variables are populated.
   ${If} $PassiveMode = 1
     Call PageLeaveReinstall
   ${Else}
@@ -343,10 +307,7 @@ Function PageLeaveReinstall
     Goto reinst_done
   ${EndIf}
 
-  ; $R0 holds whether same(0)/upgrading(1)/downgrading(-1) version
-  ; $R1 holds the radio buttons state:
-  ;   1 => first choice was selected
-  ;   0 => second choice was selected
+  ; $R0: same(0)/upgrading(1)/downgrading(-1); $R1: radio choice (1 = first, 0 = second).
   ${If} $R0 = 0 ; Same version, proceed
     ${If} $R1 = 1              ; User chose to add/reinstall
       Goto reinst_done
@@ -471,10 +432,7 @@ Function PageLeaveCustomFinish
 FunctionEnd
 
 Function ApplyShortcutChoices
-  ; Reads $CreateDesktopShortcutCheckbox / $CreateStartMenuShortcutCheckbox
-  ; (default 1 = create, set in .onInit; /NS sets both to 0) and creates the
-  ; corresponding shortcuts. Called from PageLeaveCustomFinish (GUI) and
-  ; .onInstSuccess (silent / passive).
+  ; Apply shortcut choices from the finish page (GUI) or `.onInit` defaults (silent/passive).
   ${If} $CreateDesktopShortcutCheckbox = 1
     Call CreateOrUpdateDesktopShortcut
   ${EndIf}
@@ -503,13 +461,7 @@ Var DeleteAppDataNoteLabel
 !define /ifndef WS_EX_LAYOUTRTL         0x00400000
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ConfirmShow
 Function un.ConfirmShow ; Add a `Delete user data` check box
-  ; $1 inner dialog HWND
-  ; $2 window DPI
-  ; $3 style
-  ; $4 x
-  ; $5 y
-  ; $6 width
-  ; $7 height
+  ; $1..$7: dialog HWND, DPI, style, x, y, width, height.
   FindWindow $1 "#32770" "" $HWNDPARENT ; Find inner dialog
   StrCpy $R9 $1                          ; keep the inner dialog HWND around
   System::Call "user32::GetDpiForWindow(p r1) i .r2"
@@ -576,10 +528,7 @@ Function .onInit
     StrCpy $UpdateMode 1
   ${EndIf}
 
-  ; Default to creating both shortcuts and launching the app; the finish page
-  ; overrides these in GUI mode. /NS explicitly disables both shortcuts.
-  ; Silent installers keep the default = create, since no page is shown and
-  ; the intent isn't "skip shortcuts", it's "don't show me a dialog".
+  ; Silent-install defaults: create both shortcuts and launch. `/NS` sets both to 0; the GUI page overrides.
   StrCpy $CreateDesktopShortcutCheckbox 1
   StrCpy $CreateStartMenuShortcutCheckbox 1
   StrCpy $LaunchAppCheckbox 0
@@ -826,10 +775,7 @@ Section Install
     WriteRegStr SHCTX "${UNINSTKEY}" "HelpLink" "${HOMEPAGE}"
   !endif
 
-  ; Shortcut creation moved out of Section Install. It now happens
-  ; in PageLeaveCustomFinish (GUI: user makes the choice on the finish
-  ; page) or .onInstSuccess (silent / passive: no GUI choice, fall back
-  ; to .onInit defaults). Use `ApplyShortcutChoices` from both.
+  ; Shortcut creation happens in `PageLeaveCustomFinish` (GUI) or `.onInstSuccess` (silent/passive), not here.
 
   !ifmacrodef NSIS_HOOK_POSTINSTALL
     !insertmacro NSIS_HOOK_POSTINSTALL
@@ -869,10 +815,7 @@ Function un.onInit
     !insertmacro MULTIUSER_UNINIT
   !endif
 
-  ; Language memory was intentionally removed (no registry write/read).
-  ; MUI_UNGETLANGUAGE would pop a language dialog every time because nothing
-  ; is saved, so instead: NSIS already matched $LANGUAGE against the system
-  ; at startup; remap only when neither loaded language matches.
+  ; Language memory is disabled: no registry read/write, so remap only when neither loaded language matches.
   ${If} $LANGUAGE != ${LANG_SIMPCHINESE}
   ${AndIf} $LANGUAGE != ${LANG_ENGLISH}
     StrCpy $LANGUAGE ${LANG_ENGLISH}  ; fallback = English
@@ -939,10 +882,7 @@ Section Uninstall
   ${If} $UpdateMode <> 1
     !insertmacro DeleteAppUserModelId
 
-    ; Remove start menu shortcut. MUI_PAGE_STARTMENU is no longer shown, so
-    ; MUI_STARTMENU_GETFOLDER has nothing to read from. Use the same static
-    ; folder derivation as the installer (${STARTMENUFOLDER} from Tauri
-    ; config, falling back to ${PRODUCTNAME}).
+    ; `MUI_PAGE_STARTMENU` is no longer shown; derive the folder the same way as the installer.
     !if "${STARTMENUFOLDER}" != ""
       StrCpy $AppStartMenuFolder "${STARTMENUFOLDER}"
     !else
@@ -980,19 +920,14 @@ Section Uninstall
     DeleteRegKey HKCU "${UNINSTKEY}"
   !endif
 
-  ; Removes the Autostart entry for ${PRODUCTNAME} from the HKCU Run key if it exists.
-  ; This ensures the program does not launch automatically after uninstallation if it exists.
-  ; If it doesn't exist, it does nothing.
-  ; We do this when not updating (to preserve the registry value on updates)
+  ; Remove the HKCU Run autostart entry on real uninstall; preserve it on updates.
   ${If} $UpdateMode <> 1
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"
   ${EndIf}
 
   ; Only clean anything up when this is a real uninstall, not an update
   ${If} $UpdateMode <> 1
-    ; -----------------------------------------------------------------------
     ; 1) Installer bookkeeping in the registry (not user data) - always removed
-    ; -----------------------------------------------------------------------
     DeleteRegKey SHCTX "${MANUPRODUCTKEY}"
     DeleteRegKey /ifempty SHCTX "${MANUKEY}"
 
@@ -1000,10 +935,8 @@ Section Uninstall
     DeleteRegKey /ifempty HKCU "${MANUPRODUCTKEY}"
     DeleteRegKey /ifempty HKCU "${MANUKEY}"
 
-    ; -----------------------------------------------------------------------
     ; 2) Cache / derived data - generated by the app and its dependencies and
     ;    always rebuildable, so it goes away unconditionally.
-    ; -----------------------------------------------------------------------
     SetShellVarContext current
 
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}\EBWebView"
@@ -1017,18 +950,13 @@ Section Uninstall
     ; Cover / metadata / font-extract caches (default location)
     RmDir /r "$TEMP\mercurial-player"
 
-    ; Runtime folders that only ever held cache are removed when empty, so a
-    ; clean uninstall still leaves no directory behind. fonts/ is exempt: it
-    ; holds external fonts dropped in by the user (user data), so it is only
-    ; ever touched in the user-data block below and survives an uninstall
-    ; that keeps user data - even when it is empty.
+    ; Cache-only runtime folders are removed when empty; fonts/ is user data and only touched in the user-data block.
+    ; It survives an uninstall that keeps user data, even when empty.
     RmDir "$INSTDIR\data"
     RmDir "$INSTDIR"
   ${EndIf}
 
-  ; -------------------------------------------------------------------------
   ; 3) User data - only removed when the checkbox on the confirm page is ticked
-  ; -------------------------------------------------------------------------
   ${If} $DeleteAppDataCheckboxState = 1
   ${AndIf} $UpdateMode <> 1
     SetShellVarContext current
@@ -1037,10 +965,8 @@ Section Uninstall
     RmDir /r "$INSTDIR\fonts"              ; external fonts dropped in by the user
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
 
-    ; Also wipe the whole installation directory (runtime-generated folders
-    ; such as data/, fonts/ are not covered by the per-file Delete calls above).
-    ; NSIS runs the uninstaller from a copy in $TEMP, so deleting $INSTDIR
-    ; underneath itself is safe.
+    ; Also wipe `$INSTDIR`: runtime-generated data/ and fonts/ are not covered by per-file Delete calls.
+    ; NSIS runs the uninstaller from `$TEMP`, so deleting `$INSTDIR` underneath itself is safe.
     RmDir /r "$INSTDIR"
   ${EndIf}
 

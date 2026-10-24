@@ -12,13 +12,8 @@ use crate::audio::sample_ring::{bump_write_epoch, current_write_epoch};
 /// 生产者的 2 秒水位门控（见 decode_push）远小于它，故无需设备初始化后再跨线程重设容量。
 pub(super) const SPSC_RING_CAPACITY: usize = 384_000 * 2 * 4;
 
-/// 无锁 SPSC(单生产者/单消费者)采样环形缓冲：渲染回调与解码线程不争互斥锁
-/// （Windows 上 `std::sync::Mutex` 争用会陷入内核，渲染线程被抢占即产生 xrun/爆音）。
-///
-/// 线程契约:push/push_slice_checked 仅生产者；pop_slice 仅消费者；clear/len 任意线程；
-/// invalidate 仅命令线程（递增全局世代，不在实时线程做）。
-/// 内存序:head 由生产者独占推进；tail 有两个写者（消费者的读出推进与 clear 的快进），
-/// 故两边都用 `fetch_max` 只抬不降。计数器单调递增，以 `usize` 计不会回绕。
+/// 无锁 SPSC 环形缓冲：实时回调与解码线程不争互斥锁（Windows 上争用会 xrun/爆音）。
+/// `push`/`pop` 各限单线程，`invalidate` 仅命令线程；`head`/`tail` 用 `fetch_max` 只抬不降。
 pub(super) struct SpscSampleRing {
     /// 内部可变性:生产者/消费者访问不相交区间（SAFETY 说明见各方法）
     buf: UnsafeCell<Box<[f32]>>,
@@ -57,11 +52,8 @@ impl SpscSampleRing {
             .unwrap_or(0)
     }
 
-    /// 生产者:带写入世代校验的写入（挡住切歌 / 停止时已被作废的生产者）；
-    /// 提交前复验世代，过期则不推进 `head`，这批采样对消费者永不可见。
-    ///
-    /// - `Some(n)`：写入 n 个（n 可为 0，表示缓冲已满，可等待后重试）
-    /// - `None`：世代已被 [`Self::invalidate`] 作废，必须停止写入
+    /// 带写入世代校验的批量写入；提交前复验世代，过期则不推进 `head`。
+    /// `Some(n)` 写入 n 个（0 表示缓冲已满，可重试）；`None` 表示已被 `invalidate` 作废，必须停止写入。
     pub(super) fn push_slice_checked(&self, samples: &[f32], epoch: u64) -> Option<usize> {
         if self.epoch.load(Ordering::Acquire) != epoch {
             return None;

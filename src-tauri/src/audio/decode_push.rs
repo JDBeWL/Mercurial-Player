@@ -37,7 +37,7 @@ const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
 #[cfg(any(windows, target_os = "android"))]
 pub(super) fn decode_and_push_to_wasapi(
     mut source: LockFreeSymphoniaSource,
-    // 独占播放器（见 [`crate::app_state::PlatformPlayer`]），参数名沿用早期的 wasapi 叫法
+    // 独占播放器（见 `crate::app_state::PlatformPlayer`），参数名沿用早期的 wasapi 叫法
     wasapi: Arc<Mutex<Option<crate::app_state::PlatformPlayer>>>,
     app: AppHandle,
     generation: Arc<AtomicU64>,

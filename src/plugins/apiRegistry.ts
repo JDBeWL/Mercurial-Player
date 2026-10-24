@@ -1,8 +1,4 @@
-/**
- * 权限元数据的单一事实来源:pluginAPI.ts 的权威校验与 workerCore.ts 的沙箱预检共用本表,避免两份手写映射漂移
- *
- * 值为调用该动作所需的权限;null 表示不额外设限(读取类动作,或由主侧白名单另行把关)
- */
+/** 动作 -> 权限的单一元数据源,`pluginAPI` 权威校验与 `workerCore` 沙箱预检共用;null 表示不额外限权 */
 import { PluginPermission, type PluginPermissionType } from './pluginTypes'
 
 const API_ACTION_PERMISSIONS = {
@@ -48,7 +44,7 @@ const API_ACTION_PERMISSIONS = {
   'storage.remove': PluginPermission.STORAGE,
   'storage.getAll': PluginPermission.STORAGE,
 
-  // 事件订阅走 pluginTypes 的白名单校验,emit/off 不设权限
+  // 事件订阅白名单与权限在 pluginTypes 校验,故 on/off/emit 不设权限
   'events.on': null,
   'events.off': null,
   'events.emit': null,
@@ -61,7 +57,6 @@ const API_ACTION_PERMISSIONS = {
   'clipboard.writeImage': PluginPermission.CLIPBOARD_WRITE,
   'clipboard.writeText': PluginPermission.CLIPBOARD_WRITE,
 
-  // 工具动作是纯计算/画布操作,无副作用,不设权限
   'utils.formatTime': null,
   'utils.createCanvas': null,
   'utils.canvasToBlob': null,

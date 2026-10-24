@@ -1,9 +1,6 @@
 /* 唯一的全局样式入口（main.ts 引入）：字体、主题令牌与各组件共享的类。
    App.vue 自己的布局在 App.css（scoped），歌词配色包在 assets/css 下按需动态加载。 */
 
-/* =========================================
-   Fonts
-   ========================================= */
 @font-face {
   font-family: 'Material Symbols Rounded';
   font-style: normal;
@@ -83,9 +80,6 @@
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* =========================================
-   Base & Reset
-   ========================================= */
 body {
   margin: 0;
   font-family: var(--app-font-family);
@@ -166,9 +160,6 @@ html.theme-fading *::after {
   user-select: none;
 }
 
-/* =========================================
-   Components: Buttons & Interactables
-   ========================================= */
 /* Shared Button Styles */
 .filled-button,
 .text-button,
@@ -329,9 +320,6 @@ ThemeSelector {
   -webkit-app-region: no-drag;
 }
 
-/* =========================================
-   Components: Cards & Lists
-   ========================================= */
 /* List Styles */
 .list {
   background-color: var(--md-sys-color-surface);
@@ -428,12 +416,8 @@ ThemeSelector {
   margin-right: 8px;
 }
 
-/* ===== 触屏按压态 =====
-   上面那批 :hover 现在都关在 @media (hover: hover) 里（触屏上 :hover 会粘住，
-   点完一直亮着，看着像长按没松），而 -webkit-tap-highlight-color 又是 transparent、
-   原生水波纹也没有 —— 手机上就变成"按下去毫无反应"。这里给同一批共享类补 :active。
-   带 button 前缀的那几个类定义在各组件的 scoped 样式里，scoped 基础规则的选择器
-   自带 [data-v-*] 属性、权重与全局同名类相同却后注入，不加一层元素名会被它压掉。 */
+/* 触屏按压态：`:hover` 在触屏会粘住，tap-highlight 已关，不补 `:active` 就毫无反馈。
+   带 `button` 前缀是为了压过各组件后注入的 scoped 同名规则。 */
 @media (hover: none) {
   .icon-button:active,
   .play-button:active,
@@ -468,9 +452,6 @@ ThemeSelector {
   }
 }
 
-/* =========================================
-   Components: Inputs & Controls
-   ========================================= */
 /* Progress Bar - 增强渐变效果 */
 .progress-bar {
   position: relative;
@@ -535,9 +516,6 @@ ThemeSelector {
   transform: translateX(-50%) scale(1.2);
 }
 
-/* =========================================
-   Layout: Navigation & Window
-   ========================================= */
 .nav-bar {
   display: flex;
   align-items: center;
@@ -569,9 +547,6 @@ ThemeSelector {
   align-items: center;
 }
 
-/* =========================================
-   Utilities (Layout, Spacing, Typography)
-   ========================================= */
 /* Layout Helpers */
 .flex-1 {
   flex: 1;
@@ -592,9 +567,6 @@ ThemeSelector {
   border-radius: var(--md-sys-shape-corner-medium);
 }
 
-/* =========================================
-   Animations & Misc
-   ========================================= */
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity var(--transition-normal) var(--ease-in-out);

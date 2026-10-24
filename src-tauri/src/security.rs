@@ -1,7 +1,6 @@
-//! 安全校验工具：路径与文件名的统一校验，防路径穿越、任意文件读写。
+//! 安全校验：路径与文件名的统一校验，防路径穿越、任意文件读写。
 //!
-//! 除 [`is_within_dir`] / [`is_within_music_dirs`] 需要 canonicalize 外，其余检查都是词法检查，
-//! 可以直接作用在前端传入的参数上。
+//! 除 `is_within_dir` / `is_within_music_dirs` 需要 canonicalize，其余都是可直接用于前端参数的词法检查。
 
 use std::path::Path;
 
@@ -111,10 +110,7 @@ pub fn is_within_dir(path: &Path, base: &Path) -> bool {
 }
 
 /// 目录扫描类命令的白名单门禁：路径必须是已登记的 `music_directories` 之一或其子目录。
-///
-/// `is_sensitive_path` 只是黑名单，挡不住"传一个用户从没添加过的目录"，而整树枚举加元数据
-/// 回传正是被攻破的渲染进程最想要的能力。Android 的 SAF 树 URI 本身就代表用户授权，放行；
-/// 目录不存在时 `is_within_dir` 返回 false，因此卸载的外置盘会自然被拒。
+/// 黑名单挡不住"传一个没添加过的目录"；Android SAF 树 URI 代表用户授权，放行；目录不存在时 `is_within_dir` 返回 false。
 #[must_use]
 pub fn is_within_music_dirs(path: &str, music_dirs: &[String]) -> bool {
     if crate::android::saf::is_content_uri(path) {

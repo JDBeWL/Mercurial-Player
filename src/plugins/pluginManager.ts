@@ -31,7 +31,6 @@ import {
   type Visualizer,
 } from './pluginTypes'
 
-// 纯类型契约在 pluginTypes.ts;此处 re-export 保持既有 `from './pluginManager'` 的 import 路径可用
 export { PluginState, PluginPermission } from './pluginTypes'
 export type {
   Track,
@@ -93,7 +92,7 @@ class PluginManager {
   private _playerWatcherStop: WatchStopHandle | null
   // 外置插件的 Worker 宿主:停用即 terminate,卸载时移除引用
   private workerHosts: Map<string, PluginWorkerHost>
-  // 每个插件的激活代数:deactivate/uninstall 递增它,作废在途的 activate 结果(提交点校验见 activate)
+  // 激活代数:deactivate/uninstall 递增以作废在途的 activate 结果
   private activationGens: Map<string, number>
 
   constructor() {
@@ -150,11 +149,7 @@ class PluginManager {
     logger.info('插件管理器已初始化')
   }
 
-  /**
-   * 释放管理器占用的全部资源(应用关闭路径调用)
-   *
-   * 单个插件 deactivate 抛错不影响其余插件,存储落盘始终执行
-   */
+  /** 释放管理器占用的全部资源(应用关闭路径):单个插件 `deactivate` 抛错不影响其余插件,存储落盘始终执行 */
   async cleanup(): Promise<void> {
     if (this._playerWatcherStop) {
       this._playerWatcherStop()
@@ -177,7 +172,6 @@ class PluginManager {
     // deactivate 可能漏清,这里兜底
     this.eventListeners.clear()
 
-    // 覆盖 deactivate 未处理到的存储
     for (const [pluginId, storage] of this.storage) {
       try {
         void storage.flush()
@@ -238,14 +232,13 @@ class PluginManager {
     }
 
     plugin.state = PluginState.LOADING
-    // 取本次激活的代数快照,提交前据此作废(机制见 activationGens 字段)
     const generation = (this.activationGens.get(pluginId) ?? 0) + 1
     this.activationGens.set(pluginId, generation)
 
     try {
       const api = createPluginAPI(pluginId, plugin.permissions, this)
 
-      // 外置插件走 Worker 宿主;内置插件是受信任代码,直接在主窗口执行(隔离原因见 pluginLoader)
+      // 外置插件走 Worker 宿主;内置插件是受信任代码,直接在主窗口执行
       const workerHost = this.workerHosts.get(pluginId)
       let sandbox: PluginSandbox
       let instance: PluginInstance
@@ -261,8 +254,7 @@ class PluginManager {
         await sandbox.execute(() => instance.activate!())
       }
 
-      // 内置插件的 await 打不断(只有 Worker 能被 terminate),只能在提交点验收:
-      // 代数已变说明激活期间被停用过,这份实例登记下去就是带活定时器的僵尸插件
+      // 内置插件的 await 打不断,只能在提交点验收:代数已变说明激活期间被停用,登记下去就是带活定时器的僵尸插件
       if (this.activationGens.get(pluginId) !== generation) {
         logger.warn(`插件 ${pluginId} 在激活期间已被停用，丢弃这次激活结果`)
         try {
@@ -306,10 +298,8 @@ class PluginManager {
     if (!plugin) return
 
     if (plugin.state === PluginState.LOADING) {
-      // 递增代数作废在途激活(验收分支见 activate)
       this.activationGens.set(pluginId, (this.activationGens.get(pluginId) ?? 0) + 1)
-      // 走到这里说明激活挂起(init/runMain 超时或死循环),强制 terminate;
-      // terminate 会让在途 activate 的 catch 置 ERROR,这里同步置一次保证返回后状态立即可用
+      // 激活挂起:terminate 会让在途 activate 的 catch 置 ERROR,这里同步置一次保证返回后状态立即可用
       const workerHost = this.workerHosts.get(pluginId)
       if (workerHost) {
         try {
@@ -453,7 +443,7 @@ class PluginManager {
     if (listeners) {
       for (const { callback } of listeners) {
         try {
-          // 回调多返回 Promise,同步 catch 捕不到拒绝;包一层 Promise.resolve 挂 .catch,避免 unhandledrejection
+          // 回调常返回 Promise,同步 catch 捕不到拒绝;包 `Promise.resolve` 挂 .catch 避免 unhandledrejection
           void Promise.resolve(callback(data)).catch((error) => {
             logger.error(`事件处理出错: ${event}`, error)
           })
@@ -464,7 +454,7 @@ class PluginManager {
     }
   }
 
-  /** 按插件惰性创建持久化存储;1MB 限额,紧急清理与防抖规则见 pluginStorage.ts */
+  /** 按插件惰性创建持久化存储;1MB 限额与防抖规则见 `pluginStorage` */
   getStorage(pluginId: string): PluginPersistentStorage {
     if (!this.storage.has(pluginId)) {
       this.storage.set(pluginId, createPluginStorage(pluginId))

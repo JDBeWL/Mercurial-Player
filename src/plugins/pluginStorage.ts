@@ -1,8 +1,4 @@
-/**
- * 插件存储:按 `PLUGIN_STORAGE_PREFIX + pluginId` 给每个插件一份独立的 localStorage 命名空间
- *
- * 序列化上限 1MB,超限裁剪数组;QuotaExceeded 走紧急截断;写入经 300ms 防抖并串行排队
- */
+/** 插件存储 / 每个插件一份 `localStorage` 命名空间；上限 1MB，写入 300ms 防抖并串行排队。 */
 
 import { reactive } from 'vue'
 import logger from '../utils/logger'
@@ -10,11 +6,7 @@ import errorHandler, { ErrorType, ErrorSeverity } from '../utils/errorHandler'
 
 export const PLUGIN_STORAGE_PREFIX = 'mercurial-plugin-storage-'
 
-/**
- * 插件持久化存储:除数据键外带两个不可枚举的生命周期方法
- *
- * flush 取消防抖并立即落盘(停用/应用关闭),cleanup 只取消防抖不保存(卸载)
- */
+/** 除数据键外带两个不可枚举方法：`flush` 立即落盘（停用/关闭），`cleanup` 只取消防抖（卸载）。 */
 export interface PluginPersistentStorage {
   [key: string]: unknown
   flush: () => Promise<void>
@@ -124,12 +116,7 @@ export function createPluginStorage(pluginId: string): PluginPersistentStorage {
     }
   }
 
-  /**
-   * flush/cleanup 必须是不可枚举,不可覆盖的能力,不能写成 storage 数据键
-   *
-   * 写成数据键后 getAll() 展开会带出函数,postMessage 克隆抛错又被 warn 吞掉,整份状态镜像静默丢失;
-   * 且插件可以 set('flush') 覆盖它,停用时的落盘就此失效
-   */
+  /** `flush`/`cleanup` 必须不可枚举、不可覆盖：写成数据键会被 `getAll` 克隆时丢掉，也挡不住插件覆盖。 */
   const lifecycle = {
     flush: (): Promise<void> => {
       cancelPendingSave()

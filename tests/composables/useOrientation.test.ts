@@ -8,11 +8,7 @@ import { useOrientation, type OrientationInfo } from '@/composables/useOrientati
 /** 当前"屏幕"方向；matchMedia 会按这个值回答 portrait 查询 */
 let portrait = true
 
-/**
- * 替换 window.matchMedia。
- * 必须让 `(orientation: portrait)` 与真实语义一致：竖屏为 true、其余查询为 false，
- * 否则测的就不是组件实际使用的判定路径了。
- */
+// window.matchMedia 替身：只让 (orientation: portrait) 为 true，其余查询为 false。
 function installMatchMedia(): void {
   window.matchMedia = vi.fn((query: string) => {
     return {

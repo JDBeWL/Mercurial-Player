@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, beforeEach, expect, vi, afterEach } from 'vitest'
 
-// Mock theme store to avoid pulling @material/material-color-utilities into the test.
+// Mock theme store,避免把 `@material/material-color-utilities` 拉进测试。
 const themeSetPreferenceMock = vi.fn()
 vi.mock('@/stores/theme', () => ({
   useThemeStore: vi.fn(() => ({
@@ -10,7 +10,7 @@ vi.mock('@/stores/theme', () => ({
   })),
 }))
 
-// Mock musicLibrary store to avoid recursive store initialization.
+// 避免递归初始化 store。
 vi.mock('@/stores/musicLibrary', () => ({
   useMusicLibraryStore: vi.fn(() => ({
     musicFolders: [],
@@ -48,8 +48,6 @@ describe('useConfigStore', () => {
     vi.useRealTimers()
     vi.clearAllMocks()
   })
-
-  // ---------- default state ----------
 
   describe('default state', () => {
     it('has empty musicDirectories by default', () => {
@@ -145,25 +143,19 @@ describe('useConfigStore', () => {
     })
   })
 
-  // ---------- getters ----------
-
   describe('getters', () => {
     it('availableSeparators merges separator and customSeparators uniquely', () => {
       const store = useConfigStore()
-      // defaults: separator='-', customSeparators=['-','_','.']
       const seps = store.availableSeparators
       expect(seps).toContain('-')
       expect(seps).toContain('_')
       expect(seps).toContain('.')
-      // unique
       expect(new Set(seps).size).toBe(seps.length)
     })
 
     it('validSeparators filters out empty / whitespace-only entries', () => {
       const store = useConfigStore()
       store.titleExtraction.customSeparators = ['-', '', '  ', '_']
-      // availableSeparators = [...new Set(['-', '-', '', '  ', '_'])] = ['-', '', '  ', '_']
-      // validSeparators filters falsy/whitespace -> ['-', '_']
       expect(store.validSeparators).toEqual(['-', '_'])
     })
 
@@ -174,8 +166,6 @@ describe('useConfigStore', () => {
       expect(store.hasUnsavedChanges).toBe(true)
     })
   })
-
-  // ---------- setAudioConfig ----------
 
   describe('setAudioConfig', () => {
     it('merges partial audio config', () => {
@@ -196,8 +186,6 @@ describe('useConfigStore', () => {
     })
   })
 
-  // ---------- setLyricsConfig ----------
-
   describe('setLyricsConfig', () => {
     it('merges partial lyrics config', () => {
       const store = useConfigStore()
@@ -209,8 +197,6 @@ describe('useConfigStore', () => {
       expect(store.lyrics.lyricsFontFamily).toBe('Noto Sans SC')
     })
   })
-
-  // ---------- setDesktopLyricsConfig ----------
 
   describe('setDesktopLyricsConfig', () => {
     it('merges partial desktop lyrics config', () => {
@@ -225,7 +211,6 @@ describe('useConfigStore', () => {
     it('initializes desktopLyrics when missing', () => {
       const store = useConfigStore()
       store.general.autoSaveConfig = false
-      // Force-clear the sub-config to simulate legacy state.
       store.lyrics.desktopLyrics = undefined as unknown as NonNullable<
         typeof store.lyrics.desktopLyrics
       >
@@ -235,8 +220,6 @@ describe('useConfigStore', () => {
       expect(store.lyrics.desktopLyrics?.colorPreset).toBe('auto')
     })
   })
-
-  // ---------- setDirectoryScanConfig ----------
 
   describe('setDirectoryScanConfig', () => {
     it('merges partial directory scan config', () => {
@@ -249,8 +232,6 @@ describe('useConfigStore', () => {
     })
   })
 
-  // ---------- setTitleExtractionConfig ----------
-
   describe('setTitleExtractionConfig', () => {
     it('merges partial title extraction config', () => {
       const store = useConfigStore()
@@ -262,8 +243,6 @@ describe('useConfigStore', () => {
     })
   })
 
-  // ---------- setPlaylistConfig ----------
-
   describe('setPlaylistConfig', () => {
     it('merges partial playlist config', () => {
       const store = useConfigStore()
@@ -273,8 +252,6 @@ describe('useConfigStore', () => {
       expect(store.playlist.generateAllSongsPlaylist).toBe(true)
     })
   })
-
-  // ---------- setGeneralConfig (incl. theme) ----------
 
   describe('setGeneralConfig', () => {
     it('merges partial general config including theme', () => {
@@ -302,8 +279,6 @@ describe('useConfigStore', () => {
     })
   })
 
-  // ---------- toggleSortOrder ----------
-
   describe('toggleSortOrder', () => {
     it('toggles asc -> desc -> asc', () => {
       const store = useConfigStore()
@@ -315,8 +290,6 @@ describe('useConfigStore', () => {
       expect(store.playlist.sortOrder).toBe('asc')
     })
   })
-
-  // ---------- resetToDefaults ----------
 
   describe('resetToDefaults', () => {
     it('resets all state to defaults', () => {
@@ -338,8 +311,6 @@ describe('useConfigStore', () => {
       expect(store._isDirty).toBe(true)
     })
   })
-
-  // ---------- UI methods ----------
 
   describe('UI methods', () => {
     it('openSettings / closeSettings / toggleSettings', () => {
@@ -367,8 +338,6 @@ describe('useConfigStore', () => {
     })
   })
 
-  // ---------- markInitializationComplete / _markDirty ----------
-
   describe('markInitializationComplete', () => {
     it('ends the init window and defers the pending change to a save', () => {
       const store = useConfigStore()
@@ -377,7 +346,7 @@ describe('useConfigStore', () => {
       store._markDirty()
       store.markInitializationComplete()
       expect(store._isInitializing).toBe(false)
-      // 初始化窗口内跳过的是自动保存,不是脏标记:改动不能丢
+      // 初始化窗口只跳过自动保存,不跳过脏标记:改动必须保留
       expect(store._isDirty).toBe(true)
       expect(saveSpy).toHaveBeenCalledTimes(1)
     })
@@ -407,8 +376,6 @@ describe('useConfigStore', () => {
     })
   })
 
-  // ---------- _getSaveableConfig ----------
-
   describe('_getSaveableConfig', () => {
     it('excludes internal state fields', () => {
       const store = useConfigStore()
@@ -436,8 +403,6 @@ describe('useConfigStore', () => {
     })
   })
 
-  // ---------- _hasRealChanges ----------
-
   describe('_hasRealChanges', () => {
     it('returns true when _lastSavedConfig is null', () => {
       const store = useConfigStore()
@@ -447,9 +412,7 @@ describe('useConfigStore', () => {
 
     it('returns false when config equals last saved', () => {
       const store = useConfigStore()
-      // JSON.stringify drops `undefined` values (e.g. general.coverCachePath),
-      // which would make the snapshot differ from the live state. Set it to a
-      // defined value so the round-trip clone matches.
+      // `JSON.stringify` 丢弃 `undefined`(如 `general.coverCachePath`),快照会与实时状态不等
       store.general.coverCachePath = '/cache'
       const snapshot = store._getSaveableConfig()
       store._lastSavedConfig = JSON.parse(JSON.stringify(snapshot))
@@ -464,8 +427,6 @@ describe('useConfigStore', () => {
       expect(store._hasRealChanges()).toBe(true)
     })
   })
-
-  // ---------- toggleMiniMode ----------
 
   describe('toggleMiniMode', () => {
     it('toggles mini mode on when invoke succeeds', async () => {
@@ -495,12 +456,9 @@ describe('useConfigStore', () => {
     })
   })
 
-  // ---------- saveConfigNow / flushPendingSave ----------
-
   describe('saveConfigNow', () => {
     it('skips saving when there are no real changes', async () => {
       const store = useConfigStore()
-      // Set coverCachePath to a defined value so JSON-clone matches live state.
       store.general.coverCachePath = '/cache'
       const snapshot = store._getSaveableConfig()
       store._lastSavedConfig = JSON.parse(JSON.stringify(snapshot))
@@ -510,14 +468,13 @@ describe('useConfigStore', () => {
 
     it('invokes save_config when there are changes', async () => {
       const store = useConfigStore()
-      store._lastSavedConfig = null // force real changes
+      store._lastSavedConfig = null
       store.audio.volume = 0.9
       await store.saveConfigNow()
       expect(invokeMock).toHaveBeenCalledWith(
         'save_config',
         expect.objectContaining({ config: expect.any(Object) }),
       )
-      // After save: _isDirty cleared, _lastSavedConfig set
       expect(store._isDirty).toBe(false)
       expect(store._lastSavedConfig).not.toBeNull()
     })
@@ -534,8 +491,6 @@ describe('useConfigStore', () => {
       )
     })
   })
-
-  // ---------- exportConfig / importConfig ----------
 
   describe('exportConfig', () => {
     it('invokes export_config with config and filePath', async () => {

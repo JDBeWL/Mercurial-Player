@@ -1,10 +1,6 @@
 /** 通用格式化工具（纯函数，无副作用） */
 
-/**
- * 时间格式化：秒 -> "m:ss"，超过 1 小时 -> "h:mm:ss"。
- *
- * 非法输入（0 / NaN / Infinity）返回 "0:00"。
- */
+/** 秒 → `"m:ss"`，超过 1 小时 → `"h:mm:ss"`；非法输入返回 `"0:00"`。 */
 export const formatTime = (seconds: number): string => {
   if (!seconds || !Number.isFinite(seconds) || seconds < 0) return '0:00'
 
@@ -18,11 +14,7 @@ export const formatTime = (seconds: number): string => {
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
 }
 
-/**
- * 字节数格式化为带单位文本（如 "12.5 MB"）。
- *
- * 非法输入（非有限值 / 负数）返回 "--"。
- */
+/** 字节数 → 带单位文本（如 `"12.5 MB"`）；非有限值或负数返回 `"--"`。 */
 export const formatBytes = (bytes: number): string => {
   if (!Number.isFinite(bytes) || bytes < 0) return '--'
   const units = ['B', 'KB', 'MB', 'GB']
@@ -40,4 +32,11 @@ export const formatKbMb = (bytes: number): string => {
   return bytes > 1024 * 1024
     ? `${(bytes / 1024 / 1024).toFixed(2)} MB`
     : `${(bytes / 1024).toFixed(2)} KB`
+}
+
+/** BPM → 整数省略小数，非整数保留一位；0/负数/NaN 返回空串。 */
+export const formatBpm = (bpm: number): string => {
+  if (!bpm || !Number.isFinite(bpm) || bpm <= 0) return ''
+  const rounded = Math.round(bpm * 10) / 10
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)
 }

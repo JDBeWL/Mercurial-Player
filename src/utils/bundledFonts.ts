@@ -1,7 +1,4 @@
-/**
- * 歌词字体注册表。内置/打包/外部三类来源按 parseFontFileName 的同一套文件名约定解析族名与字重。
- * 打包字体是构建期 glob，增删需重启 dev server；外部字体的 TTC/OTC 由后端拆成单字体缓存。
- */
+/** 歌词字体注册表 / 按 parseFontFileName 约定解析内置、打包与外部字体；打包字体增删需重启 dev server。 */
 import { ref } from 'vue'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import logger from './logger'

@@ -1,7 +1,6 @@
-//! Android AAudio 独占（位完美）输出：USB DAC 插上时绕过系统混音与重采样，按原生采样率直出。
+//! Android AAudio 独占输出
 //!
-//! [`player`] 的接口与 `WasapiExclusivePlayback` 对齐，命令层与解码推送线程因此完全复用；
-//! [`device`] 经 Kotlin `AudioManager` 查询设备信息，[`ffi`] 是 libaaudio 的 FFI 声明。
+//! USB DAC 插上时绕过系统混音按原生采样率直出；接口与 `WasapiExclusivePlayback` 对齐。
 
 pub mod device;
 pub mod ffi;
@@ -17,7 +16,6 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioRouteInfo {
-    /// 当前是否插着 USB 音频设备
     pub usb_connected: bool,
     /// USB 设备名（未连接时为空）
     pub usb_device_name: String,
@@ -32,7 +30,6 @@ pub struct AudioRouteInfo {
     pub devices: Vec<OutputDeviceInfo>,
 }
 
-/// 汇总当前输出路由，供设置页展示
 pub fn audio_route_info(
     exclusive_enabled: bool,
     player: Option<&AaudioExclusivePlayer>,
@@ -50,24 +47,19 @@ pub fn audio_route_info(
     }
 }
 
-/// 配置里"启用 USB DAC 独占"是否真的可用：得有 USB 设备才行
 pub fn usb_dac_available() -> Result<bool, AppError> {
     Ok(device::find_usb_output_device()?.is_some())
 }
 
-/// USB DAC 热插拔：由 Kotlin 的 `AudioDeviceCallback` 经 JNI 调用。拔掉时作废独占流、关标志并
-/// 暂停；插上时建流后置标志。
-///
-/// AAudio 的流死绑创建时的 device id，设备不在了就必须丢掉这条流
-/// （[`AaudioExclusivePlayer::release_stream`]），否则拿旧 id 开流时独占与共享回退都会失败。
+/// USB DAC 热插拔（Kotlin `AudioDeviceCallback` 经 JNI 调用）：AAudio 流死绑创建时的 device id，
+/// 设备不在了必须丢掉旧流，否则拿旧 id 开流时独占与共享回退都会失败。
 pub fn on_audio_route_changed(app: &tauri::AppHandle) {
     use tauri::Emitter;
     use tauri::Manager;
 
     let state = app.state::<crate::AppState>();
 
-    // 设备查询走 JNI，可能失败。失败时什么都不做：宁可漏一次状态更新，
-    // 也不能凭"这次没查到设备"就把用户正在放的音暂停掉。
+    // 设备查询走 JNI 可能失败：失败就跳过，不能凭一次空结果暂停正在放的声音。
     let devices = match device::query_output_devices() {
         Ok(devices) => devices,
         Err(e) => {
@@ -83,16 +75,15 @@ pub fn on_audio_route_changed(app: &tauri::AppHandle) {
         .unwrap_or(false)
         && usb;
 
-    // 锁序遵循 audio/mod.rs 顶部的约定：exclusive_mode 先于 wasapi_player。下面的临界区会跨
-    // `initialize()`（内含 JNI 设备查询与 openStream），但这条路径只在设备插拔时走，不与音频
-    // 回调争锁。
+    // 锁序遵循 audio/mod.rs 的约定：exclusive_mode 先于 wasapi_player。临界区会跨 `initialize()`
+    // （含 JNI 查询与 openStream），但只在设备插拔时走，不与音频回调争锁。
     let Ok(mut exclusive) = state.player.output.exclusive_mode.lock() else {
         log::warn!("on_audio_route_changed: exclusive_mode 锁中毒");
         return;
     };
 
-    // 字段沿用 `wasapi_player`：它在 Android 上装的是 AAudio 独占播放器
-    // （`PlatformPlayer` 按平台取不同类型，字段只此一份，避免两条并行状态）
+    // `wasapi_player` 字段在 Android 上装的是 AAudio 独占播放器：`PlatformPlayer` 按平台取类型，
+    // 字段只此一份，避免两条并行状态
     let mut player_guard = match state.player.output.wasapi_player.lock() {
         Ok(guard) => guard,
         Err(e) => {
@@ -102,7 +93,6 @@ pub fn on_audio_route_changed(app: &tauri::AppHandle) {
     };
 
     if want_exclusive {
-        // 现有流绑定的设备还在列表里吗？（插了第二个 USB 音频设备时不该打断正在播的声）
         let bound_is_gone = player_guard
             .as_ref()
             .and_then(AaudioExclusivePlayer::current_device)
@@ -114,8 +104,7 @@ pub fn on_audio_route_changed(app: &tauri::AppHandle) {
             }
         }
 
-        // 没有流就现在建一条：应用启动时没插 DAC（播放器字段是 None），或流刚被上面作废。
-        // 现在就建而不是等下次播放，设置页才能立刻反映"独占已生效"。
+        // 现在就建流而不等下次播放：设置页才能立刻反映独占已生效。
         if player_guard
             .as_ref()
             .is_none_or(|p| p.current_device().is_none())
@@ -133,9 +122,8 @@ pub fn on_audio_route_changed(app: &tauri::AppHandle) {
             *player_guard = Some(player);
         }
 
-        // 必须按"有没有真的开出一条流"判定，而不是 `player_guard.is_some()`：initialize 失败时
-        // 这里存的是一条没有流的 default 播放器，按 is_some 会让设置页显示"独占已生效"、播放却
-        // 走独占路径拿不到流（无声），共享输出也已被让位。
+        // 必须按"有没有真的开出一条流"判定，而不是 `is_some()`：initialize 失败时存的是没有流的
+        // default 播放器，按 is_some 会让设置页显示独占生效、播放却拿不到流（无声）。
         *exclusive = player_guard
             .as_ref()
             .is_some_and(|p| p.current_device().is_some());
@@ -151,11 +139,10 @@ pub fn on_audio_route_changed(app: &tauri::AppHandle) {
         return;
     }
 
-    // 不再具备独占条件：作废独占流并暂停，避免解码线程在一条死流上空转
+    // 不具备独占条件：作废独占流并暂停，避免解码线程在一条死流上空转
     if let Some(player) = player_guard.as_ref() {
         let _ = player.stop();
         let _ = player.clear_buffer();
-        // 设备没了，流本身也已失效，必须一起丢掉（见函数文档）
         player.release_stream();
     }
     drop(player_guard);
@@ -165,8 +152,8 @@ pub fn on_audio_route_changed(app: &tauri::AppHandle) {
     if let Err(e) = crate::audio::queue::media_control(app, &state, "pause", None) {
         log::warn!("独占流失效后暂停失败，前端状态可能仍停留在播放: {e}");
     }
-    // 共享模式的输出是启动时按当时的默认设备开的，同样不会自愈。
-    // 趁已经暂停把它按当前默认设备重建，否则拔掉 DAC 后共享播放会一直没声音。
+    // 共享输出是启动时按当时默认设备开的，不会自愈：趁已暂停按当前默认设备重建，
+    // 否则拔掉 DAC 后共享播放会一直没声音。
     if let Err(e) = crate::audio::rebuild_shared_sink(&state) {
         log::warn!("重建共享输出失败（下次播放可能仍指向旧设备）: {e}");
     }

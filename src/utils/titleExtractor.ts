@@ -13,6 +13,7 @@ interface TitleInfo {
   channels?: number | null
   bitDepth?: number | null
   format?: string | null
+  bpm?: number | null
   isFromMetadata: boolean
 }
 
@@ -27,6 +28,7 @@ interface TrackMetadata {
   channels?: number | null
   bitDepth?: number | null
   format?: string | null
+  bpm?: number | null
 }
 
 /** 标题提取: 优先音频元数据, 缺失时按文件名规则解析(规则见 parseFromFileName) */
@@ -75,6 +77,7 @@ export class TitleExtractor {
           channels: metadata.channels || null,
           bitDepth: metadata.bitDepth || null,
           format: metadata.format || null,
+          bpm: metadata.bpm || null,
           isFromMetadata: true,
         })
       } else {
@@ -88,6 +91,7 @@ export class TitleExtractor {
           channels: metadata?.channels || null,
           bitDepth: metadata?.bitDepth || null,
           format: metadata?.format || null,
+          bpm: metadata?.bpm || null,
         })
       }
     }
@@ -136,12 +140,8 @@ export class TitleExtractor {
     }
   }
 
-  /**
-   * 按文件名解析标题与艺术家, 只用用户配置的 separator。
-   *
-   * 优先级: 先试带空格的变体(如 ' - '), 再试原样 separator; 取最后一次出现的位置切分,
-   * 使 "艺术家 - 歌曲 - 专辑" 的末段成为标题; 切点不能在首尾, 且切出的两侧都非空才算命中。
-   */
+  /** 按文件名解析标题与艺术家，只用用户配置的 `separator`。
+   * 先试带空格变体，取最后一次出现的位置切分；切点不能在首尾，两侧都非空才算命中。 */
   static parseFromFileName(
     filePath: string,
     config: Partial<TitleExtractionConfig> = {},

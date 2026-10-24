@@ -77,6 +77,8 @@ export const useConfigStore = defineStore('config', {
       autoSaveConfig: true,
       showAudioInfo: true,
       showQueueInfo: true,
+      // BPM 识别默认关闭：它要解码音频并做 FFT（单首约 100ms CPU），对只听的用户是纯开销
+      enableBpmAnalysis: false,
       immersiveColorScheme: 'album' as const,
       immersiveAutoTheme: true,
       enableAutoUpdate: false,

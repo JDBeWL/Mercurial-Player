@@ -1,5 +1,6 @@
-//! 整帧渲染：[`render_lyrics_d2d_frame`] 画悬浮卡片与按钮、单行或双行歌词
-//! （含译文行），并返回是否需要继续滚动动画。
+//! 整帧渲染
+//!
+//! `render_lyrics_d2d_frame` 绘制悬浮卡片、按钮与单/双行歌词，返回是否继续滚动动画。
 
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D1_COLOR_F};
@@ -263,10 +264,10 @@ pub(super) fn render_lyrics_d2d_frame(
     })
 }
 
-/// 悬浮卡片底板：简单的半透明黑色遮罩圆角卡片 + 细高光描边
+/// 悬浮卡片底板：半透明黑色圆角卡片 + 细高光描边。
 ///
 /// # Safety
-/// COM 已初始化的渲染线程（见 `d2d_resources` 模块注释），且渲染目标已 BindDC
+/// COM 已初始化的渲染线程，且渲染目标已 `BindDC`
 unsafe fn draw_hover_card(state: &mut Direct2DState, client_rect: &RECT, corner_radius: f32) {
     let w = client_rect.right - client_rect.left;
     let h = client_rect.bottom - client_rect.top;

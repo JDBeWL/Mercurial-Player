@@ -1,6 +1,6 @@
-//! 卡拉OK进度计算：按字素（grapheme）簇把歌词进度换算为颜色插值相位与剪裁终点 x。
+//! 卡拉 OK 进度计算
 //!
-//! 除 `progress_clip_end_x` 要借 `IDWriteTextLayout` 做命中测试外，其余都是可单测的纯计算。
+//! 按字素簇把进度换算为颜色插值相位与剪裁终点 x；`progress_clip_end_x` 需借助 `IDWriteTextLayout`。
 
 use unicode_segmentation::UnicodeSegmentation;
 use windows::Win32::Graphics::DirectWrite::{DWRITE_HIT_TEST_METRICS, IDWriteTextLayout};
@@ -152,7 +152,6 @@ mod tests {
     #[test]
     fn karaoke_empty_words_uses_fallback() {
         assert!(close(karaoke_progress_from_words(&[], 1.0, 0.7), 0.7));
-        // 越界的 fallback 会被钳制到 [0, 1]
         assert!(close(karaoke_progress_from_words(&[], 1.0, 2.5), 1.0));
         assert!(close(karaoke_progress_from_words(&[], 1.0, -1.0), 0.0));
     }
@@ -171,7 +170,6 @@ mod tests {
 
     #[test]
     fn karaoke_midpoint_is_half() {
-        // 2 个字素、区间 [0, 2]，t=1 时走过 1 个字素 -> 0.5
         let words = [word("ab", 0.0, 2.0)];
         let p = karaoke_progress_from_words(&words, 1.0, 0.0);
         assert!(close(p, 0.5));
@@ -179,7 +177,6 @@ mod tests {
 
     #[test]
     fn karaoke_weighted_across_words() {
-        // 第 1 词 2 字素 [0,1]，第 2 词 2 字素 [1,2]；t=1.5 时共走 3/4
         let words = [word("ab", 0.0, 1.0), word("cd", 1.0, 2.0)];
         let p = karaoke_progress_from_words(&words, 1.5, 0.0);
         assert!(close(p, 0.75));
@@ -196,7 +193,6 @@ mod tests {
             progress_cluster_phase(&text, 1.0).map(|v| close(v, 1.0)),
             Some(true)
         );
-        // 中点落在第 2 个字素内部：smoothstep(0.5) = 0.5
         let mid = progress_cluster_phase(&text, 0.75).unwrap();
         assert!(close(mid, 0.5));
         assert_eq!(progress_cluster_phase(&[], 0.5), None);

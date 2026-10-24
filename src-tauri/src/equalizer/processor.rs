@@ -126,10 +126,8 @@ impl Default for BiquadCoefficients {
 }
 
 impl BiquadCoefficients {
-    /// 根据频段序号设计该 band 的滤波器:首尾用 shelf,中间用 peaking。
-    ///
-    /// 两端用 shelf 是因为用户对 31Hz/16kHz 的直觉是"低音/高音整体多一点",
-    /// peaking 的钟形响应只在中心隆起、两端回落,容易诱导用户过量提升。
+    /// 按频段设计滤波器：首尾用 shelf，中间用 peaking——31Hz/16kHz 用 peaking
+    /// 只在中心隆起，会诱导用户过量提升。
     #[must_use]
     pub fn for_band(sample_rate: f32, band: usize, gain_db: f32) -> Self {
         let freq = EQ_FREQUENCIES[band];
@@ -142,10 +140,8 @@ impl BiquadCoefficients {
         }
     }
 
-    /// RBJ peaking EQ。
-    ///
-    /// 系数用 f64 计算后转 f32 存储:31Hz@44.1kHz 的归一化频率极低,
-    /// f32 直接算会有可观的系数量化误差。
+    /// RBJ peaking EQ；系数用 f64 计算后转 f32——31Hz@44.1kHz 归一化频率极低，
+    /// f32 直接算会有可观的量化误差。
     #[must_use]
     pub fn peaking_eq(sample_rate: f32, frequency: f32, gain_db: f32, q: f32) -> Self {
         if gain_db.abs() < 0.001 {
@@ -272,17 +268,14 @@ impl Default for EqSettings {
 }
 
 impl EqSettings {
-    /// 有效 preamp(dB) = 用户 preamp - 最大提升量。
-    ///
-    /// 均衡器提升某频段后,该频段的峰值可能超过 0dBFS 触发 soft clip 全曲失真。
-    /// 自动把整体电平拉低最大提升量即可保证峰值不超(削减 band 只会降低电平,
-    /// 不需要补偿)。与专业均衡器(Equalizer APO / VLC auto gain)行为一致。
+    /// 有效 preamp = 用户 preamp - 最大提升量：提升频段会让峰值超过 0dBFS 触发 soft clip
+    /// 全曲失真，整体拉低最大提升量即可保证峰值不超；纯削减不需要补偿。
     #[must_use]
     pub fn effective_preamp_db(&self) -> f32 {
         self.preamp - self.gains.iter().copied().fold(0.0_f32, f32::max)
     }
 
-    /// 把外部来源(手改的 eq.json、前端传来的值)拉回合法区间，理由见 [`sanitize_db`]
+    /// 把外部来源（手改的 `eq.json`、前端值）拉回合法区间，理由见 `sanitize_db`
     pub fn sanitize(&mut self) {
         self.preamp = sanitize_db(self.preamp);
         for gain in &mut self.gains {
@@ -294,11 +287,8 @@ impl EqSettings {
 /// 增益/前级的合法范围(dB)，命令层与滤波系数层共用，避免两处上限漂移
 pub const GAIN_RANGE_DB: f32 = 8.0;
 
-/// 增益消毒：NaN/inf 一律当 0dB。
-///
-/// `f32::clamp` 会原样放行 NaN(比较全为 false)，一个 NaN 进 biquad 就锁死整条滤波链
-/// (状态里存了 NaN 就再也出不来)，而 WASAPI 的 SIMD 量化把 NaN 映射成 0x80000000，
-/// 听感就是满幅负压爆音
+/// 增益消毒：NaN/inf 一律当 0dB——`f32::clamp` 会原样放行 NaN，NaN 进 biquad
+/// 会锁死整条滤波链；WASAPI SIMD 量化把 NaN 映射成 0x80000000，听感是满幅负压爆音。
 #[must_use]
 pub fn sanitize_db(value: f32) -> f32 {
     if value.is_finite() {
@@ -308,9 +298,8 @@ pub fn sanitize_db(value: f32) -> f32 {
     }
 }
 
-// EQ 设置单独落盘到 data/eq.json,不进 config.json:调节是高频低延迟操作,拖拽滑块时
-// set_eq_* 命令会连续触发,且它独立于配置的导出/导入。为避免每次变更都同步写盘阻塞
-// 命令线程,这里维护一个后台线程:变更只投递脏标记,线程合并积压后写一次最新快照。
+// EQ 设置单独落盘到 data/eq.json（不进 config.json）：拖拽滑块会连续触发命令，
+// 后台线程合并脏标记后只写最新快照，避免每次变更同步写盘阻塞命令线程。
 enum PersistMsg {
     Ping,
     Stop,
@@ -335,8 +324,7 @@ impl EqPersister {
                     match msg {
                         PersistMsg::Ping => {
                             dirty = true;
-                            // 合并拖拽期间积压的脏标记;注意不能把 Stop 一并吞掉,
-                            // 否则 Drop 时的 join 会永远等不到退出信号
+                            // 合并拖拽期间积压的 Ping；不能吞掉 Stop，否则 Drop 的 join 永远等不到退出信号
                             loop {
                                 match rx.try_recv() {
                                     Ok(PersistMsg::Ping) => dirty = true,
@@ -412,8 +400,7 @@ fn read_eq_settings_file(path: &str) -> Option<EqSettings> {
     let text = std::fs::read_to_string(path).ok()?;
     match serde_json::from_str::<EqSettings>(&text) {
         Ok(mut settings) => {
-            // eq.json 是可以被手改或用旧版本覆盖的，消毒后再进内存，
-            // 免得 NaN/inf 顺着 set_* 之外的路径流进滤波系数
+            // eq.json 可被手改或用旧版本覆盖，进内存前消毒，避免 NaN/inf 流进滤波系数
             settings.sanitize();
             Some(settings)
         }
@@ -439,9 +426,8 @@ impl GlobalEqualizer {
         }
     }
 
-    /// 创建均衡器并绑定 `<data>/eq.json` 持久化。
-    ///
-    /// 启动时若文件有效则恢复上次设置,之后每次变更经后台线程合并落盘。
+    /// 创建均衡器并绑定 `<data>/eq.json`：启动时恢复有效设置，
+    /// 之后每次变更经后台线程合并落盘。
     #[must_use]
     pub fn with_persistence(config_dir: &str) -> Self {
         let path = std::path::Path::new(config_dir)
@@ -486,7 +472,7 @@ impl GlobalEqualizer {
     }
 
     pub fn set_gains(&self, mut gains: [f32; EQ_BAND_COUNT]) {
-        // 整组写入是预设/导入的路径，同样要消毒：NaN 进 biquad 会锁死整条滤波链
+        // 整组写入（预设/导入）同样要消毒：NaN 进 biquad 会锁死整条滤波链
         for gain in &mut gains {
             *gain = sanitize_db(*gain);
         }
@@ -541,7 +527,6 @@ mod tests {
 
     #[test]
     fn test_peaking_eq_near_zero_gain_returns_default() {
-        // |gain_db| < 0.001 也应返回 default (恒等滤波器)
         let coeffs = BiquadCoefficients::peaking_eq(48000.0, 1000.0, 0.0005, 1.0);
         let default = BiquadCoefficients::default();
         assert!(approx_eq(coeffs.b0, default.b0));
@@ -558,7 +543,6 @@ mod tests {
             !approx_eq(coeffs.b1, 0.0),
             "b1 should differ from 0.0 with non-zero gain"
         );
-        // peaking EQ 归一化后 a1 == b1
         assert!(approx_eq(coeffs.a1, coeffs.b1));
     }
 
@@ -582,10 +566,8 @@ mod tests {
             a1: 0.0,
             a2: 0.0,
         };
-        // 处理若干样本填充状态
         let _ = state.process(1.0, &coeffs);
         let _ = state.process(0.5, &coeffs);
-        // reset 后用恒等系数处理,输出应等于输入
         state.reset();
         let identity = BiquadCoefficients::default();
         let y = state.process(0.7, &identity);
@@ -610,7 +592,6 @@ mod tests {
             "effective preamp should subtract the max boost (4dB), got {}",
             settings.effective_preamp_db()
         );
-        // 纯削减不需要补偿
         settings.gains[5] = 0.0;
         settings.gains[2] = -3.0;
         assert!(
@@ -726,7 +707,6 @@ mod tests {
 
     #[test]
     fn test_eq_persistence_roundtrip() {
-        // 验证 with_persistence:写入 eq.json 后重建实例能恢复设置
         let dir = std::env::temp_dir().join(format!("eq-persist-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let dir_str = dir.to_str().expect("temp path utf-8");
@@ -756,8 +736,6 @@ mod tests {
         let _ = std::fs::remove_dir(&dir);
     }
 
-    /// NaN 进 biquad 会锁死整条滤波链（状态里存了 NaN 就再也出不来），
-    /// WASAPI 的 SIMD 量化又会把 NaN 映射成 0x80000000，听感是满幅负压爆音
     #[test]
     fn test_sanitize_db_rejects_non_finite() {
         assert_eq!(sanitize_db(f32::NAN), 0.0);
@@ -779,7 +757,6 @@ mod tests {
         assert_eq!(settings.gains[5], GAIN_RANGE_DB);
         assert!(settings.effective_preamp_db().is_finite());
 
-        // 消毒后的增益必须算出有限系数
         for (i, &gain) in settings.gains.iter().enumerate() {
             let c = BiquadCoefficients::for_band(44100.0, i, gain);
             assert!(

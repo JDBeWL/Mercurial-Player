@@ -62,8 +62,6 @@ describe('PlayerControls.vue', () => {
     vi.restoreAllMocks()
   })
 
-  // ---------- 播放/暂停按钮 ----------
-
   describe('播放/暂停按钮', () => {
     it('未播放时显示 play_arrow 图标', async () => {
       store.isPlaying = false
@@ -108,8 +106,6 @@ describe('PlayerControls.vue', () => {
       expect(wrapper.find('.play-button').text()).toContain('pause')
     })
   })
-
-  // ---------- 上一首/下一首按钮 ----------
 
   describe('上一首/下一首按钮', () => {
     it('hasPreviousTrack=false 时上一首按钮 disabled', async () => {
@@ -168,8 +164,6 @@ describe('PlayerControls.vue', () => {
       expect(store.nextTrack).toHaveBeenCalledTimes(1)
     })
   })
-
-  // ---------- 播放模式（随机 / 循环合并成一颗按钮） ----------
 
   describe('播放模式按钮', () => {
     /** 播放模式按钮是 .controls-row 里的第 0 颗（原本的随机按钮位置） */
@@ -234,8 +228,6 @@ describe('PlayerControls.vue', () => {
       expect(wrapper.findAll('.controls-row .icon-button')).toHaveLength(4)
     })
   })
-
-  // ---------- 综合状态切换 ----------
 
   describe('状态切换实时反映', () => {
     it('从播放切换到暂停时图标更新', async () => {

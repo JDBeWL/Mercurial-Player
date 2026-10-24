@@ -16,6 +16,8 @@ export interface TrackMetadata {
   channels: number | null
   bitDepth: number | null
   format: string | null
+  /** 每分钟拍数：标签值或后台识别结果，未知为 null */
+  bpm?: number | null
 }
 
 /** 文件存在性缓存:maxSize=200, TTL=30s(常量单位为毫秒) */

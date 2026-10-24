@@ -59,8 +59,6 @@ describe('ProgressBar.vue', () => {
     if (wrapper) wrapper.unmount()
   })
 
-  // ---------- 进度条渲染 ----------
-
   describe('渲染', () => {
     it('根据 currentTime / duration 计算填充宽度百分比', async () => {
       store.duration = 100
@@ -99,8 +97,6 @@ describe('ProgressBar.vue', () => {
       expect(fill.attributes('style')).toContain('width: 0%')
     })
   })
-
-  // ---------- 时间格式化 (mm:ss) ----------
 
   describe('时间格式化', () => {
     it('悬停时显示 tooltip，格式为 "当前时间 / 总时长"', async () => {
@@ -150,8 +146,6 @@ describe('ProgressBar.vue', () => {
       expect(wrapper.find('.hover-time-tooltip').exists()).toBe(false)
     })
   })
-
-  // ---------- 点击/拖拽 seek ----------
 
   describe('点击 seek', () => {
     it('点击进度条触发 seek 到对应位置', async () => {
@@ -299,8 +293,6 @@ describe('ProgressBar.vue', () => {
     })
   })
 
-  // ---------- pendingSeek 状态 ----------
-
   describe('pendingSeek 状态', () => {
     it('seek 后 currentTime 接近目标时清除 pendingSeek', async () => {
       store.duration = 100
@@ -354,8 +346,6 @@ describe('ProgressBar.vue', () => {
       expect(wrapper.find('.progress-bar-fill').attributes('style')).toContain('width: 0%')
     })
   })
-
-  // ---------- 时间行插槽（竖屏下用来放音频信息） ----------
 
   describe('time-middle 插槽', () => {
     it('插槽内容渲染在时间行中间', async () => {

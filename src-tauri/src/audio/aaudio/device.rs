@@ -1,7 +1,6 @@
 //! Android 输出设备能力查询
 //!
-//! 一律经 Kotlin 取：cpal 枚举出的名字给不出 `AAudioStreamBuilder_setDeviceId` 要的
-//! `AudioDeviceInfo.getId()`，也没有采样率/位深/编码。
+//! 一律经 Kotlin 取：cpal 枚举出的名字给不出 `AAudioStreamBuilder_setDeviceId` 要的 `AudioDeviceInfo.getId()`，也没有采样率/位深/编码。
 
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
@@ -29,7 +28,6 @@ pub struct OutputDeviceInfo {
     pub encodings: Vec<i32>,
 }
 
-/// 读取当前全部输出设备
 pub fn query_output_devices() -> Result<Vec<OutputDeviceInfo>, AppError> {
     let json = crate::android::java_bridge::jni_call_static_string(
         "com/jdbewl/mercurial_player/AudioBridge",
@@ -46,9 +44,7 @@ pub fn find_usb_output_device() -> Result<Option<OutputDeviceInfo>, AppError> {
     Ok(query_output_devices()?.into_iter().find(|d| d.is_usb))
 }
 
-/// 在设备支持的采样率里挑最接近 `preferred` 的，别让系统替我们重采样（位完美的关键）。
-///
-/// 采样率列表为空（设备未上报）时返回 None，调用方走设备默认值。
+/// 在设备支持的采样率里挑最接近 `preferred` 的，避免系统重采样；列表为空（设备未上报）时返回 `None`，调用方走设备默认值。
 pub fn pick_sample_rate(device: &OutputDeviceInfo, preferred: u32) -> Option<u32> {
     if device.sample_rates.is_empty() {
         return None;

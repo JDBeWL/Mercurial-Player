@@ -1,13 +1,11 @@
 //! 无锁 SPSC 采样环形缓冲，供频谱分析与 AAudio 独占输出使用。
 //!
-//! 音频线程侧只做一次原子写入，无锁、无分配、无阻塞。
-//! 解码线程可能在背压处等很久，缓冲腾出空间后会灌进上一首样本，故环上带写入世代。
+//! 音频线程只做原子写入；环上带写入世代，防止背压等待后的解码线程灌进上一首样本。
 
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-/// 全局写入世代。新环继承当前值，因此设备切换重建环之后原有解码线程仍可继续写入；
-/// 只有 [`SampleRing::invalidate`]（停止 / 切歌 / 流断开）会递增它，让所有持有旧世代的
-/// 生产者（含正卡在背压等待里的）同时失效。
+/// 全局写入世代：新环继承当前值，设备切换重建环后原解码线程仍可继续写入；只有 `SampleRing::invalidate`
+/// 递增它，让持有旧世代的生产者（含正卡在背压等待里的）同时失效。
 static NEXT_WRITE_EPOCH: AtomicU64 = AtomicU64::new(1);
 
 /// 申请一个新的写入世代：作废当前所有持有旧世代的生产者
@@ -25,19 +23,16 @@ pub(crate) fn current_write_epoch() -> u64 {
 #[cfg(test)]
 pub(crate) static EPOCH_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// 单生产者单消费者无锁环形缓冲(容量向上取整到 2 的幂)。
-///
-/// `written` 只由生产者写;`consumed` 允许双方前进但永不后退(见 `fetch_max` 注释)。
+/// 单生产者单消费者无锁环形缓冲(容量向上取整到 2 的幂)；`written` 只由生产者写，
+/// `consumed` 双方都可能推进但永不后退（见 `clear` 里的 `fetch_max`）。
 pub struct SampleRing {
     /// 采样以 f32 位模式存放,避免为 f32 引入额外的同步包装
     slots: Box<[AtomicU32]>,
-    /// 生产者已写入的采样总数
     written: AtomicUsize,
-    /// 消费者已取走的采样总数
     consumed: AtomicUsize,
     /// 容量掩码(容量恒为 2 的幂)
     mask: usize,
-    /// 当前写入世代，供 [`Self::push_slice_checked`] 判定生产者是否已被作废
+    /// 当前写入世代，供 `push_slice_checked` 判定生产者是否已被作废
     epoch: AtomicU64,
 }
 
@@ -62,9 +57,8 @@ impl SampleRing {
         self.mask + 1
     }
 
-    /// 生产者:写入一个采样。缓冲满时丢弃该采样并返回 `false`。
-    ///
-    /// 不等待、不覆盖未读数据：音频回调必须在确定时间内返回，偶发丢采样远好于阻塞。
+    /// 生产者写入一个采样；缓冲满时丢弃该采样并返回 `false`，不等待、不覆盖未读数据。
+    /// 音频回调必须在确定时间内返回，偶发丢采样远好于阻塞。
     #[inline]
     pub fn push(&self, sample: f32) -> bool {
         let w = self.written.load(Ordering::Relaxed);
@@ -77,22 +71,16 @@ impl SampleRing {
         true
     }
 
-    /// 生产者:批量写入,返回实际写入的采样数，缓冲满时截断且不覆盖未读数据。
-    ///
-    /// 按"环的当前世代"写入，仅供生命周期与环绑定的生产者（测试）使用；
-    /// 会被切歌/停止作废的 AAudio 解码线程一律走 [`Self::push_slice_checked`]。
+    /// 生产者批量写入，返回实际写入数，满时截断且不覆盖未读数据。按环的当前世代写入，仅供测试使用；
+    /// 会被切歌/停止作废的 AAudio 解码线程一律走 `push_slice_checked`。
     #[cfg(test)]
     pub fn push_slice(&self, samples: &[f32]) -> usize {
         self.push_slice_checked(samples, self.write_epoch())
             .unwrap_or(0)
     }
 
-    /// 生产者:带写入世代校验的批量写入（挡住切歌 / 停止时已被作废的生产者）。
-    ///
-    /// - `Some(n)`：写入 n 个（n 可为 0，表示环已满，可等待后重试）
-    /// - `None`：世代已被 [`Self::invalidate`] 作废，必须停止写入
-    ///
-    /// 提交前复验世代：过期则不推进 `written`，这批采样对消费者永不可见。
+    /// 带写入世代校验的批量写入：`Some(n)` 写入 n 个（0 表示环满，可等待后重试），
+    /// `None` 表示世代已被 `invalidate` 作废、必须停止写入。提交前复验世代：过期则不推进 `written`，这批采样对消费者永不可见。
     pub fn push_slice_checked(&self, samples: &[f32], epoch: u64) -> Option<usize> {
         if samples.is_empty() {
             return Some(0);
@@ -126,23 +114,20 @@ impl SampleRing {
         n
     }
 
-    /// 丢弃尚未被取走的全部采样(切歌 / seek 用)
     pub fn clear(&self) {
         // fetch_max 而非 store：并发 drain 时不会把 consumed 退回旧值，否则清空后会重播切歌前的样本
         let w = self.written.load(Ordering::Acquire);
         self.consumed.fetch_max(w, Ordering::Release);
     }
 
-    /// 本环当前的写入世代。生产者在开始推送前只取一次，之后每次写入都带上它。
+    /// 本环当前的写入世代；生产者在推送前取一次，之后每次写入都带上它。
     #[must_use]
     pub fn write_epoch(&self) -> u64 {
         self.epoch.load(Ordering::Acquire)
     }
 
-    /// 作废所有持有旧世代的生产者，并丢弃未读数据（停止 / 切歌 / 流断开时调用）。
-    ///
-    /// 先递增世代再清空：反过来的话被作废的生产者正好能在清空后灌进上一首的样本，
-    /// 而这正是解码线程从背压等待中被唤醒时最容易走到的路径。
+    /// 作废所有持有旧世代的生产者并丢弃未读数据（停止 / 切歌 / 流断开时调用）。
+    /// 必须先把世代递增再清空：反过来的话，被作废的生产者正好能在清空后灌进上一首样本，而这正是它从背压等待中被唤醒时最易走到的路径。
     pub fn invalidate(&self) {
         self.epoch.store(bump_write_epoch(), Ordering::SeqCst);
         self.clear();
@@ -161,7 +146,6 @@ impl SampleRing {
         self.len() == 0
     }
 
-    /// 消费者:取走至多 `max_n` 个采样追加到 `out`,返回实际取到的数量。
     pub fn drain_into(&self, out: &mut Vec<f32>, max_n: usize) -> usize {
         if max_n == 0 {
             return 0;
@@ -172,7 +156,6 @@ impl SampleRing {
         if n == 0 {
             return 0;
         }
-        // 先扩容再按迭代器写入,避免逐样本 push 反复走容量检查
         let start = out.len();
         out.resize(start + n, 0.0);
         for (i, dst) in out[start..].iter_mut().enumerate() {
@@ -185,11 +168,9 @@ impl SampleRing {
     }
 }
 
-/// 独占模式环形缓冲的目标容量（采样数）：取 `max(目标秒数, 水位门控 + 余量)`。
-///
-/// 后者是硬约束：[`crate::audio::EXCLUSIVE_BUFFER_WATERMARK_SECS`] 只有在环没满时才拦得住生产者，
-/// 环比门控还小则门控形同虚设，`push_samples` 的背压等待会变成主节奏点。
-/// 调用方还会把结果向上取整到 2 的幂（写指针用掩码取模），口径由测试守住。
+/// 独占模式环形缓冲的目标容量（采样数）：`max(目标秒数, 水位门控 + 余量)`。
+/// 后者是硬约束：`EXCLUSIVE_BUFFER_WATERMARK_SECS` 只有在环没满时才拦得住生产者，环比门控小则门控形同虚设，
+/// `push_samples` 的背压等待会变成主节奏点；调用方还会把结果向上取整到 2 的幂（写指针用掩码取模）。
 #[must_use]
 pub fn exclusive_ring_capacity(sample_rate: u32, channels: u16, seconds: f32) -> usize {
     // 门控之上的余量（秒）：覆盖一次回调块与解码抖动，保证"门控先生效"而不是"环先满"

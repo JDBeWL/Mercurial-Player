@@ -1,15 +1,13 @@
-//! 布局计算与文本测量。
+//! 歌词窗口布局与文本测量
 //!
-//! 负责按钮矩形（关闭/锁定）、歌词文本总区域的布局（[`build_lyrics_layout`]），
-//! 以及基于 DirectWrite 的文本宽度/高度测量（供跑马灯滚动与双行紧凑排版）。
+//! 按钮矩形、歌词文本区域，以及 DirectWrite 文本宽/高测量（跑马灯与双行排版用）。
 
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_METRICS;
 
 use super::d2d_resources::{Direct2DState, trim_utf16_nul};
 
-// 以下按钮常量/矩形函数经 renderer 模块 re-export 供 window.rs 使用，
-// 可见性需覆盖 desktop_lyrics 模块
+// 经 renderer 模块 re-export 给 window.rs 使用，可见性需覆盖 desktop_lyrics 模块
 pub(in crate::desktop_lyrics) const CLOSE_BTN_SIZE: i32 = 28;
 pub(in crate::desktop_lyrics) const CLOSE_BTN_MARGIN: i32 = 6;
 
@@ -62,8 +60,7 @@ pub(super) fn build_lyrics_layout(client_rect: &RECT, scale: i32) -> LyricsLayou
     text_rect.top = btn_bottom + padding;
     text_rect.bottom -= padding;
 
-    // 双行的具体行高在渲染时按两行字体度量动态计算（见
-    // measure_text_height_dwrite_with_state），这里只给出文本总区域
+    // 双行行高在渲染时按各自字体度量动态计算，这里只给出文本总区域
     LyricsLayout {
         close_rect,
         lock_rect,
@@ -95,8 +92,7 @@ pub(super) fn measure_text_width_dwrite_with_state(
             .ok()?
     };
     let mut metrics = DWRITE_TEXT_METRICS::default();
-    // SAFETY: layout 是有效 COM 对象；metrics 是栈上局部变量，&raw mut 仅在
-    // GetMetrics 调用期间被写入，随后读取，无别名冲突
+    // SAFETY: layout 是有效 COM 对象；metrics 为栈上局部变量，仅在 GetMetrics 期间写入
     unsafe { layout.GetMetrics(&raw mut metrics).ok()? };
     Some(metrics.widthIncludingTrailingWhitespace.ceil().max(0.0) as i32)
 }

@@ -59,8 +59,6 @@ describe('useGlobalKeyboard', () => {
     document.body.innerHTML = ''
   })
 
-  // ---------- 空格键 ----------
-
   describe('Space 键', () => {
     it('空格键触发 togglePlay', () => {
       wrapper = mountWithKeyboard()
@@ -74,8 +72,6 @@ describe('useGlobalKeyboard', () => {
       expect(event.preventDefault).toHaveBeenCalled()
     })
   })
-
-  // ---------- 方向键：上一首/下一首 ----------
 
   describe('ArrowLeft / ArrowRight', () => {
     it('左方向键触发 previousTrack', () => {
@@ -104,8 +100,6 @@ describe('useGlobalKeyboard', () => {
       expect(mockPlayerStore.nextTrack).not.toHaveBeenCalled()
     })
   })
-
-  // ---------- 方向键：音量 ----------
 
   describe('ArrowUp / ArrowDown 音量控制', () => {
     it('上方向键增加音量 (0.5 + 0.05 = 0.55)', () => {
@@ -136,8 +130,6 @@ describe('useGlobalKeyboard', () => {
       expect(mockPlayerStore.setVolume).toHaveBeenCalledWith(0)
     })
   })
-
-  // ---------- 焦点在 INPUT/TEXTAREA 时跳过 ----------
 
   describe('焦点在输入框时跳过', () => {
     it('焦点在 INPUT 时不触发任何操作', () => {
@@ -198,8 +190,6 @@ describe('useGlobalKeyboard', () => {
       expect(mockPlayerStore.togglePlay).toHaveBeenCalledTimes(1)
     })
   })
-
-  // ---------- 生命周期 ----------
 
   describe('onMounted / onUnmounted 生命周期', () => {
     it('挂载时注册 keydown 事件监听', () => {

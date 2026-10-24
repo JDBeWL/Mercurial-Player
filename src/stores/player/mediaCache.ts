@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import FileUtils from '@/utils/fileUtils'
 import logger from '@/utils/logger'
+import { analyzeTrackBpm } from '@/services/bpmService'
 import type { Track } from '@/types'
 import type { usePlayerStore } from './index'
 
@@ -22,6 +23,8 @@ export function takeCoverUpdates(): Map<string, string> {
   pendingCoverUpdates.clear()
   return taken
 }
+
+// 封面更新通道的队列在 store 实例外，避免 Pinia 深度代理整个 Map。
 
 export async function cachePlaylistMetadata(store: PlayerStore, playlist: Track[]): Promise<void> {
   if (!playlist || playlist.length === 0) return
@@ -55,6 +58,7 @@ export async function cachePlaylistMetadata(store: PlayerStore, playlist: Track[
       channels: track.channels || null,
       bitDepth: track.bitDepth || null,
       format: track.format || null,
+      bpm: track.bpm || null,
     })
     cached++
 
@@ -140,4 +144,39 @@ export async function loadPlaylistCovers(store: PlayerStore, playlist: Track[]):
   }
 
   logger.debug(`Loaded covers for playlist`)
+}
+
+/** 识别当前播放曲目的 BPM（标签优先，缺标签才解码）；不做整列表批量分析。 */
+export async function loadTrackBpm(store: PlayerStore, track: Track): Promise<void> {
+  if (!track.path) return
+
+  // BPM 用自己的取消信号，不复用 `_cacheAbortController`。
+  // 那个信号被批量元数据/封面缓存共用，一次无关的批量取消会把 BPM 结果一起丢掉。
+  // 这里只在"又一次开始算 BPM"时取消上一次。
+  store._bpmAbortController?.abort()
+  const controller = new AbortController()
+  store._bpmAbortController = controller
+  const { signal } = controller
+
+  const metadataCache = store._getMetadataCache()
+  const bpm = await analyzeTrackBpm(track, { signal })
+  // 识别结束前可能已经切歌或组件已销毁：此时结果仍进了后端缓存，但界面不该再动
+  if (bpm === null || signal.aborted || store._isDestroyed) return
+
+  // 元数据缓存同步一份：prepareTrack 切歌时读它，否则切回来 BPM 会消失
+  const cached = metadataCache.get(track.path)
+  if (cached) {
+    cached.bpm = bpm
+    metadataCache.set(track.path, cached)
+  }
+
+  // currentTrack 与 audioInfo 都是快照，需要各自补一次；路径再核对一遍防止切歌后被覆盖
+  const current = store.currentTrack
+  if (current?.path !== track.path) return
+  if (current.bpm !== bpm) {
+    store.currentTrack = { ...current, bpm }
+  }
+  if (store.audioInfo.bpm !== bpm) {
+    store.audioInfo = { ...store.audioInfo, bpm }
+  }
 }

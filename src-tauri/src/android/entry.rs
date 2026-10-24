@@ -1,7 +1,6 @@
-//! Android 平台初始化辅助：`initNdkContext` 由 MainActivity 调起，传 Application Context。
+//! Android 平台初始化辅助
 //!
-//! Tauri 的 Android 运行时栈（tao/wry）不初始化 `ndk_context`，而 cpal 的 AAudio 后端依赖它；
-//! 不初始化时 cpal 首次访问音频设备会 panic "android context was not initialized"。
+//! tao/wry 不初始化 `ndk_context`，cpal 的 AAudio 后端依赖它；`MainActivity` 必须传 Application Context。
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JObject, JString};
@@ -13,31 +12,22 @@ use std::sync::{Mutex, Once, OnceLock};
 /// 全局 AppHandle：Kotlin 侧（通知栏 / MediaSession / 耳机线控）经 JNI 反向驱动播放时没有命令上下文
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
-/// 保存 AppHandle，供 JNI 反向调用取用
 pub fn set_app_handle(app: &tauri::AppHandle) {
     let _ = APP_HANDLE.set(app.clone());
 }
 
-/// 取出全局 AppHandle（未初始化时返回 None）
 pub fn app_handle() -> Option<&'static tauri::AppHandle> {
     APP_HANDLE.get()
 }
 
-/// 进程级一次性初始化标志。
-///
-/// `singleTask` 只保证同一时刻一个 Activity 实例：进程被前台服务保活时，Activity 关闭后重开
-/// 会在同一进程里再走一遍 `onCreate` -> `initNdkContext`，而 ndk-context 重复初始化会
-/// `assert!(previous.is_none())` panic（release 构建 `panic = "abort"` 即杀进程）。
+/// `ndk-context` 只能初始化一次，重复初始化会 `assert!(previous.is_none())` panic（release 的 `panic = "abort"` 直接杀进程）；
+/// `singleTask` 只保证同一时刻一个 Activity，进程被前台服务保活时 Activity 重开会再走一遍 `onCreate`。
 static NDK_CONTEXT_INIT: Once = Once::new();
 
-/// Kotlin `MainActivity.initNdkContext(context)` 的原生实现。
-///
-/// Kotlin 侧传的是 Application Context：ndk_context 保存的裸指针要活到进程退出，不能持有随时
-/// 会被重建的 Activity（既泄漏已销毁的 Activity，重建后又触发重复初始化）。
+/// Kotlin `MainActivity.initNdkContext(context)` 的原生实现；`context` 必须是 Application Context（裸指针要活到进程退出，持有 Activity 会泄漏并触发重复初始化）。
 ///
 /// # Safety
-/// 由 Java/Kotlin 经 JNI 调用：`context` 必须为有效句柄，传给
-/// `initialize_android_context` 的指针必须指向存活对象。
+/// JNI 调用传入的 `context` 必须是有效且长期存活的句柄。
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 #[allow(unsafe_code)] // JNI 指针操作必须使用 unsafe
@@ -66,9 +56,8 @@ pub extern "system" fn Java_com_jdbewl_mercurial_1player_MainActivity_initNdkCon
     };
     let vm_ptr = vm.get_java_vm_pointer().cast::<c_void>();
     let context_ptr = context_global.as_raw().cast::<c_void>();
-    std::mem::forget(context_global); // 有意泄漏，保持引用有效直至进程退出
-    // call_once 而非裸调用：并发进来的调用点只让一个真正初始化；竞争失败者多泄漏一个全局引用
-    // （本身即有意泄漏，无害），但绝不会二次触发断言
+    std::mem::forget(context_global);
+    // `call_once` 让并发调用只初始化一次；竞争失败者会多泄漏一个全局引用（无害），但不会二次触发断言
     NDK_CONTEXT_INIT.call_once(|| {
         // SAFETY: vm/context 均为系统提供的合法指针，且 call_once 保证进程内仅执行一次
         unsafe {
@@ -79,9 +68,7 @@ pub extern "system" fn Java_com_jdbewl_mercurial_1player_MainActivity_initNdkCon
 }
 
 /// Kotlin `MainActivity.nativeMediaAction(action, positionMs)` 的原生实现。
-///
-/// 通知栏按钮、MediaSession 回调、耳机线控、音频焦点丢失与 `ACTION_AUDIO_BECOMING_NOISY`
-/// 都经这里下发到 [`crate::audio::queue::media_control`]，与前端点按钮走同一套逻辑。
+/// 通知栏、MediaSession 回调、线控与音频焦点变化都经这里下发到 `crate::audio::queue::media_control`。
 #[unsafe(no_mangle)]
 #[allow(unsafe_code)]
 #[allow(clippy::missing_const_for_fn)]
@@ -104,8 +91,7 @@ pub extern "system" fn Java_com_jdbewl_mercurial_1player_MainActivity_nativeMedi
     };
     use tauri::Manager;
     let state = app.state::<crate::AppState>();
-    // 按动作解析参数：只有 seek 需要目标位置，0 是合法值（跳回曲首，外部控制器
-    // 调 onSeekTo(0) 很常见），负值才非法；其余动作一律不携带位置
+    // 只有 seek 需要位置，0 合法（外部控制器常调 `onSeekTo(0)`），负值非法；其余动作不携带位置
     let position = match action.as_str() {
         "seek" => {
             if position_ms < 0 {
@@ -121,17 +107,14 @@ pub extern "system" fn Java_com_jdbewl_mercurial_1player_MainActivity_nativeMedi
     }
 }
 
-/// 上一次推给 MediaSession 的 `(曲目路径, 封面路径)`。
-///
-/// 播放/暂停/seek 都不换曲，封面不可能变，而这类事件远比切歌频繁。省掉重取的不只是标签解析：
-/// 取封面要先比文件 mtime，content URI 的 mtime 还要经 SAF 打开 fd，那趟 JNI 往返绝不能发生在
-/// 调用线程上（MediaSession 回调默认走主 looper，慢的 provider 直接就是 ANR）。
+/// 上一次推给 MediaSession 的 `(曲目路径, 封面路径)`：播放/暂停/seek 不换曲，缓存省掉重取。
+/// 取封面要打开 SAF fd，这趟 JNI 往返绝不能发生在 MediaSession 回调线程上（主 looper，慢 provider 直接 ANR）。
 static LAST_COVER: Mutex<Option<(String, String)>> = Mutex::new(None);
 
 /// 正在后台解析封面的曲目路径，用于去重：同一首曲目只提交一次解析
 static COVER_RESOLVING: Mutex<Option<String>> = Mutex::new(None);
 
-/// 一次状态同步的廉价字段（不含封面路径解析，那一步见 [`cover_path_for`]）
+/// 一次状态同步的廉价字段（不含封面路径解析，那一步见 `cover_path_for`）
 struct MediaSnapshot {
     playing: bool,
     has_track: bool,
@@ -175,6 +158,7 @@ fn collect_media_state(state: &crate::AppState) -> Option<MediaSnapshot> {
     })
 }
 
+/// 把一次快照推给 Kotlin（通知栏 / MediaSession）
 /// 把一次快照推给 Kotlin（通知栏 / MediaSession）
 fn push_media_state(snapshot: &MediaSnapshot, cover_path: &str) {
     let payload = serde_json::json!({
@@ -277,11 +261,8 @@ pub extern "system" fn Java_com_jdbewl_mercurial_1player_MainActivity_nativeAudi
     crate::audio::aaudio::on_audio_route_changed(app);
 }
 
-/// Kotlin `MainActivity.nativeSetForeground(foreground)` 的原生实现。
-///
-/// 频谱门控里"应用是否可见"这一路只能由 Activity 生命周期来写：退到后台时组件并不卸载，
-/// 而 wry 在 `onPause` 里就调 `mWebView.onPause()` 冻结 JS，前端既来不及关、回前台也不会
-/// 补一句"我又可见了"。见 [`crate::audio::spectrum::SpectrumGate`]。
+/// Kotlin `nativeSetForeground(foreground)` 的原生实现。
+/// 可见性只能由 Activity 生命周期写入：退到后台时 wry 已冻结 JS，前端补不了。
 #[unsafe(no_mangle)]
 #[allow(unsafe_code)]
 #[allow(clippy::missing_const_for_fn)]

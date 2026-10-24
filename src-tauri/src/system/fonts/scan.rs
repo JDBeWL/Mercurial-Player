@@ -326,11 +326,7 @@ fn get_linux_fonts() -> Result<Vec<String>, AppError> {
     Ok(font_list)
 }
 
-/// 从注册表字体名称中提取实际的字体名称
-/// 例如：
-/// - "Arial (TrueType)" -> "Arial"
-/// - "Microsoft YaHei & Microsoft YaHei UI (TrueType)" -> "Microsoft YaHei"
-/// - "Segoe UI Bold (TrueType)" -> "Segoe UI"
+/// 去掉 " (TrueType)" 等后缀；"Arial & Arial UI" 取 Arial。
 #[cfg(target_os = "windows")]
 pub(super) fn extract_font_name(registry_name: &str) -> Option<String> {
     // 移除括号及其内容

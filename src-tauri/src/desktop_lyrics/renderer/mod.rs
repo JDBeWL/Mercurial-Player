@@ -1,9 +1,9 @@
 #![allow(unsafe_code)]
 
-//! 桌面歌词渲染入口（模块组织）。
+//! 桌面歌词渲染入口
 //!
-//! 本文件只保留 [`render_lyrics`] 主流程（读共享状态、auto 配色、平滑进度、淡入、
-//! GDI 内存位图合成与 UpdateLayeredWindow 提交）；各子模块的职责见其首部注释。
+//! `render_lyrics` 主流程：读共享状态、auto 配色、平滑进度、淡入、GDI 位图合成与
+//! `UpdateLayeredWindow` 提交。
 
 mod background;
 mod d2d_resources;
@@ -34,10 +34,8 @@ use frame::render_lyrics_d2d_frame;
 use karaoke::karaoke_progress_from_words;
 
 /// 完整的桌面歌词渲染函数。
-///
 /// # Safety
-/// `hwnd` 须为本模块消息循环线程创建的窗口，当前线程已 `CoInitializeEx`；
-/// D2D/DWrite 资源线程独占，只能在 desktop-lyrics 消息循环线程调用。
+/// `hwnd` 须为本模块消息循环线程创建的窗口，当前线程已 `CoInitializeEx`，D2D/DWrite 资源线程独占。
 pub(super) unsafe fn render_lyrics(hwnd: HWND) {
     // SAFETY: 满足函数级 Safety 文档的线程与句柄约束
     unsafe {
@@ -255,7 +253,7 @@ pub(super) unsafe fn render_lyrics(hwnd: HWND) {
         SetBkMode(hdc_mem, TRANSPARENT);
 
         let font_size_scaled = font_size * scale / 96;
-        // 调用 get_cached_font 是为了预热字体缓存(有副作用),返回值未使用
+        // 只为预热字体缓存（有副作用），返回值不用
         let _ = get_cached_font(font_size_scaled);
 
         let current_words_animating = is_playing && !current_words.is_empty();

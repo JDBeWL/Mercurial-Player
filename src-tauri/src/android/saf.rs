@@ -1,7 +1,6 @@
-//! Android SAF（Storage Access Framework）适配层。
+//! Android SAF 适配层
 //!
-//! 桌面端媒体路径为绝对路径，Android 分区存储下为 `content://` URI；本模块经 JNI 调 Kotlin
-//! `SafBridge` 把 URI 转成 native fd 再包成 `File`，解码/元数据/封面因此复用桌面代码。
+//! 把 `content://` URI 经 JNI 转成 native fd 再包成 `File`，解码/元数据/封面复用桌面代码。
 
 use crate::error::AppError;
 

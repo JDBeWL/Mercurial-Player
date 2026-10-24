@@ -1,7 +1,6 @@
-//! HTTP 客户端单例：可重用的 `Client`，避免重复建连。
+//! HTTP 客户端单例
 //!
-//! 安全约束：`capabilities/*.json` 的 `http` scope 只约束前端经 tauri-plugin-http 发的 fetch，
-//! Rust 侧请求完全绕开它，故出网目标在本模块白名单化，业务代码一律走 [`get`] / [`post`]。
+//! `capabilities` 的 http scope 只约束前端 fetch，Rust 侧出网目标必须在本模块白名单化。
 
 use crate::error::AppError;
 use std::sync::LazyLock;

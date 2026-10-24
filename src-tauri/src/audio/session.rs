@@ -1,10 +1,6 @@
-//! 上次播放会话恢复
+//! 上次播放会话恢复：启动时校验配置里的 `last_session`。
 //!
-//! 启动时校验配置里的 last_session:
-//! - L1: 文件存在（桌面 `Path::exists`；SAF content URI 交由打开时校验）
-//! - L2: 文件大小 + 修改时间一致 (检测被替换)
-//!
-//! 不过 L1 时静默清除记录(播放列表由前端维护)，被替换则从 0 开始，全通过则恢复到 position_secs。
+//! 文件不存在则静默清除记录（播放列表由前端维护）；大小或修改时间变化视为被替换，从 0 开始；全部通过则恢复到 `position_secs`。
 
 use crate::AppState;
 use crate::config::manager::{LAST_SESSION_MAX_AGE_SECS, LastSession, TrackSnapshot};
@@ -14,15 +10,11 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, State};
 
-/// save_last_session 写盘节流间隔
-///
-/// 大型播放列表（数千首）下每次 pause/切歌都要全量序列化 + 落盘，用它兜住开销。
-/// 代价：程序在窗口内退出会丢掉最后一次更新，下次启动最多回退这么多。
+/// `save_last_session` 写盘节流：数千首的播放列表每次 pause/切歌都全量序列化 + 落盘，用它兜住开销。
+/// 代价是窗口内退出会丢掉最后一次更新，下次启动最多回退这么久。
 const SAVE_THROTTLE_DURATION: Duration = Duration::from_secs(5);
 
-/// 上次实际写盘时间,用于 save_last_session 节流
 static LAST_SAVE_TIME: Mutex<Option<Instant>> = Mutex::new(None);
-/// 当前 Unix 时间 (秒)
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -30,7 +22,6 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// 获取文件大小和最后修改时间 (Unix 秒)；读不到返回 None
 fn get_file_metadata(path: &str) -> Option<(u64, u64)> {
     // content URI 没有可 stat 的路径，只能从 SAF fd 上取
     let metadata = if crate::android::saf::is_content_uri(path) {
@@ -51,37 +42,29 @@ fn get_file_metadata(path: &str) -> Option<(u64, u64)> {
     Some((size, mtime))
 }
 
-/// 启动恢复结果
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResumeResult {
-    /// 是否成功恢复
     pub resumed: bool,
-    /// 给前端用于 UI 显示的曲目元数据
     pub track_path: Option<String>,
     pub track_title: Option<String>,
     pub track_artist: Option<String>,
     pub duration_secs: Option<f32>,
     /// 实际恢复到的位置 (秒)：文件被替换时返回 0，恢复成功时返回原 position
     pub position_secs: Option<f32>,
-    /// 所在播放列表名 (用于上下首导航)
     pub playlist_name: Option<String>,
     pub track_index_in_playlist: Option<usize>,
-    /// 播放队列快照 (用于恢复 player.playlist)，前端直接构造 Track[]，不依赖 musicLibrary 缓存
+    /// 播放队列快照：前端直接构造 Track[] 恢复 `player.playlist`，不依赖 musicLibrary 缓存
     pub playlist_tracks: Vec<TrackSnapshot>,
-    /// 文件状态描述 (用于前端日志/调试)
     pub status: String,
 }
 
-/// 校验并恢复上次播放会话
-///
-/// 命令内部完成 `play_track_*` 派发并暂停在 `position`，前端只按 status 决定 UI。
+/// 校验并恢复上次播放会话：内部完成 `play_track_*` 派发并暂停在 `position`，前端只按 status 决定 UI。
 pub async fn try_resume_last_session(
     app: &AppHandle,
     state: &State<'_, AppState>,
 ) -> Result<ResumeResult, AppError> {
-    // 取出会话记录：「读-改-写」在写锁内一次完成，避免与 save_last_session 并发丢更新。
-    // 各提前返回都不再写回，此时 last_session 已是 None
+    // 取出会话记录：「读-改-写」在写锁内一次完成，避免与 `save_last_session` 并发丢更新；各提前返回不再写回。
     let session = match state
         .config_manager
         .update_config(|config| config.last_session.take())?
@@ -124,7 +107,7 @@ pub async fn try_resume_last_session(
         });
     }
 
-    // L1: 文件存在性校验（SAF content URI 视为存在，交由打开时校验）
+    // 文件存在性校验：SAF content URI 视为存在，交由打开时校验
     if !crate::android::saf::is_content_uri(&session.track_path)
         && !Path::new(&session.track_path).exists()
     {
@@ -142,13 +125,12 @@ pub async fn try_resume_last_session(
             position_secs: None,
             playlist_name: session.playlist_name,
             track_index_in_playlist: session.track_index_in_playlist,
-            // 返回 playlist_tracks 让前端能重建播放列表 (虽然当前曲目不存在)
+            // 仍返回 playlist_tracks，让前端在曲目缺失时也能重建播放列表
             playlist_tracks: session.playlist_tracks,
             status: "not_found".to_string(),
         });
     }
 
-    // L2 校验，定义见模块头
     let (actual_size, actual_mtime) = if let Some(meta) = get_file_metadata(&session.track_path) {
         meta
     } else {
@@ -222,11 +204,9 @@ pub async fn try_resume_last_session(
 
     match play_result {
         Ok(()) => {
-            // play_track_* 已在播放，立即 pause：恢复后 UI 停在「暂停于 position」，
-            // 用户点播放只需 resume_track 从该位置继续
+            // play_track_* 已在播放，立即 pause：恢复后 UI 停在「暂停于 position」，点播放只需 resume 继续。
             if let Err(e) = crate::audio::commands::pause_any(app, state) {
                 log::warn!("Failed to pause after resume (playback may still be running): {e}");
-                // 不视为致命错误,仍然返回 resumed=true
             }
             Ok(ResumeResult {
                 resumed: true,
@@ -265,9 +245,7 @@ pub async fn try_resume_last_session(
     }
 }
 
-/// 保存上次播放会话
-///
-/// 调用时机: 暂停/切曲/关闭窗口/节流写入 (前端控制)
+/// 保存上次播放会话（由前端在暂停/切曲/关窗/节流时调用）。
 #[allow(clippy::too_many_arguments)]
 pub fn save_last_session(
     state: &State<AppState>,
@@ -297,7 +275,7 @@ pub fn save_last_session(
         *guard = Some(Instant::now());
     }
 
-    // L2 校验要用文件大小与修改时间；读不到就不保存，避免写入无效记录
+    // 记录要带文件大小与修改时间做替换校验；读不到就不保存，避免写入无效记录
     let (file_size, file_mtime) = if let Some(meta) = get_file_metadata(&track_path) {
         meta
     } else {
@@ -325,7 +303,7 @@ pub fn save_last_session(
         .update_config(|config| config.last_session = Some(session))
 }
 
-/// 清除上次播放会话记录 (用于文件失效场景)
+/// 清除上次播放会话记录。
 pub fn clear_last_session(state: &State<AppState>) -> Result<(), AppError> {
     state.config_manager.update_config(|config| {
         if config.last_session.is_some() {

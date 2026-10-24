@@ -6,10 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
-/// 落盘格式与前端负载的字段全集。
-///
-/// serde 忽略未知字段，后端没声明的键会在下一次整包保存时静默丢失（表现为"设置每次都被重置"），
-/// 故新增设置项必须在这里补字段并带 `#[serde(default)]`，旧配置文件才能继续解析。
+/// 落盘格式与前端负载的字段全集；serde 忽略未知字段，后端没声明的键会在下次整包保存时静默丢失。
+/// 新增设置项必须补字段并带 `#[serde(default)]`，旧配置文件才能继续解析。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 #[derive(Default)]
@@ -36,8 +34,7 @@ pub struct AppConfig {
 pub struct UiConfig {
     #[serde(default)]
     pub mini_mode: bool,
-    /// 界面字号倍率（1.0 = 设计稿原始大小），仅 Android 生效，机制见
-    /// [`crate::android::font_scale`]；必须留字段的理由见 [`AppConfig`]
+    /// 界面字号倍率（`1.0` = 设计稿原始大小），仅 Android 生效；必须持久化，理由见 `AppConfig`
     #[serde(default = "default_font_scale")]
     pub font_scale: f32,
 }
@@ -84,10 +81,7 @@ impl Default for VisualizerConfig {
     }
 }
 
-/// 上次播放会话信息
-///
-/// 启动时通过 L1(文件存在) + L2(size+mtime 一致) 校验，通过则恢复到 position_secs；
-/// 不通过则清除本字段，是否从播放列表移除由前端决定
+/// 上次播放会话信息：启动时经 L1（文件存在）+ L2（size+mtime 一致）校验，不通过则清除并由前端决定是否移出播放列表。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LastSession {
@@ -106,9 +100,9 @@ pub struct LastSession {
     pub file_size: u64,
     /// 文件最后修改时间 (Unix 秒,L2 校验)
     pub file_mtime: u64,
-    /// 本记录保存时间 (Unix 秒,[`LAST_SESSION_MAX_AGE_SECS`] 后过期)
+    /// 本记录保存时间 (Unix 秒，超过 `LAST_SESSION_MAX_AGE_SECS` 后过期)
     pub saved_at: u64,
-    /// 播放队列快照:恢复 player.playlist 用,存全量元数据以直接构造 Track[],不依赖 musicLibrary 缓存
+    /// 播放队列快照：恢复 `player.playlist` 用，存全量元数据以直接构造 `Track[]`，不依赖 `musicLibrary` 缓存
     #[serde(default)]
     pub playlist_tracks: Vec<TrackSnapshot>,
 }
@@ -127,6 +121,9 @@ pub struct TrackSnapshot {
     pub channels: Option<u8>,
     pub bit_depth: Option<u8>,
     pub format: Option<String>,
+    /// 每分钟拍数；`None` = 未知（标签里没有且还没识别过）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm: Option<f64>,
 }
 
 /// last_session 过期时间 (30 天)
@@ -177,6 +174,11 @@ pub struct GeneralConfig {
     pub show_audio_info: bool,
     #[serde(default = "default_true")]
     pub show_queue_info: bool,
+    /// 是否启用 BPM 识别。
+    ///
+    /// 默认关闭：识别要解码音频并做 FFT，是纯开销。打开后也只分析当前播放的一首。
+    #[serde(default)]
+    pub enable_bpm_analysis: bool,
     /// 沉浸式封面取色风格：album = 整张封面的代表色；fusion = 取封面右缘条带
     #[serde(default = "default_immersive_color_scheme")]
     pub immersive_color_scheme: String,
@@ -213,12 +215,12 @@ pub struct AudioConfig {
     /// 是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音)
     #[serde(default = "default_true")]
     pub fade_enabled: bool,
-    /// 用户手动选择的输出设备标识,取自 cpal `DeviceTrait::id()`(各平台原生稳定标识),落盘为 `"host:id"`。
-    /// 标识机器绑定,失效时启动静默回退系统默认设备;只有设置页主动选择才写入,自动回退不覆盖用户选择。
+    /// 用户手动选择的输出设备标识，取自 cpal `DeviceTrait::id()`，落盘为 `"host:id"`；标识机器绑定，
+    /// 失效时启动静默回退系统默认设备，只有设置页主动选择才写入，自动回退不覆盖用户选择。
     #[serde(default)]
     pub preferred_device_id: Option<String>,
-    /// Android:USB DAC 独占(位完美)输出,绕过系统混音/重采样按曲目原生采样率直连 USB 声卡。
-    /// 只有系统里确实存在 USB 音频输出设备时才可能生效,拔出后自动回落共享模式并暂停。
+    /// Android：USB DAC 独占（位完美）输出，绕过系统混音/重采样按曲目原生采样率直连 USB 声卡。
+    /// 只有系统里确实存在 USB 音频输出设备时才生效，拔出后自动回落共享模式并暂停。
     #[serde(default)]
     pub usb_dac_exclusive: bool,
 }
@@ -256,7 +258,7 @@ pub struct LyricsConfig {
     /// 启用的歌词来源 id 有序列表(= 顺延优先级),须包含 onlineSource
     #[serde(default = "default_lyric_provider_order")]
     pub lyric_provider_order: Vec<String>,
-    /// 键为歌词来源 id，值见 [`ProviderLyricSetting`]
+    /// 键为歌词来源 id，值见 `ProviderLyricSetting`
     #[serde(default)]
     pub lyric_provider_settings: HashMap<String, ProviderLyricSetting>,
     #[serde(default)]
@@ -398,6 +400,7 @@ impl Default for GeneralConfig {
             auto_save_config: true,
             show_audio_info: true,
             show_queue_info: true,
+            enable_bpm_analysis: false,
             immersive_color_scheme: default_immersive_color_scheme(),
             immersive_auto_theme: true,
             enable_auto_update: false,
@@ -455,13 +458,10 @@ impl Default for DesktopLyricsConfig {
 
 pub struct ConfigManager {
     config_dir: String,
-    /// 进程内配置缓存（Arc 共享，读命中时免磁盘 IO + JSON 解析 + 目录扫描）。
-    /// save_config 写穿更新，reset_config 清空；ConfigManager 在 AppState 中单例存在
+    /// 进程内配置缓存（`Arc` 共享，读命中免磁盘 IO 与 JSON 解析）；`save_config` 写穿更新，`reset_config` 清空。
     cache: RwLock<Option<Arc<AppConfig>>>,
-    /// 写互斥锁:串行化「读-改-写」序列,所有这类修改都必须走 [`Self::update_config`]
-    ///
-    /// 不加锁时并发的 load_config() -> 修改 -> save_config() 会读到同一份旧值，
-    /// 后写覆盖先写 (TOCTOU 丢失更新)。
+    /// 写互斥锁，串行化「读-改-写」；不加锁时并发的 load -> 修改 -> save 会读到同一份旧值、后写覆盖先写。
+    /// 所有读改写都必须走 `update_config`。
     write_lock: Mutex<()>,
 }
 
@@ -497,7 +497,7 @@ impl ConfigManager {
     }
 
     fn get_app_config_dir() -> Result<String, Box<dyn std::error::Error>> {
-        // Android 改写数据目录，见 crate::config::DATA_DIR_OVERRIDE
+        // Android 改写数据目录，见 `crate::config::data_dir_override`
         if let Some(dir) = crate::config::data_dir_override() {
             return Ok(dir.join("data").to_string_lossy().to_string());
         }
@@ -522,10 +522,8 @@ impl ConfigManager {
         Some(dir.to_string_lossy().to_string())
     }
 
-    /// 从文件读取配置,兼容旧版前端 plugin-store 包装格式 `{"appConfig": {...}}`
-    ///
-    /// 必须显式识别包装格式:serde 会忽略未知字段，反序列化包装文件只会得到全默认值、清空用户配置。
-    /// `Err` 也不能折叠成 `Ok(None)`(那是"文件不存在/首次运行"),否则损坏文件会被默认值覆盖落盘。
+    /// 从文件读取配置，兼容旧版 plugin-store 包装格式 `{"appConfig": {...}}`。
+    /// serde 忽略未知字段，不识别包装格式会得到全默认值并清空用户配置；`Err` 也不能折叠成 `Ok(None)`，否则损坏文件会被默认值覆盖。
     fn read_config_file(file_path: &str) -> Result<Option<AppConfig>, AppError> {
         if !Path::new(file_path).exists() {
             return Ok(None);
@@ -540,9 +538,8 @@ impl ConfigManager {
             .map_err(|e| AppError::Config(format!("配置文件字段不符合预期(可能已损坏): {e}")))
     }
 
-    /// 把无法解析的配置文件改名为 `<config>.corrupt-<时间戳>` 备份
-    ///
-    /// 备份要空出原路径,后续 `save_config` 才不会覆盖用户配置;备份失败时必须提示用户手工移走。
+    /// 把无法解析的配置文件改名为 `<config>.corrupt-<时间戳>` 备份，空出原路径以免 `save_config` 覆盖用户配置。
+    /// 备份失败时必须提示用户手工移走。
     fn backup_corrupt_config(&self) {
         let config_path = self.get_config_path();
         // 毫秒时间戳 + 同名避让,避免反复启动时因目标名已存在而 rename 失败
@@ -565,7 +562,7 @@ impl ConfigManager {
         }
     }
 
-    /// 是否为旧版 plugin-store 包装格式,键名见 [`Self::read_config_file`]
+    /// 是否为旧版 plugin-store 包装格式，键名见 `read_config_file`
     fn is_plugin_store_wrapped(file_path: &str) -> bool {
         std::fs::read_to_string(file_path)
             .ok()
@@ -583,11 +580,8 @@ impl ConfigManager {
         }
     }
 
-    /// 旧版布局一次性迁移(幂等):新文件有效就复用(旧包装格式重写为裸格式);
-    /// 无有效配置时回退旧 <exe>/config/user.json(后端旧权威文件,含 lastSession);
-    /// 两者皆无则只清理残留旧目录,后续走 AppConfig::default()
-    ///
-    /// 只有新文件成功落盘后才删除旧目录,避免迁移中断丢失配置。
+    /// 旧版布局一次性迁移：新文件有效则复用，否则回退 `<exe>/config/user.json`，两者皆无只清理残留目录。
+    /// 只有新文件成功落盘后才删除旧目录，避免迁移中断丢失配置。
     fn migrate_legacy_config(&self) {
         let config_path = self.get_config_path();
         let legacy_dir = Self::get_legacy_config_dir();
@@ -606,7 +600,7 @@ impl ConfigManager {
             }
             Ok(None) => {}
             Err(e) => {
-                // 旧目录是最后一份可用副本:损坏时既不覆盖也不删,备份与回退交给 load_config
+                // 旧目录是最后一份可用副本：损坏时既不覆盖也不删，备份与回退交给 load_config
                 log::warn!("配置文件已损坏,跳过旧版迁移以免覆盖: {e}");
                 return;
             }
@@ -637,7 +631,7 @@ impl ConfigManager {
         Ok(())
     }
 
-    /// 清除 .tmp 残留：原子写入中途崩溃留下的，成因见 [`Self::save_config_to_file`]
+    /// 清除 .tmp 残留：原子写入中途崩溃留下的，成因见 `save_config_to_file`
     fn cleanup_temp_files(&self) {
         let Ok(entries) = std::fs::read_dir(&self.config_dir) else {
             return;
@@ -674,7 +668,6 @@ impl ConfigManager {
     }
 
     pub fn load_config(&self) -> Result<AppConfig, AppError> {
-        // 命中即返回,省掉的开销见 Self::cache
         if let Some(cached) = self.cached_config() {
             return Ok(cached);
         }
@@ -693,7 +686,6 @@ impl ConfigManager {
                 log::info!("No configuration file yet, using compiled-in defaults");
             }
             Err(e) => {
-                // 备份优先于回退默认值,顺序理由见 backup_corrupt_config
                 log::error!("配置文件损坏,无法加载: {e}");
                 self.backup_corrupt_config();
             }
@@ -717,9 +709,7 @@ impl ConfigManager {
         Ok(())
     }
 
-    /// 在写锁保护下原子地「读-改-写」配置:`f` 拿到的是最新落盘值,写回也不会被并发修改插队
-    ///
-    /// 凡是「先 load 再 save」的地方都应改用本方法,锁的必要性见字段 write_lock。
+    /// 在写锁保护下「读-改-写」：`f` 拿到最新落盘值，写回不会被并发修改插队。
     pub fn update_config<F, T>(&self, f: F) -> Result<T, AppError>
     where
         F: FnOnce(&mut AppConfig) -> T,
@@ -739,8 +729,8 @@ impl ConfigManager {
         use std::io::Write;
         let content = serde_json::to_string_pretty(config)
             .map_err(|e| AppError::Config(format!("Failed to serialize config: {e}")))?;
-        // 原子写入:写 .tmp -> sync_all(rename 前数据必须已落盘,否则断电会留下空文件) -> rename。
-        // 中途崩溃留下的 .tmp 由启动时的 cleanup_temp_files 清理。
+        // 原子写入：写 .tmp -> `sync_all`（rename 前数据必须已落盘，否则断电会留下空文件）-> rename。
+        // 中途崩溃留下的 .tmp 由启动时的 `cleanup_temp_files` 清理。
         let tmp_path = format!("{file_path}.tmp");
         {
             let mut file = std::fs::File::create(&tmp_path)
@@ -763,7 +753,6 @@ impl ConfigManager {
 
     pub fn import_config(&self, import_path: &str) -> Result<AppConfig, AppError> {
         let config = Self::load_config_from_file(import_path)?;
-        // 导入的配置不能削弱白名单，见 Self::with_default_allowed_hosts
         Ok(Self::with_default_allowed_hosts(config))
     }
 
@@ -775,7 +764,7 @@ impl ConfigManager {
                 log::error!("Failed to remove config file: {e}");
             }
         }
-        // 文件已删就必须作废缓存,否则 load_config 还会返回旧值
+        // 文件已删就必须作废缓存，否则 load_config 还会返回旧值
         if let Ok(mut guard) = self.cache.write() {
             *guard = None;
         }
@@ -937,9 +926,7 @@ mod tests {
 
     #[test]
     fn test_new_fields_parse_old_json_fragment() {
-        // 缺字段的旧配置必须能解析，serde default 的兼容规则见 [`AppConfig`]
         let mut v = serde_json::to_value(AppConfig::default()).expect("serialize");
-        // 剥掉新增键,模拟旧版 config.json
         v["playlist"].as_object_mut().unwrap().remove("sortOrder");
         let lyrics = v["lyrics"].as_object_mut().unwrap();
         lyrics.remove("translationFontFamily");
@@ -1005,6 +992,7 @@ mod tests {
                 channels: Some(2),
                 bit_depth: None,
                 format: Some("mp3".to_string()),
+                bpm: None,
             }],
         };
 
@@ -1032,7 +1020,6 @@ mod tests {
         assert!(snapshot.format.is_none());
     }
 
-    /// 歌词来源字段必须能在后端往返，serde 静默丢字段的规则与后果见 [`AppConfig`]
     #[test]
     fn test_lyrics_provider_settings_roundtrip() {
         let raw = r#"{
@@ -1066,13 +1053,11 @@ mod tests {
             Some("translation")
         );
 
-        // 再序列化回去,三个字段都要在(不被丢弃),且空字段被省略
         let json = serde_json::to_string(&parsed).expect("应能序列化");
         assert!(json.contains("\"autoSelectBestLyrics\":false"));
         assert!(json.contains("\"lyricProviderOrder\":[\"qq\",\"netease\",\"lrclib\"]"));
         assert!(json.contains("\"lyricProviderSettings\""));
         assert!(json.contains("\"preferKind\":\"translation\""));
-        // lrclib 只设置了 method,序列化不应冒出空的 preferKind
         let round_tripped: LyricsConfig = serde_json::from_str(&json).expect("应能往返");
         let lrclib = round_tripped
             .lyric_provider_settings
@@ -1082,7 +1067,6 @@ mod tests {
         assert!(lrclib.prefer_kind.is_none());
     }
 
-    /// 老配置文件没有这几个字段时应落到默认值(自动择优 + netease)
     #[test]
     fn test_lyrics_provider_settings_defaults() {
         let legacy: LyricsConfig =

@@ -1,7 +1,6 @@
-//! 音频相关的 Tauri 命令：播放控制、设备管理、独占模式切换。
+//! 音频 Tauri 命令：播放控制、设备管理与独占模式切换。
 //!
-//! 约定：命令层一律用 `lock()` 阻塞等待而不是 `try_lock()`。播放期间解码线程会周期性持锁，
-//! try_lock 必然偶发失败，而用户操作不该因此报错；各调用点不再重复这条理由。
+//! 命令层一律用 `lock()` 阻塞等待：`try_lock` 在播放期间会偶发失败，用户操作不该因此报错。
 use crate::error::AppError;
 
 use super::device::{AudioDeviceInfo, get_all_audio_devices};
@@ -1135,11 +1134,8 @@ pub fn get_audio_route() -> Result<serde_json::Value, AppError> {
     ))
 }
 
-/// 开关 USB DAC 独占（位完美）输出（Android）。
-///
-/// 只记模式、不在当前曲目中途交接输出链路：热切换要么两条链路同时出声，要么新流没启动就静音，
-/// 还会让前端播放态与实际输出脱节。打开时独占流由 `play_track_exclusive` 在下一首开始前按需建立；
-/// 关闭时若没在出声就立即回收（独占流占住 USB DAC，见 `release_exclusive_player`），正在播则留给下一首。
+/// 开关 USB DAC 独占（位完美）输出（Android）；只记模式，不在当前曲目中途交接链路。
+/// 热切换会双出声或静音，并让前端播放态与实际输出脱节；打开后下一首由 `play_track_exclusive` 建流。
 #[cfg(target_os = "android")]
 #[command]
 pub fn set_usb_dac_exclusive(state: State<'_, AppState>, enabled: bool) -> Result<(), AppError> {

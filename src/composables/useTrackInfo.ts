@@ -14,19 +14,10 @@ interface ProcessedTrackInfo {
   isFromMetadata?: boolean
 }
 
-/**
- * 缓存条数上限,超出按 LRU 驱逐
- *
- * 取值须容得下一次目录扫描的曲目数,过小会让缓存刚填满就被清空
- * 导出供单测读取,避免测试里再硬编码一份上限
- */
+/** 缓存条数上限，须容得下整次目录扫描；导出供单测读取。 */
 export const MAX_PROCESSED_TRACKS = 5000
 
-/**
- * LRU 访问顺序表,依赖 Map 的插入顺序特性
- *
- * delete + set 即 O(1) 地把 key 挪到"最近使用"的末尾,头部就是最久未使用的
- */
+/** LRU 访问顺序表：`delete` + `set` 即 O(1) 把 key 挪到末尾，头部是最久未用。 */
 const accessOrder = new Map<string, void>()
 
 /** 将 key 移到 accessOrder 末尾 (最近使用),O(1) */
@@ -137,12 +128,7 @@ async function processTrackInfo(trackPath: string): Promise<void> {
   }
 }
 
-/**
- * 音轨信息处理 composable
- *
- * 缓存是模块级共享的 (sharedProcessedTracks),App.vue 与 MiniPlayer.vue 因此只算一次,
- * 并有 LRU 上限兜住长期增长
- */
+/** 音轨信息处理：模块级共享缓存，App 与 MiniPlayer 只算一次，LRU 上限兜住增长。 */
 export function useTrackInfo() {
   ensureConfigStore()
 
@@ -191,11 +177,7 @@ export function useTrackInfo() {
     return track.artist || fallback
   }
 
-  /**
-   * 设置音轨变化监听器
-   *
-   * 切歌时先用 track.title/artist 预填缓存,再触发异步精细提取,避免首帧显示原始文件名而抖动
-   */
+  /** 设置音轨变化监听器：先预填 `title`/`artist`，再异步精细提取，避免首帧显示文件名而抖动。 */
   const watchTrack = (trackGetter: () => Track | null | undefined): WatchStopHandle => {
     return watch(
       trackGetter,

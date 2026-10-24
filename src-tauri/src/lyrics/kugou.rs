@@ -1,4 +1,6 @@
 //! 酷狗音乐歌词来源
+//!
+//! KRC 逐字歌词的签名请求、XOR + zlib 解密、解析与 ASS/LRC 产出。
 
 use crate::error::AppError;
 use crate::http_client::{get, read_response_text, send_with_retry};
@@ -21,8 +23,6 @@ const LYRIC_DOWNLOAD_URL: &str = "https://lyrics.kugou.com/download";
 
 /// `contenttype == 2` 表示 base64 的纯文本歌词
 const CONTENT_TYPE_PLAIN: i64 = 2;
-
-// 响应结构
 
 #[derive(Debug, Deserialize)]
 struct WebSearchResponse {
@@ -70,7 +70,6 @@ struct Candidate {
 
 #[derive(Debug, Deserialize)]
 struct DownloadResponse {
-    /// 2 = base64 纯文本歌词
     #[serde(default)]
     contenttype: i64,
     #[serde(default)]
@@ -90,8 +89,6 @@ struct LanguageEntry {
     #[serde(default, rename = "lyricContent")]
     lyric_content: Vec<Vec<String>>,
 }
-
-// 通用小工具
 
 fn now_ms() -> u128 {
     std::time::SystemTime::now()
@@ -133,7 +130,6 @@ fn has_content(text: &str) -> bool {
     )
 }
 
-// 请求
 fn kg_headers(module: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     if let Ok(ua) = HeaderValue::from_str(&format!("Android14-1070-11070-201-0-{module}-wifi")) {
@@ -169,7 +165,6 @@ fn kg_signature(params: &[(&str, String)], data: &str) -> String {
     md5_hex(&buf)
 }
 
-/// GET 成功时返回响应文本
 async fn kg_get(url: &str, params: &[(&str, String)]) -> Option<String> {
     let mut all: Vec<(&str, String)> = vec![
         ("appid", APP_ID.to_string()),
@@ -191,7 +186,6 @@ async fn kg_get(url: &str, params: &[(&str, String)]) -> Option<String> {
     Some(text)
 }
 
-/// 搜索歌曲
 async fn search_songs(query: &LyricQuery, limit: u32) -> Vec<WebSearchItem> {
     let keyword = if query.artist.is_empty() {
         query.title.clone()
@@ -225,7 +219,6 @@ async fn search_songs(query: &LyricQuery, limit: u32) -> Vec<WebSearchItem> {
         .unwrap_or_default()
 }
 
-/// 歌词候选
 async fn lyric_candidates(
     hash: &str,
     album_audio_id: &str,
@@ -248,7 +241,6 @@ async fn lyric_candidates(
         .unwrap_or_default()
 }
 
-/// 下载歌词载荷
 async fn download_lyrics(id: &str, accesskey: &str) -> Option<DownloadResponse> {
     let params = [
         ("accesskey", accesskey.to_string()),
@@ -262,7 +254,6 @@ async fn download_lyrics(id: &str, accesskey: &str) -> Option<DownloadResponse> 
     serde_json::from_str::<DownloadResponse>(&text).ok()
 }
 
-// 解密
 fn krc_decrypt(encrypted: &[u8]) -> Option<String> {
     let body = encrypted.get(4..)?;
     if body.is_empty() {
@@ -286,7 +277,6 @@ fn krc_decrypt(encrypted: &[u8]) -> Option<String> {
     Some(text.trim_start_matches('\u{feff}').to_string())
 }
 
-// 解析
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct KrcLine {
     start_ms: i64,
@@ -295,17 +285,15 @@ struct KrcLine {
 }
 
 impl KrcLine {
-    /// 整行文本（拼接逐字）
     fn text(&self) -> String {
         self.words.iter().map(|word| word.text.as_str()).collect()
     }
 
-    /// 行内所有字都无文本
     fn is_blank(&self) -> bool {
         self.words.iter().all(|word| word.text.is_empty())
     }
 
-    /// LRC 时间戳取 `words[0].start`
+    /// LRC 时间戳取 `words[0].start`（不是行头的 `start_ms`）
     fn lrc_begin_ms(&self) -> i64 {
         self.words
             .first()
@@ -313,7 +301,6 @@ impl KrcLine {
     }
 }
 
-/// 解析结果
 #[derive(Debug, Default)]
 struct KrcParse {
     tags: Vec<(String, String)>,
@@ -450,7 +437,6 @@ fn apply_language(blob: &str, parsed: &mut KrcParse) {
     }
 }
 
-/// 解析实际的内容
 fn parse_krc(text: &str) -> KrcParse {
     let mut parsed = KrcParse::default();
     let mut language: Option<String> = None;
@@ -492,10 +478,7 @@ fn parse_krc(text: &str) -> KrcParse {
     parsed
 }
 
-// 文本产出
-
 impl KrcParse {
-    /// 行级 LRC
     fn to_lrc(&self) -> String {
         let mut out = String::new();
         for (key, value) in &self.tags {
@@ -567,7 +550,6 @@ impl KrcParse {
             if !has_content(&text) {
                 continue;
             }
-            // 单字行由 `dialogue` 内部退化为普通文本
             out.push_str(&super::ass::dialogue(
                 line.start_ms,
                 line.end_ms,
@@ -580,9 +562,6 @@ impl KrcParse {
     }
 }
 
-// 入口
-
-/// 取一整首的候选 bundle：搜索歌词候选
 async fn fetch_bundle(item: &WebSearchItem) -> Option<LyricsData> {
     if item.file_hash.is_empty() || item.mix_song_id.is_empty() {
         return None;
@@ -611,7 +590,6 @@ async fn fetch_bundle(item: &WebSearchItem) -> Option<LyricsData> {
         .decode(&payload)
         .ok()?;
 
-    // contenttype == 2：base64 的纯文本歌词，没有逐字与翻译
     if data.contenttype == CONTENT_TYPE_PLAIN {
         let text = String::from_utf8_lossy(&raw)
             .trim_start_matches('\u{feff}')
@@ -641,14 +619,12 @@ async fn fetch_bundle(item: &WebSearchItem) -> Option<LyricsData> {
     })
 }
 
-/// 酷狗音乐入口
 pub async fn search_candidates(
     query: &LyricQuery,
     limit: u32,
 ) -> Result<Vec<LyricCandidate>, AppError> {
     let items = search_songs(query, limit).await;
-    // 每候选两次请求（逐字 + 译文），串行会把整轮拖成 2N 次往返；并行后最坏只是一次超时。
-    // 顺序仍按搜索结果原序
+    // 每候选两次请求，并行后最坏只是一次超时；`join_all` 保持搜索结果原序
     let fetched = futures_util::future::join_all(items.into_iter().map(|item| async move {
         let bundle = fetch_bundle(&item).await?;
         Some(LyricCandidate {
@@ -733,20 +709,18 @@ mod tests {
     fn 解析行与逐字() {
         let parsed = parse_krc(KRC_SAMPLE);
         assert_eq!(parsed.lines.len(), 3);
-        assert_eq!(parsed.tags.len(), 4); // ti/ar/al/offset
+        assert_eq!(parsed.tags.len(), 4);
 
         let first = &parsed.lines[0];
         assert_eq!((first.start_ms, first.end_ms), (889, 889 + 1527));
         assert_eq!(first.text(), "夢ならば");
         assert_eq!(first.words.len(), 4);
-        // 字偏移相对行首，绝对化为行内毫秒
         assert_eq!(
             (first.words[1].start_ms, first.words[1].end_ms),
             (889 + 551, 889 + 551 + 368)
         );
         assert_eq!(first.words[3].text, "ば");
 
-        // 无逐字标记的行退化为整行单字
         let third = &parsed.lines[2];
         assert_eq!(third.words.len(), 1);
         assert_eq!(third.words[0].text, "作词：米津玄師");
@@ -772,7 +746,6 @@ mod tests {
 
     #[test]
     fn 解析语言标签的罗马音跳过空行() {
-        // type=0 的下标跳过「整行无文本」的行
         let json = r#"{"content":[{"lyricContent":[["yu","me"],["to"]],"type":0,"language":0}]}"#;
         let krc = format!(
             "[0,1000]\n[1000,1000]<0,500,0>夢<500,500,0>な\n[2000,1000]<0,900,0>ど\n[language:{}]\n",
@@ -799,14 +772,12 @@ mod tests {
         assert!(lrc.starts_with("[ti:Lemon]\n[ar:米津玄師]\n[offset:0]\n"));
         assert!(lrc.contains("[00:00.89]夢ならば"));
         assert!(!lrc.contains("<0,551,0>"));
-        // 无内容的标签值为空 -> 不输出
         assert!(!lrc.contains("[al:]"));
 
         let ass = parsed.to_ass("Lemon").expect("应生成逐字 ASS");
         assert!(ass.contains("[Script Info]"));
         assert!(ass.contains("Dialogue: 0,00:00:00.89,00:00:02.42,orig,,0,0,0,,{\\kf55}夢"));
         assert!(ass.contains(",ts,,0,0,0,,如果能做梦的话\n"));
-        // 单字行不带 \kf
         assert!(ass.contains(",orig,,0,0,0,,作词：米津玄師\n"));
     }
 
@@ -821,7 +792,7 @@ mod tests {
         assert_eq!(lrc_time(0), "00:00.00");
         assert_eq!(lrc_time(889), "00:00.89");
         assert_eq!(lrc_time(61_234), "01:01.23");
-        assert_eq!(lrc_time(3_600_000), "60:00.00"); // 小时并入分钟
+        assert_eq!(lrc_time(3_600_000), "60:00.00");
         assert_eq!(lrc_time(-5), "00:00.00");
     }
 
@@ -843,7 +814,6 @@ mod tests {
 
     #[test]
     fn 行标记识别严格三段数字() {
-        // 正文里的括号数字不算字标记
         assert!(find_word_marker("(1,2)", 0).is_none());
         assert!(find_word_marker("<1,2>", 0).is_none());
         assert!(find_word_marker("<1,2,0>", 0).is_some());

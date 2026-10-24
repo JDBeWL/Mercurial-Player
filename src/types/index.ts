@@ -1,5 +1,3 @@
-// ============ 基础类型 ============
-
 export interface Track {
   path: string
   name?: string
@@ -16,6 +14,8 @@ export interface Track {
   channels?: number | null
   bitDepth?: number | null
   format?: string | null
+  /* 每分钟拍数：标签里的值或后台识别结果，未知时为 null/undefined */
+  bpm?: number | null
 }
 
 export interface AudioInfo {
@@ -24,9 +24,8 @@ export interface AudioInfo {
   channels: number | null
   bitDepth: number | null
   format: string | null
+  bpm: number | null
 }
-
-// ============ 歌词类型 ============
 
 export interface LyricLine {
   time: number
@@ -49,8 +48,6 @@ export interface KaraokeWord {
 
 export type LyricsFormat = 'lrc' | 'ass' | 'srt' | 'auto'
 
-// ============ 播放列表类型 ============
-
 export interface Playlist {
   name: string
   files: Track[]
@@ -64,8 +61,6 @@ export type SortOrder = 'asc' | 'desc'
 
 /* 沉浸式封面背景取色风格 */
 export type ImmersiveColorScheme = 'album' | 'fusion'
-
-// ============ 配置类型 ============
 
 export interface DirectoryScanConfig {
   enableSubdirectoryScan: boolean
@@ -97,6 +92,9 @@ export interface GeneralConfig {
   showAudioInfo: boolean
   // Whether to show the queue info at the bottom-left of the player (default: true)
   showQueueInfo?: boolean
+  // Whether BPM detection is enabled (default: false). Detection decodes audio and runs an FFT,
+  // so it is opt-in; when enabled only the currently playing track is analyzed on demand.
+  enableBpmAnalysis?: boolean
   // Immersive cover background color scheme:
   // 'album' = representative theme color of the whole cover (default)
   // 'fusion' = sample the right edge strip so the background blends into the feathered cover
@@ -212,6 +210,7 @@ export interface TrackSnapshot {
   channels?: number | null
   bitDepth?: number | null
   format?: string | null
+  bpm?: number | null
 }
 
 /** 启动恢复结果。resumed=true 时其他字段填充曲目信息；status 用于前端日志/调试，
@@ -244,8 +243,6 @@ export interface AppConfig {
   /* 上次播放会话 (启动恢复用) */
   lastSession?: LastSession | null
 }
-
-// ============ 错误处理类型 ============
 
 export enum ErrorType {
   NETWORK = 'NETWORK',
@@ -301,8 +298,6 @@ export interface AppError extends Error {
   timestamp: string
 }
 
-// ============ 日志类型 ============
-
 export enum LogLevel {
   DEBUG = 0,
   INFO = 1,
@@ -322,8 +317,6 @@ export interface LogData {
   stack?: string
 }
 
-// ============ 主题类型 ============
-
 export type ThemePreference = 'auto' | 'light' | 'dark' | string
 
 export interface TonalVariants {
@@ -338,8 +331,6 @@ export interface HarmonyColors {
   triadic2: string
 }
 
-// ============ 插件类型 ============
-
 export interface Plugin {
   id: string
   name: string
@@ -351,22 +342,16 @@ export interface Plugin {
   [key: string]: unknown
 }
 
-// ============ 缓存类型 ============
-
 export interface CacheItem<T> {
   value: T
   timestamp: number
 }
-
-// ============ 设置页类型 ============
 
 export interface SettingsTab {
   id: string
   icon: string
   label: string
 }
-
-// ============ 统计类型 ============
 
 export interface LibraryStats {
   totalDirectories: number

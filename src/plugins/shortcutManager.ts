@@ -48,11 +48,9 @@ class ShortcutManager {
     if (event.metaKey) keys.push('meta')
 
     let key = event.key.toLowerCase()
-    // 规范化特殊键名,与插件注册串的写法一致
     if (key === ' ') key = 'space'
     if (key === 'escape') key = 'esc'
 
-    // 修饰键已收集过,避免重复加入
     if (!['control', 'alt', 'shift', 'meta'].includes(key)) {
       keys.push(key)
     }
@@ -71,7 +69,7 @@ class ShortcutManager {
       })
       .join('+')
 
-    // 按键串精确匹配;冲突在注册侧已挡住(见 pluginAPI 的 shortcuts.register),多匹配只作防御性告警
+    // 精确匹配;冲突已在 `pluginAPI.shortcuts.register` 拒绝,多匹配仅作防御告警
     const shortcuts = pluginManager.getExtensions('shortcuts') as ShortcutExtension[]
     const matched = shortcuts.filter((s) => s.key === pressedKey)
     if (matched.length > 1) {

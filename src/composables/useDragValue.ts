@@ -5,7 +5,6 @@ export interface UseDragValueOptions {
   getPercent: (event: MouseEvent) => number
   /** pointerdown 时调用; 返回 false 取消本次拖拽 (不进入拖拽态、不挂监听器) */
   onStart?: (percent: number, event: MouseEvent) => boolean | void
-  /** 拖拽移动时调用 */
   onMove?: (percent: number) => void
   /** pointerup 时调用 (仅当拖拽进行中) */
   onEnd?: (percent: number) => void
@@ -17,15 +16,12 @@ export interface UseDragValueResult {
   percent: Ref<number>
   /** 用调用方的 getPercent 计算任意事件的百分比 (供 click 等非拖拽路径复用) */
   getPercent: (event: MouseEvent) => number
-  /** 绑定到滑块元素的 @pointerdown */
   startDrag: (event: MouseEvent) => void
-  /** 强制结束拖拽并移除监听器 */
   stopDrag: () => void
 }
 
-/** 拖拽取值骨架: pointerdown 后把 pointermove/pointerup/pointercancel 挂到 document, 指针移出元素也不中断, 卸载自动清理。
- *  用 Pointer Events 而非 mouse events: Android WebView 上手指拖动不产生 mousemove。
- *  调用方必须给元素写 touch-action: none, 否则手势被判成滚动并中途抛 pointercancel。 */
+/** 拖拽骨架: 监听挂 `document` 故指针移出元素也不中断, 卸载时自动清理; 用 Pointer Events 因 Android WebView 手指拖动不产生 `mousemove`
+ *  调用方必须给元素写 `touch-action: none`, 否则手势被判成滚动并中途抛 `pointercancel` */
 export function useDragValue(options: UseDragValueOptions): UseDragValueResult {
   const isDragging = ref(false)
   const percent = ref(0)
@@ -65,7 +61,7 @@ export function useDragValue(options: UseDragValueOptions): UseDragValueResult {
     percent.value = options.getPercent(event)
     if (options.onStart?.(percent.value, event) === false) return
     isDragging.value = true
-    removeListeners() // 防御性去重,避免重复挂载
+    removeListeners()
     document.addEventListener('pointermove', onDragMove)
     document.addEventListener('pointerup', onDragEnd)
     document.addEventListener('pointercancel', onDragCancel)

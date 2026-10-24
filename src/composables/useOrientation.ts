@@ -8,7 +8,6 @@ function readPortrait(): boolean {
   if (typeof window.matchMedia === 'function') {
     return window.matchMedia(portraitQuery).matches
   }
-  // 降级路径: 没有 matchMedia (老 WebView / 非浏览器环境) 时才直接比宽高
   return window.innerHeight > window.innerWidth
 }
 

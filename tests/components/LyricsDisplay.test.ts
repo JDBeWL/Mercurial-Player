@@ -144,8 +144,6 @@ describe('LyricsDisplay.vue', () => {
     vi.unstubAllGlobals()
   })
 
-  // ---------- 空状态 ----------
-
   describe('空状态', () => {
     it('loading=true 时显示加载中状态', async () => {
       setupMocks({ loading: true })
@@ -257,8 +255,6 @@ describe('LyricsDisplay.vue', () => {
     })
   })
 
-  // ---------- 歌词列表渲染 ----------
-
   describe('歌词列表渲染', () => {
     it('渲染所有歌词行', async () => {
       const lyrics = makeLyrics()
@@ -298,7 +294,6 @@ describe('LyricsDisplay.vue', () => {
     })
   })
 
-  // ---------- 当前歌词高亮 ----------
   // 组件 onMounted 会根据当前 currentTime 立即计算 activeIndex（覆盖重新挂载场景），
   // 播放中的高亮切换则由 visualTime watcher 驱动。
 
@@ -388,8 +383,6 @@ describe('LyricsDisplay.vue', () => {
       expect(lines[1]!.classes()).not.toContain('active')
     })
   })
-
-  // ---------- 重新挂载恢复高亮 ----------
 
   describe('重新挂载恢复高亮', () => {
     it('暂停状态下挂载即高亮 currentTime 对应歌词行', async () => {
@@ -488,8 +481,6 @@ describe('LyricsDisplay.vue', () => {
     })
   })
 
-  // ---------- 歌词偏移调整 ----------
-
   describe('歌词偏移调整', () => {
     it('显示偏移控制栏（有歌词时）', async () => {
       const lyrics = makeLyrics()
@@ -568,8 +559,6 @@ describe('LyricsDisplay.vue', () => {
     })
   })
 
-  // ---------- 点击歌词跳转 ----------
-
   describe('点击歌词跳转', () => {
     it('点击歌词行调用 seek 到该行时间', async () => {
       const lyrics = makeLyrics()
@@ -604,8 +593,6 @@ describe('LyricsDisplay.vue', () => {
     })
   })
 
-  // ---------- 底部控制栏 ----------
-
   describe('底部控制栏', () => {
     it('有歌词时显示底部控制栏', async () => {
       const lyrics = makeLyrics()
@@ -622,8 +609,6 @@ describe('LyricsDisplay.vue', () => {
       expect(wrapper.find('.lyrics-bottom-bar').exists()).toBe(false)
     })
   })
-
-  // ---------- 点空白处（竖屏下由 App.vue 用来返回封面） ----------
 
   describe('点空白处发出 blankClick', () => {
     it('点击歌词行不发出 blankClick', async () => {

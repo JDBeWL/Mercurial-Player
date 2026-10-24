@@ -1,10 +1,6 @@
-//! 前端日志落盘
+//! 前端日志落盘：`src/utils/logger.ts` 经 `write_log` 写入主程序同级 `logs/`。
 //!
-//! 前端 `src/utils/logger.ts` 通过 `write_log` 命令把日志写进主程序同级的 `logs/`：
-//! - `mercurial-player.log`：当前这次运行
-//! - `mercurial-player-prev.log`：上一次运行（启动时轮转）
-//!
-//! 轮转在 setup 阶段执行：若上次运行的日志存在，先删旧 prev 再把当前日志重命名为 prev。
+//! 启动时轮转：当前日志改名为 `-prev.log`，再删旧 prev。
 
 use std::io::Write;
 use std::path::PathBuf;

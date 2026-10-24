@@ -1,6 +1,5 @@
 [package]
 name = "mercurial-player"
-# 运行`pnpm run version:sync`以同步
 version = "1.6.1"
 description = "A music player by JDBeWL"
 authors = ["jdbEwl"]
@@ -10,9 +9,6 @@ edition = "2024"
 rust-version = "1.92"
 default-run = "mercurial-player"
 
-# Tauri 移动端需要 staticlib/cdylib 产出 libmercurial_player_lib.so；
-# rlib 保留桌面端构建与测试行为不变。
-# 名字必须与 bin 名规范化后不同，否则 MSVC 下两个 target 抢同一个 mercurial_player.pdb
 [lib]
 name = "mercurial_player_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -29,12 +25,13 @@ cpal = "0.17"
 dirs = "6"
 walkdir = "2"
 lofty = "0.24"
-# 启用Symphonia所有格式和编解码器
 symphonia = { version = "0.6", features = ["all"] }
 rubato = "4.0"
 audioadapter-buffers = "4.0"
 rayon = "1"
 spectrum-analyzer = "1.7"
+microfft = { version = "0.6", features = ["size-512"] }
+beat-this = { version = "1.1", default-features = false }
 log = "0.4"
 tauri-plugin-log = "2.10"
 tauri-plugin-dialog = "2.8"
@@ -48,8 +45,6 @@ tauri-plugin-global-shortcut = "2.4"
 
 crossbeam-channel = "0.5"
 unicode-segmentation = "1"
-# async sleep 用于将阻塞的播放命令改为 async,避免阻塞 Tauri 命令线程;
-# fs + io-util 用于更新包分片流式落盘
 tokio = { version = "1", features = ["time", "fs", "io-util"] }
 ttf-parser = "0.25.1"
 futures-util = "0.3"
@@ -57,10 +52,8 @@ minisign-verify = "0.2"
 base64 = "0.22"
 flate2 = "1"
 md-5 = "0.10"
+anyhow = "1.0.104"
 
-# Android 专属：cpal 的 AAudio 后端需要 ndk_context（JavaVM+Context），
-# 但 Tauri 栈（tao/wry）从不初始化它；需自建 JNI 入口在进程级初始化一次
-# （传 Application Context，见 src/android/entry.rs 与 MainActivity.kt）
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 ndk-context = "0.1"
@@ -76,17 +69,14 @@ harness = false
 name = "equalizer"
 harness = false
 
-# 桌面端专属依赖：display-info 经 smithay-client-toolkit 拉入 wayland-cursor，
-# 后者无条件引用 rustix::shm（Android 上被门控）导致移动端编译失败；该依赖仅用于
-# 屏幕刷新率查询（桌面功能），移动端不参与编译
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 display-info = "0.5"
 
 [target.'cfg(windows)'.dependencies]
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic", "directml", "api-24"] }
+libloading = "0.9"
 wasapi = "0.23"
 winreg = "0.56"
-# windows-core 和 windows-implement 需要作为直接依赖，
-# 因为 #[windows::core::implement] 宏生成的代码直接引用 windows_core:: 路径
 windows-core = "0.62"
 windows-implement = "0.60"
 windows = { version = "0.62", features = [
@@ -118,45 +108,38 @@ keyword_idents_2024 = "forbid"
 unsafe_op_in_unsafe_fn = "warn"
 
 [lints.clippy]
-# 基础lint组
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
-# Tauri框架限制
 module_name_repetitions = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 doc_markdown = "allow"
-needless_pass_by_value = "allow"  # Tauri命令需要owned类型
-must_use_candidate = "allow"      # Tauri命令返回值由框架处理
-# 音频处理常见模式
-cast_precision_loss = "allow"     # u32 -> f32在音频处理中常见
-cast_possible_truncation = "allow" # 频率显示截断是预期行为
-cast_possible_wrap = "allow"      # Win32 API 常量(u32)转 i32/isize 是必需的
-cast_sign_loss = "allow"          # 频率值总是正数
-cast_lossless = "allow"           # 音频代码中类型转换很常见
-suboptimal_flops = "allow"        # 保持代码可读性
-inline_always = "allow"           # 音频热路径需要内联
-# Windows API/状态结构
-struct_field_names = "allow"      # LyricsLayout 字段都以 _rect 结尾,语义清晰
-struct_excessive_bools = "allow"  # SharedLyricState 需要多个状态标志
-# 框架生成代码
-large_stack_frames = "allow"      # Tauri宏生成
-too_many_lines = "allow"          # lib.rs 的 run() 需要初始化很多东西
-used_underscore_binding = "allow" # Tauri setup回调
-# 代码风格偏好
-collapsible_if = "allow"          # 有时分开写更清晰
-too_many_arguments = "allow"      # 音频处理函数需要多参数
-items_after_statements = "allow"  # 常量定义在使用处附近更清晰
-significant_drop_tightening = "warn" # 检测持锁跨等待等守卫存活过长问题
-match_same_arms = "allow"         # 有时显式写出更清晰
-type_complexity = "allow"         # 音频初始化返回复杂类型
-option_if_let_else = "allow"      # match有时比map_or_else更清晰
-missing_const_for_fn = "allow"    # 不是所有函数都需要const
-manual_let_else = "allow"         # match有时比let else更清晰
-redundant_closure_for_method_calls = "allow" # 闭包有时更清晰
-map_unwrap_or = "allow"           # map().unwrap_or()有时更清晰
-# 额外的严格检查
+needless_pass_by_value = "allow"
+must_use_candidate = "allow"
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+suboptimal_flops = "allow"
+inline_always = "allow"
+struct_field_names = "allow"
+struct_excessive_bools = "allow"
+large_stack_frames = "allow"
+too_many_lines = "allow"
+used_underscore_binding = "allow"
+collapsible_if = "allow"
+too_many_arguments = "allow"
+items_after_statements = "allow"
+significant_drop_tightening = "warn"
+match_same_arms = "allow"
+type_complexity = "allow"
+option_if_let_else = "allow"
+missing_const_for_fn = "allow"
+manual_let_else = "allow"
+redundant_closure_for_method_calls = "allow"
+map_unwrap_or = "allow"
 clone_on_ref_ptr = "warn"
 dbg_macro = "warn"
 todo = "warn"
@@ -165,7 +148,6 @@ unimplemented = "warn"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
-# 启用 IMMNotificationClient 事件驱动设备监听（实验性，默认禁用）
 imm-notification = []
 
 [[bin]]
@@ -173,9 +155,12 @@ name = "mercurial-player"
 path = "src/main.rs"
 
 [profile.dev]
-opt-level = 0
+opt-level = 1
 debug = true
 incremental = true
+
+[profile.dev.package."*"]
+opt-level = 3
 
 [profile.release]
 opt-level = 3

@@ -1,8 +1,4 @@
-/**
- * 视觉时间系统 composable
- *
- * 歌词显示与可视化器共用的卡拉OK时间源:rAF 内按帧间隔累加,再用 P 控制器调速消除与真实播放时间的漂移
- */
+/** 视觉时间系统 / 歌词与可视化共用的卡拉 OK 时间源：rAF 累加帧间隔，再用 P 控制器消除漂移。 */
 import { ref, watch, type Ref } from 'vue'
 import { usePlayerStore } from '@/stores/player'
 

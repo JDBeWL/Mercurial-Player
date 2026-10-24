@@ -27,7 +27,7 @@ const builtinPluginMap = new Map<string, (typeof builtinPluginModules)[string]>(
 for (const [manifestPath, manifest] of Object.entries(builtinManifests)) {
   const pluginId = manifest?.id
   if (!pluginId) continue
-  // 内置插件按目录配对:../../plugins/<id>/manifest.json 对应同目录的 index.js/index.ts
+  // 内置插件按目录配对:`../../plugins/<id>/manifest.json` 对应同目录的 `index.js` / `index.ts`
   const baseDir = manifestPath.replace(/manifest\.json$/, '')
   for (const modulePath of Object.keys(builtinPluginModules)) {
     if (modulePath.startsWith(baseDir)) {
@@ -37,11 +37,7 @@ for (const [manifestPath, manifest] of Object.entries(builtinManifests)) {
   }
 }
 
-/**
- * 并发加载全部插件,单个插件故障不影响其余插件
- *
- * 各插件的 init/runMain/回调都有超时保护(见 workerSandboxHost.ts),一个插件挂起不会阻塞整批加载
- */
+/** 并发加载全部插件;每个插件的 init/runMain/回调都有超时(见 `workerSandboxHost`),单个挂起不阻塞整批 */
 export async function loadAllPlugins(): Promise<void> {
   try {
     const pluginDirs = await invoke<string[]>('list_plugins')
@@ -77,7 +73,6 @@ function validateManifest(manifest: PluginManifest): void {
     }
   }
 
-  // 版本可选,提供了就必须是 x.y.z
   if (manifest.version && !/^\d+\.\d+\.\d+/.test(manifest.version)) {
     throw new Error('版本号格式无效，应为 x.y.z 格式')
   }
@@ -119,15 +114,13 @@ export async function loadPlugin(pluginPath: string): Promise<void> {
         return await pluginFactory(api)
       }
     } else {
-      // 外置插件跑在独立 Dedicated Worker:无 DOM / localStorage / Tauri IPC,只能经 postMessage RPC 访问受权限控制的 PluginAPI
-      // 这里建立的是与主窗口权限的物理隔离;内置插件不进 Worker,由 pluginSandbox 在主窗口执行
+      // 外置插件在独立 Worker 中执行:无 DOM/localStorage/Tauri IPC,只能经 postMessage RPC 访问受权限控制的 `PluginAPI`
       const mainCode = await invoke<string>('read_plugin_main', {
         path: pluginPath,
         main: manifest.main || 'index.js',
       })
 
-      // 静态检查只告警不阻断:正则黑名单可被等价变形绕过,阈值规则也会误伤正常插件
-      // 安全边界由 Worker 沙箱 + CSP + 宿主侧 API 白名单承担,这里只有纵深观测价值
+      // 静态检查只告警不阻断:正则黑名单可被等价变形绕过,安全边界在 Worker 沙箱 + CSP + 宿主 API 白名单
       try {
         validatePluginCode(mainCode)
       } catch (error) {

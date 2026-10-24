@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::io::BufReader;
 use std::path::Path;
 
+use super::super::bpm;
 use super::cache::{
     get_metadata_from_cache, save_metadata_to_cache, save_metadata_to_memory_cache,
 };
@@ -26,7 +27,7 @@ fn extract_cover_logged(audio_path: &str, picture: &lofty::picture::Picture) -> 
 }
 
 /// 打开媒体文件并读取标签（本地路径 / Android SAF content URI）
-pub(super) fn open_tagged_file(path: &str) -> Result<lofty::file::TaggedFile, AppError> {
+pub(crate) fn open_tagged_file(path: &str) -> Result<lofty::file::TaggedFile, AppError> {
     if !saf::is_content_uri(path) {
         // 本地路径按扩展名探测，不让内容嗅探改变桌面既有的格式判定
         return Probe::open(Path::new(path))
@@ -63,6 +64,9 @@ pub struct TrackMetadata {
     pub channels: Option<u8>,
     pub bit_depth: Option<u8>,
     pub format: Option<String>,
+    /// 每分钟拍数。标签优先，其次取 BPM 分析缓存（见 `super::bpm`）；扫描时只读回填
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm: Option<f64>,
 }
 
 /// 包含多个音轨的播放列表
@@ -215,6 +219,8 @@ fn get_track_metadata_with_options(
         channels: properties.channels(),
         bit_depth: properties.bit_depth(),
         format,
+        // 分析缓存里的结论；解码分析不在这里做（扫描上千首时不能碰音频）
+        bpm: bpm::cached_value(path),
         ..Default::default()
     };
 
@@ -222,6 +228,10 @@ fn get_track_metadata_with_options(
         metadata.title = tag.title().map(|s| s.to_string());
         metadata.artist = tag.artist().map(|s| s.to_string());
         metadata.album = tag.album().map(|s| s.to_string());
+        // 标签里的 BPM 最权威，覆盖分析缓存的结果
+        if let Some(tagged_bpm) = bpm::read_tagged_bpm_from_tag(tag) {
+            metadata.bpm = Some(tagged_bpm);
+        }
 
         if include_cover {
             if let Some(picture) = tag.pictures().first() {

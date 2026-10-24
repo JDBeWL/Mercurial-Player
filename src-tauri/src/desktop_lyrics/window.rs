@@ -29,11 +29,9 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 #[allow(non_camel_case_types)]
 type DPI_AWARENESS_CONTEXT = *mut core::ffi::c_void;
 
-/// 切换当前线程的 DPI 感知上下文。
-///
+/// 切换当前线程的 DPI 感知上下文；只在桌面歌词消息循环线程调用。
 /// # Safety
-/// 传入的句柄必须是有效的 DPI 上下文指针（如 `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2`）
-/// 或 `NULL`。只在拥有消息循环的桌面歌词线程上调用，避免跨线程干扰主窗口的 DPI 感知。
+/// `ctx` 必须是有效的 DPI 上下文指针或 `NULL`，且不能干扰主窗口的 DPI 感知。
 unsafe fn set_thread_dpi_awareness_context(ctx: DPI_AWARENESS_CONTEXT) -> DPI_AWARENESS_CONTEXT {
     #[link(name = "user32")]
     unsafe extern "system" {
@@ -47,7 +45,7 @@ unsafe fn set_thread_dpi_awareness_context(ctx: DPI_AWARENESS_CONTEXT) -> DPI_AW
 /// 取窗口所在显示器的 DPI。
 ///
 /// # Safety
-/// `hwnd` 必须是有效的窗口句柄
+/// `hwnd` 必须是有效窗口句柄。
 pub(super) unsafe fn get_dpi_for_window(hwnd: HWND) -> u32 {
     #[link(name = "user32")]
     unsafe extern "system" {
@@ -93,8 +91,8 @@ fn desired_window_height(scale: i32, font_size: i32) -> i32 {
     let line_spacing = 8 * scale / 96;
     let font_size_scaled = (font_size * scale / 96).max(18 * scale / 96);
 
-    // 始终按 1.5em 预留双行高度：字体实际行高（ascent+descent）随字体族在 1.2~1.6em
-    // 间浮动，只按字号预留会裁剪高行高字体，预留双行也避免译文切换时窗口抖动
+    // 始终按 1.5em 预留双行高度：实际行高随字体族在 1.2~1.6em 浮动，只按字号预留会
+    // 裁剪高行高字体；双行预留也避免译文切换时窗口抖动
     let content_h = font_size_scaled * 3 + line_spacing;
     (top_offset + content_h + bottom_padding).max(150 * scale / 96)
 }
@@ -133,9 +131,8 @@ fn point_in_rect(x: i32, y: i32, rect: &RECT) -> bool {
 }
 
 pub(super) fn run_message_loop(_state: Arc<Mutex<SharedLyricState>>) {
-    // SAFETY: 本函数是 desktop-lyrics 专属线程的入口，下面所有 Win32 调用都留在本线程：
-    // CoInitializeEx/CoUninitialize 成对，窗口过程与定时器都由本线程的消息泵分发
-    // （SetTimer 回调指针为 None，走 WM_TIMER），&raw const/mut 只指向栈上局部变量
+    // SAFETY: 本函数是 desktop-lyrics 专属线程的入口，所有 Win32 调用与 COM 初始化/反初始化
+    // 都留在本线程；SetTimer 回调指针为 None，走 WM_TIMER。
     unsafe {
         let _ = set_thread_dpi_awareness_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let com_initialized = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
@@ -238,11 +235,10 @@ pub(super) fn run_message_loop(_state: Arc<Mutex<SharedLyricState>>) {
     }
 }
 
-/// Win32 窗口过程回调。
+/// Win32 窗口过程；由系统在 desktop-lyrics 消息循环线程调用。
 ///
 /// # Safety
-/// 由系统在 desktop-lyrics 消息循环线程上调用（线程契约见 [`run_message_loop`]），
-/// `hwnd` 是本模块创建的窗口
+/// `hwnd` 必须是本模块创建的窗口。
 unsafe extern "system" fn window_proc(
     hwnd: HWND,
     msg: u32,
@@ -299,8 +295,8 @@ unsafe extern "system" fn window_proc(
                             let _ = InvalidateRect(Some(hwnd), None, false);
                         }
 
-                        // WS_EX_TRANSPARENT 对整个窗口生效，无法只让按钮区域接收点击，所以
-                        // 锁定态下用定时器轮询光标位置，悬在解锁按钮上时临时摘掉穿透样式
+                        // WS_EX_TRANSPARENT 对整个窗口生效，无法只让按钮区域接收点击，
+                        // 因此锁定态用定时器轮询光标，悬在解锁按钮上时临时摘掉穿透样式
                         if guard.is_locked {
                             let dpi = get_dpi_for_window(hwnd);
                             let mut client_rect = RECT::default();
@@ -341,7 +337,6 @@ unsafe extern "system" fn window_proc(
             LRESULT(0)
         },
         WM_MOUSEMOVE => unsafe {
-            // 非锁定模式下 WM_MOUSEMOVE 能正常工作
             // SAFETY: hwnd 有效，InvalidateRect 仅标记重绘区域
             if let Some(state) = SHARED_STATE.get() {
                 if let Ok(mut guard) = state.try_lock() {

@@ -108,7 +108,7 @@ describe('PlayerCacheManager', () => {
       vi.useRealTimers()
       const cache = manager.getFileExistsCache()
       cache.set('stale', true)
-      // LRUCache TTL 为 30s,直接把时间戳推到过去
+      // `LRUCache` TTL 为 30s,把时间戳推到 31s 后即过期
       vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 31_000)
 
       await manager.cleanup()
@@ -144,7 +144,6 @@ describe('PlayerCacheManager', () => {
 
       await manager.cleanup()
 
-      // 120 keys => i=50 与 i=100 两次让出主线程
       expect(
         setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 0).length,
       ).toBeGreaterThanOrEqual(2)
@@ -165,7 +164,6 @@ describe('PlayerCacheManager', () => {
 
       expect(fileCache.size).toBe(0)
       expect(metaCache.size).toBe(0)
-      // 引用被置空后再次获取会得到全新实例
       expect(manager.getFileExistsCache()).not.toBe(fileCache)
       expect(manager.getMetadataCache()).not.toBe(metaCache)
     })

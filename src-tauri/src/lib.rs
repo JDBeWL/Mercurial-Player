@@ -1,11 +1,7 @@
 //! Mercurial Player 库入口：模块导出、共享状态定义与 `run()`。
 
-/// 取锁；中毒时记录 error 后继续使用其中的数据。
-///
-/// 适用于 `Mutex::lock()`、`RwLock::read()`、`RwLock::write()`。release 构建是
-/// `panic = "abort"`，进程不会带着中毒锁继续跑，所以这条分支只在 dev 命中：命中即说明
-/// 另有线程 panic 过、数据一致性已无从保证，因此按 error 记录而不是声称已自动恢复。
-/// 命令边界别用它，改用 [`LockOrErr`] 把失败如实返回给前端。
+/// 取锁；中毒时记录 error 后继续使用，仅 dev 可达（release 是 `panic = "abort"`）。
+/// 命令边界用 `LockOrErr` 把失败返回给前端。
 macro_rules! lock_or_log {
     ($lock:expr) => {
         match $lock {
@@ -107,7 +103,7 @@ pub struct AudioOutputState {
     pub target_volume: Arc<Mutex<f32>>,
     pub current_device_name: Arc<Mutex<String>>,
     pub exclusive_mode: Arc<Mutex<bool>>,
-    /// 独占/直出播放器：字段名沿用早期只有 WASAPI 时的叫法，实际装的是 [`crate::app_state::PlatformPlayer`]
+    /// 独占/直出播放器：字段名沿用早期只有 WASAPI 时的叫法，实际装的是 `crate::app_state::PlatformPlayer`
     pub wasapi_player: Arc<Mutex<Option<PlatformPlayer>>>,
 }
 
@@ -330,6 +326,16 @@ pub fn run() {
             media::commands::get_track_metadata,
             media::commands::get_tracks_metadata_batch,
             media::commands::get_track_cover_path,
+            media::commands::analyze_tracks_bpm,
+            media::commands::analyze_beats,
+            media::commands::analyze_beats_batch,
+            media::commands::cancel_beats_batch,
+            media::commands::beat_cache_stats,
+            media::commands::beat_model_available,
+            media::commands::beat_backend,
+            media::commands::beat_backend_actual,
+            media::commands::beat_component_status,
+            media::commands::open_beat_component_dir,
             media::commands::extract_cover,
             media::commands::clean_cover_cache_command,
             media::commands::set_cover_cache_path_command,

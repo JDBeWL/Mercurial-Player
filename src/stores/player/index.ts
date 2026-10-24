@@ -1,8 +1,4 @@
-/**
- * Player store。按关注点拆到同目录下的 slice 模块(cache/listeners/loadTrack/mediaCache/
- * playlist/queue/session/shuffle):slice 是接收 store 实例参数的函数,运行时共享同一 Pinia
- * 实例,不 import 本文件以免循环依赖。playback.ts 更进一步只接收最小结构化类型。
- */
+/** Player store / 按关注点拆到同目录 slice；slice 接收 store 实例共享同一 Pinia，不 import 本文件以免循环依赖。 */
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 import i18n from '@/i18n'
@@ -44,12 +40,19 @@ import { addTrackNextInPlaylist, removeTrackFromPlaylist } from './playlist'
 import {
   cachePlaylistMetadata,
   loadPlaylistCovers,
+  loadTrackBpm,
   recordCoverUpdate as recordCoverUpdateToMap,
   takeCoverUpdates as takeCoverUpdatesFromMap,
 } from './mediaCache'
 import type { Track, AudioInfo, LyricLine, RepeatMode, ResumeResult } from '@/types'
 import { seekTrack, setPlayerVolume, togglePlayerMute } from './playback'
-import { applyPreparedTrack, prepareTrack, resolveTrackPath, startPlayback } from './loadTrack'
+import {
+  applyPreparedTrack,
+  maybeStartBpmAnalysis,
+  prepareTrack,
+  resolveTrackPath,
+  startPlayback,
+} from './loadTrack'
 
 interface PlayerState {
   currentTrack: Track | null
@@ -92,6 +95,9 @@ interface PlayerState {
   _lastDeviceSwitchTarget: string | null
   /** 背景批量任务的取消令牌,元数据缓存与封面加载共用(见 mediaCache.ts 的 ensureAbortController) */
   _cacheAbortController: AbortController | null
+  /** BPM 识别专用的取消信号。不能和 `_cacheAbortController` 共用：
+   *  后者在切歌/换列表/启动恢复时都会被 abort，BPM 结果会跟着被误杀 */
+  _bpmAbortController: AbortController | null
   /** 播放失败后顺延下一首的延迟定时器,由 cleanup 清除 */
   _nextTrackTimeoutId: ReturnType<typeof setTimeout> | null
   /** shuffle 模式下,Knuth 洗牌后的播放索引序列 (空数组表示未生成) */
@@ -131,6 +137,7 @@ export const usePlayerStore = defineStore('player', {
       channels: null,
       bitDepth: null,
       format: null,
+      bpm: null,
     },
 
     _isLoading: false,
@@ -160,6 +167,7 @@ export const usePlayerStore = defineStore('player', {
     _isSwitchingDevice: false,
     _lastDeviceSwitchTarget: null,
     _cacheAbortController: null,
+    _bpmAbortController: null,
     _nextTrackTimeoutId: null,
     _shuffleOrder: [],
     _shufflePosition: -1,
@@ -453,10 +461,14 @@ export const usePlayerStore = defineStore('player', {
 
     resume(): void {
       if (this.isPlaying || !this.currentTrack) return
+      const trackPath = this.currentTrack.path
       invoke('resume_track')
         .then(() => {
           this.isPlaying = true
           this._updateTaskbarState()
+          // 续播不走 startPlayback，那里才是 BPM 的触发点。
+          // 不补这一下，启动恢复后点播放会一直没有 BPM（切歌才有）。
+          if (trackPath) maybeStartBpmAnalysis(this, trackPath)
         })
         .catch((err) => logger.error('Failed to resume:', err))
     },
@@ -573,6 +585,10 @@ export const usePlayerStore = defineStore('player', {
         this._cacheAbortController.abort()
         this._cacheAbortController = null
       }
+      if (this._bpmAbortController) {
+        this._bpmAbortController.abort()
+        this._bpmAbortController = null
+      }
 
       try {
         await invoke('pause_track')
@@ -647,7 +663,6 @@ export const usePlayerStore = defineStore('player', {
 
     seek(time: number): void {
       // 播放控制已抽到 Playback.ts(与 setVolume/toggleMute 同模块),
-      // 经 safeInvoke 统一走 errorHandler,不再在此重复 invoke 样板
       seekTrack(this, time)
     },
 
@@ -770,6 +785,7 @@ export const usePlayerStore = defineStore('player', {
           channels: firstTrack.channels || null,
           bitDepth: firstTrack.bitDepth || null,
           format: firstTrack.format || null,
+          bpm: firstTrack.bpm || null,
         }
       } else {
         this.currentTrack = null
@@ -801,6 +817,11 @@ export const usePlayerStore = defineStore('player', {
     /** 批量加载播放列表封面 (实现见 MediaCache.ts) */
     async _loadPlaylistCovers(playlist: Track[]): Promise<void> {
       await loadPlaylistCovers(this, playlist)
+    },
+
+    /** 按需识别单首曲目的 BPM (实现见 MediaCache.ts) */
+    async _loadTrackBpm(track: Track): Promise<void> {
+      await loadTrackBpm(this, track)
     },
 
     /** 发起新的歌词请求,作废所有进行中的旧歌词请求。

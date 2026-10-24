@@ -2,10 +2,8 @@ import { ref } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import logger from '@/utils/logger'
 
-/**
- * 窗口控制: 最小化 / 全屏切换 / 关闭, 并维护 isFullscreen、isMaximized 两个本地状态。
- * 进入全屏前先取消最大化, 否则 Windows 下两种状态会冲突。
- */
+/** 窗口控制: 最小化 / 全屏 / 关闭, 并维护 `isFullscreen`、`isMaximized`
+ *  进入全屏前先取消最大化, 否则 Windows 下两种状态会冲突 */
 export function useWindowControls() {
   const appWindow = getCurrentWindow()
   const isFullscreen = ref(false)
@@ -45,7 +43,7 @@ export function useWindowControls() {
     }
   }
 
-  /** 查询窗口真实状态刷新两个 ref, 通常在 onMounted 调用一次 (标题栏按钮图标直接绑这两个 ref) */
+  /** 刷新两个 ref 为窗口真实状态 (标题栏按钮图标直接绑定它们) */
   const syncWindowState = async (): Promise<void> => {
     try {
       isFullscreen.value = await appWindow.isFullscreen()

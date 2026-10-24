@@ -13,9 +13,8 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::core::{Interface, PCWSTR, w};
 
-/// fonts/ 目录外部字体的名字索引：只记录路径，不驻留字体数据。
-///
-/// 按需加载被歌词实际选中的字体，避免 Super OTC 这类数百 MB 的字体集合整包进内存。
+/// `fonts/` 外部字体的名字索引：只记录路径，按需加载实际选中的字体，
+/// 避免 Super OTC 这类数百 MB 的集合整包进内存。
 pub(super) struct ExternalFontIndex {
     /// 前端族名（小写）-> 候选文件（常规字重/VF 优先，按优先级升序）
     pub(super) candidates: HashMap<String, Vec<String>>,
@@ -46,8 +45,7 @@ fn font_weight_priority(stem: &str) -> u8 {
 }
 
 /// 构建外部字体名字索引：只扫描文件名，不读取字体内容。
-///
-/// woff/woff2 是 Web 压缩容器，DirectWrite 读不了，直接跳过。
+/// `woff`/`woff2` 是 Web 压缩容器，DirectWrite 读不了，直接跳过。
 pub(super) fn build_external_font_index(generation: u32) -> Option<ExternalFontIndex> {
     let entries = crate::system::fonts::list_external_fonts().ok()?;
     let mut candidates: HashMap<String, Vec<(u8, String)>> = HashMap::new();
@@ -91,14 +89,9 @@ pub(super) fn build_external_font_index(generation: u32) -> Option<ExternalFontI
     })
 }
 
-/// 创建并注册 DirectWrite 内存字体加载器。
-///
-/// 加载器必须注册到 factory 才能创建字体文件引用，否则返回 E_INVALIDARG。刻意不注销：
-/// 引用只在 loader 保持注册期间有效，而注册关系随 factory 存活到进程结束，渲染线程
-/// 重建时新 loader 各自注册即可。
-///
+/// 创建并注册 DirectWrite 内存字体加载器；未注册时创建字体文件引用返回 `E_INVALIDARG`。
 /// # Safety
-/// 必须在已初始化 COM（`CoInitializeEx`）的渲染线程上调用
+/// 必须在已初始化 COM 的渲染线程调用；loader 刻意不注销，注册关系随 factory 活到进程结束。
 pub(super) unsafe fn build_memory_loader(
     dwrite: &IDWriteFactory,
 ) -> Option<IDWriteInMemoryFontFileLoader> {
@@ -120,12 +113,9 @@ pub(super) unsafe fn build_memory_loader(
     }
 }
 
-/// 把一个外部字体文件加载为 DirectWrite 自定义字体集合。
-///
-/// ownerObject 传 NULL 时 DirectWrite 会复制字体数据，调用方的临时缓冲调用后即可释放。
-///
+/// 把外部字体文件加载为 DirectWrite 自定义字体集合；`ownerObject` 传 NULL 时 DirectWrite 会复制数据。
 /// # Safety
-/// 必须在已初始化 COM（`CoInitializeEx`）的渲染线程上调用
+/// 必须在已初始化 COM 的渲染线程调用。
 pub(super) unsafe fn try_load_external_font(
     dwrite: &IDWriteFactory,
     loader: &IDWriteInMemoryFontFileLoader,
@@ -222,8 +212,7 @@ pub(super) fn get_cached_font(font_size_scaled: i32) -> HFONT {
             return HFONT(font as *mut core::ffi::c_void);
         }
 
-        // SAFETY: w!("Microsoft YaHei") 是 NUL 结尾的 UTF-16 字面量；
-        // font_size_scaled 可能为负/零，GDI 会按其绝对值处理，无 UB
+        // SAFETY: w! 字面量以 NUL 结尾；font_size_scaled 为负/零时 GDI 按绝对值处理，无 UB
         let font = unsafe {
             CreateFontW(
                 font_size_scaled,

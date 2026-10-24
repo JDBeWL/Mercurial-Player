@@ -6,17 +6,19 @@ import {
   takeCoverUpdates,
   cachePlaylistMetadata,
   loadPlaylistCovers,
+  loadTrackBpm,
 } from '@/stores/player/mediaCache'
 
 const track = (path: string, extra: Partial<Track> = {}): Track =>
   ({ path, name: path, ...extra }) as unknown as Track
 
-/** 构造满足被测函数需求的最小 store 形状 */
 interface MockStore {
   playlist: Track[]
   currentTrack: Track | null
   playlistCoverVersion: number
+  audioInfo: Record<string, number | null>
   _cacheAbortController: AbortController | null
+  _bpmAbortController: AbortController | null
   _getMetadataCache: () => {
     has: (k: string) => boolean
     get: (k: string) => unknown
@@ -31,7 +33,16 @@ function makeStore(playlist: Track[] = [], currentTrack: Track | null = null): M
     playlist,
     currentTrack,
     playlistCoverVersion: 0,
+    audioInfo: {
+      bitrate: null,
+      sampleRate: null,
+      channels: null,
+      bitDepth: null,
+      format: null,
+      bpm: null,
+    },
     _cacheAbortController: null,
+    _bpmAbortController: null,
     _getMetadataCache: () => ({
       has: (k: string) => cache.has(k),
       get: (k: string) => cache.get(k) ?? null,
@@ -41,11 +52,12 @@ function makeStore(playlist: Track[] = [], currentTrack: Track | null = null): M
   }
 }
 
-/** 被测函数签名要求完整 PlayerStore,测试只提供最小形状 */
+/** 被测函数签名要求完整 `PlayerStore`,测试只提供最小形状 */
 const cacheMetadata = (store: MockStore, playlist: Track[]) =>
   cachePlaylistMetadata(store as never, playlist)
 const loadCovers = (store: MockStore, playlist: Track[]) =>
   loadPlaylistCovers(store as never, playlist)
+const loadBpm = (store: MockStore, track: Track) => loadTrackBpm(store as never, track)
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -65,7 +77,6 @@ describe('recordCoverUpdate / takeCoverUpdates', () => {
     const taken = takeCoverUpdates()
     expect(taken.get('/a.mp3')).toBe('/cover/a.jpg')
     expect(taken.get('/b.mp3')).toBe('/cover/b.jpg')
-    // 取走后清空
     expect(takeCoverUpdates().size).toBe(0)
   })
 
@@ -140,11 +151,9 @@ describe('cachePlaylistMetadata', () => {
 
     const firstRun = cacheMetadata(store, playlist)
     await Promise.resolve()
-    // 模拟第二次调用取消第一次
     store._cacheAbortController?.abort()
     await firstRun
 
-    // 被取消后写入数量应少于完整列表
     expect(store.__cache.size).toBe(200)
     expect(store.__cache.has('/t249.mp3')).toBe(false)
   })
@@ -252,10 +261,121 @@ describe('loadPlaylistCovers', () => {
 
     await loadCovers(store, playlist)
 
-    // 25 首 => 3 批,批间让出 2 次
     expect(setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 0).length).toBe(2)
     expect(store.playlistCoverVersion).toBe(3)
     expect(takeCoverUpdates().size).toBe(25)
     setTimeoutSpy.mockRestore()
+  })
+})
+
+describe('loadTrackBpm', () => {
+  it('does nothing for a track with an empty path', async () => {
+    await loadBpm(makeStore(), track(''))
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('does nothing when the track already has a bpm', async () => {
+    await loadBpm(makeStore(), track('/a.mp3', { bpm: 120 }))
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('asks the backend for exactly one path and writes the result to the track and metadata cache', async () => {
+    vi.mocked(invoke).mockResolvedValue([{ path: '/a.mp3', bpm: 128 }])
+    const current = track('/a.mp3')
+    const store = makeStore([current], current)
+    store.__cache.set('/a.mp3', { title: 'A', bpm: null })
+
+    await loadBpm(store, current)
+
+    expect(invoke).toHaveBeenCalledWith('analyze_tracks_bpm', { paths: ['/a.mp3'] })
+    expect(current.bpm).toBe(128)
+    // 元数据缓存同步,切回来时 prepareTrack 才不会把 BPM 丢掉
+    expect((store.__cache.get('/a.mp3') as Record<string, unknown>).bpm).toBe(128)
+  })
+
+  it('backfills the currently playing track and its audioInfo snapshot', async () => {
+    vi.mocked(invoke).mockResolvedValue([{ path: '/cur.mp3', bpm: 100 }])
+    const current = track('/cur.mp3')
+    const store = makeStore([current], current)
+
+    await loadBpm(store, current)
+
+    expect(store.currentTrack!.bpm).toBe(100)
+    expect(store.audioInfo.bpm).toBe(100)
+    expect(store.playlistCoverVersion).toBe(0)
+  })
+
+  it('leaves the current track alone when the backend reports null', async () => {
+    vi.mocked(invoke).mockResolvedValue([{ path: '/cur.mp3', bpm: null }])
+    const current = track('/cur.mp3')
+    const store = makeStore([current], current)
+
+    await loadBpm(store, current)
+
+    expect(store.currentTrack!.bpm).toBeUndefined()
+    expect(store.audioInfo.bpm).toBeNull()
+  })
+
+  it('does not touch the store when the analyzed track is no longer playing', async () => {
+    // 识别是异步的，返回时用户可能已经切歌：结果已进后端缓存，但界面不该再动
+    vi.mocked(invoke).mockResolvedValue([{ path: '/old.mp3', bpm: 90 }])
+    const analyzed = track('/old.mp3')
+    const nowPlaying = track('/new.mp3')
+    const store = makeStore([analyzed, nowPlaying], nowPlaying)
+    await loadBpm(store, analyzed)
+
+    expect(store.currentTrack!.path).toBe('/new.mp3')
+    expect(store.currentTrack!.bpm).toBeUndefined()
+    expect(store.audioInfo.bpm).toBeNull()
+  })
+
+  it('keeps the BPM result when the batch-cache signal is aborted', async () => {
+    // BPM 与批量缓存不能共用取消信号,否则普通切歌会把结果一起丢掉
+    const current = track('/cur.mp3')
+    const store = makeStore([current], current)
+    const batch = new AbortController()
+    store._cacheAbortController = batch
+    vi.mocked(invoke).mockImplementation(() => {
+      batch.abort()
+      return Promise.resolve([{ path: '/cur.mp3', bpm: 100 }])
+    })
+
+    await loadBpm(store, current)
+
+    expect(store.currentTrack!.bpm).toBe(100)
+  })
+
+  it('does not touch the store when its own signal was aborted', async () => {
+    const current = track('/cur.mp3')
+    const store = makeStore([current], current)
+    vi.mocked(invoke).mockImplementation(() => {
+      // 模拟分析期间被新的 BPM 请求取代:`loadTrackBpm` 开始时会挂上新 controller
+      store._bpmAbortController?.abort()
+      return Promise.resolve([{ path: '/cur.mp3', bpm: 100 }])
+    })
+
+    await loadBpm(store, current)
+
+    expect(store.currentTrack!.bpm).toBeUndefined()
+    expect(store.audioInfo.bpm).toBeNull()
+  })
+
+  // `loadTrack` 必须传 resolvedPath:未解析路径与 `currentTrack.path` 不等,结果会被丢弃
+  it('matches the resolved path that currentTrack actually holds', async () => {
+    const rawPath = 'E:/Music/Album/track.flac'
+    const resolvedPath = 'E:\\Music\\Album\\track.flac'
+    vi.mocked(invoke).mockResolvedValue([{ path: resolvedPath, bpm: 128 }])
+    const current = track(resolvedPath)
+    const store = makeStore([current], current)
+
+    await loadBpm(store, track(resolvedPath))
+
+    expect(store.currentTrack!.bpm).toBe(128)
+    expect(store.audioInfo.bpm).toBe(128)
+
+    const store2 = makeStore([current], current)
+    await loadBpm(store2, track(rawPath))
+    expect(store2.currentTrack!.bpm).toBeUndefined()
+    expect(store2.audioInfo.bpm).toBeNull()
   })
 })

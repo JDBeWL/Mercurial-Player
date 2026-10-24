@@ -77,12 +77,7 @@ where
     result
 }
 
-/// 通过 Context 的 ClassLoader 加载应用类，并按类名缓存成全局引用
-///
-/// 不能用 `find_class`：附加线程的 FindClass 只查系统 classloader，找不到 APK 内的类。
-/// `loadClass` 只认点号二进制动名，故在此把调用点写的 JNI 斜杠名转换过来。
-/// 缓存还挡住 `ClassLoader.loadClass` 内部按类名的 `synchronized`，并行扫库时多个 worker
-/// 会串在同一个类上。方法 ID 不缓存，类解析后那只是 ART 的廉价查找。
+/// 用 Context 的 ClassLoader 加载并缓存应用类：附加线程的 FindClass 只查系统 classloader。
 pub fn app_class<'env>(
     env: &mut jni::JNIEnv<'env>,
     name: &str,

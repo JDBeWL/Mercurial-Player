@@ -1,7 +1,4 @@
-/**
- * 播放统计插件:数据分三层(单曲 tracks / 每日 daily / 明细 history)
- * 阈值与口径见下方常量,由 tests/plugins/playCount.test.ts 守护
- */
+/** 播放统计插件 / 数据分三层（单曲 / 每日 / 明细），阈值与口径见下方常量。 */
 
 import i18n from '@/i18n'
 import { PluginPermission, type PluginAPI, type BuiltinPluginDefinition } from '../pluginManager'
@@ -269,11 +266,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       totalPlayTime: 0,
     })
 
-    /**
-     * 把旧版(1.0 / 1.1)数据转换成 v2 结构:纯函数,不落盘,插件未激活也能看到迁移结果
-     *
-     * 旧版只有播放次数与总时长:plays 沿用旧计数,seconds/judged 保持 0,元信息与每日次数由旧历史回填
-     */
+    /** 把旧版（1.0 / 1.1）数据转成 v2 结构：plays 沿用旧计数，seconds/judged 置 0，其余由旧历史回填。 */
     const migrateLegacyData = (): PlayCountData => {
       const legacyCounts = api.storage.get<Record<string, number>>('playCounts', {}) ?? {}
       const legacyHistory = api.storage.get<LegacyHistoryEntry[]>('playHistory', []) ?? []
@@ -496,11 +489,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       )
     }
 
-    /**
-     * 结算当前分段:未提交时长写入聚合并计入会话累计
-     *
-     * 计次/完播按会话累计判定,只在会话结束时经 commitOutcome 落盘,故分段提交不会把一次收听拆成多次播放
-     */
+    /** 结算当前分段：未提交时长写入聚合并计入会话累计；计次/完播只在会话结束时 `commitOutcome`。 */
     const settleSegment = (): void => {
       pauseSegment()
       const segment = Math.min(accumulatedPlayTime, MAX_SESSION_SECONDS)
@@ -622,11 +611,7 @@ export const playCountPlugin: BuiltinPluginDefinition = {
       return best
     }
 
-    /**
-     * 汇总指定范围的数据:days === null 取单曲聚合(含旧版迁移,数值最完整)
-     *
-     * days > 0 取每日聚合(不受明细窗口限制),但完播与判定次数仍取自明细,旧版每日聚合没有可判定次数
-     */
+    /** 汇总指定范围：`days === null` 取单曲聚合，`days > 0` 取每日聚合；完播/判定次数仍取自明细。 */
     const summarizeScope = (data: PlayCountData, days: number | null): ScopeSummary => {
       const live = liveSeconds()
 

@@ -76,11 +76,7 @@ interface SafeTimers {
   cleanup: () => void
 }
 
-/**
- * 安全定时器组:setTimeout 延迟上限 60s,setInterval 最小间隔 100ms,回调抛错交给 onError
- *
- * cleanup 回收所有未触发的定时器,插件停用时调用,防止插件泄漏的定时器一直跑
- */
+/** 安全定时器:`setTimeout` 延迟上限 60s,`setInterval` 下限 100ms;`cleanup` 回收未触发定时器,防插件停用后泄漏 */
 function createSafeTimers(onError: (error: unknown) => void): SafeTimers {
   const timers = new Set<number>()
   const intervals = new Set<number>()
@@ -203,11 +199,7 @@ export function createPluginSandbox(api: PluginAPI): PluginSandbox {
   return {
     globals: allowedGlobals,
 
-    /**
-     * 在沙箱中执行插件函数
-     *
-     * 第二参数 globals 注入沙箱全局(安全 console + 可清理定时器),供外置插件的旧格式包装代码解构;新格式与内置插件可忽略
-     */
+    /** 在沙箱中执行插件函数;第二参数注入安全 console 与可清理定时器,供旧格式插件解构 */
     async execute<T>(fn: PluginMainFunction | (() => T | Promise<T>)): Promise<T | PluginInstance> {
       try {
         return await (
@@ -242,8 +234,7 @@ export function validatePluginCode(code: string): boolean {
     .replace(/\/\/.*$/gm, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
 
-  // 字符串形式的危险属性访问必须在下方字符串剥离之前检查:这些模式依赖字符串内容(如 obj['\x63onstructor']),
-  // 剥离后内容变成 "",规则将永远命中不到
+  // 字符串形式的危险属性访问必须在剥离字符串之前检查:这些模式依赖字符串内容,剥离后规则永远命中不到
   const stringFormForbidden: ForbiddenPattern[] = [
     { pattern: /\[\s*['"`]constructor['"`]\s*\]/, msg: '字符串形式的constructor访问' },
     { pattern: /\[\s*['"`]\\x/, msg: '十六进制转义访问' },
@@ -261,7 +252,7 @@ export function validatePluginCode(code: string): boolean {
     .replace(/'(?:[^'\\]|\\.)*'/g, "''")
     .replace(/`(?:[^`\\]|\\.)*`/g, '``')
 
-  // 黑名单:原型链逃逸,宿主全局,二次求值与常见绕过手法
+  // 黑名单:原型链逃逸,宿主全局与二次求值
   const forbidden: ForbiddenPattern[] = [
     { pattern: /\beval\b/, msg: 'eval' },
     { pattern: /\bFunction\b/, msg: 'Function 构造函数' },

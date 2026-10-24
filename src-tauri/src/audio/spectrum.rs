@@ -1,9 +1,6 @@
 //! 频谱：分析器 + 共享模式音源 + 分析线程。
 //!
-//! 共享模式由 [`VisualizationSource`] 在 rodio 拉取采样时驱动，采样写进
-//! [`super::sample_ring::SampleRing`]，由 [`spawn_spectrum_thread`] 做 FFT 与发送；
-//! 独占模式由 [`super::decode_push`] 在推送采样后直接驱动 [`SpectrumAnalyzer`]。
-//! 两者最终都通过 `spectrum-update` 事件把频谱数据发给前端可视化面板。
+//! 共享模式由 `VisualizationSource` 驱动，独占模式由 `decode_push` 驱动，最终都发 `spectrum-update`。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -42,14 +39,8 @@ pub(super) fn emit_spectrum_update(
     Ok(())
 }
 
-/// 频谱计算的门控：两个来源都为真才做 FFT 并发送 `spectrum-update`。
-///
-/// - `panel`：可视化面板是否挂载，由前端在挂载/卸载时写入。面板是该事件唯一的订阅者。
-/// - `foreground`：应用是否可见，由 Kotlin 的 Activity 生命周期写入。必须由 native 来做：
-///   横屏看着波形退到后台时组件并不会卸载，而 wry 在 `onPause` 里就已冻结 JS，
-///   前端既来不及关、回到前台也不会主动补一句"我又可见了"。
-///
-/// 缺省 `foreground = true`：进程启动即在前台，Kotlin 随后按实际生命周期纠正。
+/// 频谱门控：`panel` 与 `foreground` 同时为真才计算并发送。
+/// `foreground` 必须由 Kotlin 生命周期写入：退到后台时 wry 已冻结 JS，前端补不了。
 pub struct SpectrumGate {
     foreground: AtomicBool,
     panel: AtomicBool,
@@ -103,11 +94,8 @@ pub(crate) fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-/// 频谱分析器:Hann 窗 + FFT + AE 风格分bin/平滑
-///
-/// 内部缓冲是**单声道**的：交错的多声道采样在入口处按帧平均下来，这样 `fft_size` 就是窗口
-/// 帧数、`sample_rate` 就是真实的每帧速率。直接把 L,R,L,R 当单声道流做 FFT 会让频率轴整体
-/// 偏一倍、窗口只有一半时长，L/R 梳状叠加还会让条闪烁。
+/// 频谱分析器：Hann 窗 + FFT + AE 风格分 bin/平滑。
+/// 入口先把多声道按帧平均成单声道，否则频率轴翻倍、窗口减半且 L/R 梳状叠加导致闪烁。
 pub(super) struct SpectrumAnalyzer {
     /// 滚动采样缓冲(已下混为单声道)
     buffer: Vec<f32>,
@@ -308,7 +296,7 @@ const BATCH_SIZE: usize = 64;
 /// 共享模式音源:EQ 批量处理 + 把采样交给频谱分析线程
 ///
 /// `next` 跑在 rodio 音频回调线程上:只做无锁写入与置标志，FFT 与 spectrum-update /
-/// playback-position / track-ended 的发送见 [`spawn_spectrum_thread`]。
+/// playback-position / track-ended 的发送见 `spawn_spectrum_thread`。
 pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     input: I,
     eq_settings: Arc<RwLock<EqSettings>>,
@@ -343,7 +331,7 @@ const POSITION_EMIT_INTERVAL_MS: u64 = 100;
 /// 启动频谱分析线程
 ///
 /// FFT 会堆分配、`app.emit` 要 JSON 序列化并跨线程投递,都不能在音频回调线程上做。
-/// 音频线程只写 [`SampleRing`] 与置 EOF 标志,这里负责计算与发送。
+/// 音频线程只写 `SampleRing` 与置 EOF 标志,这里负责计算与发送。
 fn spawn_spectrum_thread(
     sample_rate: u32,
     channels: u16,
@@ -526,7 +514,7 @@ impl<I: Source<Item = f32> + Send> Iterator for VisualizationSource<I> {
         self.pending_index += 1;
         self.samples_played.fetch_add(1, Ordering::Relaxed);
 
-        // 满则丢弃，理由见 [`SampleRing::push`]
+        // 满则丢弃，理由见 `SampleRing::push`
         self.sample_ring.push(processed);
 
         Some(processed)

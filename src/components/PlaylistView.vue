@@ -36,7 +36,12 @@
           <div
             v-for="(track, index) in processedPlaylist"
             :key="track.path"
-            v-memo="[track.path, track.path === currentPath, isTrackPlaying(track), track.coverUrl]"
+            v-memo="[
+              track.path,
+              track.path === currentPath,
+              isTrackPlaying(track),
+              track.coverUrl,
+            ]"
             class="list-item"
             :class="{ selected: track.path === currentPath }"
             :data-path="track.path"
@@ -220,7 +225,7 @@ const processPlaylist = (): void => {
     const track = raw[i]!
     const existing = processedMap.get(track.path)
 
-    // path 与 coverPath 都没变就复用旧对象，保住 v-memo 的引用相等
+    // path / coverPath 都没变就复用旧对象，保住 v-memo 的引用相等
     if (existing && existing.coverPath === track.coverPath) {
       result[i] = existing
     } else {
@@ -254,15 +259,15 @@ const stopWatchPlaylist = watch(
   { immediate: true },
 )
 
-// 封面增量通道：store 的 _loadPlaylistCovers 每批处理完递增 playlistCoverVersion，
+// 封面增量通道：store 的 _loadPlaylistCovers 每处理完一批递增 playlistCoverVersion，
 // 这里取走更新并就地改 processedTrack（配合 triggerRef 与 v-memo，只重渲染变化的那几项），
 // 代价只随变化数增长，不会每批都全量重排整个列表。
 watch(
   () => playerStore.playlistCoverVersion,
   () => {
     const updates = playerStore.takeCoverUpdates()
-    if (updates.size === 0) return
     let applied = 0
+
     for (const [path, coverPath] of updates) {
       const pt = processedMap.get(path)
       if (pt && pt.coverPath !== coverPath) {
@@ -271,6 +276,7 @@ watch(
         applied++
       }
     }
+
     if (applied > 0) triggerRef(processedPlaylist)
   },
   { immediate: true },
@@ -556,6 +562,8 @@ const handleListClick = (event: MouseEvent): void => {
   gap: 4px;
   align-items: center;
 }
+
+/* 列表不展示 BPM；识别结果只出现在播放页的音频信息行。 */
 
 @media (max-width: 480px) {
   .playlist-view {

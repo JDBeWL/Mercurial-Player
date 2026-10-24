@@ -1,4 +1,6 @@
-//! 音频元数据：`extractor` 解析标签、`cache` 管缓存、`cover` 管封面，各自的职责见其模块文档。
+//! 音频元数据
+//!
+//! 标签解析、元数据缓存与封面提取。
 
 pub mod cache;
 pub mod cover;

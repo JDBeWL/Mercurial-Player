@@ -1,4 +1,4 @@
-/** 配置默认值兜底与旧版本字段迁移：从 config store 抽离的纯逻辑，store 只保留状态与读写 */
+/** 配置默认值兜底与旧版本字段迁移。 */
 import type { AppConfig, LyricsConfig } from '@/types'
 
 /** 歌词配置默认值；desktopLyrics 含全部字段，迁移兜底也复用它 */

@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { Track } from '@/types'
 import type { usePlayerStore } from './index'
 import type { TrackMetadata } from './cache'
+import { useConfigStore } from '@/stores/config'
 import FileUtils from '@/utils/fileUtils'
 import logger from '@/utils/logger'
 import errorHandler, { ErrorSeverity } from '@/utils/errorHandler'
@@ -76,6 +77,7 @@ export function prepareTrack(
       channels: track.channels || null,
       bitDepth: track.bitDepth || null,
       format: track.format || null,
+      bpm: track.bpm || null,
     }
 
   const isSameTrackReplay = store.currentTrack?.path === resolvedPath
@@ -147,6 +149,17 @@ export function applyPreparedTrack(store: PlayerStore, prepared: PreparedTrack):
     channels: metadata.channels || null,
     bitDepth: metadata.bitDepth || null,
     format: metadata.format || null,
+    bpm: metadata.bpm || null,
+  }
+}
+
+/** 按需触发 BPM 识别（开关默认关闭）：与起播并行，失败绝不能影响播放。 */
+export function maybeStartBpmAnalysis(store: PlayerStore, resolvedPath: string): void {
+  try {
+    if (!useConfigStore().general.enableBpmAnalysis) return
+    void store._loadTrackBpm({ path: resolvedPath } as Track)
+  } catch (err) {
+    logger.debug('BPM 识别未能启动:', err)
   }
 }
 
@@ -165,6 +178,10 @@ export async function startPlayback(
   } catch (err) {
     logger.warn('pause before play:', err)
   }
+
+  // BPM 识别与起播并行，不要等 play_track 返回：串起来用户会明显感到 BPM 迟到。
+  // 必须传 resolvedPath：loadTrackBpm 靠路径核对确认"算完的仍是当前曲目"。
+  maybeStartBpmAnalysis(store, resolvedPath)
 
   try {
     logger.info('Playing track:', resolvedPath)
@@ -194,7 +211,6 @@ export async function startPlayback(
     store.isPlaying = true
     store._updateTaskbarState()
 
-    // 歌词加载不再在此显式触发:useLyrics 的共享 watcher 监听 currentTrack.path
     // 变化后会统一加载 (缓存 -> 本地文件 -> 在线获取),单一入口避免双路径竞态
   } catch (err) {
     if (store._activePlayRequestId !== requestId || store._isDestroyed) {

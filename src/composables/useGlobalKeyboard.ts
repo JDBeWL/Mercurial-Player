@@ -1,12 +1,8 @@
 import { onMounted, onUnmounted } from 'vue'
 import { usePlayerStore } from '@/stores/player'
 
-/**
- * 全局键盘快捷键: 空格 播放/暂停, 左/右方向键 上一首/下一首, 上/下方向键 音量 +/- 0.05 (音量域 0~1)。
- *
- * onMounted 注册 document keydown、onUnmounted 注销; 焦点在 INPUT/TEXTAREA/可编辑元素上时整体跳过。
- * 每个分支都 preventDefault: 否则空格会顺带激活当前聚焦的按钮、方向键会滚动页面。
- */
+/** 全局快捷键: 空格 播放/暂停, 左右方向键 切曲, 上下方向键 音量 ±0.05 (0~1); 焦点在输入框或可编辑元素上时整体跳过。
+ *  每个分支都 `preventDefault`, 否则空格会顺带激活当前聚焦的按钮、方向键会滚动页面 */
 export function useGlobalKeyboard(): void {
   const playerStore = usePlayerStore()
 

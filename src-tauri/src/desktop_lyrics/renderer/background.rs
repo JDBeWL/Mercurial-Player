@@ -8,13 +8,9 @@ use windows::Win32::Graphics::Gdi::{
     DeleteObject, GetDC, HGDIOBJ, RGBQUAD, ReleaseDC, SRCCOPY, SelectObject, StretchBlt,
 };
 
-/// 捕获屏幕区域（不含分层窗口自身）到 out_w*out_h 的 BGRA 缓冲，alpha 恒为 255
-///
-/// StretchBlt 不带 CAPTUREBLT 标志时不会捕获分层窗口，拿到的降采样图就是本窗口
-/// 身后被遮挡的内容。返回 (像素数据, 宽, 高)；区域非法或 GDI 失败返回 None。
-///
+/// 捕获窗口身后屏幕区域到 BGRA 缓冲；`StretchBlt` 不带 `CAPTUREBLT`，不会捕获分层窗口自身。
 /// # Safety
-/// `window_rect` 为屏幕坐标；GDI 对象（DIB/兼容 DC/屏幕 DC）在函数内成对创建与释放
+/// `window_rect` 为屏幕坐标；GDI 对象在函数内成对释放。
 unsafe fn capture_region_bgra(
     window_rect: &RECT,
     out_w: i32,
@@ -127,7 +123,7 @@ unsafe fn capture_region_bgra(
     captured
 }
 
-/// 采样窗口背后的屏幕区域平均亮度（0=全黑 1=全白），供 auto 配色选深/浅文字
+/// 采样窗口背后屏幕区域的平均亮度（0=全黑 1=全白），供 auto 配色选深/浅文字。
 ///
 /// # Safety
 /// `window_rect` 为屏幕坐标

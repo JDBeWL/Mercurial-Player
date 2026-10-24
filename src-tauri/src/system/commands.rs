@@ -6,16 +6,13 @@ use crate::security::is_simple_filename;
 use std::collections::HashMap;
 use tauri::{AppHandle, LogicalSize, Manager, Size, State, command};
 
-/// 获取应用版本信息
 #[command]
 pub fn get_app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
-/// 解析便携化数据文件路径(主程序同级 data/ 下,如 config.json、library-cache.json)
-///
-/// plugin-store 的 JS `load()` 传入绝对路径时会原样使用(基础目录被绝对路径覆盖),
-/// 因此前端用本命令解析存储文件完整路径,即可把 store 落到程序目录而非 Roaming。
+/// 解析便携化数据文件路径（主程序同级 `data/` 下）。
+/// plugin-store 的 JS `load()` 会把绝对路径原样使用，前端因此可把 store 落到程序目录而非 Roaming。
 #[command]
 pub fn resolve_data_file(file: String) -> Result<String, AppError> {
     if !is_simple_filename(&file) {
@@ -41,18 +38,15 @@ const MINI_SIZE: LogicalSize<f64> = LogicalSize {
     width: 300.0,
     height: 100.0,
 };
-/// 默认窗口尺寸
 const DEFAULT_SIZE: LogicalSize<f64> = LogicalSize {
     width: 1250.0,
     height: 720.0,
 };
-/// 最小窗口尺寸
 const MIN_SIZE: LogicalSize<f64> = LogicalSize {
     width: 1200.0,
     height: 700.0,
 };
 
-/// 获取系统信息
 #[command]
 pub fn get_system_info() -> Result<HashMap<String, String>, AppError> {
     let mut info = HashMap::new();
@@ -71,7 +65,6 @@ pub fn get_system_info() -> Result<HashMap<String, String>, AppError> {
     Ok(info)
 }
 
-/// 获取系统可用的字体列表
 #[command]
 pub fn get_system_fonts() -> Result<Vec<String>, AppError> {
     match super::fonts::get_system_fonts() {
@@ -112,13 +105,11 @@ pub fn get_system_fonts() -> Result<Vec<String>, AppError> {
     }
 }
 
-/// 获取软件同级 fonts/ 目录下的外部字体文件列表
 #[command]
 pub fn get_external_fonts() -> Result<Vec<super::fonts::ExternalFont>, AppError> {
     super::fonts::list_external_fonts()
 }
 
-/// 获取字体相关缓存的统计信息（TTC/OTC 提取缓存占用）
 #[command]
 pub fn get_font_cache_stats() -> super::fonts::FontCacheStats {
     super::fonts::FontCacheStats {
@@ -126,9 +117,7 @@ pub fn get_font_cache_stats() -> super::fonts::FontCacheStats {
     }
 }
 
-/// 清理字体缓存：磁盘上的 TTC/OTC 提取缓存 + 桌面歌词的外部字体内存缓存。
-///
-/// 返回清理后的统计；提取缓存会在下次扫描 fonts/ 目录时按需重建。
+/// 清理 TTC/OTC 提取缓存与桌面歌词字体内存缓存；提取缓存会在下次扫描 `fonts/` 时重建。
 #[command]
 pub fn clear_font_caches() -> Result<super::fonts::FontCacheStats, AppError> {
     super::fonts::clear_font_extract_cache()?;
@@ -142,7 +131,6 @@ pub fn clear_font_caches() -> Result<super::fonts::FontCacheStats, AppError> {
     })
 }
 
-/// 设置迷你模式
 #[command]
 pub fn set_mini_mode(app_handle: AppHandle, enable: bool) -> Result<(), AppError> {
     let window = app_handle
@@ -195,7 +183,6 @@ fn disable_mini_mode(window: &tauri::WebviewWindow) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 获取当前运行平台
 #[command]
 #[must_use]
 pub const fn get_platform() -> &'static str {
@@ -212,16 +199,14 @@ pub const fn get_platform() -> &'static str {
     }
 }
 
-/// 设置应用内「界面字号」倍率（`1.0` = 设计稿原始大小）
-///
-/// Android 上把 WebView 的 `textZoom` 直接写成 `100 * 倍率`，从而覆盖系统字号
-/// （原理见 [`crate::android::font_scale`] 的模块注释）；桌面端为 no-op。
+/// 设置界面字号倍率（`1.0` = 设计稿原始大小）。
+/// Android 把 WebView 的 `textZoom` 写成 `100 * 倍率` 以覆盖系统字号；桌面端为 no-op。
 #[command]
 pub fn set_app_font_scale(scale: f32) -> Result<(), AppError> {
     crate::android::font_scale::set_app_font_scale(scale)
 }
 
-/// 隐藏/恢复 Android 系统栏（状态栏、导航栏）。桌面端 no-op，实现见 [`crate::android::system_ui`]。
+/// 隐藏/恢复 Android 系统栏（状态栏、导航栏）；桌面端为 no-op。
 #[command]
 pub fn set_system_ui_hidden(
     hide_status_bars: bool,
@@ -230,17 +215,15 @@ pub fn set_system_ui_hidden(
     crate::android::system_ui::set_system_ui_hidden(hide_status_bars, hide_navigation_bars)
 }
 
-/// 显示器刷新率信息
 #[cfg(desktop)]
 #[derive(Debug, serde::Serialize)]
 pub struct DisplayRefreshRates {
     /// 窗口当前所在显示器的刷新率
     pub current: u32,
-    /// 当前分辨率下该显示器支持的全部刷新率挡位（升序，不超过 MAX_TARGET_FPS）
+    /// 当前分辨率下支持的全部刷新率挡位（升序，不超过 `MAX_TARGET_FPS`）
     pub available: Vec<u32>,
 }
 
-/// 默认刷新率（显示器信息不可用时回落）
 #[cfg(desktop)]
 const DEFAULT_REFRESH_RATE: u32 = 60;
 
@@ -269,11 +252,10 @@ fn display_frequency(display: &display_info::DisplayInfo) -> u32 {
     }
 }
 
-/// 枚举显示器在当前分辨率下支持的全部刷新率（升序去重）。
-/// display_info 0.5 只暴露当前模式，多挡位需按平台 API 自行枚举。
+/// 枚举当前分辨率下支持的刷新率（升序去重）；display_info 0.5 只暴露当前模式。
 #[cfg(desktop)]
 #[cfg(windows)]
-#[allow(unsafe_code)] // EnumDisplaySettingsExW 是 unsafe Win32 API
+#[allow(unsafe_code)]
 fn enumerate_refresh_rates(display: &display_info::DisplayInfo) -> Vec<u32> {
     use std::collections::BTreeSet;
     use windows::Win32::Graphics::Gdi::{
@@ -282,7 +264,7 @@ fn enumerate_refresh_rates(display: &display_info::DisplayInfo) -> Vec<u32> {
     use windows::core::PCWSTR;
 
     let mut device: Vec<u16> = display.name.encode_utf16().collect();
-    device.push(0); // 以 NUL 结尾的宽字符串
+    device.push(0);
 
     let mut rates = BTreeSet::new();
     let mut mode = DEVMODEW {
@@ -336,10 +318,8 @@ pub fn get_screen_refresh_rate(window: tauri::WebviewWindow) -> Result<u32, AppE
     }
 }
 
-/// 获取窗口所在显示器支持的刷新率挡位（用于目标帧率选项，免去硬编码猜测）。
-///
-/// available 只保留不超过 MAX_TARGET_FPS 的挡位，与 set_target_fps 的钳制一致；
-/// current 始终为屏幕真实刷新率（仅用于展示，不受上限过滤）。
+/// 获取窗口所在显示器支持的刷新率挡位；`available` 只保留不超过 `MAX_TARGET_FPS` 的挡位
+/// （与 `set_target_fps` 钳制一致），`current` 为真实刷新率、不受上限过滤。
 #[cfg(desktop)]
 #[command]
 pub fn get_display_refresh_rates(
@@ -388,7 +368,7 @@ pub fn open_external_url(state: State<AppState>, url: String) -> Result<(), AppE
         .ok_or("URL host is missing")?
         .to_ascii_lowercase();
 
-    // 从配置读取白名单（兼容旧配置）
+    // 读取配置白名单；配置读取失败时使用内置列表
     let allowed_hosts = state
         .config_manager
         .load_config()

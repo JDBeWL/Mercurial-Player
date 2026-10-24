@@ -4,14 +4,13 @@ import { mount } from '@vue/test-utils'
 import { reactive, nextTick } from 'vue'
 import VolumeControl from '@/components/VolumeControl.vue'
 
-// 使用 vi.hoisted 创建可在 mock 工厂中引用的可变引用
+// vi.mock 工厂被提升到 import 之前，可变引用只能经 vi.hoisted 共享
 const storeRef = vi.hoisted(() => ({ current: null as unknown }))
 
 vi.mock('@/stores/player', () => ({
   usePlayerStore: () => storeRef.current,
 }))
 
-/** 创建一个响应式 mock store，模拟 playerStore 的状态和方法 */
 function createMockStore(overrides: Record<string, unknown> = {}) {
   return reactive({
     volume: 0.5,
@@ -22,7 +21,6 @@ function createMockStore(overrides: Record<string, unknown> = {}) {
   })
 }
 
-/** 挂载组件，注入 $t mock 返回 key 本身 */
 function mountComponent(store: ReturnType<typeof createMockStore>) {
   storeRef.current = store
   return mount(VolumeControl, {
@@ -95,7 +93,7 @@ describe('VolumeControl.vue', () => {
     store.volume = 0.65
     wrapper = mountComponent(store)
     await nextTick()
-    // 音量弹出框默认隐藏 (v-show)，但 DOM 仍存在
+    // v-show 隐藏时元素仍在 DOM，隐藏内容也能查到
     const volumeValue = wrapper.find('.volume-value')
     expect(volumeValue.text()).toContain('65%')
   })
@@ -104,7 +102,6 @@ describe('VolumeControl.vue', () => {
     wrapper = mountComponent(store)
     await nextTick()
     const popup = wrapper.find('.volume-slider-popup')
-    // v-show 控制可见性，元素存在但 display:none
     expect(popup.exists()).toBe(true)
     expect((popup.element as HTMLElement).style.display).toBe('none')
   })

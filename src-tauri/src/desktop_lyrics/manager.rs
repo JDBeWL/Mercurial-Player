@@ -20,14 +20,10 @@ pub struct DesktopLyricsManager {
     initialized: bool,
 }
 
-// SAFETY: DesktopLyricsManager 仅含一个 bool 字段，本身无内部可变性。
-// show/hide 等操作通过 PostMessageW 将请求转发到桌面歌词消息循环线程执行；
-// set_locked 虽直接调用 GetWindowLongPtrW/SetWindowLongPtrW/InvalidateRect，
-// 但这些 Win32 API 本身支持跨线程调用（仅读写窗口扩展样式，不涉及窗口过程指针），
-// 因此可安全跨线程共享。
+// SAFETY: 无内部可变性；窗口操作经 `PostMessageW` 转发到消息循环线程，`set_locked` 直接调用的
+// `GetWindowLongPtrW`/`SetWindowLongPtrW`/`InvalidateRect` 仅读写扩展样式，支持跨线程调用。
 unsafe impl Send for DesktopLyricsManager {}
-// SAFETY: 同上，所有方法要么读 bool，要么通过消息循环间接操作窗口，
-// 要么调用线程安全的 Win32 窗口 API，无数据竞争
+// SAFETY: 同 `Send`。
 unsafe impl Sync for DesktopLyricsManager {}
 
 impl Default for DesktopLyricsManager {
@@ -124,8 +120,6 @@ impl DesktopLyricsManager {
                 }
             }
             if text_changed {
-                // 注意:不能用 clone_from,因为 guard.prev_line 和 guard.current_line 都借用了 guard
-                // 会触发 mutable + immutable borrow 冲突
                 let prev = guard.current_line.clone();
                 let prev_sub = guard.sub_line.clone();
                 guard.prev_line = prev;
@@ -197,8 +191,7 @@ impl DesktopLyricsManager {
 
         let hwnd = get_hwnd();
         if hwnd != 0 {
-            // SAFETY: hwnd 经校验有效；GetWindowLongPtrW/SetWindowLongPtrW
-            // 仅读写 GWL_EXSTYLE（窗口扩展样式），不涉及窗口过程指针
+            // SAFETY: hwnd 经校验有效；仅读写 GWL_EXSTYLE，不涉及窗口过程指针
             unsafe {
                 let style = GetWindowLongPtrW(HWND(hwnd as *mut _), GWL_EXSTYLE);
                 let transparent_bit = WS_EX_TRANSPARENT.0 as isize;
@@ -231,9 +224,8 @@ impl DesktopLyricsManager {
         Ok(())
     }
 
-    /// 设置原文/译文歌词字体族。译文族传空字符串表示跟随原文。
-    /// 同时提升字体代数，渲染线程会据此重建外部字体内存字体集
-    /// （fonts/ 目录的文件可能在会话期间新增）
+    /// 设置原文/译文歌词字体族（译文传空 = 跟随原文）；递增 `font_generation`
+    /// 让渲染线程重建外部字体集，因为 `fonts/` 可能在会话期间新增文件。
     pub fn set_font_family(
         &self,
         font_family: &str,

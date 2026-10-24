@@ -1,11 +1,6 @@
-/**
- * 歌词截图分享插件
- * 生成精美的歌词分享图片，支持保存和复制到剪贴板
- *
- */
+/** 歌词截图分享插件 / 生成歌词分享图片，可保存到 screenshots 目录或复制到剪贴板 */
 
 export default function (api) {
-  // 默认配置
   const defaultConfig = {
     width: 960,
     height: 1920,
@@ -15,29 +10,20 @@ export default function (api) {
     coverBlur: 30,
     coverOpacity: 0.4,
     fontFamily: 'system-ui, -apple-system, sans-serif',
-    layout: 'classic', // 'classic' (经典布局) 或 'compact' (紧凑布局)
+    layout: 'classic', // `classic` 经典布局 | `compact` 紧凑布局
   }
 
-  /**
-   * 获取配置
-   */
   const getConfig = () => {
     return { ...defaultConfig, ...api.storage.get('config', {}) }
   }
 
-  /**
-   * 绘制圆角矩形路径（使用原生 Canvas API，Chrome 99+/Safari 17+ 支持）
-   * 自动 beginPath，调用方直接 fill() 或 clip() 即可
-   */
+  /** 原生 `ctx.roundRect`（Chrome 99+/Safari 17+），已 `beginPath`，调用方直接 `fill()`/`clip()` */
   const roundRect = (ctx, x, y, w, h, r) => {
     ctx.beginPath()
     ctx.roundRect(x, y, w, h, r)
   }
 
-  /**
-   * 自动换行绘制文本，返回绘制信息
-   * @param {boolean} dryRun - 如果为 true，只计算不绘制
-   */
+  /** 按宽度自动换行绘制文本并返回布局信息；`dryRun` 为 `true` 时只计算不绘制 */
   const wrapText = (ctx, text, x, y, maxWidth, lineHeight, dryRun = false) => {
     const chars = text.split('')
     let line = ''
@@ -72,9 +58,6 @@ export default function (api) {
     }
   }
 
-  /**
-   * 截断文本并添加省略号
-   */
   const truncateText = (ctx, text, maxWidth) => {
     if (ctx.measureText(text).width <= maxWidth) {
       return text
@@ -86,13 +69,9 @@ export default function (api) {
     return truncated + '...'
   }
 
-  // 让出主线程的辅助函数
   const yieldToMain = () => new Promise((resolve) => setTimeout(resolve, 0))
 
-  /**
-   * 从歌词数据中提取当前歌词文本和翻译
-   * 抽取自 generateClassicImage 和 generateCompactImage 的公共逻辑
-   */
+  /** 兼容 `texts` 元素为对象或字符串，回退到 `text`/`translation`；索引越界取第 0 条 */
   const getCurrentLyricText = (lyrics, lyricIndex) => {
     let mainText = ''
     let transText = ''
@@ -129,10 +108,7 @@ export default function (api) {
     return { mainText, transText }
   }
 
-  /**
-   * 获取主题颜色（抽取自两个生成函数的公共逻辑）
-   * @param {boolean} isDark - 是否深色模式，用于回退颜色
-   */
+  /** 读取主题 CSS 变量，缺失时按 `isDark` 回退到内置色值 */
   const getThemeColors = (isDark = false) => {
     return {
       bgColor:
@@ -149,12 +125,7 @@ export default function (api) {
     }
   }
 
-  /**
-   * 加载封面图片
-   * 使用 api.player.getCoverPath() 直接从后端获取封面路径，
-   * 不依赖 store 的异步加载时序。
-   * @returns {Promise<HTMLImageElement|null>}
-   */
+  /** 封面路径直接走后端 `api.player.getCoverPath()`，不依赖 store 异步时序；失败返回 `null` */
   const loadCoverImage = async () => {
     const coverPath = await api.player.getCoverPath()
 
@@ -171,11 +142,7 @@ export default function (api) {
     }
   }
 
-  /**
-   * 绘制模糊封面背景（抽取自两个生成函数的公共逻辑）
-   * @param {Array<[number, string, string]>} [gradientStops] - 渐变遮罩停止点
-   *   格式: [[offset, darkColor, lightColor], ...]，默认使用经典布局的遮罩
-   */
+  /** 模糊封面铺底 + 渐变遮罩；`gradientStops` 形如 `[[offset, darkColor, lightColor], ...]` */
   const drawBlurredBackground = (ctx, coverImg, width, height, config, isDark, gradientStops) => {
     if (!config.showCover || !coverImg) return
 
@@ -192,7 +159,6 @@ export default function (api) {
     ctx.drawImage(coverImg, offsetX, offsetY, scaledW, scaledH)
     ctx.restore()
 
-    // 渐变遮罩
     const stops = gradientStops || [
       [0, 'rgba(18,18,18,0.7)', 'rgba(254,254,254,0.7)'],
       [0.5, 'rgba(18,18,18,0.5)', 'rgba(254,254,254,0.5)'],
@@ -206,9 +172,6 @@ export default function (api) {
     ctx.fillRect(0, 0, width, height)
   }
 
-  /**
-   * 计算文本行数（不绘制，用于高度预估）
-   */
   const calculateLineCount = (ctx, text, maxWidth) => {
     if (!text) return 0
     let lineCount = 1
@@ -225,15 +188,9 @@ export default function (api) {
     return lineCount
   }
 
-  /**
-   * 歌词排版基准字号（两种布局共用，自适应缩放的基准）
-   */
+  /** 两种布局共用的歌词字号与行高基准，自适应缩放都乘在它上面 */
   const LYRIC_BASE_FONTS = { main: 56, trans: 52, mainLineH: 72, transLineH: 64, gap: 24 }
 
-  /**
-   * 按缩放比例测量歌词块尺寸（含换行重排），不绘制
-   * @returns {{mainFont:number,transFont:number,mainLineH:number,transLineH:number,gap:number,height:number,mainLines:number,transLines:number}}
-   */
   const measureLyricBlock = (ctx, mainText, transText, maxWidth, scale, fontFamily) => {
     const mainFont = Math.round(LYRIC_BASE_FONTS.main * scale)
     const transFont = Math.round(LYRIC_BASE_FONTS.trans * scale)
@@ -256,11 +213,7 @@ export default function (api) {
     return { mainFont, transFont, mainLineH, transLineH, gap, height, mainLines, transLines }
   }
 
-  /**
-   * 在 [minScale, maxScale] 区间内二分搜索能放入 areaHeight 的最大歌词缩放比例。
-   * 空间富余时放大字号填充（不超过 maxScale），空间不足时缩小（不低于 minScale）。
-   * @returns 测量结果；返回 null 表示 minScale 也放不下（调用方需要加高画布）
-   */
+  /** 二分搜索能放进 `areaHeight` 的最大字号缩放；返回 `null` 表示 `minScale` 也放不下，调用方需加高画布 */
   const fitLyricScale = (
     ctx,
     mainText,
@@ -271,7 +224,7 @@ export default function (api) {
     minScale = 0.65,
     maxScale = 1.5,
   ) => {
-    // 目标高度留 8% 呼吸空间，避免文字贴边
+    // 预留 8% 呼吸空间，避免文字贴边
     const target = areaHeight * 0.92
 
     let best = measureLyricBlock(ctx, mainText, transText, maxWidth, minScale, fontFamily)
@@ -292,24 +245,18 @@ export default function (api) {
     return best
   }
 
-  /**
-   * 生成经典布局分享图片
-   * 自适应排版：先在临时画布上完成全部测量，空间富余时放大封面/标题/歌词填满画布，
-   * 空间不足时缩小歌词字号防止溢出（极端情况加高画布兜底）
-   */
+  /** 经典布局：先在临时画布测量，再定稿画布高度；歌词溢出时加高画布兜底 */
   const generateClassicImage = async (options = {}) => {
     const config = { ...getConfig(), ...options }
     const { width, padding } = config
     const contentWidth = width - padding * 2
 
-    // 先让出主线程，避免阻塞 UI
     await yieldToMain()
 
     const state = await api.player.getState()
     const lyrics = await api.player.getLyrics()
     const lyricIndex = await api.player.getCurrentLyricIndex()
 
-    // 调试日志
     api.log.info('生成图片 - 歌曲:', state.currentTrack?.title)
     api.log.info('生成图片 - 歌词数量:', lyrics?.length || 0)
     api.log.info('生成图片 - 歌词索引:', lyricIndex)
@@ -319,21 +266,17 @@ export default function (api) {
       return null
     }
 
-    // 获取当前歌词（使用公共抽取函数）
     const { mainText, transText } = getCurrentLyricText(lyrics, lyricIndex)
     const hasLyrics = mainText.length > 0
 
-    // 让出主线程，避免长时间阻塞
     await yieldToMain()
 
-    // ==== 自适应排版：先测量，定稿尺寸后再绘制 ====
     const tempCanvas = api.utils.createCanvas(width, 100)
     const tempCtx = tempCanvas.ctx
 
     const title = state.currentTrack.title || state.currentTrack.name || '未知歌曲'
     const artist = state.currentTrack.artist || '未知艺术家'
 
-    // 基准字号下的歌词块高度
     const baseMeasure = measureLyricBlock(
       tempCtx,
       mainText,
@@ -343,19 +286,17 @@ export default function (api) {
       config.fontFamily,
     )
 
-    // 垂直方向固定开销：顶部留白60 + 封面下间距60 + 歌词上留白40 + 进度区140
+    // 固定垂直开销 300 = 顶部 60 + 封面下 60 + 歌词上 40 + 进度区 140
     const FIXED_V = 300
-    // 基准信息区高度（标题58 + 间距50 + 艺人42，单行估算）
+    // 信息区基准高度 150 = 标题 58 + 间距 50 + 艺人 42（单行估算）
     const BASE_INFO_H = 150
     const baseCoverSize = Math.min(contentWidth, 400)
 
-    // 基准状态下的自然内容高度
     const naturalHeight = padding * 2 + FIXED_V + baseCoverSize + BASE_INFO_H + baseMeasure.height
 
-    // 画布高度：沿用原有上下限（有歌词 1280 ~ 1920，无歌词 900 ~ 1920）
+    // 画布高度上限 1920；下限有歌词 1280、无歌词 900
     let height = Math.max(hasLyrics ? 1280 : 900, Math.min(1920, naturalHeight))
 
-    // ---- 分配富余空间：放大封面，标题/艺人字号小幅跟随 ----
     const extra = height - naturalHeight
     let coverSize = baseCoverSize
     let titleScale = 1
@@ -370,14 +311,12 @@ export default function (api) {
     const artistLineH = Math.round(42 * titleScale)
     const titleGap = Math.round(50 * titleScale)
 
-    // 放大后重新测量标题/艺人实际行数
     tempCtx.font = `bold ${titleFont}px ${config.fontFamily}`
     const titleLines = calculateLineCount(tempCtx, title, contentWidth)
     tempCtx.font = `${artistFont}px ${config.fontFamily}`
     const artistLines = calculateLineCount(tempCtx, artist, contentWidth)
     const infoBlockH = titleLines * titleLineH + titleGap + artistLines * artistLineH
 
-    // ---- 歌词区域：按实际剩余空间自适应缩放 ----
     const lyricAreaTop = padding + 60 + coverSize + 60 + infoBlockH + 40
     const lyricAreaBottom = height - padding - 140
 
@@ -392,7 +331,7 @@ export default function (api) {
         config.fontFamily,
       )
       if (!lyricMeasure) {
-        // 最小字号也放不下：加高画布承接全部歌词，避免文字溢出
+        // 最小字号仍溢出时加高画布承接全部歌词
         lyricMeasure = measureLyricBlock(
           tempCtx,
           mainText,
@@ -405,51 +344,39 @@ export default function (api) {
       }
     }
 
-    // 获取主题颜色
     const themeInfo = await api.theme.getCurrent()
     const isDark = themeInfo.isDark
 
-    // 创建画布
     const { canvas, ctx } = api.utils.createCanvas(width, height)
 
-    // 获取主题颜色（使用公共抽取函数）
     const { bgColor, primaryColor, onBgColor, onSurfaceVariant, surfaceContainer } =
       getThemeColors(isDark)
 
-    // 绘制纯色背景
     ctx.fillStyle = bgColor
     ctx.fillRect(0, 0, width, height)
 
-    // 让出主线程
     await yieldToMain()
 
-    // 预加载封面图片（使用公共加载函数）
     const coverImg = await loadCoverImage()
 
-    // 绘制封面背景（模糊效果，使用公共绘制函数）
     drawBlurredBackground(ctx, coverImg, width, height, config, isDark)
 
-    // 让出主线程
     await yieldToMain()
 
-    // ==== 绘制封面（居中，按富余空间放大） ====
     const coverX = (width - coverSize) / 2
     const coverY = padding + 60
 
     if (coverImg) {
-      // 绘制阴影
       ctx.save()
       ctx.shadowColor = 'rgba(0,0,0,0.3)'
       ctx.shadowBlur = 30
       ctx.shadowOffsetY = 10
 
-      // 圆角封面
       roundRect(ctx, coverX, coverY, coverSize, coverSize, 24)
       ctx.clip()
       ctx.drawImage(coverImg, coverX, coverY, coverSize, coverSize)
       ctx.restore()
     } else {
-      // 无封面占位符
       ctx.fillStyle = surfaceContainer
       roundRect(ctx, coverX, coverY, coverSize, coverSize, 24)
       ctx.fill()
@@ -461,7 +388,6 @@ export default function (api) {
       ctx.fillText('♪', coverX + coverSize / 2, coverY + coverSize / 2)
     }
 
-    // ==== 绘制歌曲信息（标题 + 艺人，流式排布，字号随富余空间放大） ====
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
 
@@ -476,7 +402,6 @@ export default function (api) {
     ctx.font = `${artistFont}px ${config.fontFamily}`
     wrapText(ctx, artist, width / 2, artistCenterY, contentWidth, artistLineH)
 
-    // ==== 绘制歌词（在信息区与进度条之间垂直居中，字号自适应） ====
     if (hasLyrics && lyricMeasure) {
       const lyricsAreaTop = artistCenterY + (artistLines * artistLineH) / 2 + 40
       const lyricsAreaBottom = height - padding - 140
@@ -502,19 +427,16 @@ export default function (api) {
       }
     }
 
-    // 进度条
     if (config.showProgress && state.duration > 0) {
       const progressY = height - padding - 80
       const progressWidth = width - padding * 2
       const progressHeight = 8
       const progressX = padding
 
-      // 背景条
       ctx.fillStyle = surfaceContainer
       roundRect(ctx, progressX, progressY, progressWidth, progressHeight, 4)
       ctx.fill()
 
-      // 进度条
       const progress = state.currentTime / state.duration
       const currentWidth = progressWidth * progress
       if (currentWidth > 0) {
@@ -523,7 +445,6 @@ export default function (api) {
         ctx.fill()
       }
 
-      // 时间文字
       ctx.fillStyle = onSurfaceVariant
       ctx.font = `24px ${config.fontFamily}`
       ctx.textAlign = 'left'
@@ -532,7 +453,6 @@ export default function (api) {
       ctx.fillText(api.utils.formatTime(state.duration), progressX + progressWidth, progressY + 40)
     }
 
-    // 水印
     ctx.fillStyle = onSurfaceVariant
     ctx.globalAlpha = 0.5
     ctx.font = `20px ${config.fontFamily}`
@@ -543,25 +463,18 @@ export default function (api) {
     return canvas
   }
 
-  /**
-   * 生成紧凑布局分享图片
-   * 布局：歌词在上方，封面在右下角，歌曲信息和进度条在左下角
-   * 自适应排版：空间富余时放大封面/标题/歌词填满画布，
-   * 空间不足时缩小歌词字号防止溢出（极端情况加高画布）
-   */
+  /** 紧凑布局：歌词在上，封面右下，进度与歌曲信息左下；先测量再定稿画布高度 */
   const generateCompactImage = async (options = {}) => {
     const config = { ...getConfig(), ...options }
     const { width, padding } = config
     const maxLyricWidth = width - padding * 2
 
-    // 先让出主线程，避免阻塞 UI
     await yieldToMain()
 
     const state = await api.player.getState()
     const lyrics = await api.player.getLyrics()
     const lyricIndex = await api.player.getCurrentLyricIndex()
 
-    // 调试日志
     api.log.info('生成紧凑布局图片 - 歌曲:', state.currentTrack?.title)
 
     if (!state.currentTrack) {
@@ -569,48 +482,41 @@ export default function (api) {
       return null
     }
 
-    // 获取当前歌词（使用公共抽取函数）
     const { mainText, transText } = getCurrentLyricText(lyrics, lyricIndex)
     const hasLyrics = mainText.length > 0
 
     await yieldToMain()
 
-    // ==== 自适应排版：先测量，定稿尺寸后再绘制 ====
     const tempCanvas = api.utils.createCanvas(width, 100)
     const tempCtx = tempCanvas.ctx
 
     const title = state.currentTrack.title || state.currentTrack.name || '未知歌曲'
     const artist = state.currentTrack.artist || '未知艺术家'
 
-    // 基准尺寸
     const baseCoverSize = 200
-    const topGap = 40 // 顶部水印与歌词区的间距
+    const topGap = 40 // 水印与歌词区的间距
 
-    // 基准歌词块高度（无歌词时按 200px 预留）
+    // 无歌词时按 200px 预留
     const baseLyricH = hasLyrics
       ? measureLyricBlock(tempCtx, mainText, transText, maxLyricWidth, 1, config.fontFamily).height
       : 200
 
-    // 底部区域高度 = 底部留白 + 封面（左侧信息与封面对齐）
     const baseBottomH = padding + baseCoverSize
 
-    // 自然内容高度：顶部留白 + 歌词 + 间距 + 底部区域
     const naturalHeight = padding + topGap + baseLyricH + 20 + baseBottomH
 
-    // 画布高度：紧凑布局 800 ~ 1600
+    // 紧凑布局画布高度 800 ~ 1600
     let height = Math.max(800, Math.min(1600, naturalHeight))
 
-    // ---- 分配富余空间：放大封面（底部区域随之变高），剩余空间留给歌词 ----
     const extra = height - naturalHeight
     let coverSize = baseCoverSize
     if (extra > 0) {
-      // 无歌词时封面多分一些，避免中部大面积留白
+      // 无歌词时封面多分余量，避免中部大面积留白
       const ratio = hasLyrics ? 0.35 : 0.6
       coverSize = baseCoverSize + Math.min(extra * ratio, 160)
     }
     const bottomH = padding + coverSize
 
-    // ---- 歌词区域：按实际剩余空间自适应缩放 ----
     const lyricAreaTop = padding + topGap
     const lyricAreaBottom = height - 20 - bottomH
 
@@ -625,7 +531,7 @@ export default function (api) {
         config.fontFamily,
       )
       if (!lyricMeasure) {
-        // 最小字号也放不下：加高画布承接全部歌词，避免文字溢出
+        // 最小字号仍溢出时加高画布承接全部歌词
         lyricMeasure = measureLyricBlock(
           tempCtx,
           mainText,
@@ -638,27 +544,21 @@ export default function (api) {
       }
     }
 
-    // 获取主题颜色
     const themeInfo = await api.theme.getCurrent()
     const isDark = themeInfo.isDark
 
-    // 创建画布
     const { canvas, ctx } = api.utils.createCanvas(width, height)
 
-    // 获取主题颜色（使用公共抽取函数）
     const { bgColor, primaryColor, onBgColor, onSurfaceVariant, surfaceContainer } =
       getThemeColors(isDark)
 
-    // 绘制纯色背景
     ctx.fillStyle = bgColor
     ctx.fillRect(0, 0, width, height)
 
     await yieldToMain()
 
-    // 预加载封面图片（使用公共加载函数）
     const coverImg = await loadCoverImage()
 
-    // 绘制封面背景（模糊效果，使用公共绘制函数，紧凑布局使用更深的底部遮罩）
     drawBlurredBackground(ctx, coverImg, width, height, config, isDark, [
       [0, 'rgba(18,18,18,0.6)', 'rgba(254,254,254,0.6)'],
       [0.7, 'rgba(18,18,18,0.7)', 'rgba(254,254,254,0.7)'],
@@ -667,7 +567,6 @@ export default function (api) {
 
     await yieldToMain()
 
-    // ========== 绘制歌词区域（上方，垂直居中，字号自适应） ==========
     const lyricsAreaBottom = height - 20 - bottomH
     const lyricsAreaCenterY = (lyricAreaTop + lyricsAreaBottom) / 2
 
@@ -682,7 +581,6 @@ export default function (api) {
       ctx.textBaseline = 'middle'
       wrapText(ctx, mainText, width / 2, mainCenterY, maxLyricWidth, m.mainLineH)
 
-      // 绘制翻译歌词
       if (transText && m.transLines > 0) {
         const transCenterY =
           mainCenterY + mainBlockH / 2 + m.gap + (m.transLines * m.transLineH) / 2
@@ -695,12 +593,6 @@ export default function (api) {
       }
     }
 
-    // ========== 底部区域 ==========
-    // 布局：
-    // - 封面：右下角，尺寸随富余空间放大
-    // - 左侧从上到下：进度条 -> 时间 -> 标题 -> 艺术家（字号随封面小幅放大）
-
-    // ========== 绘制封面（右下角） ==========
     const coverX = width - padding - coverSize
     const coverY = height - padding - coverSize
 
@@ -726,30 +618,26 @@ export default function (api) {
       ctx.fillText('♪', coverX + coverSize / 2, coverY + coverSize / 2)
     }
 
-    // ========== 绘制左侧信息区域 ==========
-    const infoMaxWidth = coverX - padding - 30 // 留出封面和间距
+    const infoMaxWidth = coverX - padding - 30 // 留 30px 间距给封面
     const infoX = padding
 
-    // 计算左侧区域的垂直位置（与封面对齐）
-    const leftAreaTop = coverY // 与封面顶部对齐
-    const leftAreaBottom = coverY + coverSize // 与封面底部对齐
+    // 左侧信息与封面上下两端对齐
+    const leftAreaTop = coverY
+    const leftAreaBottom = coverY + coverSize
 
-    // 标题/艺人字号随封面放大（一半力度，避免挤压左侧宽度）
+    // 字号随封面放大，力度减半避免挤压左侧宽度
     const fontScale = Math.min(1.3, 1 + (coverSize - baseCoverSize) / baseCoverSize / 2)
 
-    // 进度条在顶部
     if (config.showProgress && state.duration > 0) {
       const progressY = leftAreaTop + 10
       const progressWidth = infoMaxWidth
       const progressHeight = 6
       const progressX = padding
 
-      // 背景条
       ctx.fillStyle = surfaceContainer
       roundRect(ctx, progressX, progressY, progressWidth, progressHeight, 3)
       ctx.fill()
 
-      // 进度条
       const progress = state.currentTime / state.duration
       const currentWidth = progressWidth * progress
       if (currentWidth > 0) {
@@ -758,7 +646,6 @@ export default function (api) {
         ctx.fill()
       }
 
-      // 时间文字
       ctx.fillStyle = onSurfaceVariant
       ctx.font = `${Math.round(18 * fontScale)}px ${config.fontFamily}`
       ctx.textAlign = 'left'
@@ -768,7 +655,6 @@ export default function (api) {
       ctx.fillText(api.utils.formatTime(state.duration), progressX + progressWidth, progressY + 14)
     }
 
-    // 歌曲标题（在底部区域的中下部）
     const titleY = leftAreaBottom - Math.round(60 * fontScale)
     ctx.fillStyle = onBgColor
     ctx.font = `bold ${Math.round(40 * fontScale)}px ${config.fontFamily}`

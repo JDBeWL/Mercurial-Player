@@ -1,12 +1,4 @@
-// 同步版本号: 从 src-tauri/Cargo.toml 读取 version,写入 package.json 和 tauri.conf.json
-//
-// 用法: pnpm run version:sync
-// 校验: pnpm run version:check (只读校验三处版本一致,不一致时退出码 1,供 CI 使用)
-//
-// 工作流:
-//   1. 编辑 src-tauri/Cargo.toml 的 version 字段 (唯一来源)
-//   2. 运行 pnpm run version:sync
-//   3. 提交所有变更 (Cargo.toml + package.json + tauri.conf.json)
+/** 同步版本号 / 以 Cargo.toml 为准写入 package.json 与 tauri.conf.json */
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'

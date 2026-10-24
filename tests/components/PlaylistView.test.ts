@@ -378,6 +378,32 @@ describe('PlaylistView.vue', () => {
     })
   })
 
+  describe('BPM 不展示', () => {
+    // 列表行不再展示 BPM（识别改为按需、只分析当前曲目，结果只进播放页音频信息行），
+    // 这里反向守住：即使曲目带了 BPM，列表也不得渲染出标记
+    it('曲目带 BPM 时列表也不渲染标记', async () => {
+      store.playlist = [{ path: '/music/a.mp3', title: 'A', bpm: 128 }]
+      wrapper = mountComponent()
+      await nextTick()
+      expect(wrapper.find('.list-item-bpm').exists()).toBe(false)
+      expect(wrapper.html()).not.toContain('128')
+    })
+
+    it('BPM 识别补齐后列表不刷新标记', async () => {
+      const track: Track = { path: '/music/a.mp3', title: 'A' }
+      store.playlist = [track]
+      wrapper = mountComponent()
+      await nextTick()
+
+      // 模拟识别结果回填到曲目并递增版本号：列表只处理封面更新，不应受 BPM 影响
+      track.bpm = 140
+      store.playlistCoverVersion++
+      await nextTick()
+
+      expect(wrapper.find('.list-item-bpm').exists()).toBe(false)
+    })
+  })
+
   describe('滚动状态', () => {
     it('滚动时添加 is-scrolling 类', async () => {
       store.playlist = makeTracks(5)

@@ -101,7 +101,7 @@ describe('恢复会话后的当前曲目封面', () => {
   it('恢复后在 currentTrack 上写入 coverPath,且响应式可观察到(主界面/MiniPlayer 用)', async () => {
     const store = usePlayerStore()
 
-    // 模拟 App.vue 的 currentTrackCover 计算属性:先读一次建立依赖
+    // 模拟 App.vue 的 `currentTrackCover` 计算属性:先读一次建立依赖
     const cover = computed(() => store.currentTrack?.coverPath)
     expect(cover.value).toBeUndefined()
 
@@ -115,7 +115,6 @@ describe('恢复会话后的当前曲目封面', () => {
     const store = usePlayerStore()
     const { currentTrack } = storeToRefs(store)
 
-    // App.vue: computed(() => currentTrack.value?.coverPath)
     const cover = computed(() => currentTrack.value?.coverPath)
     expect(cover.value).toBeUndefined()
 

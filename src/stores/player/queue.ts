@@ -40,6 +40,7 @@ function toSnapshot(track: TrackSnapshot | null | undefined): TrackSnapshot | nu
     channels: track.channels ?? null,
     bitDepth: track.bitDepth ?? null,
     format: track.format ?? null,
+    bpm: track.bpm ?? null,
   }
 }
 
@@ -87,6 +88,7 @@ function snapshotToTrack(snapshot: TrackSnapshot): Track {
     channels: snapshot.channels ?? undefined,
     bitDepth: snapshot.bitDepth ?? undefined,
     format: snapshot.format ?? undefined,
+    bpm: snapshot.bpm ?? undefined,
   }
 }
 

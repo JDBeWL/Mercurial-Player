@@ -66,8 +66,7 @@ describe('usePlayerStore playTrack error classification', () => {
   async function expectErrorType(err: unknown, expectedType: ErrorType) {
     const store = usePlayerStore()
     invokeMock.mockReset()
-    // playTrack calls: pause_track -> play_track -> get_track_cover_path (async, may not be awaited)
-    // We need to handle multiple calls: pause_track resolves, play_track rejects
+    // `playTrack` 依次调用 `pause_track`、`play_track`,且不等待 `get_track_cover_path`
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === 'pause_track') return Promise.resolve(undefined)
       if (cmd === 'play_track') return Promise.reject(err)

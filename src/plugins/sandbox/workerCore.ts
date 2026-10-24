@@ -1,9 +1,4 @@
-/**
- * Worker 沙箱核心:外置插件代码在本 Worker 内以 ES 模块 (blob URL 动态 import) 求值,
- * 与主窗口的完整权限 (DOM / localStorage / Tauri IPC) 物理隔离:Worker 中不存在
- * __TAURI_INTERNALS__ 与 window 对象,插件只能通过 postMessage RPC 访问受权限控制的 PluginAPI。
- * 本模块保持纯逻辑 (不直接引用 self),便于测试中以 FakeWorker 通道驱动真实协议实现。
- */
+/** Worker 沙箱核心 / 插件在独立 Worker 中以 ES 模块求值，只经 `postMessage` RPC 访问受权限控制的 `PluginAPI`。 */
 
 import { formatTime } from '../../utils/format'
 import {
@@ -25,8 +20,6 @@ import {
   deserializeError,
   serializeError,
 } from './sandboxProtocol'
-
-// ---- 模块加载 ----
 
 /** 插件工厂函数 (模块默认导出):接收 api 与沙箱全局,返回插件实例 */
 export type PluginFactory = (api: PluginAPI, globals: unknown) => unknown
@@ -53,8 +46,6 @@ async function importPluginModule(code: string): Promise<PluginFactory> {
   }
   return mod.default as PluginFactory
 }
-
-// ---- 序列化 ----
 
 type CallbackRegistrar = (fn: (...args: unknown[]) => unknown) => number
 
@@ -109,14 +100,7 @@ function sanitizeLogArgs(args: unknown[]): unknown[] {
 /** Worker 侧回调注册上限(事件监听/返回值携带函数等);宿主侧权威配额见 workerSandboxHost 的 MAX_CALLBACK_STUBS */
 const MAX_REGISTERED_CALLBACKS = 10_000
 
-// ---- Worker 本地工具实现 (不经过主窗口) ----
-
-/**
- * 需从 Worker 全局移除的原生 API,按逃逸途径分类:网络类只能改走 api.network.fetch 权限代理;
- * postMessage 可伪造协议消息,close 自杀,indexedDB/caches 持久化外传,importScripts 加载远程代码;
- * Worker/SharedWorker/BroadcastChannel 另开 realm 使中和失效,RTCPeerConnection 的 ICE 出站不受 CSP connect-src 约束,
- * addEventListener 家族可窃听宿主下行消息或注入伪造 MessageEvent。
- */
+/** 从 Worker 全局移除的原生 API：网络走权限代理，其余用于堵逃逸、持久化与另开 realm。 */
 const SANDBOX_BLOCKED_GLOBAL_KEYS = [
   'fetch',
   'XMLHttpRequest',
@@ -212,8 +196,6 @@ function cssVarToCamel(name: string): string {
   return name.replace(/^--/, '').replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())
 }
 
-// ---- network.fetch 的 Response 序列化包装 (Worker 侧) ----
-
 interface SerializedResponse {
   [SANDBOX_RESPONSE_MARKER]: true
   ok: boolean
@@ -274,8 +256,6 @@ function reviveHostValue(value: unknown): unknown {
   }
   return value
 }
-
-// ---- 沙箱 Worker 运行时 ----
 
 interface PendingCall {
   resolve: (value: unknown) => void
@@ -395,8 +375,6 @@ export class SandboxWorkerRuntime {
       }
     }
   }
-
-  // ---- 内部:主流程与代理构建 ----
 
   private async runMain(): Promise<void> {
     if (!this.factory) {

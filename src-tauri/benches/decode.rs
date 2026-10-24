@@ -1,9 +1,6 @@
 //! 解码吞吐 benchmark
 //!
-//! 测量 SymphoniaDecoder 解码不同格式/参数时的吞吐量
-//!
-//! 运行: cargo bench --bench decode
-//! 输出: target/criterion/decode/report/index.html
+//! 运行 `cargo bench --bench decode`，报告在 `target/criterion/decode/`。
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use mercurial_player_lib::audio::SymphoniaDecoder;

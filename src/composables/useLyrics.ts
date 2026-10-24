@@ -112,11 +112,7 @@ async function saveLyricsToLocal(
   }
 }
 
-/**
- * 加载歌词:本地文件优先,缺失时按配置在线获取
- *
- * 写入统一走 _playerStore.lyrics,时机见 initializeSharedWatchers 中的 store.lyrics watcher
- */
+/** 加载歌词：本地文件优先，缺失时按配置在线获取；统一写入 `_playerStore.lyrics`。 */
 async function loadLyrics(trackPath: string | undefined): Promise<void> {
   if (!_playerStore || !_configStore) return
   // 序号守卫:快速切歌时请求并发,只有最新一次的结果允许写入共享状态
@@ -200,12 +196,7 @@ async function loadLyrics(trackPath: string | undefined): Promise<void> {
   }
 }
 
-/**
- * 初始化共享 watcher (只执行一次)
- *
- * LyricsDisplay / VisualizerPanel / App.vue 共用同一套 watcher 与状态,
- * 否则切歌会触发 3 次 loadLyrics、每帧 3 次二分查找
- */
+/** 初始化共享 watcher（只执行一次）：三个视图共用，避免切歌重复加载与每帧重复二分。 */
 function initializeSharedWatchers(): void {
   if (isInitialized) return
   isInitialized = true

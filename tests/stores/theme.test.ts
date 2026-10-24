@@ -24,7 +24,6 @@ vi.mock('@/stores/config', () => ({
 
 const { useThemeStore } = await import('@/stores/theme')
 
-/** 控制系统 prefers-color-scheme 的返回值 */
 let prefersDark = false
 function stubMatchMedia() {
   Object.defineProperty(window, 'matchMedia', {
@@ -361,7 +360,6 @@ describe('applyTheme', () => {
     store.applyTheme()
     store.applyTheme()
 
-    // 同一个 <style> 元素被复用,内容由缓存直接得出
     expect(document.getElementById('theme-custom-variables')).toBe(element)
     expect(customCssText()).toBe(first)
   })
@@ -428,8 +426,7 @@ describe('换主题时的统一过渡', () => {
     const store = useThemeStore()
     const root = document.documentElement
 
-    // 第一次调用可能是本次进程的首次应用（首次刻意不加，避免启动时从默认色淡入），
-    // 因此这里推进两次，保证稳定走到"需要加类"的分支。
+    // 首次应用刻意不加 `theme-fading`(避免启动淡入),调用两次才进入加类分支
     store.applyTheme()
     store.applyTheme()
     expect(root.classList.contains('theme-fading')).toBe(true)
@@ -448,7 +445,6 @@ describe('换主题时的统一过渡', () => {
     store.applyTheme()
     vi.advanceTimersByTime(200)
 
-    // 第二次换色重新计时：此时距第二次只有 200ms，类必须还在
     expect(root.classList.contains('theme-fading')).toBe(true)
 
     vi.advanceTimersByTime(100)

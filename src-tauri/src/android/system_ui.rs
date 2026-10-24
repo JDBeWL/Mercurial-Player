@@ -1,7 +1,6 @@
-//! Android 系统栏显隐（状态栏 / 导航栏）。
+//! Android 系统栏显隐（状态栏 / 导航栏）
 //!
-//! tao 在 Android 上没实现 `set_fullscreen`，只能自己经 JNI 交给 Kotlin 侧的
-//! `WindowInsetsControllerCompat`。
+//! tao 在 Android 上没实现 `set_fullscreen`，只能经 JNI 交给 Kotlin 的 `WindowInsetsControllerCompat`。
 
 use crate::error::AppError;
 

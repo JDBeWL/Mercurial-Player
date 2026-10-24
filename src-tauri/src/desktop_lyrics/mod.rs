@@ -1,8 +1,6 @@
-//! 桌面歌词显示模块：屏幕底部的置顶窗口，Direct2D 渲染，支持双行歌词。
+//! 桌面歌词窗口
 //!
-//! 锁定模式点击穿透、解锁模式顶部拖拽，悬浮时才显示锁定/关闭按钮。
-//! 字体族跟随前端歌词字体设置（原文/译文可分别指定）：优先系统已安装字体，
-//! 未安装时把 fonts/ 目录的外部字体加载为 DirectWrite 内存字体集。
+//! 底部置顶分层窗口，Direct2D 渲染双行歌词；字体优先系统字体，缺失时加载 `fonts/` 外部字体。
 
 #![allow(unsafe_code)]
 
@@ -22,8 +20,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
-/// 配色方案。outline 为文字描边色：取与文字色同色系的深色
-/// （深/浅预设用灰阶），比纯黑描边更柔和，同时保证任意背景可读
 #[derive(Clone, Copy, Debug)]
 struct ColorPreset {
     text_color: u32,
@@ -139,10 +135,8 @@ mod tests {
     use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
     use windows::core::{PCWSTR, w};
 
-    /// 用 dev 运行目录（target/debug/fonts）中的真实字体文件验证
-    /// DirectWrite 内存字体集加载链路：
-    /// Factory5 -> InMemoryFontFileLoader -> FontSetBuilder -> 集合 -> FindFamilyName。
-    /// 目录不存在或没有可用字体时跳过
+    /// 用 `target/debug/fonts` 中的真实字体验证 DirectWrite 内存字体集加载链路；
+    /// 目录不存在或无可用字体时跳过
     #[test]
     fn dwrite_external_font_load_pipeline() {
         let fonts_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -174,7 +168,6 @@ mod tests {
             let com_initialized = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
             let dwrite: IDWriteFactory =
                 DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).expect("DWriteCreateFactory 失败");
-            // 走生产构建函数（含 RegisterFontFileLoader）
             let loader = build_memory_loader(&dwrite).expect("build_memory_loader 失败");
 
             for path in &entries {
@@ -183,7 +176,6 @@ mod tests {
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default();
                 let family = crate::system::fonts::frontend_family_from_file_name(&file_name);
-                // 走生产加载函数；外层 unsafe 块保证 COM 已初始化、loader 已注册
                 let report = match try_load_external_font(
                     &dwrite,
                     &loader,

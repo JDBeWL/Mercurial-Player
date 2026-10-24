@@ -1,7 +1,4 @@
-/**
- * 播放控制的纯逻辑层:接收最小 store 形状(与 Pinia player store 结构兼容)以避免循环依赖。
- * play/pause/next/previous 与播放列表强耦合,仍留在 index.ts。
- */
+/** 播放控制纯逻辑层 / 接收最小 store 形状以避免循环依赖；强耦合的 play/pause 仍在 index.ts。 */
 import type { Track } from '@/types'
 import { ErrorSeverity } from '../../utils/errorHandler'
 import { safeInvoke } from '../../utils/safeInvoke'

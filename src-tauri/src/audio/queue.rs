@@ -256,10 +256,7 @@ pub fn handle_track_ended(app: &AppHandle, state: &AppState) {
 }
 
 /// 播放队列中指定下标的曲目，并同步 UI / 通知栏。
-///
-/// 独占模式开着时必须走独占起播路径，否则后台自动推进会把用户从独占输出上悄悄摘下来
-/// （表现为切到下一首就变成系统混音）。独占起播是 async，而这里可能跑在解码/分析线程上
-/// （见 [`handle_track_ended`]），所以那条分支整段丢给 Tauri 异步运行时执行。
+/// 独占模式必须走独占起播路径，否则后台推进会把用户悄悄切回系统混音；该分支丢给 Tauri 异步运行时。
 fn play_queue_track(
     app: &AppHandle,
     state: &AppState,

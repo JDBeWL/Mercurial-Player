@@ -203,11 +203,8 @@ describe('watchTrack', () => {
     expect(getTrackTitle(current.value)).toBe('Prefilled')
   })
 
-  // 已确认的缺陷(本测试如实记录当前行为,非期望行为):
-  // watchTrack 预填时把缓存标记为 processing:true,紧接着调用的 processTrackInfo
-  // 因 `getCached(path)?.processing` 为真而 early-return,TitleExtractor.extractTitle
-  // 在主流程(App.vue / MiniPlayer.vue 均只走 watchTrack)中永远不会被调用,
-  // 标题只能停留在 store 元数据或文件名。修复方式:预填后应立即执行提取。
+  // 已知缺陷：watchTrack 预填 processing:true，导致 processTrackInfo 提前返回，标题提取在主流程从未执行。
+  // 修复方式：预填后立即执行提取。
   it('BUG: prefill marks processing=true, so processTrackInfo skips extraction', async () => {
     const { watchTrack } = useTrackInfo()
     const current = ref<Track | null>(null)

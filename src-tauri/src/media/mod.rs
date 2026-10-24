@@ -1,7 +1,13 @@
-//! 媒体模块：文件遍历与安全检查、音频元数据与封面。
+//! 媒体模块
 //!
-//! HTTP 客户端在 `crate::http_client`（media 与 lyrics 共用），歌词来源在 `crate::lyrics`。
+//! 音频文件遍历与安全检查、元数据与封面、BPM 与节拍分析。
 
+pub mod beat_cache;
+pub mod beat_model;
+pub mod bpm;
 pub mod commands;
 pub mod filesystem;
 pub mod metadata;
+// `ort` 的 directml feature 在非 Windows 平台会拉一套用不上的绑定，故仅 Windows 编译。
+#[cfg(windows)]
+pub mod ort_model;

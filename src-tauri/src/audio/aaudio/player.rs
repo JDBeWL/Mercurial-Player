@@ -1,10 +1,8 @@
-//! AAudio 独占（位完美）输出播放器：绕过 AudioFlinger 的混音与重采样，按原生采样率直写 USB DAC。
+//! AAudio 独占输出播放器
 //!
-//! 数据通路是解码线程 `push_samples` 写无锁 SPSC 环形缓冲，AAudio 数据回调取走并施加音量与
-//! 淡入淡出；回调内全走原子量，不阻塞、不分配。
+//! 解码线程写无锁 SPSC 环，回调取走并施加音量/淡入淡出；回调内只走原子量，不分配、不加锁。
 
-// 本模块就是 AAudio 的 FFI 边界（裸指针解引用、C 回调 ABI、跨线程 UnsafeCell），逐项标注只会
-// 重复同一句话，故在模块级统一 allow；每个 unsafe 块内仍保留独立的 SAFETY 说明。
+// 本模块即 AAudio 的 FFI 边界，逐项 allow 只会重复同一句话；每个 unsafe 块仍保留独立 SAFETY。
 #![allow(unsafe_code)]
 
 use std::cell::UnsafeCell;
@@ -24,29 +22,24 @@ use super::ffi;
 use crate::audio::{PlaybackState, PushOutcome, SampleRing, spectrum::now_ms};
 use crate::error::AppError;
 
-/// 环形缓冲的目标时长（秒）：独占 buffer 很小，缓冲给足才能吸收解码抖动而不断流。
-/// 硬约束是必须大于水位门控，见 [`crate::audio::sample_ring::exclusive_ring_capacity`]。
+/// 环形缓冲目标时长（秒）：须大于解码线程的水位门控，见 `exclusive_ring_capacity`。
 const RING_SECONDS: f32 = 1.5;
 /// 默认淡入淡出时长（毫秒）
 const DEFAULT_FADE_MS: u32 = 30;
 /// 看门狗轮询间隔（毫秒）
 const WATCHDOG_INTERVAL_MS: u64 = 20;
-/// 解码线程 park gate 的兜底超时（毫秒）：正常由控制侧与消费进度唤醒，超时只兜漏通知。
+/// park gate 的兜底超时（毫秒）：正常由控制侧与消费进度唤醒，超时只兜漏通知。
 const PARK_TICK_MS: u64 = 250;
-/// 看门狗替回调收尾的宽限（毫秒）：超过 duration + 本宽限斜坡仍未推进，说明回调已停摆。
+/// 看门狗替回调收尾的宽限（毫秒）：超过 duration + 宽限斜坡仍未推进，说明回调已停摆。
 const FADE_FALLBACK_GRACE_MS: u64 = 100;
-/// 数据回调 scratch 的预留下限（交错采样数）。实际预留量开流后按生效容量重算，
-/// 这里只兜住容量查询失败或设备给出很小容量的情况。
+/// 数据回调 scratch 的预留下限（交错采样数）：开流后按生效容量重算，只兜容量查询失败或极小容量。
 const AAUDIO_SCRATCH_CAPACITY: usize = 32_768;
-/// 单次数据回调的目标时长（毫秒）：不指定时 AAudio 每 burst 回调一次，放大回调块能按同比例
-/// 减少唤醒，而输出延迟对本应用没有意义（环形缓冲已有 `RING_SECONDS` 余量）。
-///
-/// 上限受 `DEFAULT_FADE_MS` 约束：块长一旦超过淡变时长，整条淡出会在单块内走完，退化成阶跃。
+/// 单次数据回调的目标时长（毫秒）：调大按比例减少唤醒；上限受 `DEFAULT_FADE_MS` 约束，
+/// 块长超过淡变时长会让整条淡出在单块内走完，退化成阶跃。
 const CALLBACK_MILLIS: u32 = 25;
-/// 欠载补零前的收敛斜坡长度（帧），约 1.5 ms @44.1k：够消掉阶跃造成的 click，
-/// 又短到听感上只是"这句尾巴轻了一点"。
+/// 欠载补零前的收敛斜坡长度（帧），约 1.5 ms @44.1k：消掉阶跃 click，又短到听感只是尾巴轻一点。
 const UNDERRUN_RAMP_FRAMES: usize = 64;
-/// 欠载上报的最小间隔（秒）：回调是实时线程不能打日志，观测由看门狗按此间隔汇报增量。
+/// 欠载上报的最小间隔（秒）：回调是实时线程不能打日志，由看门狗按此间隔汇报增量。
 const UNDERRUN_LOG_INTERVAL_SECS: u64 = 5;
 
 /// `PlaybackState` 的原子编码（状态要能在音频回调里更新，不能用 Mutex）
@@ -1100,11 +1093,8 @@ const fn shared_fallback_format(wanted: ffi::aaudio_format_t) -> ffi::aaudio_for
     }
 }
 
-/// 数据回调入口：只做一层 panic 收口，真正的工作在 [`fill_block`]。
-///
-/// 回调里的 panic 会跨 FFI 边界——`panic = "abort"` 构建直接杀进程，否则 unwind 穿进 AAudio 的
-/// C 栈（UB）。此处能接住就补静音继续放；abort 下 catch_unwind 接不住，故 [`fill_block`]
-/// 只允许有界索引与原子量操作，不留 panic 路径。
+/// 数据回调入口：只做 panic 收口，实际工作在 `fill_block`。
+/// 回调 panic 会跨 FFI 边界（abort 杀进程，否则 unwind 进 C 栈是 UB），故 `fill_block` 只允许有界索引与原子操作。
 unsafe extern "C" fn data_callback(
     _stream: *mut ffi::AAudioStreamStruct,
     user: *mut c_void,

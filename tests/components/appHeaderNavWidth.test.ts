@@ -1,5 +1,4 @@
 // 顶栏曲目信息宽度约束护栏: 曲名/艺术家居中, 两侧是定宽按钮组, 中间列宽度须由两侧实际占宽动态推导;
-// 边列下限给 0 时中间列会长到曲名 max-content, 把按钮组挤到标题底下 (实测边列 109px -> 208px / 184px)
 import { describe, expect, it } from 'vitest'
 
 const modules = import.meta.glob('@/components/AppHeader.vue', {

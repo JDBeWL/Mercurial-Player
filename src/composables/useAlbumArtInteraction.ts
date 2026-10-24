@@ -8,8 +8,8 @@ import type { Track } from '@/types'
 /** 长按判定时长(毫秒)。太短会与普通点击混淆,太长用户会以为没反应 */
 const LONG_PRESS_MS = 450
 
-/** 从音频路径解出不带扩展名的文件名主体。Android 的 path 是 content URI,分隔符被编码成 %2F,
- *  直接按 / 切会拿到整段 document id,必须先按 %2F 取末段再 decode */
+/** 从音频路径解出不带扩展名的文件名主体。Android 的 path 是 content URI, 分隔符被编码成 `%2F`,
+ *  直接按 `/` 切会拿到整段 document id, 必须先按 `%2F` 取末段再 decode */
 function stemFromAudioPath(audioPath: string): string {
   const lastSegment = audioPath.split(/[/\\]/).pop() ?? ''
   const encoded = lastSegment.split(/%2f/i).pop() ?? lastSegment
@@ -25,11 +25,7 @@ function stemFromAudioPath(audioPath: string): string {
 /** 提取封面的结果:调用方据此决定要不要提示成功 */
 export type ExtractCoverResult = 'saved' | 'cancelled' | 'failed'
 
-/**
- * 专辑封面交互 Composable:触摸屏没有 hover,"提取封面"按钮永远点不出来,故 Android 改用长按封面弹菜单
- *
- * @param options.longPressEnabled 仅 Android 传 true。
- */
+/** 封面交互: 触摸屏没有 hover, "提取封面"按钮点不出来, 故 Android 改用长按封面弹菜单 (`options.longPressEnabled` 仅 Android 为 true) */
 export function useAlbumArtInteraction(
   currentTrack: Ref<Track | null>,
   options: { longPressEnabled?: Ref<boolean> } = {},
@@ -42,7 +38,6 @@ export function useAlbumArtInteraction(
   let longPressFired = false
   let pressTimer: ReturnType<typeof setTimeout> | null = null
 
-  /** 按下点,用于区分"按住不动"与"在封面上滑动" */
   let pressStart: { x: number; y: number } | null = null
   /** 长按期间手指移动超过这个距离(css px)就判为滑动,取消长按 */
   const LONG_PRESS_MOVE_TOLERANCE = 10

@@ -1,8 +1,5 @@
-/**
- * 插件沙箱宿主,主窗口侧:为单个外置插件管理一个 Dedicated Worker。
- * 职责:把 Worker 内代理发起的 api-call 分发到真实 PluginAPI,按 MirrorData 推送状态镜像,
- * 把插件注册的函数还原为调用 Worker 的 stub,deactivate 时 terminate Worker (定时器与监听随之释放)。
- */
+/** 插件沙箱宿主（主窗口侧）/ 为单个外置插件管理 Dedicated Worker。
+ * 分发 api-call、推送 MirrorData、把注册函数还原为 stub，deactivate 时 terminate。 */
 
 import { watch, type WatchStopHandle } from 'vue'
 import logger from '../../utils/logger'
@@ -25,12 +22,8 @@ import SandboxWorker from './workerBootstrap?worker&inline'
 /** Worker 工厂 (注入点:测试环境替换为 FakeWorker) */
 export type WorkerFactory = () => Worker
 
-/**
- * 沙箱 api-call 路径白名单:精确路径 -> 所需权限 (null = 无需权限)。
- * 权限校验的权威位置在宿主主窗口侧:Worker 内的 requirePermission 与插件共享全局作用域,
- * 可被插件直接 postMessage 伪造 api-call 绕过。
- * 精确匹配取代属性链遍历,未收录的路径 (log.info.constructor 等) 一律拒绝;用 Map 存储以免原型链键干扰查找。
- */
+/** 沙箱 `api-call` 路径白名单：精确路径 → 所需权限（`null` = 无需权限）。
+ * 权限权威校验在宿主侧：Worker 内的检查可被插件伪造消息绕过。 */
 const API_CALL_POLICY: ReadonlyMap<string, PluginPermissionType | null> = new Map([
   ['player.getLyrics', PluginPermission.PLAYER_READ],
   ['player.getCoverPath', PluginPermission.PLAYER_READ],
@@ -68,13 +61,8 @@ const API_CALL_POLICY: ReadonlyMap<string, PluginPermissionType | null> = new Ma
   ['clipboard.writeText', PluginPermission.CLIPBOARD_WRITE],
 ])
 
-/**
- * 默认 Worker 工厂:blob URL 内联 Worker (vite `?worker&inline`)。
- * Tauri 的 CSP 由 meta 标签注入主文档,资产协议不为 JS 注入 CSP 头,经普通 URL 加载的 Worker 内全无 CSP 约束,
- * 插件即可用原生 fetch / WebSocket / 远程动态 import() 绕过 NETWORK 权限;
- * blob: URL 的 Worker 继承创建文档的 CSP (MDN: CSP in workers),使 script-src / connect-src 在 Worker 内生效,
- * 当前 CSP script-src 已含 blob:。dev 下 vite 用 dev-server URL 建 Worker 不继承 CSP,但那是开发者自身可信环境。
- */
+/** 默认 Worker 工厂：blob URL 内联 Worker，继承主文档 CSP。
+ * 普通 URL 的 Worker 不受 CSP 约束，插件可绕过 NETWORK 权限；dev 环境例外。 */
 const defaultWorkerFactory = (): Worker => new SandboxWorker()
 
 /** playerState 镜像推送的节流间隔 */
@@ -138,11 +126,8 @@ class TokenBucket {
   }
 }
 
-/**
- * 反序列化 (reviveValue) 的资源预算:插件可自行 postMessage 任意 payload,
- * 深度嵌套对象会让无限制递归直接抛 RangeError,该异常从 onmessage 逃逸后等待中的 Promise 永不 settle;
- * 故预算耗尽时改抛可捕获的普通 Error,由调用方拒绝等待者。
- */
+/** 反序列化资源预算：插件可发任意 payload，深度嵌套会让递归抛 `RangeError` 并让等待中的 Promise 永不 settle。
+ * 预算耗尽时改抛普通 `Error`，由调用方拒绝等待者。 */
 const REVIVE_MAX_DEPTH = 32
 const REVIVE_MAX_NODES = 20_000
 
@@ -150,8 +135,6 @@ const REVIVE_MAX_NODES = 20_000
 const LOG_LEVELS = new Set(['error', 'warn', 'info', 'debug'])
 
 type LogLevel = 'error' | 'warn' | 'info' | 'debug'
-
-// ---- 不可信消息校验 ----
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -316,8 +299,6 @@ export class PluginWorkerHost {
     this.api = null
   }
 
-  // ---- 内部:消息分发 ----
-
   private post(msg: HostToWorkerMessage): void {
     this.worker?.postMessage(msg)
   }
@@ -334,11 +315,8 @@ export class PluginWorkerHost {
     this.cbCallPending.clear()
   }
 
-  /**
-   * 处理来自 Worker 的消息:先按类型逐一校验字段形状,不合法直接丢弃 (见 dropMalformed);
-   * revive 预算见 REVIVE_MAX_DEPTH / REVIVE_MAX_NODES;整体 try/catch,残留异常必须拒绝全部
-   * 挂起 Promise 并 terminate,否则插件会永久卡在半初始化状态且毫无报错。
-   */
+  /** 处理 Worker 消息：先逐类型校验字段，不合法直接丢弃；`revive` 预算见 `REVIVE_MAX_DEPTH/NODES`。
+   * 整体 try/catch：残留异常必须拒绝全部挂起 Promise 并 terminate，否则插件会永久卡在半初始化。 */
   private handleWorkerMessage(raw: unknown): void {
     if (!isRecord(raw) || typeof raw.type !== 'string') return
     const type = raw.type
@@ -599,8 +577,6 @@ export class PluginWorkerHost {
     return result
   }
 
-  // ---- 内部:回调桥 ----
-
   /** 主窗口侧回调 stub:调用时 RPC 到 Worker 内执行插件函数 */
   private makeCallbackStub(cbId: number): (...args: unknown[]) => Promise<unknown> {
     const existing = this.callbackStubs.get(cbId)
@@ -650,8 +626,6 @@ export class PluginWorkerHost {
     this.callbackStubs.set(cbId, stub)
     return stub
   }
-
-  // ---- 内部:状态镜像 ----
 
   private hasPerm(permission: string): boolean {
     return this.permissions.includes(permission)
@@ -776,8 +750,6 @@ export class PluginWorkerHost {
     )
   }
 }
-
-// ---- 序列化辅助 (主窗口侧) ----
 
 type StubFactory = (cbId: number) => (...args: unknown[]) => unknown
 

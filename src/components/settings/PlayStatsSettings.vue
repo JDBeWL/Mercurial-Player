@@ -390,8 +390,6 @@ const { t } = useI18n()
 const { showError, showSuccess } = useErrorNotification()
 const playerStore = usePlayerStore()
 
-// ============ 插件实例访问 ============
-
 /** 播放统计插件对外暴露的查询方法（与 playCount.ts 的实现一一对应） */
 interface PlayCountPluginInstance {
   getStats(rangeDays?: number | null): PlayCountStats
@@ -421,8 +419,6 @@ const getPluginInstance = (): PlayCountPluginInstance | null => {
 const instance = computed<PlayCountPluginInstance | null>(() =>
   pluginManager.plugins.get(PLAY_COUNT_PLUGIN_ID)?.state === 'active' ? getPluginInstance() : null,
 )
-
-// ============ 视图状态 ============
 
 const range = ref<number | null>(null)
 const sortBy = ref<TopTrackSortBy>('plays')
@@ -461,8 +457,6 @@ const EMPTY_STATS: PlayCountStats = {
   rangeDays: null,
   detailTruncated: false,
 }
-
-// ============ 数据 ============
 
 /** 数据源 = 插件实例 + 手动刷新计数; 响应式订阅见 instance */
 const dataSource = computed(() => ({
@@ -522,7 +516,6 @@ const dailySeries = computed<DailyPoint[]>(() => {
   }
 })
 
-// 趋势取完整范围的天数,不再在此裁剪;超出可容纳柱数时由 trendPoints 聚合成桶
 const trendDays = computed(() => range.value ?? TREND_DEFAULT_DAYS)
 
 /** 播放列表索引 (path -> Track); 封面就地分批写入 markRaw 元素, 故只在列表增删时重建 */
@@ -535,8 +528,6 @@ const playlistTracks = computed(() => {
 })
 
 const currentPath = computed(() => playerStore.currentTrack?.path ?? '')
-
-// ============ 曲目封面 ============
 
 /** 播放列表外的历史曲目按需补封面: 整批替换 Map 只触发一次渲染, 取不到留占位不重试 */
 const lazyCovers = shallowRef<Map<string, string>>(new Map())
@@ -574,8 +565,6 @@ const loadMissingCovers = (paths: string[]): void => {
     lazyCovers.value = next
   })()
 }
-
-// ============ 概览卡片 ============
 
 interface OverviewCard {
   key: string
@@ -658,8 +647,6 @@ const overviewCards = computed<OverviewCard[]>(() => {
   ]
 })
 
-// ============ 筛选与列表 ============
-
 const normalize = (value: string): string => value.trim().toLowerCase()
 
 const matchKeyword = (keyword: string, ...fields: Array<string | undefined>): boolean =>
@@ -724,8 +711,6 @@ const detailHintVisible = computed(() => range.value !== null && stats.value.det
 
 const historyLimit = HISTORY_LIMIT
 
-// ============ 选项卡配置 ============
-
 const rangeOptions = computed(() => [
   { key: 'all', value: null as number | null, label: t('config.playStatsRangeAll') },
   { key: 'd7', value: 7 as number | null, label: t('config.playStatsRangeDays', { days: 7 }) },
@@ -743,8 +728,6 @@ const metricOptions = computed<Array<{ value: 'plays' | 'seconds'; label: string
   { value: 'plays', label: t('config.trendMetricPlays') },
   { value: 'seconds', label: t('config.trendMetricSeconds') },
 ])
-
-// ============ 趋势图 ============
 
 /** 天数超过可容纳柱数时,把若干天聚合到一个桶,保证趋势图覆盖完整天数范围 */
 const downsampleDailySeries = (
@@ -807,8 +790,6 @@ const trendAverageLabel = computed(() => {
 const trendTooltip = (point: DailyPoint & { value: number }): string =>
   `${point.date} · ${t('config.trendMetricPlays')} ${point.plays} · ${t('config.trendMetricSeconds')} ${formatDuration(point.seconds)}`
 
-// ============ 格式化与判定 ============
-
 const startOfDay = (timestamp: number): number => {
   const date = new Date(timestamp)
   date.setHours(0, 0, 0, 0)
@@ -861,8 +842,6 @@ const formatRelative = (timestamp: number): string => {
 
 const isPlayable = (path: string): boolean => playlistTracks.value.has(path)
 const isCurrent = (path: string): boolean => currentPath.value !== '' && currentPath.value === path
-
-// ============ 操作 ============
 
 const refresh = (): void => {
   refreshTick.value += 1

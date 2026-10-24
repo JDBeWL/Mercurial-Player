@@ -119,7 +119,7 @@ export function buildFinalLyric(
   }
 }
 
-/** 候选预览用文本：与 `buildFinalLyric` 的区别是**永不返回 ASS**（ASS 塞进预览只会看到一堆
+/** 候选预览用文本：与 `buildFinalLyric` 的区别是永不返回 ASS（ASS 塞进预览只会看到一堆
  *  `Dialogue:`）。逐字候选的预览由调用方按 kind 裁完样式后再解析 ASS 自行取词，因此这里的
  *  纯文本分支只服务非逐字候选。 */
 export function buildPreviewLyric(
