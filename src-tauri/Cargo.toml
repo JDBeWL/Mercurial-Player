@@ -1,6 +1,6 @@
 [package]
 name = "mercurial-player"
-version = "1.6.1"
+version = "1.6.2"
 description = "A music player by JDBeWL"
 authors = ["jdbEwl"]
 license = "GPL-3.0"
@@ -155,12 +155,9 @@ name = "mercurial-player"
 path = "src/main.rs"
 
 [profile.dev]
-opt-level = 1
+opt-level = 0
 debug = true
 incremental = true
-
-[profile.dev.package."*"]
-opt-level = 3
 
 [profile.release]
 opt-level = 3
