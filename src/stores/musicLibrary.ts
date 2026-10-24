@@ -1,22 +1,28 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { load, type Store } from '@tauri-apps/plugin-store'
-import { resolveDataFile } from '../services/appService'
 import { useConfigStore } from './config'
 import { usePlayerStore } from './player'
 import logger from '../utils/logger'
 import type { Track, Playlist, SortOrder } from '@/types'
 
-// plugin-store 实例（懒加载单例）
+// plugin-store 实例（懒加载单例；缓存存储路径变更后按新路径重开）
 let _libraryStoreInstance: Store | null = null
+let _libraryStorePath: string | null = null
 async function getLibraryStore(): Promise<Store> {
-  if (!_libraryStoreInstance) {
-    // 传绝对路径:plugin-store 遇绝对路径会原样使用,
-    // 借此把 library-cache.json 放到主程序同级 data/ 而非系统 Roaming 目录
-    _libraryStoreInstance = await load(await resolveDataFile('library-cache.json'), {
+  // 曲库扫描缓存属于"可随时丢弃重建"的缓存,落到缓存存储路径(跟随设置)而非数据目录
+  const path = await invoke<string>('resolve_cache_file', { file: 'library-cache.json' })
+  if (!_libraryStoreInstance || _libraryStorePath !== path) {
+    // 传绝对路径:plugin-store 遇绝对路径会原样使用。路径变了先落盘旧实例再重开,
+    // 避免 autoSave=false 下未保存的改动丢失
+    if (_libraryStoreInstance) {
+      await _libraryStoreInstance.save().catch(() => {})
+    }
+    _libraryStoreInstance = await load(path, {
       defaults: {},
       autoSave: false,
     })
+    _libraryStorePath = path
   }
   return _libraryStoreInstance
 }
@@ -138,7 +144,7 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
       }
     },
 
-    /** 刷新音乐文件夹，分批重建播放列表；完成后写入 plugin-store 缓存以加速下次启动 */
+    /** 刷新音乐文件夹，整体重建播放列表；完成后写入 plugin-store 缓存以加速下次启动 */
     async refreshMusicFolders(): Promise<{ success: boolean; message: string }> {
       // 并发刷新会让「清空 -> 分批 push」交错叠加,用代际只让最后一次生效
       const epoch = ++this._refreshEpoch
@@ -152,20 +158,11 @@ export const useMusicLibraryStore = defineStore('musicLibrary', {
         })
         if (epoch !== this._refreshEpoch) return superseded
 
-        // 分批 push 而非整体替换:大列表一次性替换会触发响应式风暴卡住 UI
-        const BATCH_SIZE = 10
-        this.playlists = []
-
-        for (let i = 0; i < newPlaylists.length; i += BATCH_SIZE) {
-          if (epoch !== this._refreshEpoch) return superseded
-          const batch = newPlaylists.slice(i, i + BATCH_SIZE)
-          this.playlists.push(...batch)
-
-          // 让出主线程，避免阻塞 UI
-          if (i + BATCH_SIZE < newPlaylists.length) {
-            await new Promise((resolve) => setTimeout(resolve, 0))
-          }
-        }
+        // 临时数组构建、完成后一次性提交:push 只原地变更数组内容,监听数组引用的消费者
+        // (MusicLibrary 的 watch、插件沙箱的 watch getter)在中间批次不会被触发,分批 push
+        // 会漏掉后续批次;一次性替换保证所有消费者都拿到完整最终状态
+        if (epoch !== this._refreshEpoch) return superseded
+        this.playlists = newPlaylists
 
         // 作废惰性排序记录，下次选择播放列表时重新排序
         this._sortedPlaylists = new Set<string>()

@@ -11,14 +11,76 @@ use super::filesystem::{
     read_lyrics_file_internal, write_lyrics_file_internal,
 };
 use super::metadata::{
-    Playlist, TrackMetadata, clean_cover_cache, clear_metadata_cache, extract_cover_internal,
-    flush_metadata_cache, get_metadata_cache_stats, get_track_cover_path_internal,
-    get_track_metadata_internal, set_cover_cache_path,
+    Playlist, TrackMetadata, cache_dir, clean_cover_cache, clear_metadata_cache,
+    default_cache_root, extract_cover_internal, flush_metadata_cache, get_cover_cache_path_setting,
+    get_metadata_cache_stats, get_track_cover_path_internal, get_track_metadata_internal,
+    migrate_cache_root, set_cover_cache_path,
 };
 use crate::AppState;
 use crate::security::is_within_music_dirs;
 use serde::Serialize;
-use tauri::{Emitter, State, command};
+use std::path::PathBuf;
+use tauri::{AppHandle, Emitter, Manager, State, command};
+
+/// 路径词法归一：Windows 盘符大小写与正反斜杠混用不应影响比较
+fn normalize_path(path: &str) -> String {
+    path.replace('\\', "/").to_lowercase()
+}
+
+/// 判断路径是否位于默认缓存根 `$TEMP/mercurial-player` 内或与之相同（词法比较，理由见调用处）
+fn is_within_default_cache_root(path: &str) -> bool {
+    let root = normalize_path(&default_cache_root().to_string_lossy());
+    let path = normalize_path(path);
+    // 根自身也算命中：deny 它会压过静态放行，必须跳过收回
+    path == root || path.starts_with(&format!("{root}/"))
+}
+
+/// 两个缓存路径设置（None = 默认根）是否指向同一目录。
+/// 切换/恢复路径与每次启动的配置恢复都会经过这里，误判"变了"会白白触发迁移与权限收放。
+fn is_same_cache_setting(a: Option<&str>, b: Option<&str>) -> bool {
+    let resolve = |p: Option<&str>| {
+        normalize_path(
+            &p.map(PathBuf::from)
+                .unwrap_or_else(default_cache_root)
+                .to_string_lossy(),
+        )
+        .trim_end_matches('/')
+        .to_string()
+    };
+    resolve(a) == resolve(b)
+}
+
+/// 同步自定义缓存根目录到前端的封面访问通道。
+///
+/// 静态配置只放行默认缓存根 `$TEMP/mercurial-player`（capabilities/default.json 的
+/// fs scope 与 tauri.conf.json 的 assetProtocol scope），用户把缓存设置到别处时，
+/// 封面无法经 fs 插件 readFile（useDominantColor / useImmersiveCover / 插件 loadImage）
+/// 与 asset 协议（convertFileSrc 直出 `<img>`）读取，必须在此动态放开两条通道；
+/// 换目录 / 恢复默认时收回旧目录——默认根内的旧目录不收，deny 会压过静态放行，误伤默认位置。
+pub fn sync_cache_dir_fs_scope(app: &AppHandle, old_path: Option<&str>, new_path: Option<&str>) {
+    use tauri_plugin_fs::FsExt;
+
+    if let Some(old_dir) = old_path
+        && Some(old_dir) != new_path
+        && !is_within_default_cache_root(old_dir)
+    {
+        if let Err(e) = app.fs_scope().forbid_directory(old_dir, true) {
+            log::warn!("收回旧缓存目录的 fs 读取权限失败 {old_dir}: {e}");
+        }
+        if let Err(e) = app.asset_protocol_scope().forbid_directory(old_dir, true) {
+            log::warn!("收回旧缓存目录的 asset 协议权限失败 {old_dir}: {e}");
+        }
+    }
+
+    if let Some(new_dir) = new_path {
+        if let Err(e) = app.fs_scope().allow_directory(new_dir, true) {
+            log::error!("放行缓存目录到 fs 读取范围失败 {new_dir}: {e}");
+        }
+        if let Err(e) = app.asset_protocol_scope().allow_directory(new_dir, true) {
+            log::error!("放行缓存目录到 asset 协议范围失败 {new_dir}: {e}");
+        }
+    }
+}
 
 /// 扫描前的白名单门禁，判定见 `is_within_music_dirs`
 fn ensure_scannable(music_dirs: &[String], path: &str) -> Result<(), AppError> {
@@ -69,13 +131,20 @@ pub fn check_file_exists(path: String) -> Result<bool, AppError> {
 }
 
 #[command]
-pub fn read_lyrics_file(path: String) -> Result<String, AppError> {
-    read_lyrics_file_internal(&path)
+pub fn read_lyrics_file(state: State<'_, AppState>, path: String) -> Result<String, AppError> {
+    // 授权根目录取已登记的音乐目录，判定见 `validate_lyrics_path`
+    let music_dirs = state.config_manager.load_config()?.music_directories;
+    read_lyrics_file_internal(&path, &music_dirs)
 }
 
 #[command]
-pub fn write_lyrics_file(path: String, content: String) -> Result<(), AppError> {
-    write_lyrics_file_internal(&path, &content)
+pub fn write_lyrics_file(
+    state: State<'_, AppState>,
+    path: String,
+    content: String,
+) -> Result<(), AppError> {
+    let music_dirs = state.config_manager.load_config()?.music_directories;
+    write_lyrics_file_internal(&path, &content, &music_dirs)
 }
 
 #[command]
@@ -141,8 +210,32 @@ pub fn clean_cover_cache_command(max_cache_size_mb: Option<u64>) -> Result<usize
 }
 
 #[command]
-pub fn set_cover_cache_path_command(path: Option<String>) -> Result<(), AppError> {
-    set_cover_cache_path(path)
+pub fn set_cover_cache_path_command(app: AppHandle, path: Option<String>) -> Result<(), AppError> {
+    let old_path = get_cover_cache_path_setting();
+    let roots_changed = !is_same_cache_setting(old_path.as_deref(), path.as_deref());
+    if roots_changed {
+        // 迁移搬的是磁盘文件，换根前先把内存里的元数据落盘到旧根，否则最新条目会留在内存里丢掉
+        if let Err(e) = flush_metadata_cache() {
+            log::warn!("切换缓存路径前落盘元数据缓存失败: {e}");
+        }
+    }
+    set_cover_cache_path(path.clone())?;
+    if roots_changed {
+        // 封面缓存可达上限 1GB，跨盘搬运耗时，放线程池后台执行不阻塞界面；
+        // 启动恢复配置的那次调用同样走到这里，正好补上"改了路径但旧缓存没搬过来"的欠账
+        let old_root = old_path
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(default_cache_root);
+        let new_root = path
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(default_cache_root);
+        tauri::async_runtime::spawn_blocking(move || migrate_cache_root(&old_root, &new_root));
+    }
+    // 自定义缓存目录（含每次启动从配置恢复的那次）都要同步进 fs / asset 两条封面通道
+    sync_cache_dir_fs_scope(&app, old_path.as_deref(), path.as_deref());
+    Ok(())
 }
 
 #[command]
@@ -160,10 +253,11 @@ pub fn flush_metadata_cache_command() -> Result<(), AppError> {
     flush_metadata_cache()
 }
 
-/// 系统临时目录；未设置封面缓存路径时设置页展示的就是它
+/// 当前缓存根目录（自定义优先，未设置时为 `$TEMP/mercurial-player`）；设置页展示用。
+/// Android 端 app_setup 已把根固定到应用沙箱，返回的即沙箱路径。
 #[command]
-pub fn get_temp_dir_command() -> String {
-    std::env::temp_dir().to_string_lossy().to_string()
+pub fn get_cache_root_command() -> String {
+    cache_dir().to_string_lossy().to_string()
 }
 
 /// 调起系统目录选择器（Android SAF），仅移动端生效；桌面端为 no-op
@@ -312,7 +406,7 @@ fn record_issue(issues: &mut Vec<BeatIssue>, message: &str) {
 /// 批量整曲节拍分析；`force = false` 时跳过已有缓存的曲目，支持中断后继续，进度经 `BEATS_PROGRESS_EVENT` 上报。
 #[command]
 pub async fn analyze_beats_batch(
-    app: tauri::AppHandle,
+    app: AppHandle,
     paths: Vec<String>,
     force: bool,
 ) -> Result<BeatsBatchSummary, AppError> {
@@ -471,4 +565,53 @@ pub async fn analyze_beats_batch(
 #[command]
 pub fn beat_cache_stats() -> (usize, u64) {
     (beat_cache::valid_count(), beat_cache::cache_size_kb())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_same_cache_setting, is_within_default_cache_root};
+
+    #[test]
+    fn default_cache_root_detection_ignores_separators_and_case() {
+        let root = std::env::temp_dir().join("mercurial-player");
+
+        // 斜杠方向与大小写都不影响判定
+        assert!(is_within_default_cache_root(&root.to_string_lossy()));
+        assert!(is_within_default_cache_root(&format!(
+            r"{}\sub\cover.png",
+            root.to_string_lossy()
+        )));
+        assert!(is_within_default_cache_root(&format!(
+            "{}/COVER-CACHE/x.png",
+            root.to_string_lossy().to_uppercase()
+        )));
+
+        // 兄弟目录（mercurial-playerX）与无关目录不算命中
+        assert!(!is_within_default_cache_root(&format!(
+            r"{}x\cover.png",
+            root.to_string_lossy()
+        )));
+        assert!(!is_within_default_cache_root(r"D:\music\cover-cache"));
+    }
+
+    #[test]
+    fn same_cache_setting_compares_effective_roots() {
+        // None 表示默认根，与显式写出的默认根字符串是同一路径
+        let root = std::env::temp_dir()
+            .join("mercurial-player")
+            .to_string_lossy()
+            .to_string();
+        assert!(is_same_cache_setting(None, None));
+        assert!(is_same_cache_setting(Some(&root), None));
+
+        // 斜杠方向、大小写、结尾分隔符都不构成"换了目录"
+        assert!(is_same_cache_setting(Some(r"D:\Cache"), Some("d:/cache/")));
+
+        assert!(!is_same_cache_setting(
+            Some(r"D:\Cache"),
+            Some(r"D:\Cache2")
+        ));
+        // 恢复默认（None）与指向自定义目录必须判为不同，才能触发迁移
+        assert!(!is_same_cache_setting(Some(r"D:\Cache"), None));
+    }
 }

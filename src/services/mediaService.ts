@@ -9,9 +9,9 @@ export function getTrackCoverPath(path: string): Promise<string | null> {
   return invoke<string | null>('get_track_cover_path', { path })
 }
 
-/** 获取系统临时目录路径 */
-export function getTempDir(): Promise<string> {
-  return invoke<string>('get_temp_dir_command')
+/** 获取当前缓存根目录（自定义优先，未设置时为系统临时目录下的 mercurial-player） */
+export function getCacheRoot(): Promise<string> {
+  return invoke<string>('get_cache_root_command')
 }
 
 /** 获取元数据缓存统计信息 [条目数, 字节数] */

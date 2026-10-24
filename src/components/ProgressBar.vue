@@ -112,7 +112,8 @@ const { isDragging, startDrag: handlePointerDown } = useDragValue({
       const newTime = (dragPercent.value / 100) * playerStore.duration
       // 松手即进入等待，保持显示位置（见 pendingSeek）
       pendingSeek.value = true
-      playerStore.seek(newTime)
+      // fire-and-forget:currentTime 由后端位置回报刷新，1 秒兜底超时在下面
+      void playerStore.seek(newTime)
 
       // 兜底超时 1 秒：currentTime 没回报就退出等待，否则滑柄卡死
       setTimeout(() => {

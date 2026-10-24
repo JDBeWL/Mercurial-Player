@@ -6,11 +6,13 @@ use super::metadata::{Playlist, TrackMetadata, flush_metadata_cache, get_track_m
 use crate::android::saf;
 use crate::config::AppConfig;
 use crate::error::AppError;
-use crate::security::{has_allowed_extension, is_sensitive_path};
+use crate::security::{
+    has_allowed_extension, is_sensitive_path, is_simple_filename, is_within_music_dirs,
+};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use walkdir::{DirEntry, WalkDir};
 
 /// 支持的音频扩展名：只收 symphonia 能解开的容器（没有 opus/ape/wma）。
@@ -22,13 +24,53 @@ pub const AUDIO_EXTENSIONS: &[&str] = &[
 /// 允许读写的歌词文件扩展名
 const LYRICS_EXTENSIONS: [&str; 3] = ["lrc", "ass", "srt"];
 
-/// 校验歌词文件路径：仅允许歌词扩展名，且不落在敏感目录（SAF URI 只校验扩展名）
-fn validate_lyrics_path(path: &str) -> Result<(), AppError> {
+/// 歌词单文件大小上限：歌词文本通常远小于此，上限挡住误指向的大文件被整读/整写进内存
+const MAX_LYRICS_BYTES: u64 = 5 * 1024 * 1024;
+
+/// 校验歌词文件路径：扩展名白名单 -> 敏感目录黑名单 -> 已登记音乐目录
+/// （`is_within_music_dirs` 内部 canonicalize 复查，挡住 symlink/junction 逃逸与未授权目录）。
+/// SAF URI 代表用户授权，只校验扩展名。
+///
+/// `file_must_exist=false`（写入新建歌词）时文件可能尚不存在，改为 canonicalize 其父目录；
+/// 文件名本身要求是单一组件（`is_simple_filename`），防 `..`、分隔符、盘符混入最后一段。
+fn validate_lyrics_path(
+    path: &str,
+    music_dirs: &[String],
+    file_must_exist: bool,
+) -> Result<(), AppError> {
     if !has_allowed_extension(path, &LYRICS_EXTENSIONS) {
         return Err("仅允许读写歌词文件（.lrc/.ass/.srt）".to_string().into());
     }
-    if !saf::is_content_uri(path) && is_sensitive_path(path) {
+    if saf::is_content_uri(path) {
+        return Ok(());
+    }
+    if is_sensitive_path(path) {
         return Err("安全限制：不允许访问敏感目录".to_string().into());
+    }
+
+    let target = Path::new(path);
+    let _file_name = target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| is_simple_filename(n))
+        .ok_or_else(|| AppError::Path("非法的歌词文件名".to_string()))?;
+
+    if file_must_exist {
+        // 文件本体 canonicalize：文件级 symlink 指向音乐目录外也会被解析出来
+        if !is_within_music_dirs(path, music_dirs) {
+            return Err("安全限制：歌词文件必须位于已添加的音乐目录内"
+                .to_string()
+                .into());
+        }
+    } else {
+        let Some(parent) = target.parent() else {
+            return Err(AppError::Path("歌词路径缺少父目录".to_string()));
+        };
+        if !is_within_music_dirs(&parent.to_string_lossy(), music_dirs) {
+            return Err("安全限制：歌词文件必须位于已添加的音乐目录内"
+                .to_string()
+                .into());
+        }
     }
     Ok(())
 }
@@ -344,32 +386,60 @@ pub fn check_file_exists_internal(path: &str) -> bool {
     alt_path != path && Path::new(&alt_path).exists()
 }
 
-/// 读取歌词文件内容（content URI 走 fd 桥）
-pub fn read_lyrics_file_internal(path: &str) -> Result<String, AppError> {
-    validate_lyrics_path(path)?;
-    let mut file = saf::open_media_file(path)?;
-    let mut content = String::new();
+/// 读取歌词文件内容（content URI 走 fd 桥）；单文件大小受 [`MAX_LYRICS_BYTES`] 限制
+pub fn read_lyrics_file_internal(path: &str, music_dirs: &[String]) -> Result<String, AppError> {
     use std::io::Read;
-    file.read_to_string(&mut content)
+
+    validate_lyrics_path(path, music_dirs, true)?;
+    let mut file = saf::open_media_file(path)?;
+    // take(上限+1)：超限文件读出上限+1 字节即可判定，不把整个文件读进内存
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take(MAX_LYRICS_BYTES + 1)
+        .read_to_end(&mut bytes)
         .map_err(|e| format!("读取歌词文件失败: {e}"))?;
-    Ok(content)
+    if bytes.len() as u64 > MAX_LYRICS_BYTES {
+        return Err("歌词文件过大，拒绝读取".to_string().into());
+    }
+    String::from_utf8(bytes).map_err(|e| format!("歌词文件不是有效的 UTF-8 文本: {e}").into())
 }
 
-/// 写入歌词文件内容（Android 上落到应用沙箱）
-pub fn write_lyrics_file_internal(path: &str, content: &str) -> Result<(), AppError> {
-    validate_lyrics_path(path)?;
+/// 写入歌词文件内容（Android 上落到应用沙箱）：先写同目录临时文件再 rename 原子替换，
+/// 半写入的内容不会覆盖原文件；rename 替换的是目录项本身，也不会跟随目标位置的 symlink
+pub fn write_lyrics_file_internal(
+    path: &str,
+    content: &str,
+    music_dirs: &[String],
+) -> Result<(), AppError> {
+    validate_lyrics_path(path, music_dirs, false)?;
     if saf::is_content_uri(path) {
         // 刻意没接 SAF 的写 fd（saf::open_write_file），content URI 一律拒绝
         return Err("无法写入 SAF 管理的歌词文件".to_string().into());
     }
-
-    if let Some(parent) = Path::new(path).parent()
-        && !parent.exists()
-    {
-        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {e}"))?;
+    if content.len() as u64 > MAX_LYRICS_BYTES {
+        return Err("歌词内容过大，拒绝写入".to_string().into());
     }
 
-    fs::write(path, content).map_err(|e| format!("Failed to write file: {e}").into())
+    // validate_lyrics_path 已 canonicalize 父目录：父目录必须已存在，因此无需也不应
+    // 在这里 create_dir_all（新建目录本身就是一次未受控写）
+    let target = Path::new(path);
+
+    // 临时文件必须与目标同目录，rename 才落在同一文件系统上；命名带 pid+纳秒避免并发冲突
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let tmp_path = PathBuf::from(format!("{path}.{}.{}.tmp", std::process::id(), nanos));
+
+    if let Err(e) = fs::write(&tmp_path, content) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!("Failed to write file: {e}").into());
+    }
+    fs::rename(&tmp_path, target).map_err(|e| {
+        let _ = fs::remove_file(&tmp_path);
+        format!("Failed to replace lyrics file: {e}")
+    })?;
+    Ok(())
 }
 
 fn is_audio_file(entry: &DirEntry) -> bool {
@@ -417,5 +487,124 @@ mod tests {
         }
         assert!(!check_file_exists_internal("/etc/passwd"));
         assert!(!check_file_exists_internal("C:\\Users\\a\\.ssh\\id_rsa"));
+    }
+
+    /// 建一个带纳秒标签的独立临时目录，避免并行测试互相踩
+    fn make_lyrics_test_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("mp_lyrics_{tag}_{nanos}"));
+        fs::create_dir_all(&dir).expect("create test dir");
+        dir
+    }
+
+    #[test]
+    fn validate_lyrics_path_requires_authorized_dir() {
+        let base = make_lyrics_test_dir("auth");
+        let dirs = vec![base.to_string_lossy().to_string()];
+        let inside = base.join("song.lrc");
+        fs::write(&inside, "[00:00.00] test").expect("write inside");
+        let outside = std::env::temp_dir().join(format!(
+            "mp_lyrics_outside_{}.lrc",
+            base.file_name().unwrap().to_string_lossy()
+        ));
+        fs::write(&outside, "x").expect("write outside");
+
+        // 已登记目录内的既有文件可读
+        assert!(validate_lyrics_path(&inside.to_string_lossy(), &dirs, true).is_ok());
+        // 未登记目录的文件：读和写都拒绝
+        assert!(validate_lyrics_path(&outside.to_string_lossy(), &dirs, true).is_err());
+        assert!(validate_lyrics_path(&outside.to_string_lossy(), &dirs, false).is_err());
+        // 音乐目录内的新文件（尚不存在）：按父目录判定，允许写
+        let new_file = base.join("new-song.lrc");
+        assert!(validate_lyrics_path(&new_file.to_string_lossy(), &dirs, false).is_ok());
+
+        let _ = fs::remove_dir_all(&base);
+        let _ = fs::remove_file(&outside);
+    }
+
+    #[test]
+    fn validate_lyrics_path_rejects_bad_extension_and_sensitive_dir() {
+        let base = make_lyrics_test_dir("ext");
+        let dirs = vec![base.to_string_lossy().to_string()];
+        let txt = base.join("song.txt");
+        fs::write(&txt, "x").expect("write");
+
+        assert!(validate_lyrics_path(&txt.to_string_lossy(), &dirs, true).is_err());
+        // 敏感目录即使在授权列表里也拒绝（黑名单优先）
+        let sensitive = vec!["C:\\Windows\\System32".to_string()];
+        let win_file = Path::new("C:\\Windows\\System32\\song.lrc");
+        assert!(validate_lyrics_path(&win_file.to_string_lossy(), &sensitive, true).is_err());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn validate_lyrics_path_allows_content_uri_with_valid_extension() {
+        // SAF URI 代表用户授权，只查扩展名；is_content_uri 仅 Android 返回 true
+        #[cfg(target_os = "android")]
+        {
+            assert!(validate_lyrics_path("content://tree/x/song.lrc", &[], true).is_ok());
+            assert!(validate_lyrics_path("content://tree/x/song.txt", &[], true).is_err());
+        }
+        // 非 Android 上 content URI 不作特判，按普通路径走授权目录校验
+        #[cfg(not(target_os = "android"))]
+        {
+            assert!(validate_lyrics_path("content://tree/x/song.txt", &[], true).is_err());
+        }
+    }
+
+    #[test]
+    fn write_lyrics_replaces_atomically_and_leaves_no_tmp() {
+        let base = make_lyrics_test_dir("write");
+        let dirs = vec![base.to_string_lossy().to_string()];
+        let target = base.join("song.lrc");
+        fs::write(&target, "old").expect("seed");
+
+        write_lyrics_file_internal(&target.to_string_lossy(), "new content", &dirs)
+            .expect("write lyrics");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new content");
+
+        // 无残留临时文件
+        let leftovers = fs::read_dir(&base)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("tmp"))
+            })
+            .count();
+        assert_eq!(leftovers, 0);
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn write_lyrics_rejects_oversized_content() {
+        let base = make_lyrics_test_dir("big_write");
+        let dirs = vec![base.to_string_lossy().to_string()];
+        let target = base.join("song.lrc");
+        let big = "x".repeat((MAX_LYRICS_BYTES + 1) as usize);
+
+        assert!(write_lyrics_file_internal(&target.to_string_lossy(), &big, &dirs).is_err());
+        // 被拒后不应产生任何文件
+        assert!(!target.exists());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn read_lyrics_rejects_oversized_file() {
+        let base = make_lyrics_test_dir("big_read");
+        let dirs = vec![base.to_string_lossy().to_string()];
+        let target = base.join("song.lrc");
+        fs::write(&target, vec![b'a'; (MAX_LYRICS_BYTES + 1) as usize]).expect("seed big file");
+
+        assert!(read_lyrics_file_internal(&target.to_string_lossy(), &dirs).is_err());
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

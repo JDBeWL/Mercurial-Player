@@ -15,23 +15,35 @@ export interface PlayerPlaybackTarget {
   previousVolume: number
 }
 
+/** seek 请求序号：完成回调落地前与最新值比较，只让最新请求改写状态（latest-wins） */
+let seekRequestSeq = 0
+
 /**
  * 跳转进度。后端 seek 成功后刷新本地 currentTime;
  * 若 seek 前处于暂停态,后端 seek 总会播放,需要补一次 pause
+ *
+ * 竞态防护：捕获发起时的曲目路径并携带单调递增的请求 ID，完成时若已切歌或已有更新的
+ * seek 发起，本次结果作废——旧 seek 晚到不得覆盖新 seek 的位置，更不得改写新曲目的进度。
+ * 返回真实 Promise 供调用方等待 IPC 完成。
  */
-export function seekTrack(store: PlayerPlaybackTarget, time: number): void {
-  if (!store.currentTrack) return
+export function seekTrack(store: PlayerPlaybackTarget, time: number): Promise<void> {
+  if (!store.currentTrack) return Promise.resolve()
 
+  const trackPath = store.currentTrack.path
+  const requestId = ++seekRequestSeq
   const wasPlaying = store.isPlaying
   const newTime = Math.max(0, Math.min(time, store.duration))
 
   // rethrow:true + catch(() => {}) -> 仅在成功后刷新状态,失败已由 safeInvoke 记入 errorHandler
-  safeInvoke<void>(
+  return safeInvoke<void>(
     'seek_track',
     { time: newTime },
     { severity: ErrorSeverity.MEDIUM, rethrow: true },
   )
     .then(() => {
+      if (requestId !== seekRequestSeq || store.currentTrack?.path !== trackPath) {
+        return
+      }
       store.currentTime = newTime
       if (!wasPlaying) {
         void safeInvoke('pause_track', undefined, { severity: ErrorSeverity.LOW })

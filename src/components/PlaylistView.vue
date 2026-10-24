@@ -230,12 +230,19 @@ const processPlaylist = (): void => {
     newProcessedMap.set(track.path, result[i]!)
   }
 
-  // 只有长度变化或确有新增 / 修改项才换掉数组引用，避免每次 playlist 变动都重渲染
-  if (
-    changed ||
-    result.length !== processedPlaylist.value.length ||
-    processedMap.size !== newProcessedMap.size
-  ) {
+  // 复用旧对象时位置也可能变(纯移动 / 重排不增删曲目):逐位比对引用,任一位不同就换掉
+  // 数组引用,否则 v-for 渲染的还是旧顺序。完全没变时跳过赋值,避免无谓的全表重渲染
+  let orderChanged = result.length !== processedPlaylist.value.length
+  if (!orderChanged) {
+    for (let i = 0; i < result.length; i++) {
+      if (result[i] !== processedPlaylist.value[i]) {
+        orderChanged = true
+        break
+      }
+    }
+  }
+
+  if (changed || orderChanged) {
     processedPlaylist.value = result
   }
   processedMap = newProcessedMap

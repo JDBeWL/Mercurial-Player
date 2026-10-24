@@ -341,7 +341,7 @@ pub fn run() {
             media::commands::set_cover_cache_path_command,
             media::commands::clear_metadata_cache_command,
             media::commands::get_metadata_cache_stats_command,
-            media::commands::get_temp_dir_command,
+            media::commands::get_cache_root_command,
             media::commands::flush_metadata_cache_command,
             // 在线歌词命令
             lyrics::commands::netease_search_songs,
@@ -438,8 +438,10 @@ pub fn run() {
             system::logging::write_log,
             // 系统版本命令
             system::commands::get_app_version,
-            // 便携化数据文件路径（config.json / library-cache.json 存放位置）
+            // 便携化数据文件路径（config.json 等用户数据存放位置）
             system::commands::resolve_data_file,
+            // 缓存文件路径（library-cache.json 等可丢弃缓存，跟随缓存存储路径）
+            system::commands::resolve_cache_file,
             // 应用更新命令（桌面端）
             #[cfg(desktop)]
             updater::updater_check,

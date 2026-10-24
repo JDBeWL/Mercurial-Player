@@ -31,12 +31,18 @@ struct MetadataCache {
 const CACHE_VERSION: u32 = 1;
 const METADATA_CACHE_FILENAME: &str = "metadata-cache.json";
 
+/// 默认缓存根 `$TEMP/mercurial-player`：未设置自定义路径时的缓存根，
+/// 权限判定（is_within_default_cache_root）与设置页展示也取它
+pub(crate) fn default_cache_root() -> PathBuf {
+    std::env::temp_dir().join("mercurial-player")
+}
+
 /// 缓存根目录（用户自定义优先，否则系统临时目录）：元数据、封面、BPM 共用，改一处管全部。
 pub(crate) fn cache_dir() -> PathBuf {
     if let Some(custom_path) = get_cover_cache_path_setting() {
         return PathBuf::from(custom_path);
     }
-    std::env::temp_dir().join("mercurial-player")
+    default_cache_root()
 }
 
 /// 元数据缓存文件路径（缓存根目录下的 metadata-cache.json）
@@ -335,14 +341,94 @@ pub fn get_cover_cache_path_setting() -> Option<String> {
     lock_or_log!(CUSTOM_CACHE_PATH.read()).clone()
 }
 
-/// 封面缓存目录（自定义根目录下的 cover-cache 子目录）
+/// 封面缓存子目录名（自定义根目录下同样存在）
+const COVER_CACHE_DIR_NAME: &str = "cover-cache";
+
+/// 封面缓存目录（缓存根目录下的 cover-cache 子目录）
 pub(super) fn cover_cache_dir() -> PathBuf {
     if let Some(custom_path) = get_cover_cache_path_setting() {
-        return PathBuf::from(custom_path).join("cover-cache");
+        return PathBuf::from(custom_path).join(COVER_CACHE_DIR_NAME);
     }
-    std::env::temp_dir()
-        .join("mercurial-player")
-        .join("cover-cache")
+    default_cache_root().join(COVER_CACHE_DIR_NAME)
+}
+
+/// 缓存根内由应用管理的顶层文件清单，切换缓存路径时逐项搬到新根。
+/// 新增 `resolve_cache_file` 调用方时必须把文件名补进来，否则换目录时它会被留在原地；
+/// 封面缓存是目录，由 [`migrate_cache_root`] 单独递归搬运。
+const CACHE_ARTIFACT_FILES: &[&str] = &[
+    "metadata-cache.json", // METADATA_CACHE_FILENAME
+    "bpm-cache.json",      // get_metadata_cache_stats 计入的 BPM 缓存
+    "beat-cache.json",     // beat_cache::BEAT_CACHE_FILENAME
+    "library-cache.json",  // 前端曲库扫描缓存（resolve_cache_file 的唯一调用方）
+];
+
+/// 单文件搬运。目标已存在视为重复内容（封面按内容哈希命名必然同名同内容）：
+/// 删源保留目标——来回切换目录时 JSON 可能因此留下较旧的一份，重新扫描即可补全。
+fn move_one_file(src: &Path, dst: &Path) -> Result<(), String> {
+    if dst.exists() {
+        fs::remove_file(src).map_err(|e| format!("删除重复源文件失败: {e}"))?;
+        return Ok(());
+    }
+    // 跨盘 rename 会失败，回退为复制+删除
+    if fs::rename(src, dst).is_err() {
+        fs::copy(src, dst).map_err(|e| format!("复制失败: {e}"))?;
+        fs::remove_file(src).map_err(|e| format!("删除源文件失败: {e}"))?;
+    }
+    Ok(())
+}
+
+/// 目录递归搬运（封面缓存目前是平铺的，仍按递归实现以兼容未来子目录）
+fn move_dir_contents(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| format!("创建目录失败: {e}"))?;
+    let entries = fs::read_dir(src).map_err(|e| format!("读取目录失败: {e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("读取目录条目失败: {e}"))?;
+        let path = entry.path();
+        let target = dst.join(entry.file_name());
+        if path.is_dir() {
+            move_dir_contents(&path, &target)?;
+            // 搬空才删得掉；非空说明个别文件失败，留待下次切换重试
+            let _ = fs::remove_dir(&path);
+        } else {
+            move_one_file(&path, &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// 切换缓存根后，把旧根内的缓存工件搬到新根。
+///
+/// 单个工件失败只记日志跳过、不整体回滚：搬不过去的条目等价于缓存丢失，
+/// 扫描后自动重建，不应阻断用户切换路径。调用方负责先落盘内存元数据缓存。
+pub fn migrate_cache_root(old_root: &Path, new_root: &Path) {
+    if !old_root.exists() {
+        return;
+    }
+    if let Err(e) = fs::create_dir_all(new_root) {
+        log::error!("创建新缓存目录失败 {}: {e}", new_root.display());
+        return;
+    }
+    for name in CACHE_ARTIFACT_FILES {
+        let src = old_root.join(name);
+        if src.is_file() {
+            if let Err(e) = move_one_file(&src, &new_root.join(name)) {
+                log::warn!("迁移缓存文件失败 {}: {e}", src.display());
+            }
+        }
+    }
+    let old_covers = old_root.join(COVER_CACHE_DIR_NAME);
+    if old_covers.is_dir() {
+        if let Err(e) = move_dir_contents(&old_covers, &new_root.join(COVER_CACHE_DIR_NAME)) {
+            log::warn!("迁移封面缓存目录失败: {e}");
+        }
+        // 搬空才删得掉；删不掉说明仍有残留文件，留待下次切换重试
+        let _ = fs::remove_dir(&old_covers);
+    }
+    log::info!(
+        "缓存根迁移完成: {} -> {}",
+        old_root.display(),
+        new_root.display()
+    );
 }
 
 // 缓存清理配置
@@ -502,4 +588,89 @@ pub fn clean_cover_cache(max_cache_size_mb: Option<u64>) -> Result<usize, AppErr
     }
 
     Ok(total_cleaned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 每个用例独立的临时目录，结束后 best-effort 清理
+    fn scratch_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "mp-cache-test-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn migrate_moves_artifacts_and_cover_dir() {
+        let old = scratch_root("old");
+        let new = scratch_root("new");
+
+        for name in CACHE_ARTIFACT_FILES {
+            fs::write(old.join(name), name).unwrap();
+        }
+        fs::create_dir_all(old.join(COVER_CACHE_DIR_NAME)).unwrap();
+        fs::write(old.join(COVER_CACHE_DIR_NAME).join("123.png"), "png").unwrap();
+        // 不在清单内的文件不属于应用缓存，必须留在原地
+        fs::write(old.join("user-file.txt"), "keep").unwrap();
+
+        migrate_cache_root(&old, &new);
+
+        for name in CACHE_ARTIFACT_FILES {
+            assert!(new.join(name).is_file(), "{name} 应迁移到新根");
+            assert!(!old.join(name).exists(), "{name} 应从旧根消失");
+        }
+        assert_eq!(
+            fs::read_to_string(new.join(COVER_CACHE_DIR_NAME).join("123.png")).unwrap(),
+            "png"
+        );
+        assert!(
+            !old.join(COVER_CACHE_DIR_NAME).exists(),
+            "搬空后的旧封面目录应删除"
+        );
+        assert!(old.join("user-file.txt").exists(), "未知文件必须留在原地");
+
+        let _ = fs::remove_dir_all(&old);
+        let _ = fs::remove_dir_all(&new);
+    }
+
+    #[test]
+    fn migrate_without_old_root_is_noop() {
+        let old = std::env::temp_dir().join("mp-cache-test-never-created");
+        let new = scratch_root("new");
+
+        migrate_cache_root(&old, &new);
+
+        // 旧根不存在时不创建任何工件（新根目录本身允许被 create_dir_all 建出）
+        for name in CACHE_ARTIFACT_FILES {
+            assert!(!new.join(name).exists());
+        }
+        assert!(!new.join(COVER_CACHE_DIR_NAME).exists());
+
+        let _ = fs::remove_dir_all(&new);
+    }
+
+    #[test]
+    fn migrate_dedupes_when_destination_already_has_the_file() {
+        let old = scratch_root("old");
+        let new = scratch_root("new");
+
+        // 目标已有同名文件（如上次使用该目录留下的），源文件按重复内容处理掉
+        fs::write(old.join("metadata-cache.json"), "src").unwrap();
+        fs::write(new.join("metadata-cache.json"), "dst").unwrap();
+
+        migrate_cache_root(&old, &new);
+
+        assert!(new.join("metadata-cache.json").is_file());
+        assert!(!old.join("metadata-cache.json").exists());
+
+        let _ = fs::remove_dir_all(&old);
+        let _ = fs::remove_dir_all(&new);
+    }
 }

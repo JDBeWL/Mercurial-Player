@@ -159,7 +159,7 @@ const { isDragging, startDrag: startSeeking } = useDragValue({
       pendingSeekTime.value = target
       // 超时保护：seek 被拒/无响应时 1000ms 后恢复跟随播放位置
       pendingSeekTimeoutId = setTimeout(clearPendingSeek, 1000)
-      playerStore.seek(target)
+      void playerStore.seek(target)
     }
   },
 })

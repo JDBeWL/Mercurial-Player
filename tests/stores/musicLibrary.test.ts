@@ -54,10 +54,10 @@ describe('useMusicLibraryStore', () => {
     mockConfigStore.musicDirectories = []
     mockConfigStore.playlist.sortOrder = 'asc'
     mockPlayerStore.playlist = []
-    // `resolve_data_file` 需返回数据文件完整路径,store 用它定位缓存文件
+    // `resolve_cache_file` 需返回缓存文件完整路径,store 用它定位 library-cache.json
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === 'resolve_data_file') {
-        return Promise.resolve('C:\\mock\\data\\store.json')
+      if (cmd === 'resolve_cache_file') {
+        return Promise.resolve('C:\\mock\\cache\\library-cache.json')
       }
       return Promise.resolve(undefined)
     })
@@ -485,7 +485,8 @@ describe('useMusicLibraryStore', () => {
     function mockScanResult(scanned: Playlist[]): void {
       invokeMock.mockImplementation((cmd: string) => {
         if (cmd === 'get_all_audio_files') return Promise.resolve(scanned)
-        if (cmd === 'resolve_data_file') return Promise.resolve('C:\\mock\\data\\store.json')
+        if (cmd === 'resolve_cache_file')
+          return Promise.resolve('C:\\mock\\cache\\library-cache.json')
         return Promise.resolve(undefined)
       })
     }
@@ -519,7 +520,7 @@ describe('useMusicLibraryStore', () => {
       expect(store.currentPlaylist).toBeNull()
     })
 
-    it('超过 10 个播放列表时分批写入且顺序不变', async () => {
+    it('超过 10 个播放列表时完整提交且顺序不变', async () => {
       const store = useMusicLibraryStore()
       const scanned = Array.from({ length: 25 }, (_, i) =>
         makePlaylist(`P${i}`, [makeTrack(`/t${i}.mp3`)]),

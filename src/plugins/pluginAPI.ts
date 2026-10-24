@@ -279,7 +279,7 @@ export function createPluginAPI(
 
       seek(time: number): void {
         requireAction('player.seek')
-        getPlayerStore().seek(time)
+        void getPlayerStore().seek(time)
       },
 
       setVolume(volume: number): void {

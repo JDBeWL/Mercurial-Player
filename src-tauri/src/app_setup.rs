@@ -114,13 +114,13 @@ pub fn init(app: &tauri::App) {
             )) {
                 log::warn!("设置 Android 缓存路径失败: {e}");
             }
-            // 封面经 asset 协议提供给前端，须放开访问范围
-            if let Err(e) = app
-                .asset_protocol_scope()
-                .allow_directory(&media_cache, true)
-            {
-                log::warn!("放行 Android 缓存目录到 asset 范围失败: {e}");
-            }
+            // Android 的缓存目录在应用沙箱内、不在静态配置的默认缓存根里，
+            // fs 插件与 asset 协议两条封面通道都要一并放开（理由见 sync_cache_dir_fs_scope）
+            crate::media::commands::sync_cache_dir_fs_scope(
+                app.handle(),
+                None,
+                Some(&media_cache.to_string_lossy().to_string()),
+            );
         }
     }
 

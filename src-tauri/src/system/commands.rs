@@ -33,6 +33,22 @@ pub fn resolve_data_file(file: String) -> Result<String, AppError> {
     Ok(dir.join(&file).to_string_lossy().to_string())
 }
 
+/// 解析缓存文件路径（缓存存储路径下，见 `metadata::cache::cache_dir`）。
+///
+/// 曲库扫描缓存等"可随时丢弃重建"的文件走这里；config、上次播放会话等用户数据
+/// 仍走 `resolve_data_file`（数据目录），不随缓存路径切换。
+/// 新调用方必须把文件名登记进 `metadata::cache::CACHE_ARTIFACT_FILES`，
+/// 否则切换缓存路径时该文件不会被迁移到新目录。
+#[command]
+pub fn resolve_cache_file(file: String) -> Result<String, AppError> {
+    if !is_simple_filename(&file) {
+        return Err(AppError::msg("非法的缓存文件名"));
+    }
+    let dir = crate::media::metadata::cache_dir();
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join(&file).to_string_lossy().to_string())
+}
+
 /// 迷你模式窗口尺寸
 const MINI_SIZE: LogicalSize<f64> = LogicalSize {
     width: 300.0,

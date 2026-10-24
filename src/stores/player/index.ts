@@ -663,9 +663,10 @@ export const usePlayerStore = defineStore('player', {
 
     // --- 播放控制 ---
 
-    seek(time: number): void {
+    seek(time: number): Promise<void> {
       // 播放控制已抽到 Playback.ts(与 setVolume/toggleMute 同模块),
-      seekTrack(this, time)
+      // 透传 Promise 供调用方等待 IPC 完成(如 LyricsDisplay 的按歌词行跳转)
+      return seekTrack(this, time)
     },
 
     setVolume(volume: number): void {

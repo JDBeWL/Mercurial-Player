@@ -14,11 +14,16 @@ use crate::AppState;
 use rodio::Source;
 use std::io::BufReader;
 use std::sync::Arc;
+use std::sync::Mutex;
 #[cfg(any(windows, target_os = "android"))]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tauri::{AppHandle, State};
+
+/// 共享模式 sink 替换（play/seek）的互斥：命令跑在线程池上，两个并发 seek 各自
+/// stop + append 会让两份音源同时排队进 sink（旧音源播完才轮到新的），必须在此排队
+static SHARED_SINK_GATE: Mutex<()> = Mutex::new(());
 
 /// 播放音轨（共享模式）
 pub fn play_track_shared(
@@ -27,6 +32,8 @@ pub fn play_track_shared(
     path: &str,
     position: Option<f32>,
 ) -> Result<(), AppError> {
+    // 先排队再碰任何共享状态,理由见 SHARED_SINK_GATE;锁内是命令线程的阻塞工作,持锁时长可接受
+    let _sink_gate = lock_or_log!(SHARED_SINK_GATE.lock());
     let player = &state.player;
     // 作废进行中的 fade，理由见 commands 的 spawn_shared_fade
     player.fade.generation.fetch_add(1, Ordering::SeqCst);
@@ -330,6 +337,9 @@ pub fn seek_track_shared(
     path: &str,
     time: f32,
 ) -> Result<(), AppError> {
+    // 与 play_track_shared 互斥:seek 也是"stop + append 新音源",不排队的话
+    // 两次并发 seek 会把两份音源都排进 sink
+    let _sink_gate = lock_or_log!(SHARED_SINK_GATE.lock());
     let player = &state.player;
     // 作废进行中的 fade，理由见 commands 的 spawn_shared_fade
     player.fade.generation.fetch_add(1, Ordering::SeqCst);

@@ -212,6 +212,28 @@ describe('PlaylistView.vue', () => {
       expect(placeholder.exists()).toBe(true)
       expect(placeholder.find('.material-symbols-rounded').text()).toBe('album')
     })
+
+    it('已有曲目移动到下一首时更新渲染顺序（回归）', async () => {
+      const tracks = makeTracks(3)
+      store.playlist = tracks
+      wrapper = mountComponent()
+      await nextTick()
+      expect(wrapper.findAll('.list-item-headline').map((h) => h.text())).toEqual([
+        'Track 0',
+        'Track 1',
+        'Track 2',
+      ])
+
+      // 纯重排:同一批曲目对象只改顺序,不增删、不换引用。
+      // processPlaylist 会复用全部对象,历史上 changed=false 时数组引用不替换,UI 停在旧顺序
+      store.playlist = [tracks[1]!, tracks[0]!, tracks[2]!]
+      await nextTick()
+      expect(wrapper.findAll('.list-item-headline').map((h) => h.text())).toEqual([
+        'Track 1',
+        'Track 0',
+        'Track 2',
+      ])
+    })
   })
 
   describe('当前曲目高亮', () => {

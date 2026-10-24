@@ -31,8 +31,8 @@ import {
 import {
   cleanCoverCache,
   clearMetadataCache,
+  getCacheRoot,
   getMetadataCacheStats,
-  getTempDir,
   getTrackCoverPath,
   setCoverCachePath,
   convertFileSrc,
@@ -110,7 +110,7 @@ describe('mediaService', () => {
     await expectInvoke(() => getTrackCoverPath('C:/music/a.mp3'), 'get_track_cover_path', {
       path: 'C:/music/a.mp3',
     })
-    await expectInvoke(() => getTempDir(), 'get_temp_dir_command')
+    await expectInvoke(() => getCacheRoot(), 'get_cache_root_command')
     await expectInvoke(() => getMetadataCacheStats(), 'get_metadata_cache_stats_command')
     await expectInvoke(() => clearMetadataCache(), 'clear_metadata_cache_command')
     await expectInvoke(() => cleanCoverCache(512), 'clean_cover_cache_command', {

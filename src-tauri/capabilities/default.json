@@ -1,11 +1,13 @@
 {
   "identifier": "default",
-  "description": "Default capability for the main window. Renderer file reads are confined to the system temp dir by fs:scope-temp-recursive; a capability-level \"scope\" block is not part of Tauri's capability schema and is dropped by codegen, so scoping must be expressed on the permission entry itself.",
+  "description": "Default capability for the main window. Renderer file reads are confined to the app's cache subdir of the system temp dir ($TEMP/mercurial-player, see media::metadata::cache) by default; a user-configured cache directory is added to this scope at runtime by media::commands::sync_cache_dir_fs_scope (same for the assetProtocol scope in tauri.conf.json). A capability-level \"scope\" block is not part of Tauri's capability schema and is dropped by codegen, so scoping must be expressed on the permission entry itself.",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "fs:allow-read-file",
-    "fs:scope-temp-recursive",
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "$TEMP/mercurial-player" }, { "path": "$TEMP/mercurial-player/**" }]
+    },
     "core:window:allow-close",
     "core:window:allow-destroy",
     "core:window:allow-hide",

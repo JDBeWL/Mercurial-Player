@@ -17,6 +17,15 @@ use super::eq_processor::EqProcessor;
 use super::spectrum::SpectrumAnalyzer;
 use super::{EXCLUSIVE_BUFFER_WATERMARK_SECS, PushOutcome};
 
+// 重采样相关导入：仅独占模式（Windows / Android）使用
+#[cfg(any(windows, target_os = "android"))]
+use audioadapter_buffers::direct::SequentialSliceOfVecs;
+#[cfg(any(windows, target_os = "android"))]
+use rubato::{
+    Async, FixedAsync, Indexing, PolynomialDegree, Resampler, SincInterpolationParameters,
+    SincInterpolationType, WindowFunction,
+};
+
 /// 背压等待的单次兜底超时（毫秒）
 const GATE_WAIT_TICK_MS: u64 = 250;
 
@@ -32,6 +41,54 @@ const fn calculate_decode_chunk_size(sample_rate: u32) -> usize {
         64001..=128_000 => 2048, // 88.2k/96k
         _ => 4096,               // 176.4k/192k/384k
     }
+}
+
+/// 构造 linear（多项式插值）重采样器：成本远低于 sinc、比例仍正确，作 sinc 不可用时的降级
+#[cfg(any(windows, target_os = "android"))]
+fn build_linear_resampler(
+    resample_ratio: f64,
+    chunk_size: usize,
+    src_ch: u16,
+) -> Result<Async<f32>, String> {
+    Async::<f32>::new_poly(
+        resample_ratio,
+        2.0,
+        PolynomialDegree::Linear,
+        chunk_size,
+        src_ch as usize,
+        FixedAsync::Input,
+    )
+    .map_err(|e| format!("{e:?}"))
+}
+
+/// 对一块输入执行重采样并截断到实际写出帧数；任何一步失败都以错误描述返回，
+/// 由调用方决定降级（换 linear 重试）还是终止流
+#[cfg(any(windows, target_os = "android"))]
+fn process_resample_chunk(
+    resampler: &mut Async<f32>,
+    input_frames: &[Vec<f32>],
+    output_frames_resampled: &mut [Vec<f32>],
+    output_frames_capacity: usize,
+    src_ch: usize,
+) -> Result<usize, String> {
+    let frames_in = input_frames.first().map_or(0, Vec::len);
+    let input_adapter = SequentialSliceOfVecs::new(input_frames, src_ch, frames_in)
+        .map_err(|e| format!("{e:?}"))?;
+    for ch in output_frames_resampled.iter_mut() {
+        ch.clear();
+        ch.resize(output_frames_capacity, 0.0);
+    }
+    let mut output_adapter =
+        SequentialSliceOfVecs::new_mut(output_frames_resampled, src_ch, output_frames_capacity)
+            .map_err(|e| format!("{e:?}"))?;
+    let indexing = Indexing::new();
+    let (_in_used, out_written) = resampler
+        .process_into_buffer(&input_adapter, &mut output_adapter, Some(&indexing))
+        .map_err(|e| format!("{e:?}"))?;
+    for ch in output_frames_resampled.iter_mut() {
+        ch.truncate(out_written);
+    }
+    Ok(out_written)
 }
 
 #[cfg(any(windows, target_os = "android"))]
@@ -53,11 +110,6 @@ pub(super) fn decode_and_push_to_wasapi(
     gate: Arc<super::spectrum::SpectrumGate>,
     start_position: f32,
 ) {
-    use audioadapter_buffers::direct::SequentialSliceOfVecs;
-    use rubato::{
-        Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
-        WindowFunction,
-    };
     // 记录启动时的代际,循环中检测代际变化即退出
     let my_generation = generation.load(Ordering::SeqCst);
     if generation.load(Ordering::SeqCst) != my_generation
@@ -89,24 +141,34 @@ pub(super) fn decode_and_push_to_wasapi(
         ) {
             Ok(r) => Some(r),
             Err(e) => {
-                // 构造失败等于整首都不重采样：44.1k 内容在 48k 设备上会永久慢 9%、音偏低，
-                // 不留痕就只能从"这首歌解码有问题"去猜
+                // sinc 构造失败（极端参数 / 内存不足）：退到成本更低的 linear 重采样——
+                // 质量低一些但比例仍正确。linear 也不可用就终止本流：把源采样率数据
+                // 交给目标输出会永久变速变调（44.1k 内容在 48k 设备上慢约 9%），宁可静音不播错
                 log::error!(
-                    "重采样器创建失败，本首退化为不重采样输出: src={src_sr}Hz target={target_sr}Hz ratio={resample_ratio} -> {e:?}"
+                    "sinc 重采样器创建失败({e:?})，退到 linear: src={src_sr}Hz target={target_sr}Hz ratio={resample_ratio}"
                 );
-                None
+                match build_linear_resampler(resample_ratio, chunk_size, src_ch) {
+                    Ok(r) => Some(r),
+                    Err(e2) => {
+                        log::error!(
+                            "linear 重采样器也创建失败({e2})，终止本流输出: src={src_sr}Hz target={target_sr}Hz"
+                        );
+                        return;
+                    }
+                }
             }
         }
     } else {
         None
     };
-    // 循环内的退化只报第一次（每轮最多 47 次，日志本身会成为开销）
+    // 循环内的失败只报第一次（每轮最多 47 次，日志本身会成为开销）；
+    // 降级后不再用源速率直出，因此这里记录的是"换 linear 重试"
     let mut resample_err_logged = false;
-    let mut log_resample_failure = |err: &dyn std::fmt::Debug| {
+    let mut log_resample_failure = |err: &str| {
         if !resample_err_logged {
             resample_err_logged = true;
             log::error!(
-                "重采样失败，本首退化为不重采样输出: src={src_sr}Hz target={target_sr}Hz -> {err:?}"
+                "重采样失败，本块换 linear 重采样器重试: src={src_sr}Hz target={target_sr}Hz -> {err}"
             );
         }
     };
@@ -275,10 +337,9 @@ pub(super) fn decode_and_push_to_wasapi(
         // 处理重采样 - 用 Cow 避免成功路径的 clone
         use std::borrow::Cow;
         let output_frames: Cow<'_, [Vec<f32>]> = if let Some(ref mut r) = resampler {
-            let actual = input_frames[0].len();
             // 不足一块（含 EOF 的零头）都要补齐再过重采样：直接借用原样输出会把这段以源速率
             // 混进目标速率的流里，听感是曲尾一小段变速；补齐用的淡出填充正是为这种尾巴准备的
-            if actual < chunk_size {
+            if input_frames[0].len() < chunk_size {
                 for ch in &mut input_frames {
                     let last_sample = ch.last().copied().unwrap_or(0.0);
                     let samples_to_add = chunk_size - ch.len();
@@ -287,91 +348,50 @@ pub(super) fn decode_and_push_to_wasapi(
                         last_sample * fade
                     }));
                 }
-                match SequentialSliceOfVecs::new(&input_frames, src_ch as usize, chunk_size) {
-                    Ok(input_adapter) => {
-                        for ch in &mut output_frames_resampled {
-                            ch.clear();
-                            ch.resize(output_frames_capacity, 0.0);
-                        }
-                        match SequentialSliceOfVecs::new_mut(
+            }
+
+            let mut written = process_resample_chunk(
+                r,
+                &input_frames,
+                &mut output_frames_resampled,
+                output_frames_capacity,
+                src_ch as usize,
+            );
+
+            // sinc 中途失败：换 linear 重采样器重试本块（内部位置重置，代价只是极短的不连续），
+            // 成功则保留 linear 继续用。降级后输出比例仍正确；比例错误的数据一条都不能出
+            if written.is_err() {
+                let err_desc = match written {
+                    Err(e) => e,
+                    Ok(_) => unreachable!("written.is_err() 已判定"),
+                };
+                log_resample_failure(&err_desc);
+                match build_linear_resampler(resample_ratio, chunk_size, src_ch) {
+                    Ok(mut linear) => {
+                        let retried = process_resample_chunk(
+                            &mut linear,
+                            &input_frames,
                             &mut output_frames_resampled,
-                            src_ch as usize,
                             output_frames_capacity,
-                        ) {
-                            Ok(mut output_adapter) => {
-                                let indexing = Indexing::new();
-                                match r.process_into_buffer(
-                                    &input_adapter,
-                                    &mut output_adapter,
-                                    Some(&indexing),
-                                ) {
-                                    Ok((_in_used, out_written)) => {
-                                        for ch in &mut output_frames_resampled {
-                                            ch.truncate(out_written);
-                                        }
-                                        // 借用即可：output_frames_resampled 本迭代内只读，下一轮才 clear/resize
-                                        Cow::Borrowed(&output_frames_resampled)
-                                    }
-                                    Err(e) => {
-                                        log_resample_failure(&e);
-                                        Cow::Borrowed(&input_frames)
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                log_resample_failure(&e);
-                                Cow::Borrowed(&input_frames)
-                            }
+                            src_ch as usize,
+                        );
+                        if retried.is_ok() {
+                            *r = linear;
                         }
+                        written = retried;
                     }
-                    Err(e) => {
-                        log_resample_failure(&e);
-                        Cow::Borrowed(&input_frames)
-                    }
+                    Err(e) => written = Err(e),
                 }
-            } else {
-                let frames_in = input_frames[0].len();
-                match SequentialSliceOfVecs::new(&input_frames, src_ch as usize, frames_in) {
-                    Ok(input_adapter) => {
-                        for ch in &mut output_frames_resampled {
-                            ch.clear();
-                            ch.resize(output_frames_capacity, 0.0);
-                        }
-                        match SequentialSliceOfVecs::new_mut(
-                            &mut output_frames_resampled,
-                            src_ch as usize,
-                            output_frames_capacity,
-                        ) {
-                            Ok(mut output_adapter) => {
-                                let indexing = Indexing::new();
-                                match r.process_into_buffer(
-                                    &input_adapter,
-                                    &mut output_adapter,
-                                    Some(&indexing),
-                                ) {
-                                    Ok((_in_used, out_written)) => {
-                                        for ch in &mut output_frames_resampled {
-                                            ch.truncate(out_written);
-                                        }
-                                        // 同上：成功路径借用即可
-                                        Cow::Borrowed(&output_frames_resampled)
-                                    }
-                                    Err(e) => {
-                                        log_resample_failure(&e);
-                                        Cow::Borrowed(&input_frames)
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                log_resample_failure(&e);
-                                Cow::Borrowed(&input_frames)
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log_resample_failure(&e);
-                        Cow::Borrowed(&input_frames)
-                    }
+            }
+
+            match written {
+                Ok(_) => Cow::Borrowed(&output_frames_resampled),
+                Err(e) => {
+                    // 两级重采样都失败：终止本流。按源速率直出会变速变调，宁可静音不播错
+                    log::error!(
+                        "linear 降级后重采样仍失败({e})，终止本流输出: src={src_sr}Hz target={target_sr}Hz"
+                    );
+                    break;
                 }
             }
         } else {

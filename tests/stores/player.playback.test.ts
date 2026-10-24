@@ -248,10 +248,8 @@ describe('player.playback > seek', () => {
     const store = usePlayerStore()
     setPlaying(store, makePlaylist(1), 0)
 
-    store.seek(42)
-    await vi.waitFor(() => {
-      expect(store.currentTime).toBe(42)
-    })
+    await store.seek(42)
+    expect(store.currentTime).toBe(42)
     expect(invokeMock).toHaveBeenCalledWith('seek_track', { time: 42 })
   })
 
@@ -259,13 +257,11 @@ describe('player.playback > seek', () => {
     const store = usePlayerStore()
     setPlaying(store, makePlaylist(1), 0)
 
-    store.seek(999)
-    store.seek(-5)
+    await store.seek(999)
+    await store.seek(-5)
 
-    await vi.waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('seek_track', { time: 100 })
-      expect(invokeMock).toHaveBeenCalledWith('seek_track', { time: 0 })
-    })
+    expect(invokeMock).toHaveBeenCalledWith('seek_track', { time: 100 })
+    expect(invokeMock).toHaveBeenCalledWith('seek_track', { time: 0 })
   })
 
   it('re-pauses after a seek when the track was paused', async () => {
@@ -273,27 +269,23 @@ describe('player.playback > seek', () => {
     setPlaying(store, makePlaylist(1), 0)
     store.isPlaying = false
 
-    store.seek(10)
-    await vi.waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('pause_track')
-    })
+    await store.seek(10)
+    expect(invokeMock).toHaveBeenCalledWith('pause_track')
   })
 
   it('does not re-pause after a seek while playing', async () => {
     const store = usePlayerStore()
     setPlaying(store, makePlaylist(1), 0)
 
-    store.seek(10)
-    await vi.waitFor(() => {
-      expect(store.currentTime).toBe(10)
-    })
+    await store.seek(10)
+    expect(store.currentTime).toBe(10)
     expect(invokeMock).not.toHaveBeenCalledWith('pause_track')
   })
 
-  it('ignores seek without a current track', () => {
+  it('ignores seek without a current track', async () => {
     const store = usePlayerStore()
 
-    store.seek(10)
+    await store.seek(10)
 
     expect(invokeMock).not.toHaveBeenCalledWith('seek_track', expect.anything())
   })
@@ -303,11 +295,75 @@ describe('player.playback > seek', () => {
     setPlaying(store, makePlaylist(1), 0)
     invokeMock.mockRejectedValueOnce(new Error('seek failed'))
 
-    store.seek(10)
-    await vi.waitFor(() => {
-      // safeInvoke 统一经 errorHandler 记录(MEDIUM -> logger.warn)
-      expect(loggerMock.warn).toHaveBeenCalledWith('[UNKNOWN] seek failed', expect.anything())
+    await store.seek(10)
+    // safeInvoke 统一经 errorHandler 记录(MEDIUM -> logger.warn)
+    expect(loggerMock.warn).toHaveBeenCalledWith('[UNKNOWN] seek failed', expect.anything())
+  })
+
+  it('返回的 Promise 在 IPC 完成后才 resolve', async () => {
+    const store = usePlayerStore()
+    setPlaying(store, makePlaylist(1), 0)
+
+    let settle!: () => void
+    invokeMock.mockImplementationOnce(() => new Promise<void>((r) => (settle = r)))
+
+    let resolved = false
+    const done = store.seek(10).then(() => {
+      resolved = true
     })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(resolved).toBe(false)
+
+    settle()
+    await done
+    expect(resolved).toBe(true)
+    expect(store.currentTime).toBe(10)
+  })
+
+  it('旧 seek 晚到完成时不得覆盖新 seek 的位置（latest-wins）', async () => {
+    const store = usePlayerStore()
+    setPlaying(store, makePlaylist(1), 0)
+
+    let settleFirst!: () => void
+    let settleSecond!: () => void
+    invokeMock
+      .mockImplementationOnce(() => new Promise<void>((r) => (settleFirst = r)))
+      .mockImplementationOnce(() => new Promise<void>((r) => (settleSecond = r)))
+
+    void store.seek(10)
+    void store.seek(50)
+
+    // 新请求先完成,旧请求(第一个)反而最后落地:不得把位置覆盖回 10
+    settleSecond()
+    await vi.waitFor(() => {
+      expect(store.currentTime).toBe(50)
+    })
+
+    settleFirst()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(store.currentTime).toBe(50)
+  })
+
+  it('切歌后旧 seek 完成不得改写新曲目的进度', async () => {
+    const store = usePlayerStore()
+    const tracks = makePlaylist(2)
+    setPlaying(store, tracks, 0)
+    store.isPlaying = false
+
+    let settle!: () => void
+    invokeMock.mockImplementationOnce(() => new Promise<void>((r) => (settle = r)))
+
+    void store.seek(10)
+    // IPC 未完成时切到下一首(wasPlaying 也会变成 true)
+    setPlaying(store, tracks, 1)
+    store.currentTime = 0
+
+    settle()
+    await new Promise((r) => setTimeout(r, 0))
+
+    // 旧 seek 的结果作废:不改写新曲目进度,也不再按旧请求的暂停态补 pause_track
+    expect(store.currentTime).toBe(0)
+    expect(invokeMock).not.toHaveBeenCalledWith('pause_track')
   })
 })
 

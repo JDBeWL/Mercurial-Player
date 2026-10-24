@@ -144,11 +144,10 @@ pub fn clear_font_extract_cache() -> Result<u64, AppError> {
     Ok(freed)
 }
 
-/// 字体集合成员提取缓存目录（temp/mercurial-player/font-extract）
+/// 字体集合成员提取缓存目录（缓存存储路径下的 font-extract/，用户自定义优先，理由见
+/// `metadata::cache::cache_dir`）
 pub fn get_font_extract_cache_dir() -> Result<PathBuf, AppError> {
-    let dir = std::env::temp_dir()
-        .join("mercurial-player")
-        .join("font-extract");
+    let dir = crate::media::metadata::cache_dir().join("font-extract");
     fs::create_dir_all(&dir).map_err(|e| format!("无法创建字体提取缓存目录: {e}"))?;
     Ok(dir)
 }

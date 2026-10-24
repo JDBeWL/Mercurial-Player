@@ -200,7 +200,9 @@
           </div>
         </div>
         <div class="cache-path-control">
-          <span class="cache-path-value">{{ coverCachePathDisplay }}</span>
+          <span class="cache-path-value" :title="coverCachePathDisplay">{{
+            coverCachePathDisplay
+          }}</span>
           <button class="cache-path-btn" @click="selectCachePath">
             <span class="material-symbols-rounded">folder_open</span>
           </button>
@@ -271,8 +273,8 @@ import { useI18n } from 'vue-i18n'
 import {
   cleanCoverCache,
   clearMetadataCache as clearMetadataCacheCommand,
+  getCacheRoot,
   getMetadataCacheStats,
-  getTempDir,
   setCoverCachePath,
 } from '../../services/mediaService'
 import {
@@ -365,25 +367,17 @@ const coverCachePath = computed({
   },
 })
 
-const coverCachePathDisplay = computed(() => {
-  if (!coverCachePath.value) {
-    return tempDirPath.value
-  }
-  const path = coverCachePath.value
-  if (path.length > 30) {
-    return '...' + path.slice(-30)
-  }
-  return path
-})
+const coverCachePathDisplay = computed(() => coverCachePath.value || cacheRootPath.value)
 
-const tempDirPath = ref('')
+/** 未自定义时展示的缓存根（后端解析：系统临时目录下的 mercurial-player） */
+const cacheRootPath = ref('')
 
-const loadTempDirPath = async () => {
+const loadCacheRootPath = async () => {
   try {
-    tempDirPath.value = await getTempDir()
+    cacheRootPath.value = await getCacheRoot()
   } catch (error) {
-    tempDirPath.value = t('config.systemTempDir')
-    logger.error('Failed to get temp dir:', error)
+    cacheRootPath.value = t('config.defaultCacheRoot')
+    logger.error('Failed to get cache root:', error)
   }
 }
 
@@ -549,7 +543,7 @@ const clearMetadataCache = async () => {
 onMounted(() => {
   void loadMetadataCacheStats()
   void loadFontCacheStats()
-  void loadTempDirPath()
+  void loadCacheRootPath()
 })
 </script>
 
