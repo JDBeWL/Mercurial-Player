@@ -1,6 +1,4 @@
-//! Mercurial Player - 主入口（二进制壳）
-//!
-//! 启动逻辑全在 [`mercurial_player_lib::run`]，移动端入口（`mobile_entry_point`）才能复用同一套初始化。
+//! Mercurial Player
 //!
 //! Copyright (C) 2026  JDBeWL
 //!

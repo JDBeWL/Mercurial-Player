@@ -108,11 +108,12 @@ impl PlaybackQueue {
         self.index = Some(index).filter(|i| *i < self.tracks.len());
     }
 
-    /// 按路径定位当前下标（前端直接调 `play_track` 时用）
+    /// 按路径定位当前下标（前端直接调 `play_track` 时用）。
+    ///
+    /// 未命中时置为「未知」而非保留旧值：正在播的曲目已不在队列里，自然结束后
+    /// 就不该按旧位置继续推进，与 `set_queue` 收到 `null` 下标的语义一致。
     pub fn sync_index_by_path(&mut self, path: &str) {
-        if let Some(pos) = self.tracks.iter().position(|t| t.path == path) {
-            self.index = Some(pos);
-        }
+        self.index = self.tracks.iter().position(|t| t.path == path);
     }
 
     pub fn set_repeat(&mut self, repeat: RepeatMode) {
@@ -564,7 +565,7 @@ mod tests {
         q.sync_index_by_path("/music/2.mp3");
         assert_eq!(q.index(), Some(2));
         q.sync_index_by_path("/music/not-exist.mp3");
-        assert_eq!(q.index(), Some(2), "未命中时保持原下标");
+        assert_eq!(q.index(), None, "未命中时置为未知，结束后不再按旧位置推进");
     }
 
     #[test]

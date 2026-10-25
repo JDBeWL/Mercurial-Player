@@ -2793,7 +2793,7 @@ dependencies = [
 
 [[package]]
 name = "mercurial-player"
-version = "1.6.4"
+version = "1.6.5"
 dependencies = [
  "anyhow",
  "audioadapter-buffers 4.0.0",

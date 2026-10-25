@@ -455,6 +455,23 @@ describe('useImmersiveCover > lifecycle', () => {
     expect(cover.url()).toBe(original('/b.jpg'))
   })
 
+  it('revokes a stale upscale result instead of leaking it', async () => {
+    const useImmersiveCover = await loadComposable()
+    const cover = await mountCover(useImmersiveCover, '/a.jpg', true)
+    const worker = workerCtor.instances[0]!
+    const staleJobId = worker.lastJobId
+
+    cover.coverPath.value = '/b.jpg'
+    await flushPromises()
+
+    FakeURL.revokeObjectURL.mockClear()
+    worker.respondAs(staleJobId, { buffer: new ArrayBuffer(16) })
+    await flushPromises()
+
+    // 过期的高清结果不允许悄悄泄漏:单张可达数 MB,反复切歌会持续累积
+    expect(FakeURL.revokeObjectURL).toHaveBeenCalledWith('blob:upscaled')
+  })
+
   it('revokes the object url on unmount', async () => {
     const useImmersiveCover = await loadComposable()
     const cover = await mountCover(useImmersiveCover, '/a.jpg', true)

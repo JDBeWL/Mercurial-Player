@@ -78,18 +78,28 @@ fn load_from_disk() -> BeatCache {
 #[must_use]
 pub fn cached(path: &str) -> Option<BeatTrack> {
     let current = get_file_modified_time(path)?;
-    let mut guard = BEAT_CACHE.write().ok()?;
-    if guard.is_none() {
-        *guard = Some(load_from_disk());
-    }
-    let cache = guard.as_mut()?;
-    let entry = cache.entries.get(path)?;
-    if entry.modified_time != current {
-        // 文件已变：旧拍点对不上音频，删掉等重算
-        cache.entries.remove(path);
-        return None;
-    }
-    let track = BeatTrack {
+    let entry = {
+        let mut guard = BEAT_CACHE.write().ok()?;
+        if guard.is_none() {
+            *guard = Some(load_from_disk());
+        }
+        let cache = guard.as_mut()?;
+        if cache
+            .entries
+            .get(path)
+            .is_some_and(|e| e.modified_time != current)
+        {
+            // 文件已变：旧拍点对不上音频，删掉等重算
+            cache.entries.remove(path);
+            return None;
+        }
+        // 锁内只做一次快照拷贝（memcpy 级）；f32→f64 的逐元素转换挪到锁外，
+        // 数 MB 的拍点数组转换期间不再压住全局写锁
+        let snapshot = cache.entries.get(path)?.clone();
+        drop(guard);
+        snapshot
+    };
+    Some(BeatTrack {
         bpm: entry.bpm,
         beats: entry.beats.iter().map(|&v| f64::from(v)).collect(),
         downbeats: entry.downbeats.iter().map(|&v| f64::from(v)).collect(),
@@ -102,10 +112,7 @@ pub fn cached(path: &str) -> Option<BeatTrack> {
             })
             .collect(),
         span_secs: f64::from(entry.span_secs),
-    };
-    // 拍点数组可能有数 MB，拷贝期间没必要一直占着全局写锁
-    drop(guard);
-    Some(track)
+    })
 }
 
 /// 最近一次分析时间（用于 UI 判断"是否分析过整库"）
@@ -124,23 +131,29 @@ pub fn cached_at(path: &str) -> Option<u64> {
 #[must_use]
 pub fn valid_count() -> usize {
     // 用写锁而非读锁：首次调用时内存是 `None`，需借此加载磁盘缓存，否则设置页一直显示"已分析 0 首"。
-    let mut guard = match BEAT_CACHE.write() {
-        Ok(guard) => guard,
-        Err(_) => return 0,
+    let snapshot: Vec<(String, u64)> = {
+        let mut guard = match BEAT_CACHE.write() {
+            Ok(guard) => guard,
+            Err(_) => return 0,
+        };
+        if guard.is_none() {
+            *guard = Some(load_from_disk());
+        }
+        // 锁内只取 (路径, mtime) 快照：整库逐首 stat 可能上百毫秒，不能压着全局写锁做
+        let snap = guard.as_ref().map_or(Vec::new(), |cache| {
+            cache
+                .entries
+                .iter()
+                .map(|(path, entry)| (path.clone(), entry.modified_time))
+                .collect()
+        });
+        drop(guard);
+        snap
     };
-    if guard.is_none() {
-        *guard = Some(load_from_disk());
-    }
-    // 逐首 stat 一遍可能很慢（整库），统计完立刻放锁，别把写锁按住那么久
-    let count = guard.as_ref().map_or(0, |cache| {
-        cache
-            .entries
-            .iter()
-            .filter(|(path, entry)| get_file_modified_time(path) == Some(entry.modified_time))
-            .count()
-    });
-    drop(guard);
-    count
+    snapshot
+        .iter()
+        .filter(|(path, mtime)| get_file_modified_time(path) == Some(*mtime))
+        .count()
 }
 
 /// 写入一条结果，不落盘；批量结束后由调用方 `flush`

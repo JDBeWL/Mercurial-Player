@@ -359,7 +359,8 @@ export function useDesktopLyrics() {
           void syncFontSize()
           void syncFontFamily()
           void syncColorPreset()
-          startDesktopLyricsPolling()
+          // 暂停状态下不启动轮询（理由见下方 isPlaying watcher），只发一帧初始内容
+          if (playerStore.isPlaying) startDesktopLyricsPolling()
           scheduleDesktopLyricsUpdate()
         } else {
           stopDesktopLyricsPolling()
@@ -368,6 +369,24 @@ export function useDesktopLyrics() {
       },
     )
     stopFns.push(stopWatchEnabled)
+
+    // 暂停时歌词数据不再变化:先补发一帧最终状态（isPlaying=false 供窗口切暂停态），
+    // 再停掉 16ms 轮询，免得每帧白算一遍歌词再被去抖挡掉；恢复播放时重启轮询。
+    // 暂停期间的切歌/换行等离散变化仍由上面的 refresh watcher 单帧推送，不受影响。
+    const stopWatchPlaying = watch(
+      () => playerStore.isPlaying,
+      (playing) => {
+        if (!configStore.lyrics?.desktopLyrics?.enabled) return
+        if (playing) {
+          startDesktopLyricsPolling()
+          scheduleDesktopLyricsUpdate()
+        } else {
+          stopDesktopLyricsPolling()
+          void updateDesktopLyrics()
+        }
+      },
+    )
+    stopFns.push(stopWatchPlaying)
 
     // 锁定/字号/配色:仅对实际变化的那一项执行同步,避免无关配置改动触发多余 IPC
     const stopWatchDesktopSettings = watch(
@@ -399,7 +418,8 @@ export function useDesktopLyrics() {
       void syncFontSize()
       void syncFontFamily()
       void syncColorPreset()
-      startDesktopLyricsPolling()
+      // 暂停状态下不启动轮询（理由见 isPlaying watcher），只发一帧初始内容
+      if (playerStore.isPlaying) startDesktopLyricsPolling()
       scheduleDesktopLyricsUpdate()
     }
   })

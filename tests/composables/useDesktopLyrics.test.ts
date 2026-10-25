@@ -226,7 +226,10 @@ describe('useDesktopLyrics > mount', () => {
     config().lyrics.desktopLyrics.enabled = true
     player().lyrics = karaokeLyrics()
     player().currentLyricIndex = 0
-    player().currentTime = 0.5
+    // 与相邻用例的播放状态错开,避免被上一条用例的去重缓存吞帧(见文件头注释)
+    player().currentTime = 0.3
+    // 暂停状态下不启动轮询（见 pause behaviour 组），此处要验证轮询本身
+    player().isPlaying = true
     await mountDesktopLyrics()
 
     await tick()
@@ -293,6 +296,7 @@ describe('useDesktopLyrics > lyric payload', () => {
     player().lyrics = karaokeLyrics()
     player().currentLyricIndex = 0
     player().currentTime = -10
+    player().isPlaying = true
     await mountDesktopLyrics()
     await tick()
     expect(lastUpdatePayload()?.progress).toBe(0)
@@ -378,6 +382,7 @@ describe('useDesktopLyrics > lyric payload', () => {
     player().lyrics = karaokeLyrics()
     player().currentLyricIndex = 0
     player().currentTime = 0.25
+    player().isPlaying = true
     await mountDesktopLyrics()
 
     await tick()
@@ -468,6 +473,95 @@ describe('useDesktopLyrics > lyric payload', () => {
       severity: 'low',
       showToUser: false,
     })
+  })
+})
+
+describe('useDesktopLyrics > pause behaviour', () => {
+  it('stops polling and sends one final frame when paused', async () => {
+    config().lyrics.desktopLyrics.enabled = true
+    player().lyrics = karaokeLyrics()
+    player().currentLyricIndex = 0
+    player().currentTime = 0.5
+    player().isPlaying = true
+    await mountDesktopLyrics()
+    await tick()
+
+    player().isPlaying = false
+    await nextTick()
+    await settle()
+
+    // 暂停瞬间补发一帧最终状态,窗口得以切到暂停态
+    expect(lastUpdatePayload()).toMatchObject({ isPlaying: false })
+    const pausedCount = invokeCalls('update_desktop_lyric').length
+
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 5)
+    await flushFrames()
+
+    // 轮询已停:不再每 16ms 空算一遍歌词再被去抖挡掉
+    expect(invokeCalls('update_desktop_lyric')).toHaveLength(pausedCount)
+  })
+
+  it('resumes polling when playback resumes', async () => {
+    config().lyrics.desktopLyrics.enabled = true
+    player().lyrics = karaokeLyrics()
+    player().currentLyricIndex = 0
+    player().currentTime = 1
+    player().isPlaying = true
+    await mountDesktopLyrics()
+    await tick()
+
+    player().isPlaying = false
+    await nextTick()
+    await settle()
+
+    player().isPlaying = true
+    await nextTick()
+    await settle()
+
+    // currentTime 不在任何 watcher 源里,暂停期间推进它不会发帧;
+    // 连续两帧不同的 currentTime 说明 16ms 轮询确实恢复了
+    player().currentTime = 1.5
+    await tick()
+    expect(lastUpdatePayload()).toMatchObject({ isPlaying: true, currentTime: 1.5 })
+
+    player().currentTime = 2
+    await tick()
+    expect(lastUpdatePayload()).toMatchObject({ currentTime: 2 })
+  })
+
+  it('does not start polling while paused on mount', async () => {
+    config().lyrics.desktopLyrics.enabled = true
+    player().lyrics = karaokeLyrics()
+    player().currentLyricIndex = 0
+    player().currentTime = 0.5
+    await mountDesktopLyrics()
+    await tick()
+
+    // 挂载时只发一帧初始内容,暂停状态下不启动轮询
+    const initialCount = invokeCalls('update_desktop_lyric').length
+    expect(initialCount).toBeGreaterThan(0)
+
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 5)
+    await flushFrames()
+
+    expect(invokeCalls('update_desktop_lyric')).toHaveLength(initialCount)
+  })
+
+  it('still pushes single updates while paused when the track changes', async () => {
+    config().lyrics.desktopLyrics.enabled = true
+    player().lyrics = karaokeLyrics()
+    player().currentLyricIndex = 0
+    player().currentTime = 0.75
+    await mountDesktopLyrics()
+    await tick()
+    const before = invokeCalls('update_desktop_lyric').length
+
+    player().currentTrack = { path: '/next.flac' }
+    await nextTick()
+    await flushFrames()
+
+    // 暂停期间轮询虽停,离散变化(切歌/换行)仍由 refresh watcher 单帧推送
+    expect(invokeCalls('update_desktop_lyric').length).toBeGreaterThan(before)
   })
 })
 

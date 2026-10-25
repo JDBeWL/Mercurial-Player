@@ -260,7 +260,12 @@ export function useImmersiveCover(
     upscaleCover(path, targetSide)
       .then((url) => {
         // 代次守卫:已切歌 / 关闭沉浸 / 目标尺寸已变时丢弃过期结果
-        if (gen !== generation || !url) return
+        if (gen !== generation) {
+          // 过期结果同样要释放:高清封面单张可达数 MB,反复切歌会持续泄漏
+          if (url) URL.revokeObjectURL(url)
+          return
+        }
+        if (!url) return
         revokeProcessed()
         objectUrl = url
         coverDisplayUrl.value = url

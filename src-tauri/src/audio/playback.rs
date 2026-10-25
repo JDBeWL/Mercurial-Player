@@ -32,29 +32,17 @@ pub fn play_track_shared(
     path: &str,
     position: Option<f32>,
 ) -> Result<(), AppError> {
-    // 先排队再碰任何共享状态,理由见 SHARED_SINK_GATE;锁内是命令线程的阻塞工作,持锁时长可接受
-    let _sink_gate = lock_or_log!(SHARED_SINK_GATE.lock());
     let player = &state.player;
-    // 作废进行中的 fade，理由见 commands 的 spawn_shared_fade
-    player.fade.generation.fetch_add(1, Ordering::SeqCst);
-    // 上一首可能还挂在独占输出上，走共享前必须回收，理由见 release_exclusive_player
-    super::commands::release_exclusive_player(state);
-    // 先读取 target_volume 再锁 sink,避免嵌套锁死锁风险
-    let vol = *lock_or_log!(player.output.target_volume.lock());
-    {
-        let player_lock = lock_or_log!(player.output.sink.lock());
-        // 直接停止不做淡出（淡出会阻塞这里），新音源的 fade_in 负责平滑过渡
-        player_lock.stop();
-        player_lock.set_volume(vol);
-    }
-    *lock_or_log!(player.track.current_path.lock()) = Some(path.to_string());
+    // 解码准备（打开 + 探测 + seek + 预解码）放在 SHARED_SINK_GATE 之前：冷盘文件这段
+    // 可达几十毫秒，压在 gate/sink 锁里会把并发 seek 无谓串行化、挡住其它碰 sink 的
+    // 路径；提前后旧曲目在此期间继续出声，起播失败（两侧解码都挂）也不会先停掉
+    // 正在播的旧曲
     let (spectrum, eq_settings, target_fps, gate) = (
         Arc::clone(&player.visualization.spectrum_data),
         state.equalizer.get_settings_handle(),
         Arc::clone(&player.visualization.target_fps),
         Arc::clone(&player.visualization.spectrum_gate),
     );
-
     let source: Box<dyn Source<Item = f32> + Send> = match SymphoniaDecoder::new(path) {
         Ok(mut dec) => {
             let start_pos = position.unwrap_or(0.0);
@@ -95,6 +83,22 @@ pub fn play_track_shared(
             )
         }
     };
+
+    // 先排队再碰任何共享状态,理由见 SHARED_SINK_GATE;锁内只剩纯 sink 操作
+    let _sink_gate = lock_or_log!(SHARED_SINK_GATE.lock());
+    // 作废进行中的 fade，理由见 commands 的 spawn_shared_fade
+    player.fade.generation.fetch_add(1, Ordering::SeqCst);
+    // 上一首可能还挂在独占输出上，走共享前必须回收，理由见 release_exclusive_player
+    super::commands::release_exclusive_player(state);
+    // 先读取 target_volume 再锁 sink,避免嵌套锁死锁风险
+    let vol = *lock_or_log!(player.output.target_volume.lock());
+    {
+        let player_lock = lock_or_log!(player.output.sink.lock());
+        // 直接停止不做淡出（淡出会阻塞这里），新音源的 fade_in 负责平滑过渡
+        player_lock.stop();
+        player_lock.set_volume(vol);
+    }
+    *lock_or_log!(player.track.current_path.lock()) = Some(path.to_string());
 
     // 手动重采样到 mixer 的采样率：rodio 0.22 的 UniformSourceIterator 在 queue keep_alive 模式下，
     // source.current_span_len() 返回 None 时不会重新 bootstrap SampleRateConverter，高采样率音轨
@@ -337,12 +341,9 @@ pub fn seek_track_shared(
     path: &str,
     time: f32,
 ) -> Result<(), AppError> {
-    // 与 play_track_shared 互斥:seek 也是"stop + append 新音源",不排队的话
-    // 两次并发 seek 会把两份音源都排进 sink
-    let _sink_gate = lock_or_log!(SHARED_SINK_GATE.lock());
+    // 解码准备放在 SHARED_SINK_GATE 之前（理由同 play_track_shared）：重活不压着
+    // gate，旧音源也得以多播到被替换的那一刻
     let player = &state.player;
-    // 作废进行中的 fade，理由见 commands 的 spawn_shared_fade
-    player.fade.generation.fetch_add(1, Ordering::SeqCst);
     let eq_settings = state.equalizer.get_settings_handle();
     let mut decoder =
         SymphoniaDecoder::new(path).map_err(|e| format!("Failed to create decoder: {e}"))?;
@@ -360,6 +361,12 @@ pub fn seek_track_shared(
         .with_eq_settings(eq_settings)
         .fade_in(Duration::from_millis(FADE_IN_ON_SEEK_MS)), // seek时使用较短的淡入
     );
+
+    // 与 play_track_shared 互斥:seek 也是"stop + append 新音源",不排队的话
+    // 两次并发 seek 会把两份音源都排进 sink
+    let _sink_gate = lock_or_log!(SHARED_SINK_GATE.lock());
+    // 作废进行中的 fade，理由见 commands 的 spawn_shared_fade
+    player.fade.generation.fetch_add(1, Ordering::SeqCst);
 
     // 手动重采样到 mixer 采样率（同 play_track_shared 的修复）
     let resampled: Box<dyn Source<Item = f32> + Send> = {

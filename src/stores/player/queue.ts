@@ -53,11 +53,22 @@ function orderedTracks(store: PlayerStore): TrackSnapshot[] {
   return store._shuffleOrder.map((i) => store.playlist[i]!).filter(Boolean)
 }
 
-/** 同步队列到 Rust（Android 开启自动推进，桌面端关闭） */
+/** 同步队列快照到 Rust。
+ *
+ *  仅 Android 发送：桌面端 Rust 侧队列没有任何消费者（自动推进不开，通知栏/
+ *  MediaSession 同步是 Android 专属空实现），整份快照的序列化与 IPC 纯属浪费。
+ *  切歌时的下标同步不走这里，由 play_track 命令（note_playback_started）在 Rust 侧完成。 */
+let syncSeq = 0
+
 async function syncPlayQueue(store: PlayerStore): Promise<void> {
   if (store._isDestroyed) return
+  // latest-wins：判平台的 await 期间又触发了新一次同步时，旧请求放弃发送，
+  // 避免慢的旧快照后到、把新快照覆盖回去
+  const seq = ++syncSeq
   try {
     const android = await isAndroid()
+    if (seq !== syncSeq || store._isDestroyed) return
+    if (!android) return
     const tracks = orderedTracks(store)
       .map(toSnapshot)
       .filter((t): t is TrackSnapshot => t !== null)
@@ -67,7 +78,7 @@ async function syncPlayQueue(store: PlayerStore): Promise<void> {
       tracks,
       currentIndex: index >= 0 ? index : null,
       repeatMode: store.repeatMode ?? 'none',
-      autoAdvance: android,
+      autoAdvance: true,
     })
   } catch (err) {
     logger.warn('Failed to sync play queue:', err)
@@ -163,7 +174,9 @@ export async function setupStateSyncListener(store: PlayerStore): Promise<Unlist
 
 let queueWatchStop: WatchStopHandle | null = null
 
-/** 监听播放列表/循环/随机变化，自动同步队列到 Rust */
+/** 监听队列结构/顺序变化，自动同步快照到 Rust。
+ *  currentTrack 不在源里：每次切歌都重发整份队列没有意义，下标由 play_track 命令
+ *  （note_playback_started → sync_index_by_path）在 Rust 侧同步。 */
 export function watchPlayQueue(store: PlayerStore): void {
   if (queueWatchStop) return
   // watch 路径拼接而不是数组本身:playlist 原地变异不改引用,直接 watch 数组不会触发
@@ -171,7 +184,8 @@ export function watchPlayQueue(store: PlayerStore): void {
     () =>
       [
         store.playlist.map((t) => t.path).join('\n'),
-        store.currentTrack?.path,
+        // 重新随机只换 _shuffleOrder：isShuffle 与列表都不动，必须单独盯住
+        store._shuffleOrder.join(','),
         store.repeatMode,
         store.isShuffle,
       ] as const,
