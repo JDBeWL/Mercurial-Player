@@ -107,7 +107,7 @@ describe('watchPlayQueue > snapshot sync', () => {
       repeatMode: 'none',
       autoAdvance: true,
     })
-    expect((lastQueueArgs().tracks as unknown[])).toHaveLength(2)
+    expect(lastQueueArgs().tracks as unknown[]).toHaveLength(2)
   })
 
   it('does not resend the queue when only the current track changes', async () => {
