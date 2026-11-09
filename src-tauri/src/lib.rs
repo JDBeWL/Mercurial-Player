@@ -96,7 +96,8 @@ impl Placeholder {
 
 /// 音频输出相关状态
 pub struct AudioOutputState {
-    pub sink: Arc<Mutex<rodio::Player>>,
+    /// 共享模式输出：内部可能同时持有当前曲目与过渡中的旧曲目两个 `Player`
+    pub sink: Arc<Mutex<audio::shared_output::SharedOutput>>,
     /// 音频输出流（必须长期持有，否则会静音）
     pub output_stream: Arc<Mutex<Option<rodio::MixerDeviceSink>>>,
     /// 目标音量（与 sink 实际生效的渐变音量区分）
@@ -110,6 +111,9 @@ pub struct AudioOutputState {
 /// 当前播放曲目状态
 pub struct TrackState {
     pub current_path: Arc<Mutex<Option<String>>>,
+    /// 播放位置事件权威令牌：只有持有最新 token 的音源能上报进度/曲目结束。
+    /// 交叉淡化期间旧曲仍在出声，但它的进度与 `track-ended` 必须被压掉。
+    pub playback_token: Arc<AtomicU64>,
 }
 
 /// 可视化相关状态
@@ -137,6 +141,16 @@ pub struct FadeControl {
     pub enabled: Arc<AtomicBool>,
 }
 
+/// 智能过渡控制（仅共享模式）
+pub struct TransitionState {
+    /// 是否启用；运行时读取，避免每次访问配置文件
+    pub enabled: Arc<AtomicBool>,
+    /// 调度代际：任何手动切歌/seek/设备切换都会递增，旧调度线程据此退出
+    pub generation: Arc<AtomicU64>,
+    /// 当前曲目的增益句柄，取消过渡时需要把它恢复到 1.0
+    pub current_gain: Arc<Mutex<Option<Arc<audio::transition::TransitionGain>>>>,
+}
+
 /// 播放器状态，按职责域分组
 pub struct PlayerState {
     pub output: AudioOutputState,
@@ -147,6 +161,7 @@ pub struct PlayerState {
     /// 播放队列（Android 后台自动切歌；桌面端不启用自动推进）
     pub queue: Arc<Mutex<PlaybackQueue>>,
     pub fade: FadeControl,
+    pub transition: TransitionState,
 }
 
 /// 应用全局状态
@@ -195,6 +210,10 @@ pub fn run() {
         .as_ref()
         .map(|c| c.audio.fade_enabled)
         .unwrap_or(true);
+    let smart_transition_enabled = config
+        .as_ref()
+        .map(|c| c.audio.smart_transition_enabled)
+        .unwrap_or(false);
 
     // Android 上独占开关是 `usb_dac_exclusive`（必须插着 USB DAC 才有意义），
     // 桌面端沿用 `exclusive_mode`；这里合并成一个启动期判定。
@@ -265,6 +284,7 @@ pub fn run() {
         device_name,
         exclusive_mode_enabled,
         fade_enabled,
+        smart_transition_enabled,
         config_manager,
     );
 
@@ -391,6 +411,8 @@ pub fn run() {
             audio::commands::set_visualizer_visible,
             audio::commands::set_fade_enabled,
             audio::commands::get_fade_enabled,
+            audio::commands::set_smart_transition_enabled,
+            audio::commands::get_smart_transition_enabled,
             // 上次播放会话恢复命令
             audio::commands::resume_last_session,
             audio::commands::save_last_session,

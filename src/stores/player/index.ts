@@ -44,7 +44,7 @@ import {
   recordCoverUpdate as recordCoverUpdateToMap,
   takeCoverUpdates as takeCoverUpdatesFromMap,
 } from './mediaCache'
-import type { Track, AudioInfo, LyricLine, RepeatMode, ResumeResult } from '@/types'
+import type { Track, TrackSnapshot, AudioInfo, LyricLine, RepeatMode, ResumeResult } from '@/types'
 import { seekTrack, setPlayerVolume, togglePlayerMute } from './playback'
 import {
   applyPreparedTrack,
@@ -290,8 +290,11 @@ export const usePlayerStore = defineStore('player', {
       this._queueUnlisten = await setupQueueListener(this)
       await setupStateSyncListener(this)
 
-      // 把播放队列同步给 Rust,Android 自动推进的来由见 queue.ts 文件头
-      watchPlayQueue(this)
+      // 把播放队列同步给 Rust：Android 自动推进见 queue.ts 文件头，
+      // 桌面端仅在开启智能过渡时发送（Rust 需要提前知道下一首）
+      watchPlayQueue(this, {
+        smartTransitionsEnabled: () => useConfigStore().audio.smartTransitionEnabled,
+      })
       // 播放模式变化即落库(它不是暂停/切曲这类关键节点,没有别的保存点会触发)
       watchPlayMode(this)
       void startBackgroundHeartbeat()
@@ -386,6 +389,36 @@ export const usePlayerStore = defineStore('player', {
       invoke('update_taskbar_state', { isPlaying: this.isPlaying }).catch(() => {
         // 任务栏 API 仅 Windows 可用,其他平台的错误直接忽略
       })
+    },
+
+    /** 应用 Rust 侧已经起播的曲目（智能过渡 / Android 后台自动推进）。
+     *  只同步 UI，不再 invoke play_track，否则会把正在交叉淡化的音频停掉。 */
+    _applyExternalTrack(snapshot: TrackSnapshot): void {
+      const path = snapshot.path
+      if (!path) return
+      const existing = this.playlist.find((track) => track.path === path)
+      const base: Track = existing
+        ? { ...existing }
+        : {
+            path,
+            name: snapshot.title ?? path,
+            title: snapshot.title ?? undefined,
+            artist: snapshot.artist ?? undefined,
+            album: snapshot.album ?? undefined,
+            duration: snapshot.duration ?? undefined,
+            bitrate: snapshot.bitrate ?? undefined,
+            sampleRate: snapshot.sampleRate ?? undefined,
+            channels: snapshot.channels ?? undefined,
+            bitDepth: snapshot.bitDepth ?? undefined,
+            format: snapshot.format ?? undefined,
+            bpm: snapshot.bpm ?? undefined,
+          }
+      applyPreparedTrack(this, prepareTrack(this, base, path))
+      this.isPlaying = true
+      this._updateTaskbarState()
+      maybeStartBpmAnalysis(this, path)
+      // 与 playTrack 一致：切歌是无节流保存点
+      void this._saveLastSessionNow()
     },
 
     // --- 核心行为 ---

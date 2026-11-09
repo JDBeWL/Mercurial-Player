@@ -138,32 +138,37 @@ impl PlaybackQueue {
         self.auto_advance
     }
 
-    /// 曲目自然结束后推进：返回下一首的 `(下标, 快照)`，`None` 表示队列到底应停止。
+    /// 自然结束时应播放的下一首，`(下标, 快照)`；`None` 表示队列到底应停止。
     ///
-    /// 单曲循环时返回当前曲目本身。
-    pub fn advance_on_end(&mut self) -> Option<(usize, TrackSnapshot)> {
+    /// 只计算不修改下标，供智能过渡提前预载使用；单曲循环时返回当前曲目本身。
+    #[must_use]
+    pub fn next_on_end(&self) -> Option<(usize, TrackSnapshot)> {
         let len = self.tracks.len();
         if len == 0 {
             return None;
         }
         let current = self.index?;
-        match self.repeat {
-            RepeatMode::One => self.tracks.get(current).cloned().map(|t| (current, t)),
-            RepeatMode::All => {
-                let next = (current + 1) % len;
-                self.index = Some(next);
-                self.tracks.get(next).cloned().map(|t| (next, t))
-            }
+        let next = match self.repeat {
+            RepeatMode::One => current,
+            RepeatMode::All => (current + 1) % len,
             RepeatMode::Off => {
                 let next = current + 1;
                 if next >= len {
-                    None
-                } else {
-                    self.index = Some(next);
-                    self.tracks.get(next).cloned().map(|t| (next, t))
+                    return None;
                 }
+                next
             }
-        }
+        };
+        self.tracks.get(next).cloned().map(|t| (next, t))
+    }
+
+    /// 曲目自然结束后推进：返回下一首的 `(下标, 快照)`，`None` 表示队列到底应停止。
+    ///
+    /// 单曲循环时返回当前曲目本身。
+    pub fn advance_on_end(&mut self) -> Option<(usize, TrackSnapshot)> {
+        let next = self.next_on_end()?;
+        self.index = Some(next.0);
+        Some(next)
     }
 
     /// 手动「下一首」的下标（单曲循环下也前进，与前端行为一致）
@@ -353,6 +358,7 @@ pub fn media_control(
             }
         }
         "stop" => {
+            super::transition::cancel_smart_transition(state);
             super::commands::pause_any(app, state)?;
             #[cfg(any(windows, target_os = "android"))]
             {

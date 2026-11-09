@@ -14,8 +14,10 @@ import {
   getCurrentAudioDevice,
   getExclusiveMode,
   getFadeEnabled,
+  getSmartTransitionEnabled,
   setAudioDevice,
   setFadeEnabled,
+  setSmartTransitionEnabled,
   toggleExclusiveMode,
 } from '@/services/audioService'
 import {
@@ -89,6 +91,10 @@ describe('audioService', () => {
     })
     await expectInvoke(() => setFadeEnabled(true), 'set_fade_enabled', { enabled: true })
     await expectInvoke(() => getFadeEnabled(), 'get_fade_enabled')
+    await expectInvoke(() => setSmartTransitionEnabled(true), 'set_smart_transition_enabled', {
+      enabled: true,
+    })
+    await expectInvoke(() => getSmartTransitionEnabled(), 'get_smart_transition_enabled')
   })
 })
 

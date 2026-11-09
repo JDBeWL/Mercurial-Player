@@ -49,7 +49,9 @@ pub mod playback;
 pub mod queue;
 pub mod sample_ring;
 pub mod session;
+pub mod shared_output;
 pub mod spectrum;
+pub mod transition;
 
 /// Android 的 AAudio 独占（位完美 / USB DAC 直连）通道
 #[cfg(target_os = "android")]
@@ -76,6 +78,8 @@ pub use wasapi::WasapiExclusivePlayback;
 pub fn rebuild_shared_sink(state: &crate::AppState) -> Result<(), crate::error::AppError> {
     use rodio::stream::DeviceSinkBuilder;
 
+    // 重建 sink 会替换整条共享输出，正在进行的过渡必须作废
+    transition::cancel_smart_transition(state);
     let output = &state.player.output;
 
     // 音量单独读：锁序里 target_volume 在 sink 之后，先读后锁安全，持 sink 时再读才违规。
@@ -90,6 +94,12 @@ pub fn rebuild_shared_sink(state: &crate::AppState) -> Result<(), crate::error::
         .map_err(|e| format!("打开默认输出流失败: {e}"))?;
     let player = rodio::Player::connect_new(mixer_sink.mixer());
     player.set_volume(volume);
+    let shared = shared_output::SharedOutput::new(
+        player,
+        mixer_sink.mixer().clone(),
+        mixer_sink.config().sample_rate().get(),
+        mixer_sink.config().channel_count().get(),
+    );
 
     // 按锁序 sink -> output_stream 依次替换（两个临界区不嵌套）：先换 sink，旧 sink drop 关旧 cpal 流时旧播放器已释放。
     {
@@ -97,7 +107,7 @@ pub fn rebuild_shared_sink(state: &crate::AppState) -> Result<(), crate::error::
             .sink
             .lock()
             .map_err(|e| format!("替换共享播放器失败: {e}"))?;
-        *sink = player;
+        *sink = shared;
     }
     {
         let mut stream = output

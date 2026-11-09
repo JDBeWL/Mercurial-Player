@@ -177,6 +177,19 @@
           <SettingSwitch :model-value="fadeEnabled" />
         </div>
       </div>
+
+      <div class="option-item" @click="toggleSmartTransition()">
+        <div class="option-label">
+          <span class="material-symbols-rounded">auto_awesome</span>
+          <div class="option-text">
+            <h4>{{ $t('config.smartTransitionEnabled') }}</h4>
+            <p>{{ $t('config.smartTransitionEnabledDesc') }}</p>
+          </div>
+        </div>
+        <div class="option-control">
+          <SettingSwitch :model-value="smartTransitionEnabled" />
+        </div>
+      </div>
     </div>
 
     <div v-if="loading" class="loading-state">
@@ -218,8 +231,10 @@ import {
   getCurrentAudioDevice,
   getExclusiveMode,
   getFadeEnabled,
+  getSmartTransitionEnabled,
   setAudioDevice,
   setFadeEnabled,
+  setSmartTransitionEnabled,
   toggleExclusiveMode as toggleExclusiveModeCommand,
   getAudioRoute,
   setUsbDacExclusive,
@@ -245,6 +260,7 @@ const error = ref<string | null>(null)
 const restartRequired = ref(false)
 const useExclusiveMode = ref(false)
 const fadeEnabled = ref(true)
+const smartTransitionEnabled = ref(false)
 const currentPlatform = ref<string>('unknown')
 
 /** Android 输出路由快照; 非安卓平台保持 null */
@@ -433,6 +449,18 @@ const toggleFadeEnabled = async (): Promise<void> => {
   }
 }
 
+const toggleSmartTransition = async (): Promise<void> => {
+  const newValue = !smartTransitionEnabled.value
+  try {
+    await setSmartTransitionEnabled(newValue)
+    smartTransitionEnabled.value = newValue
+    configStore.setAudioConfig({ smartTransitionEnabled: newValue })
+  } catch (err) {
+    logger.error('Failed to toggle smart transition:', err)
+    error.value = getErrorMessage(err, 'Failed to toggle smart transition')
+  }
+}
+
 const refreshDevices = (): void => {
   void fetchAudioDevices()
   void fetchAudioRoute()
@@ -467,6 +495,17 @@ onMounted(async () => {
     } catch (err) {
       logger.warn('Failed to get fade enabled from backend:', err)
       fadeEnabled.value = true
+    }
+  }
+
+  if (configStore.audio?.smartTransitionEnabled !== undefined) {
+    smartTransitionEnabled.value = configStore.audio.smartTransitionEnabled
+  } else {
+    try {
+      smartTransitionEnabled.value = (await getSmartTransitionEnabled()) ?? false
+    } catch (err) {
+      logger.warn('Failed to get smart transition from backend:', err)
+      smartTransitionEnabled.value = false
     }
   }
 

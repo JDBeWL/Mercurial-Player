@@ -6,6 +6,7 @@
 use super::decode_push::decode_and_push_to_wasapi;
 use super::decoder::{LockFreeSymphoniaSource, SymphoniaDecoder};
 use super::spectrum::VisualizationSource;
+use super::transition::{self, TransitionGain, TransitionSource};
 use crate::error::AppError;
 
 use super::{FADE_IN_MS, FADE_IN_ON_SEEK_MS};
@@ -21,9 +22,14 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tauri::{AppHandle, State};
 
-/// 共享模式 sink 替换（play/seek）的互斥：命令跑在线程池上，两个并发 seek 各自
+/// 共享模式 sink 替换（play/seek/过渡）的互斥：命令跑在线程池上，两个并发 seek 各自
 /// stop + append 会让两份音源同时排队进 sink（旧音源播完才轮到新的），必须在此排队
-static SHARED_SINK_GATE: Mutex<()> = Mutex::new(());
+pub(crate) static SHARED_SINK_GATE: Mutex<()> = Mutex::new(());
+
+/// 供过渡调度线程复用同一把 sink 互斥锁
+pub(crate) fn shared_sink_gate() -> &'static Mutex<()> {
+    &SHARED_SINK_GATE
+}
 
 /// 播放音轨（共享模式）
 pub fn play_track_shared(
@@ -33,56 +39,72 @@ pub fn play_track_shared(
     position: Option<f32>,
 ) -> Result<(), AppError> {
     let player = &state.player;
+    // 手动切歌会作废正在进行的智能过渡，并立刻丢弃仍在淡出的旧曲
+    transition::cancel_smart_transition(state);
     // 解码准备（打开 + 探测 + seek + 预解码）放在 SHARED_SINK_GATE 之前：冷盘文件这段
     // 可达几十毫秒，压在 gate/sink 锁里会把并发 seek 无谓串行化、挡住其它碰 sink 的
     // 路径；提前后旧曲目在此期间继续出声，起播失败（两侧解码都挂）也不会先停掉
     // 正在播的旧曲
-    let (spectrum, eq_settings, target_fps, gate) = (
+    let (spectrum, eq_settings, target_fps, gate, authority) = (
         Arc::clone(&player.visualization.spectrum_data),
         state.equalizer.get_settings_handle(),
         Arc::clone(&player.visualization.target_fps),
         Arc::clone(&player.visualization.spectrum_gate),
+        Arc::clone(&player.track.playback_token),
     );
-    let source: Box<dyn Source<Item = f32> + Send> = match SymphoniaDecoder::new(path) {
-        Ok(mut dec) => {
-            let start_pos = position.unwrap_or(0.0);
-            if let Some(t) = position {
-                if let Err(e) = dec.seek(Duration::from_secs_f32(t)) {
-                    log::warn!("Seek failed for track, starting from beginning: {e}");
+    let channels = |src: &(dyn Source<Item = f32> + Send)| src.channels().get();
+    let sample_rate = |src: &(dyn Source<Item = f32> + Send)| src.sample_rate().get();
+    let total_duration = |src: &(dyn Source<Item = f32> + Send)| src.total_duration();
+
+    let (source, samples): (Box<dyn Source<Item = f32> + Send>, Arc<_>) =
+        match SymphoniaDecoder::new(path) {
+            Ok(mut dec) => {
+                let start_pos = position.unwrap_or(0.0);
+                if let Some(t) = position {
+                    if let Err(e) = dec.seek(Duration::from_secs_f32(t)) {
+                        log::warn!("Seek failed for track, starting from beginning: {e}");
+                    }
                 }
-            }
-            let _ = dec.prefill_buffer();
-            log::debug!("Symphonia decoder: {path}");
-            Box::new(
-                VisualizationSource::new(
+                let _ = dec.prefill_buffer();
+                log::debug!("Symphonia decoder: {path}");
+                let vis = VisualizationSource::new(
                     LockFreeSymphoniaSource::new(dec),
                     spectrum,
                     Some(app.clone()),
                     target_fps,
                     gate,
+                    Arc::clone(&authority),
                 )
                 .with_start_position(start_pos)
-                .with_eq_settings(eq_settings)
-                .fade_in(Duration::from_millis(FADE_IN_MS)), // 稍长的淡入来补偿没有淡出
-            )
-        }
-        Err(e) => {
-            log::warn!("Symphonia decoder failed, fallback to rodio: {e}");
-            let file = crate::android::saf::open_media_file(path)?;
-            Box::new(
-                VisualizationSource::new(
+                .with_eq_settings(eq_settings);
+                let samples = vis.samples_played_handle();
+                let vis = vis.fade_in(Duration::from_millis(FADE_IN_MS)); // 稍长的淡入来补偿没有淡出
+                (Box::new(vis), samples)
+            }
+            Err(e) => {
+                log::warn!("Symphonia decoder failed, fallback to rodio: {e}");
+                let file = crate::android::saf::open_media_file(path)?;
+                let vis = VisualizationSource::new(
                     rodio::Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?,
                     spectrum,
                     Some(app.clone()),
                     target_fps,
                     gate,
+                    Arc::clone(&authority),
                 )
                 .with_start_position(position.unwrap_or(0.0))
-                .with_eq_settings(eq_settings)
-                .fade_in(Duration::from_millis(FADE_IN_MS)),
-            )
-        }
-    };
+                .with_eq_settings(eq_settings);
+                let samples = vis.samples_played_handle();
+                let vis = vis.fade_in(Duration::from_millis(FADE_IN_MS));
+                (Box::new(vis), samples)
+            }
+        };
+
+    let (src_channels, src_rate, duration) = (
+        channels(source.as_ref()),
+        sample_rate(source.as_ref()),
+        total_duration(source.as_ref()),
+    );
 
     // 先排队再碰任何共享状态,理由见 SHARED_SINK_GATE;锁内只剩纯 sink 操作
     let _sink_gate = lock_or_log!(SHARED_SINK_GATE.lock());
@@ -103,6 +125,7 @@ pub fn play_track_shared(
     // 手动重采样到 mixer 的采样率：rodio 0.22 的 UniformSourceIterator 在 queue keep_alive 模式下，
     // source.current_span_len() 返回 None 时不会重新 bootstrap SampleRateConverter，高采样率音轨
     // 会被以错误的速率播放（降速）；因此在 append 之前先手动重采样。
+    let gain = Arc::new(TransitionGain::new(1.0, 1.0));
     let resampled: Box<dyn Source<Item = f32> + Send> = {
         let stream_guard = lock_or_log!(player.output.output_stream.lock());
         if let Some(ref mixer_sink) = *stream_guard {
@@ -122,11 +145,28 @@ pub fn play_track_shared(
             source
         }
     };
+    let resampled: Box<dyn Source<Item = f32> + Send> =
+        Box::new(TransitionSource::new(resampled, Arc::clone(&gain)));
 
     let player_lock = lock_or_log!(player.output.sink.lock());
     player_lock.append(resampled);
     player_lock.play();
     drop(player_lock);
+
+    *lock_or_log!(player.transition.current_gain.lock()) = Some(Arc::clone(&gain));
+    // 调度线程可能立刻读队列算"下一首"，这里先把下标对齐到正在播的曲目
+    if let Ok(mut queue) = player.queue.lock() {
+        queue.sync_index_by_path(path);
+    }
+    transition::spawn_smart_transition(
+        app.clone(),
+        state,
+        path.to_string(),
+        duration.map(|d| d.as_secs_f64()),
+        samples,
+        src_rate,
+        src_channels,
+    );
     Ok(())
 }
 
@@ -143,6 +183,8 @@ pub async fn play_track_exclusive(
     start_playback: bool,
 ) -> Result<(), AppError> {
     let player = &state.player;
+    // 独占模式不支持双音源混音，起播前作废任何共享模式的过渡调度
+    transition::cancel_smart_transition(state);
     // 递增代际计数器取消旧解码推送线程（布尔标志会有约 70ms 的状态不一致窗口）
     player.decode.generation.fetch_add(1, Ordering::SeqCst);
     let new_thread_id = player.decode.id.fetch_add(1, Ordering::SeqCst) + 1;
@@ -344,23 +386,30 @@ pub fn seek_track_shared(
     // 解码准备放在 SHARED_SINK_GATE 之前（理由同 play_track_shared）：重活不压着
     // gate，旧音源也得以多播到被替换的那一刻
     let player = &state.player;
+    // seek 会重建音源，正在进行的智能过渡必须取消（不重新调度：用户刚跳转，不必再猜切点）
+    transition::cancel_smart_transition(state);
     let eq_settings = state.equalizer.get_settings_handle();
     let mut decoder =
         SymphoniaDecoder::new(path).map_err(|e| format!("Failed to create decoder: {e}"))?;
     decoder.seek(Duration::from_secs_f32(time))?;
     let _ = decoder.prefill_buffer();
-    let source: Box<dyn Source<Item = f32> + Send> = Box::new(
-        VisualizationSource::new(
-            LockFreeSymphoniaSource::new(decoder),
-            Arc::clone(&player.visualization.spectrum_data),
-            Some(app.clone()),
-            Arc::clone(&player.visualization.target_fps),
-            Arc::clone(&player.visualization.spectrum_gate),
-        )
-        .with_start_position(time)
-        .with_eq_settings(eq_settings)
-        .fade_in(Duration::from_millis(FADE_IN_ON_SEEK_MS)), // seek时使用较短的淡入
-    );
+    let vis = VisualizationSource::new(
+        LockFreeSymphoniaSource::new(decoder),
+        Arc::clone(&player.visualization.spectrum_data),
+        Some(app.clone()),
+        Arc::clone(&player.visualization.target_fps),
+        Arc::clone(&player.visualization.spectrum_gate),
+        Arc::clone(&player.track.playback_token),
+    )
+    .with_start_position(time)
+    .with_eq_settings(eq_settings);
+    let samples = vis.samples_played_handle();
+    let duration = vis.total_duration();
+    let src_rate = vis.sample_rate().get();
+    let src_channels = vis.channels().get();
+    let vis = vis.fade_in(Duration::from_millis(FADE_IN_ON_SEEK_MS)); // seek时使用较短的淡入
+    let source: Box<dyn Source<Item = f32> + Send> = Box::new(vis);
+    let gain = Arc::new(TransitionGain::new(1.0, 1.0));
 
     // 与 play_track_shared 互斥:seek 也是"stop + append 新音源",不排队的话
     // 两次并发 seek 会把两份音源都排进 sink
@@ -389,9 +438,25 @@ pub fn seek_track_shared(
         sink.set_volume(*lock_or_log!(player.output.target_volume.lock()));
         drop(sink);
     }
+    let resampled: Box<dyn Source<Item = f32> + Send> =
+        Box::new(TransitionSource::new(resampled, Arc::clone(&gain)));
     let sink = lock_or_log!(player.output.sink.lock());
     sink.append(resampled);
     sink.play();
     drop(sink);
+    *lock_or_log!(player.transition.current_gain.lock()) = Some(Arc::clone(&gain));
+    if let Ok(mut queue) = player.queue.lock() {
+        queue.sync_index_by_path(path);
+    }
+    // seek 之后仍可为后面的曲目保留智能过渡
+    transition::spawn_smart_transition(
+        app.clone(),
+        state,
+        path.to_string(),
+        duration.map(|d| d.as_secs_f64()),
+        samples,
+        src_rate,
+        src_channels,
+    );
     Ok(())
 }

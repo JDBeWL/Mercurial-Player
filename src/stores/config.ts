@@ -101,6 +101,7 @@ export const useConfigStore = defineStore('config', {
       exclusiveMode: false,
       volume: 0.5,
       fadeEnabled: true,
+      smartTransitionEnabled: false,
       usbDacExclusive: false,
     },
 

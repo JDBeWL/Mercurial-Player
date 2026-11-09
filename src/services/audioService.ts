@@ -49,6 +49,16 @@ export function getFadeEnabled(): Promise<boolean> {
   return invoke<boolean>('get_fade_enabled')
 }
 
+/** 设置智能过渡开关（按节拍对齐 + DJ 式交叉淡化，仅共享模式生效） */
+export function setSmartTransitionEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>('set_smart_transition_enabled', { enabled })
+}
+
+/** 获取智能过渡开关状态 */
+export function getSmartTransitionEnabled(): Promise<boolean> {
+  return invoke<boolean>('get_smart_transition_enabled')
+}
+
 /** 单个输出设备的摘要（Android，来自 AudioManager.getDevices） */
 export interface OutputDevice {
   id: number

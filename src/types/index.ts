@@ -169,6 +169,8 @@ export interface AudioConfig {
   volume: number
   /* 是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音) */
   fadeEnabled: boolean
+  /* 智能过渡：按节拍/小节对齐 + DJ 式交叉淡化，仅共享模式生效 */
+  smartTransitionEnabled: boolean
   /* Android:是否在检测到 USB 音频设备时走 AAudio 独占(位完美)。
      与 Windows 的 exclusiveMode 是同一类诉求,但触发条件不同(必须插着 USB DAC),
      因此单独一个开关:桌面端读到 false 不影响任何行为。 */

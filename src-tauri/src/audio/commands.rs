@@ -6,6 +6,8 @@ use crate::error::AppError;
 use super::device::{AudioDeviceInfo, get_all_audio_devices};
 use super::playback::{play_track_exclusive, play_track_shared, seek_track_shared};
 use super::queue::{self, RepeatMode};
+use super::shared_output::SharedOutput;
+use super::transition;
 
 #[cfg(windows)]
 use super::wasapi::WasapiExclusivePlayback;
@@ -34,11 +36,11 @@ const FADE_STEP_MS: u64 = 3;
 /// `direction` 正数淡入、负数淡出；`on_complete` 在持锁状态下执行且执行前再查一次代际，
 /// 防止 fade-out 的 pause() 落在 resume 的 play() 之后。
 fn spawn_shared_fade(
-    sink: Arc<std::sync::Mutex<rodio::Player>>,
+    sink: Arc<std::sync::Mutex<SharedOutput>>,
     target_volume: f32,
     direction: i32,
     fade_generation: Arc<AtomicU32>,
-    on_complete: Box<dyn FnOnce(&rodio::Player) + Send>,
+    on_complete: Box<dyn FnOnce(&SharedOutput) + Send>,
 ) {
     use std::thread;
     let fade_gen = fade_generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -504,6 +506,8 @@ async fn switch_to_wasapi_exclusive(
     current_time: Option<f32>,
 ) -> Result<(), AppError> {
     log::info!("Switching to WASAPI exclusive mode for device: {device_name}");
+    // 切到独占前先作废智能过渡：独占模式不支持双音源混音
+    transition::cancel_smart_transition(state);
 
     let (is_playing, current_path) = {
         let is_playing = {
@@ -640,6 +644,8 @@ async fn switch_to_shared_mode(
     current_time: Option<f32>,
 ) -> Result<(), AppError> {
     log::info!("Switching to shared mode for device: {device_name}");
+    // 换输出设备会重建 sink，旧调度线程必须退出
+    transition::cancel_smart_transition(state);
 
     // 先记录当前播放状态和路径（必须在停止旧播放器之前）
     let (is_playing, volume, current_path) = {
@@ -754,10 +760,16 @@ async fn switch_to_shared_mode(
     };
 
     let new_player = rodio::Player::connect_new(new_mixer_sink.mixer());
+    let new_output = SharedOutput::new(
+        new_player,
+        new_mixer_sink.mixer().clone(),
+        new_mixer_sink.config().sample_rate().get(),
+        new_mixer_sink.config().channel_count().get(),
+    );
 
     {
         let mut player_guard = state.player.output.sink.lock().lock_or_err("player")?;
-        *player_guard = new_player;
+        *player_guard = new_output;
         player_guard.set_volume(volume);
         if is_playing {
             player_guard.play();
@@ -1069,6 +1081,32 @@ pub fn set_fade_enabled(state: State<AppState>, enabled: bool) -> Result<(), App
 #[command]
 pub fn get_fade_enabled(state: State<AppState>) -> Result<bool, AppError> {
     Ok(state.player.fade.enabled.load(Ordering::SeqCst))
+}
+
+/// 设置是否启用智能过渡（按节拍对齐 + DJ 式交叉淡化）。
+///
+/// 仅共享模式生效；关闭时立即取消正在进行的过渡，独占模式不会启动该功能。
+#[command]
+pub fn set_smart_transition_enabled(state: State<AppState>, enabled: bool) -> Result<(), AppError> {
+    state
+        .player
+        .transition
+        .enabled
+        .store(enabled, Ordering::SeqCst);
+    if !enabled {
+        transition::cancel_smart_transition(&state);
+    }
+    log::info!(
+        "Smart transition {}",
+        if enabled { "enabled" } else { "disabled" }
+    );
+    Ok(())
+}
+
+/// 获取当前是否启用智能过渡
+#[command]
+pub fn get_smart_transition_enabled(state: State<AppState>) -> Result<bool, AppError> {
+    Ok(state.player.transition.enabled.load(Ordering::SeqCst))
 }
 
 // 播放队列与媒体控制

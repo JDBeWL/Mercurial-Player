@@ -305,6 +305,8 @@
     "exclusiveModeRestartHint": "请关闭并重新打开应用程序以应用新的音频模式设置",
     "fadeEnabled": "淡入淡出",
     "fadeEnabledDesc": "切歌时平滑过渡、暂停/恢复时消除爆音",
+    "smartTransitionEnabled": "智能过渡",
+    "smartTransitionEnabledDesc": "按节拍/小节对齐并做 DJ 式交叉淡化，让歌曲自然衔接（仅共享模式生效）",
     "equalizer": "EQ 均衡器",
     "enableEq": "启用均衡器",
     "eqPreset": "预设",

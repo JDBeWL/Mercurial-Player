@@ -1,10 +1,11 @@
 /** 播放队列同步。Android 上 App 进后台后 WebView 的 JS 会被节流/冻结，`track-ended`
  *  可能无人处理、播完即停，故把排好序的队列同步给 Rust 负责自然结束后的推进，
- *  前端在 Android 上退化为跟随者（监听 `queue-track-changed`）。桌面端行为零改变。 */
+ *  前端在 Android 上退化为跟随者（监听 `queue-track-changed`）。
+ *  桌面端仍由前端推进，但开启智能过渡时也要同步队列：Rust 需要提前知道下一首以预载并交叉淡化。 */
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { watch, type WatchStopHandle } from 'vue'
-import type { Track, TrackSnapshot } from '@/types'
+import type { TrackSnapshot } from '@/types'
 import { getPlatform } from '@/services/appService'
 import logger from '@/utils/logger'
 import type { usePlayerStore } from './index'
@@ -60,7 +61,12 @@ function orderedTracks(store: PlayerStore): TrackSnapshot[] {
  *  切歌时的下标同步不走这里，由 play_track 命令（note_playback_started）在 Rust 侧完成。 */
 let syncSeq = 0
 
-async function syncPlayQueue(store: PlayerStore): Promise<void> {
+/** 队列同步的可选依赖：桌面端只有在开启智能过渡时才需要把队列交给 Rust（用于预载下一首） */
+export interface PlayQueueSyncOptions {
+  smartTransitionsEnabled?: () => boolean
+}
+
+async function syncPlayQueue(store: PlayerStore, options?: PlayQueueSyncOptions): Promise<void> {
   if (store._isDestroyed) return
   // latest-wins：判平台的 await 期间又触发了新一次同步时，旧请求放弃发送，
   // 避免慢的旧快照后到、把新快照覆盖回去
@@ -68,7 +74,8 @@ async function syncPlayQueue(store: PlayerStore): Promise<void> {
   try {
     const android = await isAndroid()
     if (seq !== syncSeq || store._isDestroyed) return
-    if (!android) return
+    const smartTransitions = options?.smartTransitionsEnabled?.() ?? false
+    if (!android && !smartTransitions) return
     const tracks = orderedTracks(store)
       .map(toSnapshot)
       .filter((t): t is TrackSnapshot => t !== null)
@@ -78,28 +85,11 @@ async function syncPlayQueue(store: PlayerStore): Promise<void> {
       tracks,
       currentIndex: index >= 0 ? index : null,
       repeatMode: store.repeatMode ?? 'none',
-      autoAdvance: true,
+      // 桌面端仍然由前端推进；Rust 只把它当"下一首是谁"的数据源
+      autoAdvance: android,
     })
   } catch (err) {
     logger.warn('Failed to sync play queue:', err)
-  }
-}
-
-/** Rust 的 TrackSnapshot 用 null 表示"未知",前端 Track 用 undefined,这里做一次归一 */
-function snapshotToTrack(snapshot: TrackSnapshot): Track {
-  return {
-    path: snapshot.path,
-    name: snapshot.title ?? snapshot.path,
-    title: snapshot.title ?? undefined,
-    artist: snapshot.artist ?? undefined,
-    album: snapshot.album ?? undefined,
-    duration: snapshot.duration ?? undefined,
-    bitrate: snapshot.bitrate ?? undefined,
-    sampleRate: snapshot.sampleRate ?? undefined,
-    channels: snapshot.channels ?? undefined,
-    bitDepth: snapshot.bitDepth ?? undefined,
-    format: snapshot.format ?? undefined,
-    bpm: snapshot.bpm ?? undefined,
   }
 }
 
@@ -118,15 +108,10 @@ export async function setupQueueListener(store: PlayerStore): Promise<UnlistenFn
           store.isPlaying = false
           return
         }
-        // Rust 侧已经开始播放，前端只更新状态，不能再次 invoke play_track
-        const idx = store.playlist.findIndex((t) => t.path === track.path)
-        if (idx >= 0) {
-          store.currentTrack = { ...store.playlist[idx]! }
-        } else {
-          store.currentTrack = snapshotToTrack(track)
-        }
-        store.currentTime = 0
-        store.duration = track.duration ?? 0
+        // Rust 侧已经开始播放，前端只更新状态，不能再次 invoke play_track。
+        // 走完整应用（封面/歌词/音频信息）而不是只换 currentTrack：智能过渡在旧曲
+        // 结束前就切到新曲，UI 必须与真正出声的曲目一致。
+        store._applyExternalTrack(track)
         store.isPlaying = true
       },
     )
@@ -177,7 +162,7 @@ let queueWatchStop: WatchStopHandle | null = null
 /** 监听队列结构/顺序变化，自动同步快照到 Rust。
  *  currentTrack 不在源里：每次切歌都重发整份队列没有意义，下标由 play_track 命令
  *  （note_playback_started → sync_index_by_path）在 Rust 侧同步。 */
-export function watchPlayQueue(store: PlayerStore): void {
+export function watchPlayQueue(store: PlayerStore, options?: PlayQueueSyncOptions): void {
   if (queueWatchStop) return
   // watch 路径拼接而不是数组本身:playlist 原地变异不改引用,直接 watch 数组不会触发
   queueWatchStop = watch(
@@ -188,9 +173,11 @@ export function watchPlayQueue(store: PlayerStore): void {
         store._shuffleOrder.join(','),
         store.repeatMode,
         store.isShuffle,
+        // 开关打开时才需要把队列交给 Rust；开关变化也要立刻补发一次
+        options?.smartTransitionsEnabled?.() ?? false,
       ] as const,
     () => {
-      void syncPlayQueue(store)
+      void syncPlayQueue(store, options)
     },
     { immediate: true },
   )

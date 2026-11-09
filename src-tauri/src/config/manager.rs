@@ -227,6 +227,9 @@ pub struct AudioConfig {
     /// 是否启用淡入淡出(切歌平滑过渡 + pause/resume 消除爆音)
     #[serde(default = "default_true")]
     pub fade_enabled: bool,
+    /// 智能过渡：按节拍/小节对齐并做 DJ 式交叉淡化；仅共享模式生效，独占模式不参与
+    #[serde(default)]
+    pub smart_transition_enabled: bool,
     /// 用户手动选择的输出设备标识，取自 cpal `DeviceTrait::id()`，落盘为 `"host:id"`；标识机器绑定，
     /// 失效时启动静默回退系统默认设备，只有设置页主动选择才写入，自动回退不覆盖用户选择。
     #[serde(default)]
@@ -429,6 +432,7 @@ impl Default for AudioConfig {
             exclusive_mode: false,
             volume: default_volume(),
             fade_enabled: true,
+            smart_transition_enabled: false,
             preferred_device_id: None,
             usb_dac_exclusive: false,
         }
@@ -808,6 +812,7 @@ mod tests {
         assert!(!config.audio.exclusive_mode);
         assert!(approx_eq(config.audio.volume, 0.5));
         assert!(config.audio.fade_enabled);
+        assert!(!config.audio.smart_transition_enabled);
         assert_eq!(config.lyrics.online_source, "netease");
         assert_eq!(config.lyrics.lyrics_alignment, "center");
         assert!(config.last_session.is_none());
@@ -882,6 +887,7 @@ mod tests {
         assert!(json.contains("\"titleExtraction\""));
         assert!(json.contains("\"exclusiveMode\""));
         assert!(json.contains("\"fadeEnabled\""));
+        assert!(json.contains("\"smartTransitionEnabled\""));
         assert!(json.contains("\"onlineSource\""));
         assert!(json.contains("\"lyricsAlignment\""));
         assert!(json.contains("\"translationFontFamily\""));
@@ -931,6 +937,7 @@ mod tests {
         assert!(!config.exclusive_mode);
         assert!(approx_eq(config.volume, 0.5));
         assert!(config.fade_enabled);
+        assert!(!config.smart_transition_enabled);
         assert!(config.preferred_device_id.is_none());
     }
 

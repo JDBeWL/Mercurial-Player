@@ -315,6 +315,8 @@ pub struct VisualizationSource<I: Source<Item = f32> + Send> {
     eof_reached: Arc<AtomicBool>,
     /// 置为 true 后分析线程退出(本值在 drop 时设置)
     analysis_stop: Arc<AtomicBool>,
+    /// 本音源的播放权威令牌；交叉淡化期间旧曲仍出声但不该上报进度或结束
+    token: u64,
 }
 
 /// 采样通道容量(向上取整到 2 的幂)
@@ -332,6 +334,7 @@ const POSITION_EMIT_INTERVAL_MS: u64 = 100;
 ///
 /// FFT 会堆分配、`app.emit` 要 JSON 序列化并跨线程投递,都不能在音频回调线程上做。
 /// 音频线程只写 `SampleRing` 与置 EOF 标志,这里负责计算与发送。
+#[allow(clippy::too_many_arguments)]
 fn spawn_spectrum_thread(
     sample_rate: u32,
     channels: u16,
@@ -343,6 +346,8 @@ fn spawn_spectrum_thread(
     samples_played: Arc<AtomicU64>,
     eof_reached: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
+    authority: Option<Arc<AtomicU64>>,
+    token: u64,
 ) {
     std::thread::spawn(move || {
         let mut analyzer = SpectrumAnalyzer::new(sample_rate, channels);
@@ -352,9 +357,16 @@ fn spawn_spectrum_thread(
         // 初值取 MAX,保证首个发送窗口一定发一次位置
         let mut last_emitted_samples: u64 = u64::MAX;
 
+        // 当前线程是否仍代表"正在播放的那首"：交叉淡化开始后旧曲的令牌会被新曲取代
+        let is_authoritative = || {
+            authority
+                .as_ref()
+                .is_none_or(|slot| slot.load(Ordering::SeqCst) == token)
+        };
+
         // 消费一次 EOF 标志并发送 track-ended(用 swap 保证只发一次)
-        fn emit_ended_once(app: Option<&AppHandle>, eof: &AtomicBool) {
-            if eof.swap(false, Ordering::SeqCst) {
+        fn emit_ended_once(app: Option<&AppHandle>, eof: &AtomicBool, authoritative: bool) {
+            if eof.swap(false, Ordering::SeqCst) && authoritative {
                 if let Some(app) = app {
                     if let Err(e) = emit_track_ended(app) {
                         log::warn!("track-ended 发送失败，自动续播可能中断: {e}");
@@ -364,11 +376,13 @@ fn spawn_spectrum_thread(
         }
 
         while !stop.load(Ordering::SeqCst) {
-            emit_ended_once(app.as_ref(), &eof_reached);
+            let authoritative = is_authoritative();
+            emit_ended_once(app.as_ref(), &eof_reached, authoritative);
 
             let now = now_ms();
-            // 门控见 SpectrumGate；未放行时采样堆到 ring 上限后由 push 侧丢弃
-            if gate.allowed() {
+            // 门控见 SpectrumGate；未放行时采样堆到 ring 上限后由 push 侧丢弃。
+            // 非权威音源（淡出中的旧曲）不参与频谱，避免两首频谱叠加闪烁。
+            if authoritative && gate.allowed() {
                 let drained = ring.drain_into(&mut scratch, SPECTRUM_DRAIN_MAX);
                 if drained > 0 {
                     analyzer.extend_buffer(&scratch);
@@ -378,7 +392,8 @@ fn spawn_spectrum_thread(
             }
 
             // 播放位置事件同样不能从音频线程发送
-            if now.saturating_sub(last_position_emit) >= POSITION_EMIT_INTERVAL_MS {
+            if authoritative && now.saturating_sub(last_position_emit) >= POSITION_EMIT_INTERVAL_MS
+            {
                 last_position_emit = now;
                 let played = samples_played.load(Ordering::Relaxed);
                 // 暂停时计数不再增长,重复投递相同位置只是白白占用 IPC
@@ -397,7 +412,7 @@ fn spawn_spectrum_thread(
 
         // EOF 与 drop 几乎同时发生(音频线程先置 EOF、再在 drop 里置 stop),
         // 退出前再消费一次,避免漏发
-        emit_ended_once(app.as_ref(), &eof_reached);
+        emit_ended_once(app.as_ref(), &eof_reached, is_authoritative());
     });
 }
 
@@ -408,12 +423,15 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
         app_handle: Option<AppHandle>,
         target_fps: Arc<AtomicU64>,
         gate: Arc<SpectrumGate>,
+        authority: Arc<AtomicU64>,
     ) -> Self {
         let (sr, ch) = (input.sample_rate().get(), input.channels().get());
         let samples_played = Arc::new(AtomicU64::new(0));
         let sample_ring = Arc::new(SampleRing::new(SPECTRUM_RING_CAPACITY));
         let eof_reached = Arc::new(AtomicBool::new(false));
         let analysis_stop = Arc::new(AtomicBool::new(false));
+        // 每建一条音源就换一个令牌：旧音源的分析线程立即失去进度/结束上报资格
+        let token = authority.fetch_add(1, Ordering::SeqCst) + 1;
 
         // 分析线程接管 FFT 与事件发送,spectrum_data / app_handle 所有权整体移交
         spawn_spectrum_thread(
@@ -427,6 +445,8 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             Arc::clone(&samples_played),
             Arc::clone(&eof_reached),
             Arc::clone(&analysis_stop),
+            Some(authority),
+            token,
         );
 
         Self {
@@ -442,7 +462,20 @@ impl<I: Source<Item = f32> + Send> VisualizationSource<I> {
             sample_ring,
             eof_reached,
             analysis_stop,
+            token,
         }
+    }
+
+    /// 当前音源的播放位置计数句柄（采样数，按源采样率/声道数）
+    #[must_use]
+    pub fn samples_played_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.samples_played)
+    }
+
+    /// 当前音源的播放权威令牌
+    #[must_use]
+    pub const fn token(&self) -> u64 {
+        self.token
     }
 
     /// 设置初始播放位置（用于seek操作）

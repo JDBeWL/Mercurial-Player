@@ -7,7 +7,7 @@ use crate::config::ConfigManager;
 use crate::equalizer::GlobalEqualizer;
 use crate::{
     AppState, AudioOutputState, DecodeThreadState, FadeControl, PlayerState, TrackState,
-    VisualizationState,
+    TransitionState, VisualizationState,
 };
 
 #[cfg(windows)]
@@ -45,6 +45,7 @@ pub fn build_app_state(
     device_name: String,
     exclusive_mode_enabled: bool,
     fade_enabled: bool,
+    smart_transition_enabled: bool,
     config_manager: ConfigManager,
 ) -> AppState {
     let AudioOutput {
@@ -52,6 +53,12 @@ pub fn build_app_state(
         mixer_sink,
         wasapi_player,
     } = output;
+    let sink = crate::audio::shared_output::SharedOutput::new(
+        sink,
+        mixer_sink.mixer().clone(),
+        mixer_sink.config().sample_rate().get(),
+        mixer_sink.config().channel_count().get(),
+    );
 
     // 均衡器设置独立落盘到 data/eq.json(与 config.json 分开,高频低频写互不干扰)
     let equalizer = GlobalEqualizer::with_persistence(config_manager.get_config_directory());
@@ -71,6 +78,7 @@ pub fn build_app_state(
             },
             track: TrackState {
                 current_path: Arc::new(Mutex::new(None)),
+                playback_token: Arc::new(AtomicU64::new(0)),
             },
             visualization: VisualizationState {
                 spectrum_data: Arc::new(Mutex::new(vec![
@@ -89,6 +97,11 @@ pub fn build_app_state(
             fade: FadeControl {
                 generation: Arc::new(AtomicU32::new(0)),
                 enabled: Arc::new(AtomicBool::new(fade_enabled)),
+            },
+            transition: TransitionState {
+                enabled: Arc::new(AtomicBool::new(smart_transition_enabled)),
+                generation: Arc::new(AtomicU64::new(0)),
+                current_gain: Arc::new(Mutex::new(None)),
             },
         },
         config_manager,
