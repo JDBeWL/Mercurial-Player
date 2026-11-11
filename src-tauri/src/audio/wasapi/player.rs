@@ -11,7 +11,7 @@ fn check_device_format(device_name: Option<&str>) -> Result<(u32, u16), AppError
 
     let device = if let Some(name) = device_name {
         let collection = enumerator
-            .get_device_collection(&Direction::Render)
+            .get_device_collection(Direction::Render)
             .map_err(|e| format!("Failed to get device collection: {e:?}"))?;
 
         collection
@@ -21,7 +21,7 @@ fn check_device_format(device_name: Option<&str>) -> Result<(u32, u16), AppError
             .ok_or_else(|| format!("Device not found: {name}"))?
     } else {
         enumerator
-            .get_default_device(&Direction::Render)
+            .get_default_device(Direction::Render)
             .map_err(|e| format!("Failed to get default device: {e:?}"))?
     };
 
@@ -49,10 +49,10 @@ fn get_exclusive_format(audio_client: &AudioClient) -> Result<(u32, u16), AppErr
         } else {
             SampleType::Int
         };
-        let wave_format = WaveFormat::new(bits, bits, &sample_type, sample_rate, channels, None);
+        let wave_format = WaveFormat::new(bits, bits, sample_type, sample_rate, channels, None);
 
         if audio_client
-            .is_supported(&wave_format, &ShareMode::Exclusive)
+            .is_supported(&wave_format, ShareMode::Exclusive)
             .is_ok()
         {
             return Ok((sample_rate as u32, channels as u16));

@@ -14,7 +14,7 @@ pub(super) fn initialize_exclusive_device(
 
     let device = if let Some(name) = device_name {
         let collection = enumerator
-            .get_device_collection(&Direction::Render)
+            .get_device_collection(Direction::Render)
             .map_err(|e| format!("Failed to get device collection: {e:?}"))?;
         collection
             .into_iter()
@@ -23,7 +23,7 @@ pub(super) fn initialize_exclusive_device(
             .ok_or_else(|| format!("Device not found: {name}"))?
     } else {
         enumerator
-            .get_default_device(&Direction::Render)
+            .get_default_device(Direction::Render)
             .map_err(|e| format!("Failed to get default device: {e:?}"))?
     };
 
@@ -70,10 +70,10 @@ pub(super) fn initialize_exclusive_device(
                     SampleType::Int
                 };
                 let wave_format =
-                    WaveFormat::new(bits, bits, &sample_type, sample_rate, channels, None);
+                    WaveFormat::new(bits, bits, sample_type, sample_rate, channels, None);
 
                 if audio_client
-                    .is_supported(&wave_format, &ShareMode::Exclusive)
+                    .is_supported(&wave_format, ShareMode::Exclusive)
                     .is_ok()
                 {
                     found_format = Some((
@@ -103,7 +103,9 @@ pub(super) fn initialize_exclusive_device(
     // 尝试初始化独占模式，添加重试机制
     let mut last_error = None;
     for attempt in 1..=3 {
-        match audio_client.initialize_client(&wave_format, &Direction::Render, &stream_mode) {
+        // wasapi 0.27：direction / stream_mode 改为按值传入，并新增可选的 session GUID
+        // （None 表示不指定，保持与升级前一致的行为）
+        match audio_client.initialize_client(&wave_format, Direction::Render, stream_mode, None) {
             Ok(()) => {
                 log::info!(
                     "WASAPI Exclusive Mode initialized: {device_name} @ {sample_rate}Hz, {channels} channels, {bits} bits, float: {is_float}"

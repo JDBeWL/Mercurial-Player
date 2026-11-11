@@ -2,9 +2,10 @@
 //!
 //! 运行 `cargo bench --bench equalizer`，报告在 `target/criterion/equalizer/`。
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use mercurial_player_lib::audio::EqProcessor;
 use mercurial_player_lib::equalizer::{EQ_BAND_COUNT, EqSettings};
+use std::hint::black_box;
 
 /// 生成测试用音频采样 (440Hz sine wave)
 fn generate_samples(count: usize, sample_rate: u32) -> Vec<f32> {

@@ -163,8 +163,9 @@ impl From<&str> for AppError {
 }
 
 // 音频库错误归入 Audio，避免 `.to_string().into()` 落入 Other
-// 清单随依赖版本而变：cpal 0.15+ 把统一的 `cpal::Error` 按操作拆分；rodio 0.22 的 `StreamError`
-// 由 `PlayError` 携带，根路径只导出 `PlayError`/`DeviceSinkError`
+// 清单随依赖版本而变：cpal 0.18 起废弃了按操作拆分的错误类型
+// （BuildStreamError/StreamError/...），统一为 `cpal::Error` + `cpal::ErrorKind`；
+// rodio 的 `StreamError` 由 `PlayError` 携带，根路径只导出 `PlayError`/`DeviceSinkError`
 
 macro_rules! impl_audio_from {
     ($($ty:ty => $desc:literal),+ $(,)?) => {
@@ -179,16 +180,14 @@ macro_rules! impl_audio_from {
     };
 }
 
+// 附带 ErrorKind，便于区分“设备被占用/设备不可用/采样格式不支持”等排查方向
+impl From<cpal::Error> for AppError {
+    fn from(err: cpal::Error) -> Self {
+        Self::Audio(format!("音频设备错误({:?}): {err}", err.kind()))
+    }
+}
+
 impl_audio_from!(
-    cpal::BuildStreamError => "打开音频输出流失败: {e}",
-    cpal::StreamError => "音频流运行错误: {e}",
-    cpal::PlayStreamError => "音频流播放错误: {e}",
-    cpal::PauseStreamError => "音频流暂停错误: {e}",
-    cpal::DefaultStreamConfigError => "获取音频设备默认配置失败: {e}",
-    cpal::SupportedStreamConfigsError => "查询音频设备支持配置失败: {e}",
-    cpal::DevicesError => "枚举音频设备失败: {e}",
-    cpal::DeviceNameError => "读取音频设备名称失败: {e}",
-    cpal::DeviceIdError => "解析音频设备标识失败: {e}",
     rodio::PlayError => "播放流创建错误: {e}",
     rodio::DeviceSinkError => "创建设备音频输出失败: {e}",
 );

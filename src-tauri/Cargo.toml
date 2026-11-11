@@ -1,6 +1,6 @@
 [package]
 name = "mercurial-player"
-version = "1.6.6"
+version = "1.7.0"
 description = "A music player by JDBeWL"
 authors = ["jdbEwl"]
 license = "GPL-3.0"
@@ -14,52 +14,54 @@ name = "mercurial_player_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.7", features = [] }
+tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
-tauri = { version = "2.12", features = ["protocol-asset", "rustls-tls"] }
+tauri = { version = "2.12.5", features = ["protocol-asset", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rodio = { version = "0.22", default-features = false, features = ["playback"] }
-cpal = "0.17"
-dirs = "6"
+rodio = { version = "0.23", default-features = false, features = ["playback"] }
+cpal = "0.18"
+dirs = "7"
 walkdir = "2"
-lofty = "0.24"
-symphonia = { version = "0.6", features = ["all"] }
-rubato = "4.0"
-audioadapter-buffers = "4.0"
+lofty = "0.25"
+symphonia = { version = "0.6.1", features = ["all"] }
+rubato = "5.0"
+audioadapter-buffers = "5.2"
 rayon = "1"
-spectrum-analyzer = "1.7"
+spectrum-analyzer = "2.0"
 microfft = { version = "0.6", features = ["size-512"] }
 beat-this = { version = "1.1", default-features = false }
 log = "0.4"
-tauri-plugin-log = "2.10"
-tauri-plugin-dialog = "2.8"
-tauri-plugin-fs = "2.7"
-tauri-plugin-http = { version = "2.8", features = ["stream"] }
-tauri-plugin-opener = "2.7"
-tauri-plugin-process = "2.4"
-tauri-plugin-updater = "2.14"
-tauri-plugin-store = "2.5"
-tauri-plugin-global-shortcut = "2.4"
+tauri-plugin-log = "2.10.2"
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-fs = "2.7.1"
+tauri-plugin-http = { version = "2.9", features = ["stream"] }
+tauri-plugin-opener = "2.7.3"
+tauri-plugin-process = "2.4.0"
+tauri-plugin-updater = "2.14.1"
+tauri-plugin-store = "2.5.1"
+tauri-plugin-global-shortcut = "2.4.1"
 
 crossbeam-channel = "0.5"
 unicode-segmentation = "1"
 tokio = { version = "1", features = ["time", "fs", "io-util"] }
 ttf-parser = "0.25.1"
 futures-util = "0.3"
-minisign-verify = "0.2"
-base64 = "0.22"
+minisign-verify = "0.3"
+base64 = "0.23"
 flate2 = "1"
-md-5 = "0.10"
+md-5 = "0.11"
 anyhow = "1.0.104"
 
 [target.'cfg(target_os = "android")'.dependencies]
+# 暂留 0.21：0.22 的 GlobalRef 泛型化 + 局部帧 API 重构需要重写 JNI 层，
+# 而本机无 Android NDK 无法编译/运行验证，不改未经验证的 JNI 代码。
 jni = "0.21"
 ndk-context = "0.1"
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "decode"
@@ -73,10 +75,12 @@ harness = false
 display-info = "0.5"
 
 [target.'cfg(windows)'.dependencies]
-ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic", "directml", "api-24"] }
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["load-dynamic", "directml", "api-24"] }
 libloading = "0.9"
-wasapi = "0.23"
+wasapi = "0.27"
 winreg = "0.56"
+# windows-core / windows-implement / windows-numerics 必须与 `windows` 0.62 同代，
+# 0.100 系列配套的是尚未发布的 windows 0.100，混用会产生不兼容的 COM 类型。
 windows-core = "0.62"
 windows-implement = "0.60"
 windows = { version = "0.62", features = [

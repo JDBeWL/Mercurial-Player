@@ -398,10 +398,9 @@ fn process_audio_output(
                         reusable_bytes,
                     );
 
-                    if rc
-                        .write_to_device(frames_available as usize, reusable_bytes, None)
-                        .is_ok()
-                    {
+                    // wasapi 0.27：write_to_device 不再单独接收帧数，改由 data.len() 推得
+                    // （bytes_per_frame 来自 initialize_client，长度必须是整帧的整数倍）
+                    if rc.write_to_device(reusable_bytes.as_slice(), None).is_ok() {
                         // 只按真正取到的采样推进位置：欠载补的零也算进去，进度条和歌词就会在
                         // 每次供给不上的时候往前跳且永不回正。AAudio 侧同口径（见 player.rs 的
                         // written.fetch_add(got)）

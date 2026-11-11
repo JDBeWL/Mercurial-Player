@@ -229,10 +229,11 @@ impl SpectrumAnalyzer {
             // 写死 20kHz 会让 22.05k/32k 这类低频源每帧都算不出频谱且没有任何提示
             let nyquist = self.sample_rate as f32 / 2.0;
             let freq_hi = 20000.0f32.min(nyquist - 1.0).max(21.0);
+            // spectrum-analyzer 2.0：FrequencyLimit 内部改用 NonNegF32，用 range() 构造
             let fft = samples_fft_to_spectrum(
                 &self.fft_buffer,
                 self.sample_rate,
-                FrequencyLimit::Range(20.0, freq_hi),
+                FrequencyLimit::range(20.0, freq_hi),
                 Some(&divide_by_N_sqrt),
             );
             if let Ok(spectrum) = &fft {

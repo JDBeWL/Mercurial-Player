@@ -98,7 +98,18 @@ fn now_ms() -> u128 {
 }
 
 fn md5_hex(text: &str) -> String {
-    format!("{:x}", Md5::digest(text.as_bytes()))
+    use std::fmt::Write as _;
+
+    // digest 0.11 的摘要输出改为 hybrid_array::Array 且不再实现 LowerHex，
+    // 无法再 `format!("{:x}", ..)`，手动逐字节转十六进制
+    let digest = Md5::digest(text.as_bytes());
+    digest
+        .iter()
+        .fold(String::with_capacity(32), |mut out, byte| {
+            // 写入 String 不会失败
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
 }
 
 /// 搜索结果里的高亮标签 `<em>…</em>`

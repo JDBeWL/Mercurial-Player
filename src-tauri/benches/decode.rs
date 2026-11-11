@@ -2,8 +2,9 @@
 //!
 //! 运行 `cargo bench --bench decode`，报告在 `target/criterion/decode/`。
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use mercurial_player_lib::audio::SymphoniaDecoder;
+use std::hint::black_box;
 use std::io::Write;
 
 /// 生成测试用 WAV 文件 (sine wave)

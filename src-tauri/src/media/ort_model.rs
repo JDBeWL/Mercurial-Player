@@ -4,9 +4,11 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::anyhow;
 use beat_this::{Model, Tensor};
+use ort::environment::Environment;
 use ort::ep::{CPU, DirectML};
 use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
@@ -90,8 +92,24 @@ pub fn load_pair(
     }
 }
 
+/// 进程级 ORT 环境。
+///
+/// ort 2.0-rc.15 起 `Session::builder` 必须显式传入 `&Environment`（旧版是隐式的全局环境），
+/// 而 `Environment` 内部是 `Arc`、不实现 `Clone`，所以用 `OnceLock` 存一份常驻实例。
+/// 只建一次也正合其“进程全局配置”的语义。
+fn environment() -> Result<&'static Environment, AppError> {
+    static ENV: OnceLock<Result<Environment, String>> = OnceLock::new();
+    ENV.get_or_init(|| {
+        ort::init()
+            .build()
+            .map_err(|e| format!("ORT 环境创建失败: {e}"))
+    })
+    .as_ref()
+    .map_err(|e| AppError::Audio(e.clone()))
+}
+
 fn load(path: &Path, gpu: bool) -> Result<OrtModel, AppError> {
-    let builder = Session::builder()
+    let mut builder = Session::builder(environment()?)
         .map_err(|e| AppError::Audio(format!("ORT 会话创建失败: {e}")))?
         .with_optimization_level(GraphOptimizationLevel::Level3)
         .map_err(|e| AppError::Audio(format!("ORT 优化级别设置失败: {e}")))?
@@ -99,7 +117,7 @@ fn load(path: &Path, gpu: bool) -> Result<OrtModel, AppError> {
         .with_intra_threads(0)
         .map_err(|e| AppError::Audio(format!("ORT 线程数设置失败: {e}")))?;
 
-    let mut builder = if gpu {
+    builder = if gpu {
         builder
             .with_execution_providers([DirectML::default().with_device_id(0).build()])
             .map_err(|e| AppError::Audio(format!("DirectML 注册失败: {e}")))?

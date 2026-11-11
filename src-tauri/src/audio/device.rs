@@ -18,8 +18,9 @@ pub struct AudioDeviceInfo {
 /// `description().name()` 只给 `DeviceDesc`（如 "Speakers"）；wasapi crate 按 FriendlyName 匹配设备，必须一致。
 pub fn get_device_friendly_name(device: &cpal::Device) -> Option<String> {
     let desc = device.description().ok()?;
-    if let Some(friendly) = desc.extended().first() {
-        Some(friendly.clone())
+    // cpal 0.18 起 `extended()` 返回迭代器（旧版是切片），只取首行
+    if let Some(friendly) = desc.extended().next() {
+        Some(friendly.to_string())
     } else {
         // 无 extended 时 name() 已是 FriendlyName（没有 DeviceDesc 可用），或两者相同
         Some(desc.name().to_string())
